@@ -6,10 +6,17 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  ImageSourcePropType,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { API_BASE_URL } from "../../../constants/stringConstants";
-import ImageViewModal from "./ImageViewModal"; // Adjust the import path as needed
+import ImageViewModal from "./ImageViewModal";
+
+// ============================================
+// LOCAL ASSETS
+// ============================================
+
+const DEFAULT_AVATAR: ImageSourcePropType = require("../../../assets/images/default-avatar.png");
 
 // ============================================
 // INTERFACE DEFINITIONS
@@ -50,36 +57,42 @@ const normalizeCoverPhotoUrl = (
     return null;
   }
 
-  // Already a full URL - return as is
   if (coverPhoto.startsWith("http://") || coverPhoto.startsWith("https://")) {
     return coverPhoto;
   }
 
-  // Relative path starting with /uploads/
   if (coverPhoto.startsWith("/uploads/")) {
     return `${API_BASE_URL}${coverPhoto}`;
   }
 
-  // Filename pattern for cover photos
   if (coverPhoto.includes("cover-photo-")) {
     return `${API_BASE_URL}/uploads/cover-photos/${coverPhoto}`;
   }
 
-  // Default case - assume it's a relative path
   return `${API_BASE_URL}/${coverPhoto}`;
 };
 
 /**
- * Returns profile picture URL with DiceBear fallback
+ * Returns profile picture source (local or remote)
+ * ✅ Uses local default avatar as fallback when no custom image exists
  */
-const getProfilePictureUrl = (
+const getProfilePictureSource = (
   profilePic: string | undefined,
-  username: string,
-): string => {
-  if (!profilePic || profilePic.trim() === "") {
-    return `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`;
+): ImageSourcePropType => {
+  // If there's a custom profile picture, use it
+  if (profilePic && profilePic.trim() !== "") {
+    let imageUrl = profilePic;
+
+    // Normalize relative paths
+    if (imageUrl.startsWith("/")) {
+      imageUrl = `${API_BASE_URL}${imageUrl}`;
+    }
+
+    return { uri: imageUrl };
   }
-  return profilePic;
+
+  // ✅ Fallback to local default avatar
+  return DEFAULT_AVATAR;
 };
 
 // ============================================
@@ -94,74 +107,47 @@ export default function ProfileHeader({
   onImagePress,
   onCoverPhotoPress,
 }: ProfileHeaderProps) {
-  // ============================================
-  // STATE MANAGEMENT
-  // ============================================
-
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
 
-  // ============================================
-  // DATA EXTRACTION & PROCESSING
-  // ============================================
-
-  // Extract username from user or profile data
+  // Extract data from props
   const username = user?.username || profile?.username || "user";
-
-  // Extract full name from profile or user data
   const fullName = profile?.fullName || user?.name || "User";
-
-  // Get normalized image URLs
-  const profilePictureUrl = getProfilePictureUrl(
-    profile?.profilePicture,
-    username,
-  );
   const coverPhotoUrl = normalizeCoverPhotoUrl(profile?.coverPhoto);
-
-  // Check if user has a custom profile picture (not DiceBear)
   const hasCustomProfilePicture =
     profile?.profilePicture && profile.profilePicture.trim() !== "";
-
-  // Check if user has completed profile for verification badge
   const showVerifiedBadge = user?.profileComplete;
+  const profilePictureSource = getProfilePictureSource(profile?.profilePicture);
 
-  // ============================================
-  // HANDLER FUNCTIONS
-  // ============================================
+  // Get remote URL for image viewer (only for custom images)
+  const getImageViewerUri = (): string | undefined => {
+    if (hasCustomProfilePicture && profile?.profilePicture) {
+      let pic = profile.profilePicture;
+      if (pic.startsWith("/")) {
+        pic = `${API_BASE_URL}${pic}`;
+      }
+      return pic;
+    }
+    return undefined;
+  };
 
-  /**
-   * Handles single tap on profile picture - opens upload modal
-   */
+  // Handlers
   const handleProfilePicturePress = () => {
-    // Only trigger upload if not currently uploading
     if (!uploading) {
       onImagePress();
     }
   };
 
-  /**
-   * Handles long press on profile picture - opens image viewer
-   */
   const handleProfilePictureLongPress = () => {
-    // Only open viewer if user has a custom profile picture
     if (hasCustomProfilePicture && !uploading) {
       setImageViewerVisible(true);
     }
   };
 
-  /**
-   * Closes the image viewer modal
-   */
   const closeImageViewer = () => {
     setImageViewerVisible(false);
   };
 
-  // ============================================
-  // RENDER FUNCTIONS
-  // ============================================
-
-  /**
-   * Renders the cover photo section with camera overlay
-   */
+  // Render functions
   const renderCoverPhotoSection = () => (
     <View style={styles.coverPhotoContainer}>
       {coverPhotoUrl ? (
@@ -176,7 +162,6 @@ export default function ProfileHeader({
         </View>
       )}
 
-      {/* Camera overlay button for cover photo */}
       <TouchableOpacity
         style={styles.coverCameraButton}
         onPress={onCoverPhotoPress}
@@ -193,30 +178,22 @@ export default function ProfileHeader({
     </View>
   );
 
-  /**
-   * Renders the profile picture with camera overlay
-   */
   const renderProfilePicture = () => (
     <TouchableOpacity
-      onPress={handleProfilePicturePress} // Single tap: upload modal
-      onLongPress={handleProfilePictureLongPress} // Long press: image viewer
+      onPress={handleProfilePicturePress}
+      onLongPress={handleProfilePictureLongPress}
       activeOpacity={0.7}
       disabled={uploading}
       style={styles.profileImageWrapper}
-      delayLongPress={500} // 500ms delay for long press
+      delayLongPress={500}
     >
       <View style={styles.imageContainer}>
-        <Image
-          source={{ uri: profilePictureUrl }}
-          style={styles.profileImage}
-        />
+        <Image source={profilePictureSource} style={styles.profileImage} />
 
-        {/* Small camera icon overlay */}
         <View style={styles.profileCameraOverlay}>
           <Ionicons name="camera" size={16} color="white" />
         </View>
 
-        {/* Loading overlay when uploading */}
         {uploading && (
           <View style={styles.uploadingOverlay}>
             <ActivityIndicator color="white" size="small" />
@@ -226,9 +203,6 @@ export default function ProfileHeader({
     </TouchableOpacity>
   );
 
-  /**
-   * Renders the name and username section
-   */
   const renderNameSection = () => (
     <View style={styles.nameUsernameContainer}>
       <Text style={styles.fullName} numberOfLines={2}>
@@ -245,9 +219,6 @@ export default function ProfileHeader({
     </View>
   );
 
-  /**
-   * Renders the bio section (conditionally)
-   */
   const renderBioSection = () => {
     if (!profile?.bio) return null;
 
@@ -258,40 +229,34 @@ export default function ProfileHeader({
     );
   };
 
-  /**
-   * Renders the image viewer modal
-   */
-  const renderImageViewerModal = () => (
-    <ImageViewModal
-      visible={imageViewerVisible}
-      imageUri={profilePictureUrl}
-      onClose={closeImageViewer}
-      title={fullName}
-      isCoverPhoto={false}
-    />
-  );
+  const renderImageViewerModal = () => {
+    const imageUri = getImageViewerUri();
 
-  // ============================================
-  // MAIN RENDER
-  // ============================================
+    if (!imageUri) return null;
+
+    return (
+      <ImageViewModal
+        visible={imageViewerVisible}
+        imageUri={imageUri}
+        onClose={closeImageViewer}
+        title={fullName}
+        isCoverPhoto={false}
+      />
+    );
+  };
 
   return (
     <View style={styles.headerContainer}>
-      {/* Main header with cover photo and profile info */}
       <View style={styles.header}>
         {renderCoverPhotoSection()}
 
-        {/* Profile image and name container positioned over cover photo */}
         <View style={styles.profileImageNameContainer}>
           {renderProfilePicture()}
           {renderNameSection()}
         </View>
       </View>
 
-      {/* Bio section (appears below header) */}
       {renderBioSection()}
-
-      {/* Image viewer modal */}
       {renderImageViewerModal()}
     </View>
   );
@@ -302,22 +267,19 @@ export default function ProfileHeader({
 // ============================================
 
 const styles = StyleSheet.create({
-  // Main container
   headerContainer: {
     marginBottom: 8,
   },
 
-  // Header wrapper
   header: {
     position: "relative",
     height: 240,
   },
 
-  // COVER PHOTO STYLES
   coverPhotoContainer: {
     height: 180,
     position: "relative",
-    backgroundColor: "#000000",
+    backgroundColor: "#e5e7eb",
   },
 
   coverPhoto: {
@@ -351,7 +313,6 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.3)",
   },
 
-  // PROFILE IMAGE & NAME CONTAINER
   profileImageNameContainer: {
     flexDirection: "row",
     alignItems: "flex-end",
@@ -409,7 +370,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  // NAME & USERNAME STYLES
   nameUsernameContainer: {
     flex: 1,
     marginBottom: 10,
@@ -439,7 +399,6 @@ const styles = StyleSheet.create({
     padding: 1,
   },
 
-  // BIO SECTION STYLES
   bioContainer: {
     marginTop: 8,
     marginHorizontal: 20,

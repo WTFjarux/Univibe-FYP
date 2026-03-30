@@ -1,5 +1,5 @@
-// components/VerificationModal.tsx
-import React, { useState } from "react";
+// app/(auth)/VerificationModal.tsx
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -9,48 +9,165 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as SecureStore from "expo-secure-store";
+import { jwtDecode } from "jwt-decode";
+import { API_BASE_URL } from "../../constants/stringConstants";
+
+interface CustomJwtPayload {
+  id: string;
+  email: string;
+  role: string;
+  isEmailVerified: boolean;
+  exp?: number;
+  iat?: number;
+}
 
 interface VerificationModalProps {
   visible: boolean;
   email: string;
+  token?: string | null;
   isEmailVerified?: boolean;
   onClose: () => void;
-  onSetupProfile: () => Promise<void>; // Will redirect if verified
-  onResendVerification?: () => void;
+  onSetupProfile: () => Promise<void>;
+  onResendVerification?: () => Promise<void>;
+  onVerificationComplete?: (newToken: string) => void;
   isChecking?: boolean;
 }
 
 const VerificationModal: React.FC<VerificationModalProps> = ({
   visible,
   email,
+  token,
   isEmailVerified = false,
   onClose,
   onSetupProfile,
   onResendVerification,
+  onVerificationComplete,
   isChecking = false,
 }) => {
-  const [showNotVerifiedMessage, setShowNotVerifiedMessage] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+  const [localVerified, setLocalVerified] = useState(isEmailVerified);
+  const [hasChecked, setHasChecked] = useState(false);
 
-  /**
-   * Handle setup profile button click
-   * Redirects to profile setup if verified, shows message if not verified
-   */
+  // Update local state when prop changes
+  useEffect(() => {
+    setLocalVerified(isEmailVerified);
+  }, [isEmailVerified]);
+
+  // Check verification status once when modal opens
+  useEffect(() => {
+    if (visible && !localVerified && !hasChecked) {
+      checkVerificationStatus();
+    }
+  }, [visible, localVerified, hasChecked]);
+
+  const checkVerificationStatus = async () => {
+    if (!token || hasChecked) return;
+
+    setIsCheckingStatus(true);
+    try {
+      const decoded = jwtDecode<CustomJwtPayload>(token);
+
+      // If token already shows verified, update state
+      if (decoded.isEmailVerified) {
+        setLocalVerified(true);
+        setHasChecked(true);
+        return;
+      }
+
+      // Check with backend
+      const response = await fetch(
+        `${API_BASE_URL}/api/auth/check-verification`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        },
+      );
+
+      const data = await response.json();
+
+      if (data.success && data.isEmailVerified) {
+        // Email is verified - refresh token
+        const refreshResponse = await fetch(
+          `${API_BASE_URL}/api/auth/refresh-token`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          },
+        );
+
+        const refreshData = await refreshResponse.json();
+
+        if (refreshData.success && refreshData.token) {
+          await SecureStore.setItemAsync("authToken", refreshData.token);
+          setLocalVerified(true);
+
+          if (onVerificationComplete) {
+            onVerificationComplete(refreshData.token);
+          }
+        }
+      }
+      setHasChecked(true);
+    } catch (error) {
+      console.error("Verification check failed:", error);
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    if (!onResendVerification) return;
+
+    try {
+      await onResendVerification();
+      // Reset check flag to allow re-checking after resend
+      setHasChecked(false);
+    } catch (error) {
+      // Error handled by parent
+    }
+  };
+
   const handleSetupProfileClick = async () => {
-    if (!isEmailVerified) {
-      // Show message when user tries to setup profile without verification
-      setShowNotVerifiedMessage(true);
-      // Auto-hide message after 5 seconds
-      setTimeout(() => setShowNotVerifiedMessage(false), 5000);
-      return;
+    if (!localVerified) {
+      // Re-check before proceeding
+      setIsCheckingStatus(true);
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/api/auth/check-verification`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          },
+        );
+        const data = await response.json();
+
+        if (data.success && data.isEmailVerified) {
+          setLocalVerified(true);
+        } else {
+          return;
+        }
+      } catch (error) {
+        return;
+      } finally {
+        setIsCheckingStatus(false);
+      }
     }
 
-    // If verified, proceed with setup
     setIsProcessing(true);
     try {
       await onSetupProfile();
     } catch (error) {
-      console.error("Setup profile error:", error);
+      // Error handled by parent
     } finally {
       setIsProcessing(false);
     }
@@ -65,47 +182,52 @@ const VerificationModal: React.FC<VerificationModalProps> = ({
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
-          {/* ========== HEADER ========== */}
+          {(isCheckingStatus || isChecking) && !localVerified && (
+            <View style={styles.checkingOverlay}>
+              <ActivityIndicator size="large" color="#6C63FF" />
+              <Text style={styles.checkingText}>
+                Checking verification status...
+              </Text>
+            </View>
+          )}
+
           <View style={styles.modalHeader}>
             <View style={styles.modalIconContainer}>
               <Ionicons
-                name={
-                  isEmailVerified ? "checkmark-circle" : "mail-open-outline"
-                }
+                name={localVerified ? "checkmark-circle" : "mail-open-outline"}
                 size={50}
-                color={isEmailVerified ? "#4CAF50" : "#6C63FF"}
+                color={localVerified ? "#4CAF50" : "#6C63FF"}
               />
-              {isEmailVerified && (
+              {localVerified && (
                 <View style={styles.checkmarkContainer}>
                   <Ionicons name="checkmark" size={30} color="#4CAF50" />
                 </View>
               )}
             </View>
             <Text style={styles.modalTitle}>
-              {isEmailVerified ? "Email Verified!" : "Check Your Email!"}
+              {localVerified ? "Email Verified!" : "Check Your Email!"}
             </Text>
             <Text style={styles.modalSubtitle}>
-              {isEmailVerified
+              {localVerified
                 ? "Your email has been successfully verified!"
                 : "We've sent a verification email to:"}
             </Text>
           </View>
 
-          {/* ========== EMAIL DISPLAY ========== */}
           <View
             style={[
               styles.emailContainer,
-              isEmailVerified && styles.verifiedEmailContainer,
+              localVerified && styles.verifiedEmailContainer,
             ]}
           >
             <Ionicons
-              name={isEmailVerified ? "checkmark-circle" : "mail"}
+              name={localVerified ? "checkmark-circle" : "mail"}
               size={20}
-              color={isEmailVerified ? "#4CAF50" : "#6C63FF"}
+              color={localVerified ? "#4CAF50" : "#6C63FF"}
               style={styles.emailIcon}
             />
             <Text style={styles.emailText}>{email}</Text>
-            {isEmailVerified && (
+            {localVerified && (
               <Ionicons
                 name="checkmark"
                 size={16}
@@ -115,27 +237,7 @@ const VerificationModal: React.FC<VerificationModalProps> = ({
             )}
           </View>
 
-          {/* ========== NOT VERIFIED MESSAGE ========== */}
-          {showNotVerifiedMessage && !isEmailVerified && (
-            <View style={styles.notVerifiedMessage}>
-              <Ionicons name="alert-circle" size={20} color="#FF6B6B" />
-              <Text style={styles.notVerifiedText}>
-                Please verify your email before setting up your profile
-              </Text>
-            </View>
-          )}
-
-          {/* ========== STATUS INDICATOR ========== */}
-          {!isEmailVerified && (
-            <View style={styles.statusContainer}>
-              <View style={styles.statusDot} />
-              <Text style={styles.statusText}>Verification Pending</Text>
-            </View>
-          )}
-
-          {/* ========== INSTRUCTIONS ========== */}
-          {/* Show different instructions based on verification status */}
-          {!isEmailVerified ? (
+          {!localVerified ? (
             <View style={styles.instructionContainer}>
               <View style={styles.instructionRow}>
                 <View style={styles.instructionIcon}>
@@ -160,7 +262,8 @@ const VerificationModal: React.FC<VerificationModalProps> = ({
                   <Ionicons name="refresh" size={18} color="#29B6F6" />
                 </View>
                 <Text style={styles.instructionText}>
-                  After verification, click "Setup Profile" again
+                  Return to this screen and click "Setup Profile" after
+                  verification
                 </Text>
               </View>
             </View>
@@ -180,59 +283,49 @@ const VerificationModal: React.FC<VerificationModalProps> = ({
                   <Ionicons name="person" size={18} color="#6C63FF" />
                 </View>
                 <Text style={styles.instructionText}>
-                  You can now complete your profile setup
+                  Click "Setup Profile" to complete your account
                 </Text>
               </View>
             </View>
           )}
 
-          {/* ========== NOTE TEXT ========== */}
           <Text style={styles.noteText}>
-            {isEmailVerified
-              ? "You can now proceed to set up your profile!"
+            {localVerified
+              ? "Click the button below to set up your profile"
               : "Profile setup will be available after verification."}
           </Text>
 
-          {/* ========== BUTTONS ========== */}
           <View style={styles.buttonContainer}>
-            {/* Setup Profile Button - Single button for all states */}
             <TouchableOpacity
               style={[
                 styles.profileButton,
-                (isChecking || isProcessing) && styles.disabledButton,
+                (isProcessing || isCheckingStatus) && styles.disabledButton,
               ]}
               onPress={handleSetupProfileClick}
-              disabled={isChecking || isProcessing}
+              disabled={isProcessing || isCheckingStatus}
             >
-              {isChecking || isProcessing ? (
+              {isProcessing ? (
                 <ActivityIndicator color="white" size="small" />
               ) : (
                 <>
                   <Ionicons
-                    name={isEmailVerified ? "person" : "person-outline"}
+                    name={localVerified ? "person" : "person-outline"}
                     size={20}
                     color="#FFF"
                   />
                   <Text style={styles.profileButtonText}>
-                    {isEmailVerified ? "Setup Profile Now" : "Setup Profile"}
+                    {localVerified ? "Setup Profile Now" : "Setup Profile"}
                   </Text>
                 </>
               )}
             </TouchableOpacity>
           </View>
 
-          {/* ========== RESEND SECTION ========== */}
-          {/* Only show when email is not verified */}
-          {!isEmailVerified && onResendVerification && (
+          {!localVerified && onResendVerification && (
             <View style={styles.resendContainer}>
               <Text style={styles.resendText}>Didn't receive the email?</Text>
-              <TouchableOpacity
-                onPress={onResendVerification}
-                disabled={isChecking || isProcessing}
-              >
-                <Text style={styles.resendLink}>
-                  {isChecking ? "Sending..." : "Resend Verification"}
-                </Text>
+              <TouchableOpacity onPress={handleResendVerification}>
+                <Text style={styles.resendLink}>Resend Verification</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -243,7 +336,6 @@ const VerificationModal: React.FC<VerificationModalProps> = ({
 };
 
 const styles = StyleSheet.create({
-  // ========== MODAL OVERLAY ==========
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.8)",
@@ -265,9 +357,25 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 20,
     elevation: 10,
+    position: "relative",
   },
-
-  // ========== HEADER STYLES ==========
+  checkingOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(42, 40, 64, 0.95)",
+    borderRadius: 24,
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 10,
+  },
+  checkingText: {
+    color: "white",
+    marginTop: 12,
+    fontSize: 14,
+  },
   modalHeader: {
     alignItems: "center",
     marginBottom: 25,
@@ -296,8 +404,6 @@ const styles = StyleSheet.create({
     color: "rgba(255, 255, 255, 0.8)",
     textAlign: "center",
   },
-
-  // ========== EMAIL CONTAINER ==========
   emailContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -326,50 +432,6 @@ const styles = StyleSheet.create({
   verifiedBadge: {
     marginLeft: 8,
   },
-
-  // ========== NOT VERIFIED MESSAGE ==========
-  notVerifiedMessage: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(255, 107, 107, 0.1)",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 15,
-    borderLeftWidth: 3,
-    borderLeftColor: "#FF6B6B",
-    width: "100%",
-  },
-  notVerifiedText: {
-    color: "#FF6B6B",
-    marginLeft: 8,
-    fontSize: 14,
-    flex: 1,
-  },
-
-  // ========== STATUS INDICATOR ==========
-  statusContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(255, 165, 0, 0.1)",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginBottom: 20,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#FFA726",
-    marginRight: 8,
-  },
-  statusText: {
-    color: "#FFA726",
-    fontSize: 14,
-    fontWeight: "500",
-  },
-
-  // ========== INSTRUCTION CONTAINERS ==========
   instructionContainer: {
     width: "100%",
     backgroundColor: "rgba(255, 255, 255, 0.05)",
@@ -401,8 +463,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     flex: 1,
   },
-
-  // ========== NOTE TEXT ==========
   noteText: {
     color: "rgba(255, 255, 255, 0.7)",
     fontSize: 13,
@@ -410,8 +470,6 @@ const styles = StyleSheet.create({
     marginBottom: 25,
     fontStyle: "italic",
   },
-
-  // ========== BUTTONS ==========
   buttonContainer: {
     width: "100%",
     marginBottom: 20,
@@ -435,8 +493,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
-
-  // ========== RESEND SECTION ==========
   resendContainer: {
     flexDirection: "row",
     alignItems: "center",

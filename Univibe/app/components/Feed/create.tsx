@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react"; // Added useEffect import
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Dimensions,
+  ImageSourcePropType,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -20,6 +21,9 @@ import * as ImagePicker from "expo-image-picker";
 import { createPost } from "../../../lib/postService";
 import { useAuth } from "../../../lib/AuthContext";
 import { API_BASE_URL } from "../../../constants/stringConstants";
+
+// ✅ Local default avatar
+const DEFAULT_AVATAR: ImageSourcePropType = require("../../../assets/images/default-avatar.png");
 
 const { width } = Dimensions.get("window");
 
@@ -58,9 +62,20 @@ export default function CreatePostScreen() {
     return `${API_BASE_URL}/${url}`;
   };
 
-  const userAvatar = profile?.profilePicture
-    ? getFullImageUrl(profile.profilePicture)
-    : `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.username || user?.email || "User"}`;
+  /**
+   * ✅ Get user avatar with local default fallback
+   */
+  const getUserAvatar = (): ImageSourcePropType => {
+    // If user has a profile picture
+    if (profile?.profilePicture && profile.profilePicture.trim() !== "") {
+      return { uri: getFullImageUrl(profile.profilePicture) };
+    }
+
+    // ✅ Fallback to local default avatar
+    return DEFAULT_AVATAR;
+  };
+
+  const userAvatar = getUserAvatar();
 
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -164,7 +179,7 @@ export default function CreatePostScreen() {
         isAnonymous,
       });
 
-      // ✅ FIXED: For anonymous posts, always use "campus" visibility
+      // For anonymous posts, always use "campus" visibility
       const finalVisibility = isAnonymous ? "campus" : visibility;
 
       await createPost(content, imageObjects, finalVisibility, isAnonymous);
@@ -272,7 +287,7 @@ export default function CreatePostScreen() {
                 <Ionicons name="eye-off" size={20} color="#666" />
               </View>
             ) : (
-              <Image source={{ uri: userAvatar }} style={styles.avatar} />
+              <Image source={userAvatar} style={styles.avatar} />
             )}
             <View style={styles.userTextContainer}>
               <Text style={styles.userName}>{getUserName()}</Text>
@@ -551,12 +566,13 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 16,
     gap: 8,
+    backgroundColor: "#fef3c7",
+    borderRadius: 8,
   },
   anonymousWarningText: {
-    fontSize: 14,
+    fontSize: 12,
     color: "#92400e",
     flex: 1,
-    fontStyle: "italic",
   },
   input: {
     fontSize: 16,
@@ -681,7 +697,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#8b5cf6",
     marginTop: 10,
-    fontStyle: "italic",
   },
   addImageButtonSimple: {
     flexDirection: "row",

@@ -1,3 +1,4 @@
+// app/components/Profile/ProfileInfo.tsx
 import React from "react";
 import {
   View,
@@ -9,21 +10,25 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 interface ProfileInfoProps {
-  profile: {
-    major: string;
-    year: string;
-    graduationYear: string;
-    pronouns: string;
-    universityEmail: string;
+  profile?: {
+    major?: string;
+    year?: string;
+    graduationYear?: string;
+    pronouns?: string;
+    universityEmail?: string;
     socialLinks?: {
       instagram?: string;
       linkedin?: string;
       github?: string;
     };
-  };
-  user: {
-    email: string;
-  };
+  } | null;
+  user?: {
+    id?: string;
+    email?: string;
+    name?: string;
+    username?: string;
+    isEmailVerified?: boolean;
+  } | null;
 }
 
 // Update the InfoItemType
@@ -38,31 +43,52 @@ type InfoItemType = {
 
 export default function ProfileInfo({ profile, user }: ProfileInfoProps) {
   // Create base info items
-  const infoItems: InfoItemType[] = [
-    {
+  const infoItems: InfoItemType[] = [];
+
+  // Add major if available
+  if (profile?.major) {
+    infoItems.push({
       key: "major",
       label: "Major",
-      value: profile.major || "Not specified",
+      value: profile.major,
       icon: "school-outline",
-    },
-    {
-      key: "year",
-      label: "Year",
-      value: `${profile.year || "Not specified"} • Class of ${
-        profile.graduationYear || "Not specified"
-      }`,
-      icon: "calendar-outline",
-    },
-    {
+    });
+  }
+
+  // Add year and graduation year if available
+  if (profile?.year || profile?.graduationYear) {
+    let yearText = "";
+    if (profile.year) {
+      yearText = `${profile.year} Year`;
+    }
+    if (profile.graduationYear) {
+      yearText += yearText
+        ? ` • Class of ${profile.graduationYear}`
+        : `Class of ${profile.graduationYear}`;
+    }
+    if (yearText) {
+      infoItems.push({
+        key: "year",
+        label: "Year",
+        value: yearText,
+        icon: "calendar-outline",
+      });
+    }
+  }
+
+  // Add university email (from profile or user)
+  const email = profile?.universityEmail || user?.email;
+  if (email) {
+    infoItems.push({
       key: "email",
       label: "University Email",
-      value: profile.universityEmail || user.email || "Not specified",
+      value: email,
       icon: "mail-outline",
-    },
-  ];
+    });
+  }
 
   // Add pronouns if available
-  if (profile.pronouns) {
+  if (profile?.pronouns && profile.pronouns.trim() !== "") {
     infoItems.push({
       key: "pronouns",
       label: "Pronouns",
@@ -72,7 +98,7 @@ export default function ProfileInfo({ profile, user }: ProfileInfoProps) {
   }
 
   // Add social links if available
-  if (profile.socialLinks) {
+  if (profile?.socialLinks) {
     if (profile.socialLinks.instagram) {
       infoItems.push({
         key: "instagram",
@@ -96,10 +122,11 @@ export default function ProfileInfo({ profile, user }: ProfileInfoProps) {
           : `https://linkedin.com/in/${profile.socialLinks.linkedin}`,
       });
     }
+
     if (profile.socialLinks.github) {
       infoItems.push({
         key: "github",
-        label: "Github",
+        label: "GitHub",
         value: profile.socialLinks.github,
         icon: "logo-github",
         isLink: true,
@@ -108,6 +135,26 @@ export default function ProfileInfo({ profile, user }: ProfileInfoProps) {
           : `https://github.com/${profile.socialLinks.github}`,
       });
     }
+  }
+
+  // If no info items, show a message
+  if (infoItems.length === 0) {
+    return (
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>About</Text>
+        <View style={styles.emptyContainer}>
+          <Ionicons
+            name="information-circle-outline"
+            size={40}
+            color="#d1d5db"
+          />
+          <Text style={styles.emptyText}>No profile information available</Text>
+          <Text style={styles.emptySubtext}>
+            Complete your profile to share more about yourself
+          </Text>
+        </View>
+      </View>
+    );
   }
 
   const handleLinkPress = (url: string) => {
@@ -194,7 +241,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "bold",
     color: "#111827",
-    marginBottom: 10,
+    marginBottom: 16,
   },
   infoItem: {
     flexDirection: "row",
@@ -228,5 +275,22 @@ const styles = StyleSheet.create({
   linkIcon: {
     marginLeft: 8,
     alignSelf: "center",
+  },
+  emptyContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 20,
+    gap: 8,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: "#6b7280",
+    textAlign: "center",
+    fontWeight: "500",
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: "#9ca3af",
+    textAlign: "center",
   },
 });

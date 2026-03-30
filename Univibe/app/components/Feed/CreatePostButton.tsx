@@ -1,8 +1,18 @@
 // app/components/Feed/CreatePostButton.tsx
 import React from "react";
-import { View, Text, TouchableOpacity, Image, StyleSheet } from "react-native";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Image,
+  StyleSheet,
+  ImageSourcePropType,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useAuth } from "../../../lib/AuthContext"; // Import AuthContext
+import { useAuth } from "../../../lib/AuthContext";
+import { API_BASE_URL } from "../../../constants/stringConstants";
+
+const DEFAULT_AVATAR: ImageSourcePropType = require("../../../assets/images/default-avatar.png");
 
 interface CreatePostButtonProps {
   onPress?: () => void;
@@ -13,22 +23,27 @@ const CreatePostButton: React.FC<CreatePostButtonProps> = ({
   onPress,
   placeholder = "What's happening on campus?",
 }) => {
-  const { profile } = useAuth(); // Get profile from auth context
+  const { profile } = useAuth();
 
-  // Get user's profile picture or use default
-  const userAvatar =
-    profile?.profilePicture ||
-    "https://api.dicebear.com/7.x/avataaars/svg?seed=User";
+  const getProfilePictureSource = (): ImageSourcePropType => {
+    const hasProfilePicture = profile?.profilePicture?.trim();
+
+    if (hasProfilePicture) {
+      let imageUrl = profile.profilePicture;
+
+      if (imageUrl.startsWith("/")) {
+        imageUrl = `${API_BASE_URL}${imageUrl}`;
+      }
+
+      return { uri: imageUrl };
+    }
+
+    return DEFAULT_AVATAR;
+  };
 
   return (
     <TouchableOpacity style={styles.createPostButton} onPress={onPress}>
-      <Image
-        source={{ uri: userAvatar }}
-        style={styles.userAvatar}
-        defaultSource={{
-          uri: "https://api.dicebear.com/7.x/avataaars/svg?seed=User",
-        }}
-      />
+      <Image source={getProfilePictureSource()} style={styles.userAvatar} />
       <Text style={styles.createPostText}>{placeholder}</Text>
       <Ionicons name="image-outline" size={20} color="#8b5cf6" />
     </TouchableOpacity>
@@ -55,7 +70,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#f3f4f6", // Fallback background
+    backgroundColor: "#f3f4f6",
   },
   createPostText: {
     flex: 1,

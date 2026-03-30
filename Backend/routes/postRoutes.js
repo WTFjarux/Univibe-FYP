@@ -1,7 +1,7 @@
-// routes/postRoutes.js
 const express = require("express");
 const router = express.Router();
 const postController = require("../controllers/postController");
+const commentRoutes = require("./commentRoutes"); // Import comment routes
 const { protect } = require("../middleware/authmiddleware");
 const { uploadPostImages } = require("../middleware/uploadPostMiddleware");
 
@@ -16,6 +16,8 @@ router.get("/:id", postController.getPostById);
 router.put("/:id", uploadPostImages, postController.updatePost);
 router.delete("/:id", postController.deletePost);
 router.post("/:id/like", postController.toggleLike);
-router.post("/:id/comments", postController.addComment);
+
+// Nested comment routes - this will handle all /:id/comments/* routes
+router.use("/:id/comments", commentRoutes);
 
 module.exports = router;

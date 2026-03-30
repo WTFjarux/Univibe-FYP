@@ -1,197 +1,219 @@
+<!-- Backend/templates/emailVerification.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
   <title>Email Verification - UNIVIBE</title>
   <style>
     * {
       margin: 0;
       padding: 0;
       box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-      background: linear-gradient(135deg, #9f95b6 0%, #17151a 100%);
-      color: white;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 20px;
+      padding: 16px;
     }
 
     .container {
-      max-width: 450px;
+      max-width: 400px;
       width: 100%;
+      background: white;
+      border-radius: 32px;
+      padding: 40px 24px;
       text-align: center;
-      background: rgba(42, 40, 64, 0.95);
-      padding: 40px 35px;
-      border-radius: 24px;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
-      backdrop-filter: blur(10px);
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+      animation: slideUp 0.5s ease-out;
+    }
+
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
 
     .logo {
-      font-size: 42px;
+      font-size: 32px;
       font-weight: 800;
-      color: white;
-      margin-bottom: 10px;
-      letter-spacing: 1.5px;
-      background: linear-gradient(90deg, #6C63FF, #9f95b6);
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
+      margin-bottom: 8px;
     }
 
     .subtitle {
-      color: rgba(255, 255, 255, 0.7);
-      margin-bottom: 35px;
-      font-size: 16px;
+      color: #6b7280;
+      font-size: 14px;
+      margin-bottom: 32px;
     }
 
-    .icon-container {
-      margin: 25px 0 35px;
+    /* Status Icons */
+    .status-container {
+      margin: 24px 0 32px;
     }
 
     .spinner {
-      width: 70px;
-      height: 70px;
-      border: 5px solid rgba(108, 99, 255, 0.2);
-      border-top: 5px solid #6C63FF;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
+      width: 80px;
+      height: 80px;
       margin: 0 auto;
+      border: 4px solid #e5e7eb;
+      border-top-color: #667eea;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
     }
 
     .success-icon {
-      color: #4CAF50;
-      font-size: 70px;
-      animation: scaleIn 0.5s ease;
+      width: 80px;
+      height: 80px;
+      margin: 0 auto;
+      background: #10b981;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: bounceIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    }
+
+    .success-icon svg {
+      width: 48px;
+      height: 48px;
+      stroke: white;
+      stroke-width: 2;
     }
 
     .error-icon {
-      color: #FF5252;
-      font-size: 70px;
-      animation: scaleIn 0.5s ease;
+      width: 80px;
+      height: 80px;
+      margin: 0 auto;
+      background: #ef4444;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: shake 0.5s ease-in-out;
+    }
+
+    .error-icon svg {
+      width: 48px;
+      height: 48px;
+      stroke: white;
+      stroke-width: 2;
     }
 
     @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
+      to { transform: rotate(360deg); }
     }
 
-    @keyframes scaleIn {
-      from { transform: scale(0.5); opacity: 0; }
-      to { transform: scale(1); opacity: 1; }
+    @keyframes bounceIn {
+      0% {
+        transform: scale(0);
+        opacity: 0;
+      }
+      50% {
+        transform: scale(1.1);
+      }
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-8px); }
+      75% { transform: translateX(8px); }
     }
 
     .title {
       font-size: 28px;
       font-weight: 700;
-      margin-bottom: 15px;
-      color: white;
+      color: #1f2937;
+      margin-bottom: 12px;
     }
 
     .message {
-      color: rgba(255, 255, 255, 0.85);
-      line-height: 1.6;
-      margin-bottom: 30px;
-      font-size: 16px;
-      padding: 0 10px;
+      color: #6b7280;
+      font-size: 15px;
+      line-height: 1.5;
+      margin-bottom: 24px;
     }
 
     .email-display {
-      background: rgba(108, 99, 255, 0.15);
-      padding: 14px 18px;
+      background: #f3f4f6;
+      padding: 12px 16px;
       border-radius: 12px;
-      margin: 25px 0;
-      border: 1px solid rgba(108, 99, 255, 0.3);
-      word-break: break-all;
-      font-size: 15px;
-      animation: fadeIn 0.5s ease;
-    }
-
-    .button {
-      display: block;
-      width: 100%;
-      background: linear-gradient(90deg, #6C63FF, #8a84ff);
-      color: white;
-      text-decoration: none;
-      padding: 18px;
-      border-radius: 14px;
-      font-weight: 600;
-      font-size: 17px;
-      border: none;
-      cursor: pointer;
-      transition: all 0.3s ease;
-      margin: 12px 0;
-      letter-spacing: 0.5px;
-    }
-
-    .button:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 10px 25px rgba(108, 99, 255, 0.4);
-    }
-
-    .button:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-      transform: none !important;
-    }
-
-    .secondary-button {
-      background: transparent;
-      border: 2px solid rgba(255, 255, 255, 0.25);
-      color: rgba(255, 255, 255, 0.9);
-    }
-
-    .secondary-button:hover {
-      background: rgba(255, 255, 255, 0.05);
-      border-color: rgba(255, 255, 255, 0.4);
-    }
-
-    .note {
-      color: rgba(255, 255, 255, 0.6);
-      font-size: 14px;
-      margin-top: 25px;
-      line-height: 1.5;
-    }
-
-    .hidden {
-      display: none !important;
-    }
-
-    .error-details {
-      background: rgba(255, 82, 82, 0.1);
-      border: 1px solid rgba(255, 82, 82, 0.3);
-      border-radius: 10px;
-      padding: 15px;
       margin: 20px 0;
-      text-align: left;
       font-size: 14px;
-      color: rgba(255, 255, 255, 0.8);
-      animation: fadeIn 0.5s ease;
+      color: #1f2937;
+      word-break: break-all;
+    }
+
+    .email-display strong {
+      color: #667eea;
+      display: block;
+      margin-bottom: 4px;
+      font-size: 12px;
     }
 
     .token-notice {
-      background: rgba(76, 175, 80, 0.1);
-      border: 1px solid rgba(76, 175, 80, 0.3);
-      border-radius: 10px;
-      padding: 12px;
-      margin: 15px 0;
+      background: #ecfdf5;
+      border-left: 4px solid #10b981;
+      padding: 12px 16px;
+      border-radius: 8px;
+      margin: 16px 0;
       font-size: 13px;
-      animation: fadeIn 0.5s ease;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      color: #065f46;
+      text-align: left;
     }
 
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(10px); }
-      to { opacity: 1; transform: translateY(0); }
+    .button {
+      width: 100%;
+      padding: 14px 20px;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin: 8px 0;
+    }
+
+    .button-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .button-primary:active {
+      transform: scale(0.98);
+    }
+
+    .button-secondary {
+      background: #f3f4f6;
+      color: #4b5563;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .note {
+      font-size: 12px;
+      color: #9ca3af;
+      margin-top: 24px;
     }
   </style>
 </head>
@@ -200,22 +222,29 @@
     <div class="logo">UNIVIBE</div>
     <div class="subtitle">Your Campus, Your Community, Your Vibe.</div>
     
-    <div class="icon-container">
+    <div class="status-container">
       <div class="spinner" id="loadingSpinner"></div>
-      <div class="success-icon hidden" id="successIcon">✅</div>
-      <div class="error-icon hidden" id="errorIcon">❌</div>
+      <div id="successIcon" class="success-icon hidden">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <path d="M20 6L9 17L4 12" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div id="errorIcon" class="error-icon hidden">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <path d="M18 6L6 18M6 6L18 18" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
     </div>
 
     <h1 class="title" id="title">Verifying Email...</h1>
     <p class="message" id="message">Please wait while we verify your email address.</p>
 
-    <div id="emailDisplay" class="hidden email-display"></div>
-    <div id="tokenNotice" class="hidden token-notice"></div>
-    <div id="errorDetails" class="hidden error-details"></div>
+    <div id="emailDisplay" class="email-display hidden"></div>
+    <div id="tokenNotice" class="token-notice hidden"></div>
 
     <div id="buttonContainer" class="hidden">
-      <button class="button" id="primaryButton"></button>
-      <button class="button secondary-button" id="secondaryButton"></button>
+      <button class="button button-primary" id="primaryButton"></button>
+      <button class="button button-secondary" id="secondaryButton"></button>
     </div>
 
     <p class="note" id="noteText">This verification link will expire in 24 hours.</p>
@@ -230,17 +259,13 @@
     const message = document.getElementById('message');
     const emailDisplay = document.getElementById('emailDisplay');
     const tokenNotice = document.getElementById('tokenNotice');
-    const errorDetails = document.getElementById('errorDetails');
     const buttonContainer = document.getElementById('buttonContainer');
     const primaryButton = document.getElementById('primaryButton');
     const secondaryButton = document.getElementById('secondaryButton');
     const noteText = document.getElementById('noteText');
 
-    // Get token from URL
     const token = window.location.pathname.split('/').pop();
-    console.log('🔑 Token from URL:', token);
 
-    // Show loading state
     function showLoading(text = 'Verifying email...') {
       loadingSpinner.classList.remove('hidden');
       successIcon.classList.add('hidden');
@@ -249,265 +274,100 @@
       message.textContent = text;
       emailDisplay.classList.add('hidden');
       tokenNotice.classList.add('hidden');
-      errorDetails.classList.add('hidden');
       buttonContainer.classList.add('hidden');
     }
 
-    // Show success state
     function showSuccess(data) {
       loadingSpinner.classList.add('hidden');
       successIcon.classList.remove('hidden');
-      title.textContent = 'Email Verified!';
+      errorIcon.classList.add('hidden');
+      title.textContent = 'Email Verified! ✓';
+      title.style.color = '#10b981';
       message.textContent = data.message || 'Your email has been verified successfully.';
       
       if (data.user && data.user.email) {
-        emailDisplay.innerHTML = '<strong>Verified Email:</strong><br>' +
-          '<span style="color: #6C63FF;">' + data.user.email + '</span>';
+        emailDisplay.innerHTML = '<strong>Verified Email</strong>' + data.user.email;
         emailDisplay.classList.remove('hidden');
       }
 
-      // ✅ CRITICAL: Save the new token if provided
-      let tokenSaved = false;
       if (data.token) {
-        console.log('🔑 New token received after verification:', data.token.substring(0, 20) + '...');
-        
-        // Save to localStorage for web
-        localStorage.setItem('univibe_token', data.token);
-        
-        // Send to React Native app via WebView
         try {
           if (window.ReactNativeWebView) {
-            const messageData = {
-              type: 'email_verified',
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'EMAIL_VERIFIED',
               token: data.token,
-              user: data.user,
-              timestamp: new Date().toISOString()
-            };
-            window.ReactNativeWebView.postMessage(JSON.stringify(messageData));
-            console.log('📱 Token sent to React Native app:', messageData);
+              user: data.user
+            }));
             
-            // Show token saved notice
-            tokenNotice.innerHTML = '✅ <strong>Token Updated:</strong> Your authentication token has been updated. You can now proceed.';
+            tokenNotice.innerHTML = '✓ Verification successful! Redirecting...';
             tokenNotice.classList.remove('hidden');
-            tokenSaved = true;
+            
+            setTimeout(() => {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'CLOSE_WEBVIEW'
+              }));
+            }, 1500);
           }
         } catch (error) {
           console.log('Not in React Native context');
         }
       }
-
-      // Setup buttons with token-aware navigation
-      primaryButton.textContent = 'Open UNIVIBE App';
-      primaryButton.onclick = function() {
-        // Try to open the app via deep link with new token
-        if (data.token) {
-          window.location.href = `univibe://auth/verified?token=${encodeURIComponent(data.token)}`;
-        } else {
-          window.location.href = 'univibe://auth/verified';
-        }
-        // Fallback after 2 seconds
-        setTimeout(function() {
-          window.location.href = 'http://localhost:8081/auth/verified';
-        }, 2000);
-      };
       
-      secondaryButton.textContent = tokenSaved ? 'Continue to Setup' : 'Continue to Login';
-      secondaryButton.onclick = function() {
-        if (tokenSaved) {
-          // Navigate to setup profile in React Native
-          try {
-            if (window.ReactNativeWebView) {
-              window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'navigate_to_setup'
-              }));
-            }
-          } catch (error) {
-            window.location.href = 'http://localhost:8081/setup-profile';
-          }
-        } else {
-          window.location.href = 'http://localhost:8081/login';
-        }
-      };
-      
-      buttonContainer.classList.remove('hidden');
-      secondaryButton.classList.remove('hidden');
-      noteText.textContent = tokenSaved 
-        ? 'Your authentication has been updated. You can now setup your profile.' 
-        : 'Your account is now verified. You can login to UNIVIBE.';
+      buttonContainer.classList.add('hidden');
+      noteText.textContent = 'You can now access all features of UNIVIBE.';
     }
 
-    // Show error state
     function showError(data) {
       loadingSpinner.classList.add('hidden');
+      successIcon.classList.add('hidden');
       errorIcon.classList.remove('hidden');
-      title.textContent = 'Verification Failed';
-      message.textContent = data.message || 'Something went wrong. Please try again.';
+      title.textContent = 'Verification Failed ✗';
+      title.style.color = '#ef4444';
+      message.textContent = data.message || 'Something went wrong.';
       
-      // Show error details if available
-      if (data.code) {
-        errorDetails.innerHTML = '<strong>Error Code:</strong> ' + data.code;
-        errorDetails.classList.remove('hidden');
-      }
-
-      // Setup buttons based on error type
       if (data.code === 'TOKEN_EXPIRED') {
-        primaryButton.textContent = 'Resend Verification';
-        primaryButton.onclick = function() {
-          promptResendVerification();
+        primaryButton.textContent = 'Resend Verification Email';
+        primaryButton.onclick = () => promptResendVerification();
+        secondaryButton.textContent = 'Back to Login';
+        secondaryButton.onclick = () => {
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'CLOSE_WEBVIEW'
+            }));
+          }
         };
-        secondaryButton.textContent = 'Contact Support';
-        secondaryButton.onclick = function() {
-          window.location.href = 'mailto:support@univibe.com';
-        };
-      } else {
-        primaryButton.textContent = 'Try Again';
-        primaryButton.onclick = function() {
-          location.reload();
-        };
-        secondaryButton.textContent = 'Go to Login';
-        secondaryButton.onclick = function() {
-          window.location.href = 'http://localhost:8081/login';
-        };
+        buttonContainer.classList.remove('hidden');
       }
       
-      buttonContainer.classList.remove('hidden');
-      secondaryButton.classList.remove('hidden');
-      noteText.textContent = 'If problem persists, please contact our support team.';
+      noteText.textContent = 'Please try again or contact support.';
     }
 
-    // Prompt for email to resend verification
-    function promptResendVerification() {
-      const email = prompt('Please enter your email address to resend verification:');
-      if (!email) return;
-      
-      primaryButton.disabled = true;
-      primaryButton.textContent = 'Sending...';
-      
-      // ✅ FIXED: Changed from /verify-email/ to /resend-verification
-      const apiUrl = window.location.origin + '/api/auth/resend-verification';
-      console.log('📧 Calling API:', apiUrl);
-      
-      fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email: email }),
-      })
-      .then(function(response) {
-        console.log('📧 API response status:', response.status);
-        return response.json();
-      })
-      .then(function(data) {
-        console.log('📧 API response data:', data);
-        if (data.success) {
-          alert('Verification email sent! Please check your inbox.');
-          showSuccess({ message: 'New verification email sent! Please check your inbox.' });
-        } else {
-          alert(data.message || 'Failed to resend verification email.');
-          primaryButton.disabled = false;
-          primaryButton.textContent = 'Resend Verification';
-        }
-      })
-      .catch(function(error) {
-        console.error('📧 API call error:', error);
-        alert('Network error. Please try again. Error: ' + error.message);
-        primaryButton.disabled = false;
-        primaryButton.textContent = 'Resend Verification';
-      });
-    }
-
-    // Send token to parent window (for iframe/WebView scenarios)
-    function sendTokenToParent(tokenData) {
-      try {
-        // Send to parent window
-        if (window.parent !== window) {
-          window.parent.postMessage({
-            type: 'email_verification_complete',
-            ...tokenData
-          }, '*');
-          console.log('📤 Token sent to parent window');
-        }
-        
-        // Send to opener (if opened from another window)
-        if (window.opener) {
-          window.opener.postMessage({
-            type: 'email_verification_complete',
-            ...tokenData
-          }, '*');
-          console.log('📤 Token sent to opener window');
-        }
-        
-        // Broadcast to all listeners
-        window.dispatchEvent(new CustomEvent('univibe_email_verified', {
-          detail: tokenData
-        }));
-      } catch (error) {
-        console.log('Could not send token to parent:', error);
-      }
-    }
-
-    // Main verification function
     async function verifyEmail() {
       if (!token || token === 'verify-email') {
-        showError({ message: 'Invalid verification link. No token found.' });
+        showError({ message: 'Invalid verification link.' });
         return;
       }
 
       showLoading();
 
       try {
-        // ✅ CRITICAL FIX: Changed from /api/auth/verify-email/ to /api/auth/verify-email-api/
         const apiUrl = window.location.origin + '/api/auth/verify-email-api/' + token;
-        console.log('🔐 Calling verification API:', apiUrl);
-        
         const response = await fetch(apiUrl, {
-          headers: {
-            'Accept': 'application/json',
-          },
+          headers: { 'Accept': 'application/json' }
         });
-
-        console.log('🔐 API response status:', response.status);
         const data = await response.json();
-        console.log('🔐 API response data:', data);
         
         if (data.success) {
-          // Send token to various listeners
-          if (data.token) {
-            sendTokenToParent({
-              token: data.token,
-              user: data.user,
-              isEmailVerified: true
-            });
-          }
-          
           showSuccess(data);
         } else {
           showError(data);
         }
       } catch (error) {
-        console.error('🔐 Verification error:', error);
-        showError({ 
-          message: 'Network error. Please check your internet connection and try again.',
-          code: 'NETWORK_ERROR'
-        });
+        showError({ message: 'Network error. Please check your connection.' });
       }
     }
 
-    // Listen for messages from React Native (if needed)
-    window.addEventListener('message', function(event) {
-      console.log('📩 Message received from parent:', event.data);
-      // Handle any messages from React Native if needed
-    });
-
-    // Start verification on page load
     document.addEventListener('DOMContentLoaded', verifyEmail);
-
-    // Also expose a global function to manually trigger token check
-    window.checkVerificationStatus = async function() {
-      showLoading('Checking verification status...');
-      await verifyEmail();
-    };
   </script>
 </body>
 </html>

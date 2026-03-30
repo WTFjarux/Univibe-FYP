@@ -1,4 +1,4 @@
-// app/(tabs)/profile/index.tsx - UPDATED VERSION
+// app/(tabs)/profile/index.tsx
 import React, { useRef, useEffect, useState } from "react";
 import {
   ScrollView,
@@ -17,7 +17,7 @@ import { useRouter } from "expo-router";
 
 import { useAuth } from "../../../lib/AuthContext";
 import { useImageUpload } from "../../../hooks/useImageUpload";
-import { useCoverPhotoUpload } from "../../../hooks/useCoverPhotoUpload"; // NEW
+import { useCoverPhotoUpload } from "../../../hooks/useCoverPhotoUpload";
 
 import ProfileHeader from "../../components/Profile/ProfileHeader";
 import ProfileInfo from "../../components/Profile/ProfileInfo";
@@ -29,7 +29,6 @@ import { styles } from "../../components/Profile/profileStyles";
 export default function ProfileScreen() {
   const { user, profile, isLoading, logout, loadProfile } = useAuth();
 
-  // Profile picture upload hook
   const {
     uploadModal,
     viewPhotoModal,
@@ -42,7 +41,6 @@ export default function ProfileScreen() {
     deleteProfileImage,
   } = useImageUpload();
 
-  // Cover photo upload hook
   const {
     coverModal,
     coverViewModal,
@@ -59,7 +57,6 @@ export default function ProfileScreen() {
   const pickerActiveRef = useRef(false);
   const router = useRouter();
 
-  // Load profile on mount if not loaded
   useEffect(() => {
     if (!profile && !isLoading) {
       loadProfile();
@@ -86,91 +83,96 @@ export default function ProfileScreen() {
     ]);
   };
 
-  // PROFILE PICTURE HANDLERS (existing)
-  const handleGalleryPick = async () => {
+  const requestMediaPermissions = async (): Promise<boolean> => {
+    const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      const { status: newStatus } =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (newStatus !== "granted") {
+        Alert.alert(
+          "Permission Required",
+          "Please allow photo access to upload pictures.",
+        );
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const requestCameraPermissions = async (): Promise<boolean> => {
+    const { status } = await ImagePicker.getCameraPermissionsAsync();
+    if (status !== "granted") {
+      const { status: newStatus } =
+        await ImagePicker.requestCameraPermissionsAsync();
+      if (newStatus !== "granted") {
+        Alert.alert(
+          "Camera Permission",
+          "Please allow camera access to take photos.",
+        );
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const handleImagePicker = async (
+    pickerFn: () => Promise<ImagePicker.ImagePickerResult>,
+    onSuccess: (uri: string) => Promise<boolean>,
+    closeModal: () => void,
+  ) => {
     if (pickerActiveRef.current) return;
     pickerActiveRef.current = true;
 
     try {
-      const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
-      if (status !== "granted") {
-        const { status: newStatus } =
-          await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (newStatus !== "granted") {
-          Alert.alert(
-            "Permission Required",
-            "Please allow photo access to upload profile pictures.",
-          );
-          pickerActiveRef.current = false;
-          return;
-        }
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: "images",
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
-      });
-
-      closeUploadModal();
+      const result = await pickerFn();
+      closeModal();
 
       if (!result.canceled && result.assets?.[0]?.uri) {
-        const success = await uploadProfileImage(result.assets[0].uri);
+        const success = await onSuccess(result.assets[0].uri);
         if (success) {
           await loadProfile();
         }
       }
     } catch (error) {
-      console.error("Gallery picker error:", error);
-      Alert.alert("Error", "Failed to select image from gallery");
-      closeUploadModal();
+      Alert.alert("Error", "Failed to select image");
+      closeModal();
     } finally {
       pickerActiveRef.current = false;
     }
   };
 
+  const handleGalleryPick = async () => {
+    const hasPermission = await requestMediaPermissions();
+    if (!hasPermission) return;
+
+    await handleImagePicker(
+      () =>
+        ImagePicker.launchImageLibraryAsync({
+          mediaTypes: "images",
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.8,
+        }),
+      uploadProfileImage,
+      closeUploadModal,
+    );
+  };
+
   const handleCameraPick = async () => {
-    if (pickerActiveRef.current) return;
-    pickerActiveRef.current = true;
+    const hasPermission = await requestCameraPermissions();
+    if (!hasPermission) return;
 
-    try {
-      const { status } = await ImagePicker.getCameraPermissionsAsync();
-      if (status !== "granted") {
-        const { status: newStatus } =
-          await ImagePicker.requestCameraPermissionsAsync();
-        if (newStatus !== "granted") {
-          Alert.alert(
-            "Camera Permission",
-            "Please allow camera access to take photos.",
-          );
-          pickerActiveRef.current = false;
-          return;
-        }
-      }
-
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: "images",
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
-      });
-
-      closeUploadModal();
-
-      if (!result.canceled && result.assets?.[0]?.uri) {
-        const success = await uploadProfileImage(result.assets[0].uri);
-        if (success) {
-          await loadProfile();
-        }
-      }
-    } catch (error) {
-      console.error("Camera error:", error);
-      Alert.alert("Error", "Failed to take photo");
-      closeUploadModal();
-    } finally {
-      pickerActiveRef.current = false;
-    }
+    await handleImagePicker(
+      () =>
+        ImagePicker.launchCameraAsync({
+          mediaTypes: "images",
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.8,
+        }),
+      uploadProfileImage,
+      closeUploadModal,
+    );
   };
 
   const handleDeleteProfileImage = async () => {
@@ -196,95 +198,38 @@ export default function ProfileScreen() {
     }
   };
 
-  // COVER PHOTO HANDLERS (NEW)
-  const handleCoverPhotoPress = () => {
-    openCoverModal();
-  };
-
   const handleCoverGalleryPick = async () => {
-    if (pickerActiveRef.current) return;
-    pickerActiveRef.current = true;
+    const hasPermission = await requestMediaPermissions();
+    if (!hasPermission) return;
 
-    try {
-      const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
-      if (status !== "granted") {
-        const { status: newStatus } =
-          await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (newStatus !== "granted") {
-          Alert.alert(
-            "Permission Required",
-            "Please allow photo access to upload cover photos.",
-          );
-          pickerActiveRef.current = false;
-          return;
-        }
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: "images",
-        allowsEditing: true,
-        aspect: [16, 9], // Better aspect ratio for cover photos
-        quality: 0.8,
-      });
-
-      closeCoverModal();
-
-      if (!result.canceled && result.assets?.[0]?.uri) {
-        const success = await uploadCoverPhoto(result.assets[0].uri);
-        if (success) {
-          await loadProfile();
-        }
-      }
-    } catch (error) {
-      console.error("Cover gallery picker error:", error);
-      Alert.alert("Error", "Failed to select image from gallery");
-      closeCoverModal();
-    } finally {
-      pickerActiveRef.current = false;
-    }
+    await handleImagePicker(
+      () =>
+        ImagePicker.launchImageLibraryAsync({
+          mediaTypes: "images",
+          allowsEditing: true,
+          aspect: [16, 9],
+          quality: 0.8,
+        }),
+      uploadCoverPhoto,
+      closeCoverModal,
+    );
   };
 
   const handleCoverCameraPick = async () => {
-    if (pickerActiveRef.current) return;
-    pickerActiveRef.current = true;
+    const hasPermission = await requestCameraPermissions();
+    if (!hasPermission) return;
 
-    try {
-      const { status } = await ImagePicker.getCameraPermissionsAsync();
-      if (status !== "granted") {
-        const { status: newStatus } =
-          await ImagePicker.requestCameraPermissionsAsync();
-        if (newStatus !== "granted") {
-          Alert.alert(
-            "Camera Permission",
-            "Please allow camera access to take photos.",
-          );
-          pickerActiveRef.current = false;
-          return;
-        }
-      }
-
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: "images",
-        allowsEditing: true,
-        aspect: [16, 9],
-        quality: 0.8,
-      });
-
-      closeCoverModal();
-
-      if (!result.canceled && result.assets?.[0]?.uri) {
-        const success = await uploadCoverPhoto(result.assets[0].uri);
-        if (success) {
-          await loadProfile();
-        }
-      }
-    } catch (error) {
-      console.error("Cover camera error:", error);
-      Alert.alert("Error", "Failed to take photo");
-      closeCoverModal();
-    } finally {
-      pickerActiveRef.current = false;
-    }
+    await handleImagePicker(
+      () =>
+        ImagePicker.launchCameraAsync({
+          mediaTypes: "images",
+          allowsEditing: true,
+          aspect: [16, 9],
+          quality: 0.8,
+        }),
+      uploadCoverPhoto,
+      closeCoverModal,
+    );
   };
 
   const handleDeleteCoverPhoto = async () => {
@@ -295,7 +240,18 @@ export default function ProfileScreen() {
     }
   };
 
-  // Loading state
+  const handleCoverPhotoPress = () => {
+    openCoverModal();
+  };
+
+  const formattedUser = {
+    _id: user?.id,
+    name: user?.name || profile?.fullName,
+    email: user?.email,
+    username: user?.username || profile?.username,
+    profileComplete: user?.profileComplete,
+  };
+
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -305,7 +261,6 @@ export default function ProfileScreen() {
     );
   }
 
-  // No profile state
   if (!profile) {
     return (
       <SafeAreaView style={styles.container}>
@@ -327,77 +282,6 @@ export default function ProfileScreen() {
     );
   }
 
-  const renderMenuItems = () => (
-    <View style={menuStyles.menuSection}>
-      {/* Edit Profile */}
-      <TouchableOpacity
-        style={menuStyles.menuItem}
-        onPress={() => router.push("/profile/edit")}
-        activeOpacity={0.7}
-      >
-        <View style={menuStyles.menuItemContent}>
-          <Ionicons name="create-outline" size={24} color="#4b5563" />
-          <Text style={menuStyles.menuText}>Edit Profile</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={22} color="#9ca3af" />
-      </TouchableOpacity>
-
-      <View style={menuStyles.divider} />
-
-      {/* Settings */}
-      <TouchableOpacity
-        style={menuStyles.menuItem}
-        onPress={() =>
-          Alert.alert("Coming Soon", "Settings feature will be available soon!")
-        }
-        activeOpacity={0.7}
-      >
-        <View style={menuStyles.menuItemContent}>
-          <Ionicons name="settings-outline" size={24} color="#4b5563" />
-          <Text style={menuStyles.menuText}>Settings</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={22} color="#9ca3af" />
-      </TouchableOpacity>
-
-      <View style={menuStyles.divider} />
-
-      {/* Help & Support */}
-      <TouchableOpacity
-        style={menuStyles.menuItem}
-        onPress={() =>
-          Alert.alert(
-            "Coming Soon",
-            "Help & Support feature will be available soon!",
-          )
-        }
-        activeOpacity={0.7}
-      >
-        <View style={menuStyles.menuItemContent}>
-          <Ionicons name="help-circle-outline" size={24} color="#4b5563" />
-          <Text style={menuStyles.menuText}>Help & Support</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={22} color="#9ca3af" />
-      </TouchableOpacity>
-
-      <View style={menuStyles.divider} />
-
-      {/* Logout */}
-      <TouchableOpacity
-        style={menuStyles.menuItem}
-        onPress={handleLogoutConfirm}
-        activeOpacity={0.7}
-      >
-        <View style={menuStyles.menuItemContent}>
-          <Ionicons name="log-out-outline" size={24} color="#ef4444" />
-          <Text style={[menuStyles.menuText, { color: "#ef4444" }]}>
-            Logout
-          </Text>
-        </View>
-        <Ionicons name="chevron-forward" size={22} color="#ef4444" />
-      </TouchableOpacity>
-    </View>
-  );
-
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <ScrollView
@@ -413,7 +297,7 @@ export default function ProfileScreen() {
         }
       >
         <ProfileHeader
-          user={user}
+          user={formattedUser}
           profile={profile}
           uploading={uploading || pickerActiveRef.current}
           coverUploading={coverUploading}
@@ -426,11 +310,81 @@ export default function ProfileScreen() {
           <ProfileStats
             stats={profile?.stats || { posts: 0, connections: 0, groups: 0 }}
           />
-          {renderMenuItems()}
+
+          <View style={menuStyles.menuSection}>
+            <TouchableOpacity
+              style={menuStyles.menuItem}
+              onPress={() => router.push("/profile/edit")}
+              activeOpacity={0.7}
+            >
+              <View style={menuStyles.menuItemContent}>
+                <Ionicons name="create-outline" size={24} color="#4b5563" />
+                <Text style={menuStyles.menuText}>Edit Profile</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={22} color="#9ca3af" />
+            </TouchableOpacity>
+
+            <View style={menuStyles.divider} />
+
+            <TouchableOpacity
+              style={menuStyles.menuItem}
+              onPress={() =>
+                Alert.alert(
+                  "Coming Soon",
+                  "Settings feature will be available soon!",
+                )
+              }
+              activeOpacity={0.7}
+            >
+              <View style={menuStyles.menuItemContent}>
+                <Ionicons name="settings-outline" size={24} color="#4b5563" />
+                <Text style={menuStyles.menuText}>Settings</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={22} color="#9ca3af" />
+            </TouchableOpacity>
+
+            <View style={menuStyles.divider} />
+
+            <TouchableOpacity
+              style={menuStyles.menuItem}
+              onPress={() =>
+                Alert.alert(
+                  "Coming Soon",
+                  "Help & Support feature will be available soon!",
+                )
+              }
+              activeOpacity={0.7}
+            >
+              <View style={menuStyles.menuItemContent}>
+                <Ionicons
+                  name="help-circle-outline"
+                  size={24}
+                  color="#4b5563"
+                />
+                <Text style={menuStyles.menuText}>Help & Support</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={22} color="#9ca3af" />
+            </TouchableOpacity>
+
+            <View style={menuStyles.divider} />
+
+            <TouchableOpacity
+              style={menuStyles.menuItem}
+              onPress={handleLogoutConfirm}
+              activeOpacity={0.7}
+            >
+              <View style={menuStyles.menuItemContent}>
+                <Ionicons name="log-out-outline" size={24} color="#ef4444" />
+                <Text style={[menuStyles.menuText, { color: "#ef4444" }]}>
+                  Logout
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={22} color="#ef4444" />
+            </TouchableOpacity>
+          </View>
         </View>
       </ScrollView>
 
-      {/* Profile Picture Upload Modal */}
       <UploadModal
         visible={uploadModal}
         onClose={closeUploadModal}
@@ -441,13 +395,12 @@ export default function ProfileScreen() {
         hasExistingImage={
           !!profile?.profilePicture &&
           !profile.profilePicture.includes("dicebear.com")
-        } // Check if it's not a default avatar
+        }
         title="Profile Picture"
         viewLabel="View Profile Picture"
         deleteLabel="Remove Profile Picture"
       />
 
-      {/* Cover Photo Upload Modal */}
       <UploadModal
         visible={coverModal}
         onClose={closeCoverModal}
@@ -460,22 +413,20 @@ export default function ProfileScreen() {
         viewLabel="View Cover Photo"
       />
 
-      {/* Profile Picture Viewer Modal */}
       <ImageViewModal
         visible={viewPhotoModal}
         imageUri={profile?.profilePicture}
         onClose={closeImageViewer}
         title="Profile Picture"
-        isCoverPhoto={false} // Default is false anyway
+        isCoverPhoto={false}
       />
 
-      {/* Cover Photo Viewer Modal */}
       <ImageViewModal
         visible={coverViewModal}
         imageUri={profile?.coverPhoto}
         onClose={closeCoverImageViewer}
         title="Cover Photo"
-        isCoverPhoto={true} // This will make it rectangular
+        isCoverPhoto={true}
       />
     </SafeAreaView>
   );

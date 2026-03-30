@@ -1,30 +1,36 @@
+// Backend/services/verificationService.js
 const emailService = require("./emailService");
 
 const BASE_URL =
   process.env.NODE_ENV === "production"
     ? process.env.PRODUCTION_URL
-    : process.env.BASE_URL || "http://172.20.10.2:5001"; // Default IP for development
+    : process.env.BASE_URL || "http://192.168.1.168:5001";
 
+const EXPO_GO_URL = "exp://10.21.6.88:8081";
+
+/**
+ * Send verification email to user
+ * Generates verification token and sends both web and deep links
+ * @param {Object} user - User object with generateEmailVerificationToken method
+ * @returns {Promise<boolean>} - Success status
+ */
 const sendVerificationEmail = async (user) => {
   try {
-    // Generate token on user model
     const verificationToken = user.generateEmailVerificationToken();
-
-    // Save without triggering password validation again
     await user.save({ validateBeforeSave: false });
 
-    const verificationUrl = `${BASE_URL}/verify-email/${verificationToken}`;
+    const webUrl = `${BASE_URL}/verify-email/${verificationToken}`;
+    const deepLinkUrl = `${EXPO_GO_URL}/--/verify?token=${verificationToken}`;
 
     await emailService.sendVerificationEmail({
       to: user.email,
       name: user.name,
-      verificationUrl,
+      verificationUrl: deepLinkUrl,
+      webUrl: webUrl,
     });
 
-    console.log(`✅ Verification email sent to ${user.email}`);
     return true;
   } catch (error) {
-    console.error("❌ Verification email service failed:", error);
     return false;
   }
 };

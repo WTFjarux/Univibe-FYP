@@ -1,3 +1,4 @@
+// app/(auth)/signup.tsx
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -19,15 +20,12 @@ import { useAuth } from "../../lib/AuthContext";
 import VerificationModal from "./VerificationModal";
 
 export default function SignUpScreen() {
-  // Form state
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
-  // UI state
   const [isLoading, setIsLoading] = useState(false);
   const [showVerificationModal, setShowVerificationModal] = useState(false);
   const [verificationEmail, setVerificationEmail] = useState("");
@@ -36,53 +34,52 @@ export default function SignUpScreen() {
 
   const {
     signup: authSignup,
+    token,
     checkVerificationStatus,
     resendVerificationEmail,
+    refreshToken,
   } = useAuth();
 
-  /**
-   * Validate form and register new user
-   * Shows verification modal on successful registration
-   */
-  const handleSignUp = async () => {
-    // Form validation
+  const validateForm = (): boolean => {
     if (!fullName || !email || !password || !confirmPassword) {
       Alert.alert("Error", "Please fill in all fields");
-      return;
+      return false;
     }
 
     if (password !== confirmPassword) {
       Alert.alert("Error", "Passwords do not match");
-      return;
+      return false;
     }
 
     if (password.length < 6) {
       Alert.alert("Error", "Password must be at least 6 characters");
-      return;
+      return false;
     }
 
     if (!/[A-Z]/.test(password)) {
       Alert.alert("Error", "Password must contain at least 1 capital letter");
-      return;
+      return false;
     }
 
     if (!/\d/.test(password)) {
       Alert.alert("Error", "Password must contain at least 1 number");
-      return;
+      return false;
     }
 
     if (!email.includes("@")) {
       Alert.alert("Error", "Please enter a valid email address");
-      return;
+      return false;
     }
+
+    return true;
+  };
+
+  const handleSignUp = async () => {
+    if (!validateForm()) return;
 
     try {
       setIsLoading(true);
-
-      // Create user account
       await authSignup(fullName, email, password);
-
-      // Show verification modal
       setVerificationEmail(email);
       setShowVerificationModal(true);
       clearForm();
@@ -93,9 +90,6 @@ export default function SignUpScreen() {
     }
   };
 
-  /**
-   * Clear all form fields after successful registration
-   */
   const clearForm = () => {
     setFullName("");
     setEmail("");
@@ -103,10 +97,6 @@ export default function SignUpScreen() {
     setConfirmPassword("");
   };
 
-  /**
-   * Check email verification status
-   * Only shows alert when manually checked outside modal
-   */
   const handleCheckVerification = async () => {
     try {
       setIsCheckingVerification(true);
@@ -114,10 +104,11 @@ export default function SignUpScreen() {
 
       if (result.isEmailVerified) {
         setIsEmailVerified(true);
-        // No alert - modal will update to show verified state
+        if (refreshToken) {
+          await refreshToken();
+        }
       } else {
         setIsEmailVerified(false);
-        // Only alert if checking from outside modal
         if (!showVerificationModal) {
           Alert.alert(
             "Not Verified Yet",
@@ -139,9 +130,6 @@ export default function SignUpScreen() {
     }
   };
 
-  /**
-   * Resend verification email to user
-   */
   const handleResendVerification = async () => {
     try {
       const result = await resendVerificationEmail(verificationEmail);
@@ -156,13 +144,27 @@ export default function SignUpScreen() {
     }
   };
 
-  /**
-   * Navigate to profile setup if email is verified
-   * Shows alert if verification is still pending
-   */
+  const handleVerificationComplete = async (newToken: string) => {
+    try {
+      if (refreshToken) {
+        await refreshToken();
+      }
+      setIsEmailVerified(true);
+      setShowVerificationModal(false);
+      router.replace("/(auth)/setup-profile");
+    } catch (error) {
+      // Silently fail - user can retry
+    }
+  };
+
   const handleSetupProfile = async () => {
     try {
       setIsCheckingVerification(true);
+
+      if (refreshToken) {
+        await refreshToken();
+      }
+
       const result = await checkVerificationStatus();
 
       if (!result.isEmailVerified) {
@@ -184,7 +186,6 @@ export default function SignUpScreen() {
         return;
       }
 
-      // Verified - proceed to profile setup
       setShowVerificationModal(false);
       router.replace("/(auth)/setup-profile");
     } catch (error) {
@@ -194,32 +195,35 @@ export default function SignUpScreen() {
     }
   };
 
-  /**
-   * Auto-poll verification status while modal is open
-   * Silently updates state without alerts
-   */
   useEffect(() => {
-    let intervalId: any;
+    let intervalId: number | null = null;
 
     if (showVerificationModal && !isEmailVerified) {
-      // Check every 10 seconds for verification
       intervalId = setInterval(async () => {
         try {
           const result = await checkVerificationStatus();
           if (result.isEmailVerified) {
             setIsEmailVerified(true);
-            clearInterval(intervalId);
+            if (refreshToken) {
+              await refreshToken();
+            }
+            if (intervalId) clearInterval(intervalId);
           }
         } catch (error) {
-          // Silently fail - user can check manually
+          // Silently fail
         }
-      }, 10000);
+      }, 5000);
     }
 
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [showVerificationModal, isEmailVerified, checkVerificationStatus]);
+  }, [
+    showVerificationModal,
+    isEmailVerified,
+    checkVerificationStatus,
+    refreshToken,
+  ]);
 
   return (
     <LinearGradient
@@ -236,21 +240,16 @@ export default function SignUpScreen() {
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {/* Logo */}
             <View style={styles.logoContainer}>
               <Text style={styles.logoText}>UNIVIBE</Text>
             </View>
 
-            {/* Slogan */}
             <Text style={styles.sloganTitle}>Your Campus, Your Community,</Text>
             <Text style={styles.sloganSubtitle}>Your Vibe.</Text>
 
-            {/* Form header */}
             <Text style={styles.signUpTitle}>SIGN UP</Text>
 
-            {/* Registration form */}
             <View style={styles.formContainer}>
-              {/* Full Name */}
               <View style={styles.inputContainer}>
                 <Ionicons
                   name="person-outline"
@@ -269,7 +268,6 @@ export default function SignUpScreen() {
                 />
               </View>
 
-              {/* Email */}
               <View style={styles.inputContainer}>
                 <Ionicons
                   name="mail-outline"
@@ -289,7 +287,6 @@ export default function SignUpScreen() {
                 />
               </View>
 
-              {/* Password */}
               <View style={styles.inputContainer}>
                 <Ionicons
                   name="lock-closed-outline"
@@ -318,7 +315,6 @@ export default function SignUpScreen() {
                 </TouchableOpacity>
               </View>
 
-              {/* Confirm Password */}
               <View style={styles.inputContainer}>
                 <Ionicons
                   name="lock-closed-outline"
@@ -349,7 +345,6 @@ export default function SignUpScreen() {
                 </TouchableOpacity>
               </View>
 
-              {/* Password requirements */}
               <View style={styles.passwordRequirements}>
                 <View style={styles.requirementRow}>
                   <Ionicons
@@ -439,7 +434,6 @@ export default function SignUpScreen() {
                 </View>
               </View>
 
-              {/* Terms agreement */}
               <View style={styles.termsContainer}>
                 <Text style={styles.termsText}>
                   By signing up, you agree to our{" "}
@@ -448,7 +442,6 @@ export default function SignUpScreen() {
                 </Text>
               </View>
 
-              {/* Sign up button */}
               <TouchableOpacity
                 style={[
                   styles.signUpButton,
@@ -464,7 +457,6 @@ export default function SignUpScreen() {
                 )}
               </TouchableOpacity>
 
-              {/* Divider */}
               <View style={styles.orContainer}>
                 <View style={styles.orLine} />
                 <Text style={styles.orText}>OR</Text>
@@ -473,7 +465,6 @@ export default function SignUpScreen() {
 
               <Text style={styles.continueWith}>Continue with</Text>
 
-              {/* Social login */}
               <View style={styles.socialRow}>
                 <TouchableOpacity
                   style={styles.socialButton}
@@ -489,7 +480,6 @@ export default function SignUpScreen() {
                 </TouchableOpacity>
               </View>
 
-              {/* Sign in link */}
               <View style={styles.signInContainer}>
                 <Text style={styles.signInText}>Already have an account? </Text>
                 <Link href="/(auth)/login" asChild>
@@ -503,10 +493,10 @@ export default function SignUpScreen() {
         </KeyboardAvoidingView>
       </SafeAreaView>
 
-      {/* Verification Modal */}
       <VerificationModal
         visible={showVerificationModal}
         email={verificationEmail}
+        token={token}
         isEmailVerified={isEmailVerified}
         onClose={() => {
           setShowVerificationModal(false);
@@ -515,44 +505,30 @@ export default function SignUpScreen() {
         }}
         onSetupProfile={handleSetupProfile}
         onResendVerification={handleResendVerification}
+        onVerificationComplete={handleVerificationComplete}
         isChecking={isCheckingVerification}
       />
     </LinearGradient>
   );
 }
 
-// ========== STYLES ==========
 const styles = StyleSheet.create({
-  // Main container
-  container: {
-    flex: 1,
-  },
-  safeArea: {
-    flex: 1,
-  },
-  keyboardAvoidingView: {
-    flex: 1,
-  },
+  container: { flex: 1 },
+  safeArea: { flex: 1 },
+  keyboardAvoidingView: { flex: 1 },
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 30,
     paddingTop: 60,
     paddingBottom: 40,
   },
-
-  // Logo styles
-  logoContainer: {
-    alignItems: "center",
-    marginTop: 10,
-  },
+  logoContainer: { alignItems: "center", marginTop: 10 },
   logoText: {
     fontSize: 48,
     color: "white",
     fontFamily: "Sofia-Regular",
     letterSpacing: 2,
   },
-
-  // Slogan styles
   sloganTitle: {
     marginTop: 10,
     color: "white",
@@ -568,8 +544,6 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Bold",
     fontWeight: "bold",
   },
-
-  // Sign up title
   signUpTitle: {
     color: "white",
     fontSize: 24,
@@ -577,15 +551,11 @@ const styles = StyleSheet.create({
     marginBottom: 30,
     fontFamily: "SofiaSans-Bold",
   },
-
-  // Form container
   formContainer: {
     width: "100%",
     alignItems: "center",
     marginBottom: 40,
   },
-
-  // Input fields
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -598,24 +568,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.3)",
   },
-  inputIcon: {
-    marginRight: 12,
-  },
-  input: {
-    flex: 1,
-    fontSize: 16,
-    color: "white",
-  },
-  eyeButton: {
-    padding: 5,
-  },
-
-  // Password requirements
-  passwordRequirements: {
-    width: "100%",
-    padding: 15,
-    marginBottom: 15,
-  },
+  inputIcon: { marginRight: 12 },
+  input: { flex: 1, fontSize: 16, color: "white" },
+  eyeButton: { padding: 5 },
+  passwordRequirements: { width: "100%", padding: 15, marginBottom: 15 },
   requirementRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -626,27 +582,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginLeft: 8,
   },
-  requirementMet: {
-    color: "#4CAF50",
-  },
-
-  // Terms agreement
-  termsContainer: {
-    marginBottom: 20,
-    paddingHorizontal: 10,
-  },
+  requirementMet: { color: "#4CAF50" },
+  termsContainer: { marginBottom: 20, paddingHorizontal: 10 },
   termsText: {
     color: "white",
     fontSize: 12,
     textAlign: "center",
     lineHeight: 16,
   },
-  termsLink: {
-    fontWeight: "600",
-    textDecorationLine: "underline",
-  },
-
-  // Sign up button
+  termsLink: { fontWeight: "600", textDecorationLine: "underline" },
   signUpButton: {
     width: "90%",
     padding: 16,
@@ -658,59 +602,31 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  disabledButton: {
-    opacity: 0.6,
-  },
+  disabledButton: { opacity: 0.6 },
   signUpButtonText: {
     color: "white",
     textAlign: "center",
     fontSize: 16,
     fontWeight: "600",
   },
-
-  // OR divider
   orContainer: {
     flexDirection: "row",
     alignItems: "center",
     width: "100%",
     marginBottom: 15,
   },
-  orLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.3)",
-  },
+  orLine: { flex: 1, height: 1, backgroundColor: "rgba(255, 255, 255, 0.3)" },
   orText: {
     color: "white",
     fontSize: 16,
     marginHorizontal: 15,
     fontFamily: "Sofia-Regular",
   },
-  continueWith: {
-    color: "white",
-    fontSize: 15,
-    marginBottom: 20,
-  },
-
-  // Social login buttons
-  socialRow: {
-    flexDirection: "row",
-    marginBottom: 30,
-    gap: 25,
-  },
-  socialButton: {
-    padding: 10,
-  },
-
-  // Sign in link
-  signInContainer: {
-    flexDirection: "row",
-    justifyContent: "center",
-  },
-  signInText: {
-    color: "white",
-    fontSize: 14,
-  },
+  continueWith: { color: "white", fontSize: 15, marginBottom: 20 },
+  socialRow: { flexDirection: "row", marginBottom: 30, gap: 25 },
+  socialButton: { padding: 10 },
+  signInContainer: { flexDirection: "row", justifyContent: "center" },
+  signInText: { color: "white", fontSize: 14 },
   signInLink: {
     color: "white",
     fontSize: 14,

@@ -8,7 +8,7 @@ const profileSchema = new mongoose.Schema(
       ref: "User",
       required: true,
       unique: true,
-      index: true, // Keep this field-level index
+      index: true,
     },
     fullName: {
       type: String,
@@ -27,21 +27,18 @@ const profileSchema = new mongoose.Schema(
         /^[a-zA-Z0-9_.-]+$/,
         "Username can only contain letters, numbers, dots, underscores and hyphens",
       ],
-      index: true, // Keep this field-level index
+      index: true,
     },
-
-    // CAMPUS FIELD
     campus: {
       type: String,
       required: true,
       trim: true,
       default: "Herald College Kathmandu",
-      index: true, // Keep this field-level index
+      index: true,
     },
-
     profilePicture: {
       type: String,
-      default: "https://api.dicebear.com/7.x/avataaars/svg?seed=default",
+      default: "", // ✅ Empty string - will use local default avatar
     },
     coverPhoto: {
       type: String,
@@ -81,7 +78,7 @@ const profileSchema = new mongoose.Schema(
     verified: {
       type: Boolean,
       default: false,
-      index: true, // Add this for verified field
+      index: true,
     },
     socialLinks: {
       instagram: { type: String, default: "" },
@@ -109,7 +106,6 @@ const profileSchema = new mongoose.Schema(
   },
 );
 
-// Keep these compound/unique indexes:
 profileSchema.index({ "stats.connections": -1 });
 profileSchema.index({ coverPhoto: 1 });
 

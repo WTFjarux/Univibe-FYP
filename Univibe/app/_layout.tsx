@@ -38,6 +38,15 @@ export default function RootLayout() {
           <Stack.Screen name="index" />
           <Stack.Screen name="(auth)" />
 
+          {/* ✅ Verification route - modal presentation */}
+          <Stack.Screen
+            name="verify"
+            options={{
+              presentation: "modal",
+              animation: "slide_from_bottom",
+            }}
+          />
+
           {/* Protected routes - require auth */}
           <Stack.Screen name="(tabs)" />
           {/* Add other protected screens here */}

@@ -1,3 +1,4 @@
+// Backend/controllers/profileController.js
 const User = require("../models/User");
 const Profile = require("../models/Profile");
 const fs = require("fs");
@@ -13,30 +14,26 @@ const path = require("path");
 const getFullImageUrl = (imagePath, req) => {
   if (!imagePath) return null;
 
-  // Already a full URL (http:// or https://) - return as is
+  // Already a full URL
   if (imagePath.startsWith("http://") || imagePath.startsWith("https://")) {
     return imagePath;
   }
 
-  // Construct full URL for uploaded files
   const baseUrl = req ? `${req.protocol}://${req.get("host")}` : "";
 
-  // If it's already a path like /uploads/profile-pictures/filename.jpg
   if (imagePath.startsWith("/uploads/")) {
     return `${baseUrl}${imagePath}`;
   }
 
-  // If it's just a filename, determine which directory it belongs to
+  // Determine correct directory based on filename pattern
   if (imagePath.includes("profilePicture-")) {
     return `${baseUrl}/uploads/profile-pictures/${imagePath}`;
   } else if (imagePath.includes("coverPhoto-")) {
     return `${baseUrl}/uploads/cover-photos/${imagePath}`;
   } else if (imagePath.includes("user-")) {
-    // For old format files, assume they're profile pictures
     return `${baseUrl}/uploads/profile-pictures/${imagePath}`;
   }
 
-  // Default fallback
   return `${baseUrl}/uploads/${imagePath}`;
 };
 
@@ -51,10 +48,9 @@ const cleanupUploadedFile = (filename, fileType = "profile-picture") => {
 
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
-      console.log(`✅ Cleaned up ${fileType} file: ${filename}`);
     }
   } catch (error) {
-    console.error(`❌ Error cleaning up file ${filename}:`, error);
+    // Silently fail - cleanup is best effort
   }
 };
 
@@ -64,14 +60,13 @@ const cleanupUploadedFile = (filename, fileType = "profile-picture") => {
 
 /**
  * Check if a username is available for registration/profile setup
- * Used during signup and profile completion
  */
 exports.checkUsernameAvailability = async (req, res) => {
   try {
     const { username } = req.params;
     const userId = req.user.id;
 
-    // Basic validation
+    // Validation
     if (!username || username.trim().length < 3) {
       return res.status(400).json({
         success: false,
@@ -86,7 +81,6 @@ exports.checkUsernameAvailability = async (req, res) => {
       });
     }
 
-    // Validate allowed characters
     const validUsernameRegex = /^[a-zA-Z0-9_.-]+$/;
     if (!validUsernameRegex.test(username)) {
       return res.status(400).json({
@@ -98,18 +92,15 @@ exports.checkUsernameAvailability = async (req, res) => {
 
     const lowercaseUsername = username.toLowerCase();
 
-    // Check against existing users (excluding current user)
     const existingUser = await User.findOne({
       username: lowercaseUsername,
       _id: { $ne: userId },
     });
 
-    // Check against existing profiles
     const existingProfile = await Profile.findOne({
       username: lowercaseUsername,
     });
 
-    // Username is taken
     if (existingUser || existingProfile) {
       return res.status(409).json({
         success: false,
@@ -118,14 +109,12 @@ exports.checkUsernameAvailability = async (req, res) => {
       });
     }
 
-    // Username is available
     res.status(200).json({
       success: true,
       message: "Username available",
       available: true,
     });
   } catch (error) {
-    console.error("❌ Username check error:", error);
     res.status(500).json({
       success: false,
       message: "Error checking username availability",
@@ -135,14 +124,12 @@ exports.checkUsernameAvailability = async (req, res) => {
 
 /**
  * Complete initial profile setup for new users
- * Creates profile with required information
  */
 exports.setupProfile = async (req, res) => {
   try {
     const userId = req.user.id;
     const profileData = req.body;
 
-    // Validate required fields
     if (!profileData.username || !profileData.major || !profileData.year) {
       return res.status(400).json({
         success: false,
@@ -150,7 +137,6 @@ exports.setupProfile = async (req, res) => {
       });
     }
 
-    // Find user
     const existingUser = await User.findById(userId);
     if (!existingUser) {
       return res.status(404).json({
@@ -178,7 +164,7 @@ exports.setupProfile = async (req, res) => {
       });
     }
 
-    // Update user with profile completion status and username
+    // Update user
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       {
@@ -188,11 +174,12 @@ exports.setupProfile = async (req, res) => {
       { new: true },
     );
 
-    // Prepare profile data
+    // ✅ REMOVED DICEBEAR - use empty string for default profile picture
     const profileFields = {
       user: userId,
       fullName: existingUser.name,
       username: profileData.username.trim(),
+      campus: profileData.campus || "Herald College Kathmandu",
       major: profileData.major.trim(),
       year: profileData.year,
       graduationYear:
@@ -202,9 +189,7 @@ exports.setupProfile = async (req, res) => {
       universityEmail: (profileData.universityEmail || existingUser.email)
         .toLowerCase()
         .trim(),
-      // Default profile picture using DiceBear avatar generator
-      profilePicture: `https://api.dicebear.com/7.x/avataaars/svg?seed=${profileData.username.trim()}`,
-      // Default empty cover photo
+      profilePicture: "", // ✅ Empty string - will use local default avatar
       coverPhoto: "",
       socialLinks: {
         instagram: (profileData.instagram || "").trim(),
@@ -228,13 +213,13 @@ exports.setupProfile = async (req, res) => {
       profile = await Profile.findOneAndUpdate(
         { user: userId },
         profileFields,
-        { new: true },
+        { new: true, runValidators: true },
       );
     } else {
       profile = await Profile.create(profileFields);
     }
 
-    // Convert image paths to full URLs for response
+    // Prepare response
     const profileResponse = profile.toObject();
     profileResponse.profilePicture = getFullImageUrl(
       profileResponse.profilePicture,
@@ -260,9 +245,8 @@ exports.setupProfile = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Profile setup error:", error);
+    console.error("Profile setup error:", error);
 
-    // Handle validation errors
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((val) => val.message);
       return res.status(400).json({
@@ -271,7 +255,6 @@ exports.setupProfile = async (req, res) => {
       });
     }
 
-    // Handle duplicate username
     if (error.code === 11000 && error.keyPattern?.username) {
       return res.status(400).json({
         success: false,
@@ -288,13 +271,13 @@ exports.setupProfile = async (req, res) => {
 
 /**
  * Check if user has completed their profile
- * Used to determine if user needs to complete profile setup
  */
 exports.checkProfileStatus = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
       "name profileComplete username email",
     );
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -304,7 +287,7 @@ exports.checkProfileStatus = async (req, res) => {
 
     let profile = await Profile.findOne({ user: req.user.id });
 
-    // Create basic profile if user is marked as complete but profile doesn't exist
+    // Create basic profile if user is marked complete but profile doesn't exist
     if (!profile && user.profileComplete) {
       profile = await Profile.create({
         user: req.user.id,
@@ -319,7 +302,6 @@ exports.checkProfileStatus = async (req, res) => {
       });
     }
 
-    // Convert image paths to full URLs
     const profileData = profile ? profile.toObject() : null;
     if (profileData) {
       profileData.profilePicture = getFullImageUrl(
@@ -341,7 +323,6 @@ exports.checkProfileStatus = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Profile status check error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to check profile status",
@@ -355,7 +336,6 @@ exports.checkProfileStatus = async (req, res) => {
 
 /**
  * Upload profile picture
- * Accepts image file and updates user's profile picture
  */
 exports.uploadProfilePicture = async (req, res) => {
   try {
@@ -368,25 +348,12 @@ exports.uploadProfilePicture = async (req, res) => {
 
     const userId = req.user.id;
     const imageFilename = req.file.filename;
-
-    // Create the correct path for profile picture
-    // Profile pictures go to: /uploads/profile-pictures/filename.jpg
     const profilePicturePath = `/uploads/profile-pictures/${imageFilename}`;
-
-    // Get full URL for response
     const fullImageUrl = getFullImageUrl(imageFilename, req);
 
-    console.log("📸 Profile picture upload details:", {
-      userId,
-      filename: imageFilename,
-      path: profilePicturePath,
-      fullUrl: fullImageUrl,
-    });
-
-    // Update profile with the correct path (not just filename)
     const updatedProfile = await Profile.findOneAndUpdate(
       { user: userId },
-      { profilePicture: profilePicturePath }, // Store the path, not just filename
+      { profilePicture: profilePicturePath },
       { new: true },
     );
 
@@ -401,11 +368,10 @@ exports.uploadProfilePicture = async (req, res) => {
         year: "UPC",
         graduationYear: String(new Date().getFullYear() + 1),
         universityEmail: user.email,
-        profilePicture: profilePicturePath, // Store path here too
+        profilePicture: profilePicturePath,
         coverPhoto: "",
       });
 
-      // Mark user as having completed profile
       await User.findByIdAndUpdate(userId, { profileComplete: true });
 
       return res.status(200).json({
@@ -426,9 +392,6 @@ exports.uploadProfilePicture = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Profile picture upload error:", error);
-
-    // Clean up uploaded file on error
     if (req.file && req.file.filename) {
       cleanupUploadedFile(req.file.filename, "profile-picture");
     }
@@ -441,8 +404,7 @@ exports.uploadProfilePicture = async (req, res) => {
 };
 
 /**
- * Delete profile picture
- * Removes uploaded file and resets to default DiceBear avatar
+ * Delete profile picture and reset to default avatar
  */
 exports.deleteProfilePicture = async (req, res) => {
   try {
@@ -456,10 +418,8 @@ exports.deleteProfilePicture = async (req, res) => {
       });
     }
 
-    // Check if it's an uploaded file (not external URL)
+    // Delete uploaded file if it's not an external URL
     const isUploadedFile = !profile.profilePicture.includes("http");
-
-    // Delete file from server if it's uploaded
     if (isUploadedFile) {
       let filename;
       if (profile.profilePicture.includes("/uploads/profile-pictures/")) {
@@ -471,11 +431,10 @@ exports.deleteProfilePicture = async (req, res) => {
       } else {
         filename = profile.profilePicture;
       }
-
       cleanupUploadedFile(filename, "profile-picture");
     }
 
-    // Reset to default DiceBear avatar
+    // Reset to default avatar
     const user = await User.findById(userId);
     const defaultAvatar = `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username || userId}`;
 
@@ -494,7 +453,6 @@ exports.deleteProfilePicture = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Profile picture delete error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to delete profile picture",
@@ -504,11 +462,9 @@ exports.deleteProfilePicture = async (req, res) => {
 
 /**
  * Upload cover photo
- * Accepts image file and updates user's cover photo
  */
 exports.uploadCoverPhoto = async (req, res) => {
   try {
-    // Check if file was uploaded
     if (!req.file) {
       return res.status(400).json({
         success: false,
@@ -518,46 +474,33 @@ exports.uploadCoverPhoto = async (req, res) => {
 
     const userId = req.user.id;
     const imageFilename = req.file.filename;
-
-    console.log("📸 Uploading cover photo for user:", userId);
-
-    // ✅ FIXED: Store relative path instead of full URL
     const coverPhotoPath = `/uploads/cover-photos/${imageFilename}`;
 
-    // Update the user's profile with the relative path
     const updatedProfile = await Profile.findOneAndUpdate(
       { user: userId },
-      { coverPhoto: coverPhotoPath }, // Store relative path, NOT full URL
+      { coverPhoto: coverPhotoPath },
       { new: true },
     );
 
     if (!updatedProfile) {
-      // Clean up uploaded file if profile not found
       cleanupUploadedFile(imageFilename, "cover-photo");
-
       return res.status(404).json({
         success: false,
         message: "Profile not found",
       });
     }
 
-    // ✅ Get full URL for response only (not storage)
     const fullImageUrl = getFullImageUrl(coverPhotoPath, req);
-
-    console.log("✅ Cover photo updated successfully for user:", userId);
 
     res.status(200).json({
       success: true,
       message: "Cover photo uploaded successfully",
       data: {
-        coverPhoto: fullImageUrl, // Send full URL in response
+        coverPhoto: fullImageUrl,
         profile: updatedProfile,
       },
     });
   } catch (error) {
-    console.error("❌ Cover photo upload error:", error);
-
-    // Clean up uploaded file on error
     if (req.file && req.file.filename) {
       cleanupUploadedFile(req.file.filename, "cover-photo");
     }
@@ -572,15 +515,10 @@ exports.uploadCoverPhoto = async (req, res) => {
 
 /**
  * Delete cover photo
- * Removes uploaded file and sets cover photo to empty
  */
 exports.deleteCoverPhoto = async (req, res) => {
   try {
     const userId = req.user.id;
-
-    console.log("🗑️ Deleting cover photo for user:", userId);
-
-    // Find the user's profile
     const profile = await Profile.findOne({ user: userId });
 
     if (!profile) {
@@ -590,7 +528,6 @@ exports.deleteCoverPhoto = async (req, res) => {
       });
     }
 
-    // Check if there's a cover photo to delete
     if (!profile.coverPhoto || profile.coverPhoto === "") {
       return res.status(400).json({
         success: false,
@@ -598,7 +535,7 @@ exports.deleteCoverPhoto = async (req, res) => {
       });
     }
 
-    // Extract filename from URL (handle both full URL and relative path)
+    // Extract filename from path
     let coverPhotoUrl = profile.coverPhoto;
     let filename;
 
@@ -610,17 +547,13 @@ exports.deleteCoverPhoto = async (req, res) => {
       filename = coverPhotoUrl;
     }
 
-    // Delete the file from server
     cleanupUploadedFile(filename, "cover-photo");
 
-    // Update profile to remove cover photo URL
     const updatedProfile = await Profile.findOneAndUpdate(
       { user: userId },
-      { coverPhoto: "" }, // Set to empty string
+      { coverPhoto: "" },
       { new: true },
     );
-
-    console.log("✅ Cover photo deleted successfully for user:", userId);
 
     res.status(200).json({
       success: true,
@@ -630,7 +563,6 @@ exports.deleteCoverPhoto = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Cover photo delete error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to delete cover photo",
@@ -645,7 +577,6 @@ exports.deleteCoverPhoto = async (req, res) => {
 
 /**
  * Get authenticated user's detailed profile information
- * Includes all profile fields with full image URLs
  */
 exports.getProfileDetails = async (req, res) => {
   try {
@@ -654,6 +585,7 @@ exports.getProfileDetails = async (req, res) => {
     const user = await User.findById(userId).select(
       "name username email profileComplete",
     );
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -672,12 +604,10 @@ exports.getProfileDetails = async (req, res) => {
       });
     }
 
-    // Ensure profile has username (fallback to user's username)
     if (!profile.username && user.username) {
       profile.username = user.username;
     }
 
-    // Convert image paths to full URLs
     profile.profilePicture = getFullImageUrl(profile.profilePicture, req);
     profile.coverPhoto = getFullImageUrl(profile.coverPhoto, req);
 
@@ -695,7 +625,6 @@ exports.getProfileDetails = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Get profile details error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch profile details",
@@ -705,7 +634,6 @@ exports.getProfileDetails = async (req, res) => {
 
 /**
  * Get authenticated user's full profile with timestamps
- * Used for the main profile screen
  */
 exports.getMyProfile = async (req, res) => {
   try {
@@ -714,6 +642,7 @@ exports.getMyProfile = async (req, res) => {
     const user = await User.findById(userId).select(
       "name username email profileComplete createdAt",
     );
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -732,7 +661,6 @@ exports.getMyProfile = async (req, res) => {
       });
     }
 
-    // Convert image paths to full URLs
     profile.profilePicture = getFullImageUrl(profile.profilePicture, req);
     profile.coverPhoto = getFullImageUrl(profile.coverPhoto, req);
 
@@ -755,7 +683,6 @@ exports.getMyProfile = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Get my profile error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch profile",
@@ -765,7 +692,6 @@ exports.getMyProfile = async (req, res) => {
 
 /**
  * Get public profile by username
- * Used for viewing other users' profiles
  */
 exports.getProfileByUsername = async (req, res) => {
   try {
@@ -785,7 +711,6 @@ exports.getProfileByUsername = async (req, res) => {
       });
     }
 
-    // Convert image paths to full URLs
     profile.profilePicture = getFullImageUrl(profile.profilePicture, req);
     profile.coverPhoto = getFullImageUrl(profile.coverPhoto, req);
 
@@ -803,7 +728,6 @@ exports.getProfileByUsername = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Get profile by username error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch profile",
@@ -813,7 +737,6 @@ exports.getProfileByUsername = async (req, res) => {
 
 /**
  * Get public profile by user ID
- * Alternative public profile endpoint
  */
 exports.getPublicProfile = async (req, res) => {
   try {
@@ -822,6 +745,7 @@ exports.getPublicProfile = async (req, res) => {
     const user = await User.findById(userId).select(
       "name username profileComplete",
     );
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -842,7 +766,6 @@ exports.getPublicProfile = async (req, res) => {
       });
     }
 
-    // Convert image paths to full URLs
     profile.profilePicture = getFullImageUrl(profile.profilePicture, req);
     profile.coverPhoto = getFullImageUrl(profile.coverPhoto, req);
 
@@ -859,7 +782,6 @@ exports.getPublicProfile = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Get public profile error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch public profile",
@@ -873,7 +795,6 @@ exports.getPublicProfile = async (req, res) => {
 
 /**
  * Update profile information
- * Allows updating all editable profile fields
  */
 exports.updateProfile = async (req, res) => {
   try {
@@ -892,9 +813,8 @@ exports.updateProfile = async (req, res) => {
       fullName: currentUser.name,
     };
 
-    // Handle username change with availability check
+    // Handle username change
     if (updateData.username && updateData.username !== currentUser.username) {
-      // Check username availability
       const existingUser = await User.findOne({
         username: updateData.username,
         _id: { $ne: userId },
@@ -911,13 +831,12 @@ exports.updateProfile = async (req, res) => {
         });
       }
 
-      // Update username in both models
       currentUser.username = updateData.username;
       await currentUser.save();
       profileUpdate.username = updateData.username;
     }
 
-    // Update other profile fields
+    // Update profile fields
     if (updateData.bio !== undefined) profileUpdate.bio = updateData.bio;
     if (updateData.major) profileUpdate.major = updateData.major;
     if (updateData.year) profileUpdate.year = updateData.year;
@@ -928,7 +847,7 @@ exports.updateProfile = async (req, res) => {
     if (updateData.universityEmail)
       profileUpdate.universityEmail = updateData.universityEmail;
 
-    // Handle profile picture update (only allow external URLs)
+    // Handle profile picture (only external URLs)
     if (
       updateData.profilePicture &&
       updateData.profilePicture.includes("http")
@@ -936,18 +855,13 @@ exports.updateProfile = async (req, res) => {
       profileUpdate.profilePicture = updateData.profilePicture;
     }
 
-    // Handle cover photo update (allow empty string or external URLs)
+    // Handle cover photo
     if (updateData.coverPhoto !== undefined) {
-      // If it's an empty string, set to empty
       if (updateData.coverPhoto === "") {
         profileUpdate.coverPhoto = "";
-      }
-      // If it's an uploaded file path (starts with /uploads/)
-      else if (updateData.coverPhoto.startsWith("/uploads/")) {
+      } else if (updateData.coverPhoto.startsWith("/uploads/")) {
         profileUpdate.coverPhoto = updateData.coverPhoto;
-      }
-      // If it's an external URL, store as is
-      else if (updateData.coverPhoto.includes("http")) {
+      } else if (updateData.coverPhoto.includes("http")) {
         profileUpdate.coverPhoto = updateData.coverPhoto;
       }
     }
@@ -967,7 +881,6 @@ exports.updateProfile = async (req, res) => {
     let profile = await Profile.findOne({ user: userId });
 
     if (!profile) {
-      // Include username when creating new profile
       if (!profileUpdate.username && currentUser.username) {
         profileUpdate.username = currentUser.username;
       }
@@ -977,7 +890,6 @@ exports.updateProfile = async (req, res) => {
         ...profileUpdate,
       });
     } else {
-      // Ensure username is included in update
       if (!profileUpdate.username && currentUser.username) {
         profileUpdate.username = currentUser.username;
       }
@@ -989,7 +901,7 @@ exports.updateProfile = async (req, res) => {
       );
     }
 
-    // Convert image paths to full URLs for response
+    // Prepare response
     const profileResponse = profile.toObject();
     profileResponse.profilePicture = getFullImageUrl(
       profileResponse.profilePicture,
@@ -1014,9 +926,6 @@ exports.updateProfile = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Update profile error:", error);
-
-    // Handle duplicate username
     if (error.code === 11000 && error.keyPattern?.username) {
       return res.status(400).json({
         success: false,
@@ -1024,7 +933,6 @@ exports.updateProfile = async (req, res) => {
       });
     }
 
-    // Handle validation errors
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((err) => err.message);
       return res.status(400).json({
@@ -1046,7 +954,6 @@ exports.updateProfile = async (req, res) => {
 
 /**
  * Get all profiles with pagination
- * Used for browsing/exploring users
  */
 exports.getAllProfiles = async (req, res) => {
   try {
@@ -1065,7 +972,6 @@ exports.getAllProfiles = async (req, res) => {
       .limit(limit)
       .lean();
 
-    // Convert image paths to full URLs
     profiles.forEach((profile) => {
       profile.profilePicture = getFullImageUrl(profile.profilePicture, req);
       profile.coverPhoto = getFullImageUrl(profile.coverPhoto, req);
@@ -1084,7 +990,6 @@ exports.getAllProfiles = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Get all profiles error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch profiles",
@@ -1094,7 +999,6 @@ exports.getAllProfiles = async (req, res) => {
 
 /**
  * Search profiles by name, username, major, or bio
- * Used for the search functionality
  */
 exports.searchProfiles = async (req, res) => {
   try {
@@ -1120,7 +1024,6 @@ exports.searchProfiles = async (req, res) => {
       .limit(20)
       .lean();
 
-    // Convert image paths to full URLs
     profiles.forEach((profile) => {
       profile.profilePicture = getFullImageUrl(profile.profilePicture, req);
       profile.coverPhoto = getFullImageUrl(profile.coverPhoto, req);
@@ -1131,7 +1034,6 @@ exports.searchProfiles = async (req, res) => {
       data: profiles,
     });
   } catch (error) {
-    console.error("❌ Search profiles error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to search profiles",

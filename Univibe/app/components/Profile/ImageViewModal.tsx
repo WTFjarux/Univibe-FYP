@@ -18,7 +18,7 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 interface ImageViewModalProps {
   visible: boolean;
-  imageUri: string;
+  imageUri?: string;
   onClose: () => void;
   title?: string;
   isCoverPhoto?: boolean;

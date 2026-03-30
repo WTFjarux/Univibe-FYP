@@ -1,5 +1,6 @@
-// controllers/postController.js - UPDATED
+// controllers/postController.js - UPDATED for separate Comment model
 const Post = require("../models/Post");
+const Comment = require("../models/Comment"); // Add this
 const User = require("../models/User");
 const Profile = require("../models/Profile");
 const {
@@ -38,7 +39,7 @@ exports.createPost = async (req, res) => {
     console.log("User ID:", req.user._id);
     console.log("Files received:", req.files ? req.files.length : 0);
 
-    const { content, tags, visibility, isAnonymous } = req.body; // Removed category
+    const { content, tags, visibility, isAnonymous } = req.body;
     const userId = req.user._id;
 
     // 1. Get user's profile for campus info
@@ -70,7 +71,7 @@ exports.createPost = async (req, res) => {
       });
     }
 
-    // 4. Create new post
+    // 4. Create new post (without embedded comments)
     const campus = profile.campus || "Unknown Campus";
     const post = new Post({
       user: userId,
@@ -78,8 +79,10 @@ exports.createPost = async (req, res) => {
       images,
       tags: allTags,
       campus,
-      visibility: visibility || "campus", // Default to campus
+      visibility: visibility || "campus",
       isAnonymous: isAnonymous === "true" || isAnonymous === true,
+      commentCount: 0, // Initialize comment count
+      recentComments: [], // Initialize empty recent comments
     });
 
     await post.save();
@@ -89,16 +92,16 @@ exports.createPost = async (req, res) => {
       .populate("user", "name username email verified")
       .lean();
 
-    // 6. Get user's profile picture - store relative path
+    // 6. Get user's profile picture
     const userProfile = await Profile.findOne({ user: userId })
       .select("profilePicture")
       .lean();
 
-    // Store relative path (frontend will convert to absolute)
     populatedPost.user.profilePicture = userProfile?.profilePicture || null;
 
     // 7. Add isAnonymous flag to response
     populatedPost.isAnonymous = post.isAnonymous;
+    populatedPost.commentCount = 0; // Send to frontend
 
     res.status(201).json({
       success: true,
@@ -127,10 +130,11 @@ exports.createPost = async (req, res) => {
  */
 exports.getPosts = async (req, res) => {
   try {
-    const { filter = "all", page = 1, limit = 20, userId } = req.query; // Removed category
-
+    const { filter = "all", page = 1, limit = 20, userId } = req.query;
     const skip = (page - 1) * limit;
     const currentUserId = req.user._id;
+
+    console.log(`📊 Fetching posts - Filter: ${filter}, Page: ${page}`);
 
     // 1. Get current user's profile for campus info
     const currentUserProfile = await Profile.findOne({ user: currentUserId });
@@ -140,8 +144,7 @@ exports.getPosts = async (req, res) => {
     const currentUser = await User.findById(currentUserId);
     const followingIds = currentUser.following || [];
 
-    // Get connections (mutual follows or friends)
-    // Users who follow current user OR are followed by current user
+    // Get connections (mutual follows)
     const connectionsQuery = await User.find({
       $or: [{ _id: { $in: followingIds } }, { following: currentUserId }],
     }).select("_id");
@@ -151,28 +154,23 @@ exports.getPosts = async (req, res) => {
     let query = {};
     switch (filter) {
       case "following":
-        // Posts from people the user follows
         query.user = { $in: followingIds };
         break;
       case "connections":
-        // Posts from connections (mutual follows)
         query.user = { $in: connectionIds };
         break;
       case "campus":
-        // Posts from current user's campus
         query.campus = currentUserCampus;
         break;
       case "anonymous":
-        // Only anonymous posts
         query.isAnonymous = true;
         break;
       case "user":
         query.user = userId;
         break;
-      // "all" shows everything (no specific filter)
     }
 
-    // 4. Apply visibility filter based on post's visibility setting
+    // 4. Apply visibility filter
     const visibilityQuery = {
       $or: [
         { visibility: "campus", campus: currentUserCampus },
@@ -183,7 +181,6 @@ exports.getPosts = async (req, res) => {
       ],
     };
 
-    // Combine filter query with visibility query
     if (Object.keys(query).length > 0) {
       query = { $and: [query, visibilityQuery] };
     } else {
@@ -199,28 +196,50 @@ exports.getPosts = async (req, res) => {
       .populate("likes", "name username")
       .lean();
 
-    // 6. Get profile pictures for all users in posts
-    const userIds = posts.map((post) => post.user._id);
+    // 6. Get profile pictures for all users
+    const userIds = posts.map((post) => post.user?._id).filter((id) => id);
     const profiles = await Profile.find({ user: { $in: userIds } })
       .select("user profilePicture")
       .lean();
 
-    // 7. Create map of user ID → profile picture
     const profilePictureMap = {};
     profiles.forEach((profile) => {
       profilePictureMap[profile.user.toString()] = profile.profilePicture;
     });
 
-    // 8. Process each post
+    // 7. Get accurate comment counts for all posts (including nested replies)
+    const postIds = posts.map((post) => post._id);
+
+    // Count all comments (top-level + replies) that are not deleted
+    const commentCounts = await Comment.aggregate([
+      { $match: { post: { $in: postIds }, isDeleted: false } },
+      { $group: { _id: "$post", count: { $sum: 1 } } },
+    ]);
+
+    const commentCountMap = {};
+    commentCounts.forEach((item) => {
+      commentCountMap[item._id.toString()] = item.count;
+    });
+
+    // 8. Also get the stored commentCount from posts for debugging
+    const postCommentCounts = {};
     posts.forEach((post) => {
-      // Store relative path for profile picture
-      post.user.profilePicture =
-        profilePictureMap[post.user._id.toString()] || null;
+      postCommentCounts[post._id.toString()] = post.commentCount;
+    });
+
+    // 9. Process each post
+    posts.forEach((post) => {
+      // Add profile picture
+      if (post.user && post.user._id) {
+        post.user.profilePicture =
+          profilePictureMap[post.user._id.toString()] || null;
+      }
 
       // Check if current user liked the post
-      post.isLiked = post.likes.some(
-        (like) => like._id.toString() === currentUserId.toString(),
-      );
+      post.isLiked =
+        post.likes?.some(
+          (like) => like._id.toString() === currentUserId.toString(),
+        ) || false;
 
       // Check if current user reposted
       post.isReposted =
@@ -228,10 +247,22 @@ exports.getPosts = async (req, res) => {
           (repost) => repost.toString() === currentUserId.toString(),
         ) || false;
 
-      // ANONYMOUS POSTS: Hide user info if post is anonymous
+      // ✅ FIX: Use aggregated comment count (most accurate)
+      const aggregatedCount = commentCountMap[post._id.toString()] || 0;
+      const storedCount = post.commentCount || 0;
+
+      post.commentCount = aggregatedCount;
+
+      // Debug logging - log if there's a discrepancy
+      if (aggregatedCount !== storedCount) {
+        console.log(
+          `⚠️ Post ${post._id} comment count mismatch - Stored: ${storedCount}, Actual: ${aggregatedCount}`,
+        );
+      }
+
+      // ANONYMOUS POSTS: Hide user info
       if (post.isAnonymous) {
-        // Keep original user data for system tracking but hide from frontend
-        post.originalUser = post.user; // For potential admin/moderator use later
+        post.originalUser = post.user;
         post.user = {
           _id: null,
           name: "Anonymous",
@@ -243,12 +274,18 @@ exports.getPosts = async (req, res) => {
       }
     });
 
-    // 9. Get total count for pagination
+    // 10. Get total count for pagination
     const total = await Post.countDocuments(query);
+
+    // 11. Summary logging
+    console.log(`📊 Posts fetched: ${posts.length}, Total available: ${total}`);
+    console.log(
+      `   Comment counts - Sum: ${posts.reduce((sum, p) => sum + (p.commentCount || 0), 0)}`,
+    );
 
     res.json({
       success: true,
-      posts, // Send relative paths to frontend
+      posts,
       currentCampus: currentUserCampus,
       pagination: {
         page: parseInt(page),
@@ -272,6 +309,7 @@ exports.getPosts = async (req, res) => {
 exports.getPostById = async (req, res) => {
   try {
     const currentUserId = req.user._id;
+    const postId = req.params.id;
 
     // 1. Get current user info for visibility checks
     const currentUser = await User.findById(currentUserId);
@@ -285,11 +323,10 @@ exports.getPostById = async (req, res) => {
     }).select("_id");
     const connectionIds = connectionsQuery.map((u) => u._id);
 
-    // 2. Fetch post with populated data
-    const post = await Post.findById(req.params.id)
+    // 2. Fetch post with populated data (NO embedded comments)
+    const post = await Post.findById(postId)
       .populate("user", "name username email verified")
       .populate("likes", "name username")
-      .populate("comments.user", "name username")
       .lean();
 
     if (!post) {
@@ -299,7 +336,7 @@ exports.getPostById = async (req, res) => {
       });
     }
 
-    // 3. Check if user can view this post based on visibility
+    // 3. Check if user can view this post
     const canViewPost =
       post.user._id.toString() === currentUserId.toString() ||
       (post.visibility === "campus" && post.campus === currentUserCampus) ||
@@ -317,27 +354,33 @@ exports.getPostById = async (req, res) => {
       });
     }
 
-    // 4. ANONYMOUS POST: Hide user info if post is anonymous
-    if (post.isAnonymous) {
-      post.originalUser = post.user; // For admin use
-      post.user = {
-        _id: null,
-        name: "Anonymous",
-        username: "anonymous",
-        email: null,
-        verified: false,
-        profilePicture: null,
-      };
-    } else {
-      // Get profile picture for non-anonymous post author
+    // 4. Get profile picture for post author
+    if (!post.isAnonymous) {
       const authorProfile = await Profile.findOne({ user: post.user._id })
         .select("profilePicture")
         .lean();
       post.user.profilePicture = authorProfile?.profilePicture || null;
     }
 
-    // 5. Get profile pictures for comment authors
-    const commentUserIds = post.comments.map((comment) => comment.user._id);
+    // 5. Get comment count
+    post.commentCount = await Comment.countDocuments({
+      post: postId,
+      isDeleted: false,
+    });
+
+    // 6. Get recent comments (first 3 for preview)
+    const recentComments = await Comment.find({
+      post: postId,
+      isDeleted: false,
+      parentComment: null, // Only top-level comments
+    })
+      .populate("user", "name username")
+      .sort({ createdAt: -1 })
+      .limit(3)
+      .lean();
+
+    // 7. Get profile pictures for recent comment authors
+    const commentUserIds = recentComments.map((comment) => comment.user._id);
     const commentProfiles = await Profile.find({
       user: { $in: commentUserIds },
     })
@@ -349,33 +392,46 @@ exports.getPostById = async (req, res) => {
       commentProfileMap[profile.user.toString()] = profile.profilePicture;
     });
 
-    // 6. Add profile pictures to comments
-    post.comments.forEach((comment) => {
-      // Check if comment is from anonymous post author
-      if (
-        post.isAnonymous &&
-        comment.user._id.toString() === post.originalUser?._id?.toString()
-      ) {
+    // 8. Add profile pictures to comments
+    recentComments.forEach((comment) => {
+      comment.user.profilePicture =
+        commentProfileMap[comment.user._id.toString()] || null;
+
+      // Handle anonymous comments
+      if (comment.isAnonymous) {
         comment.user = {
           _id: null,
           name: "Anonymous",
           username: "anonymous",
           profilePicture: null,
         };
-      } else {
-        comment.user.profilePicture =
-          commentProfileMap[comment.user._id.toString()] || null;
       }
     });
 
-    // 7. Check if current user liked the post
+    // 9. ANONYMOUS POST: Hide author info
+    if (post.isAnonymous) {
+      post.originalUser = post.user;
+      post.user = {
+        _id: null,
+        name: "Anonymous",
+        username: "anonymous",
+        email: null,
+        verified: false,
+        profilePicture: null,
+      };
+    }
+
+    // 10. Check if current user liked the post
     post.isLiked = post.likes.some(
       (like) => like._id.toString() === currentUserId.toString(),
     );
 
+    // Add recent comments to response
+    post.recentComments = recentComments;
+
     res.json({
       success: true,
-      post, // Send relative paths to frontend
+      post,
     });
   } catch (error) {
     console.error("Error fetching post:", error);
@@ -391,7 +447,7 @@ exports.getPostById = async (req, res) => {
  */
 exports.searchPosts = async (req, res) => {
   try {
-    const { q, campus } = req.query; // Removed category
+    const { q, campus } = req.query;
     const currentUserId = req.user._id;
 
     // 1. Get current user's campus and connections
@@ -415,7 +471,6 @@ exports.searchPosts = async (req, res) => {
       ];
     }
 
-    // Use provided campus or default to user's campus
     const campusFilter = campus || currentUserCampus;
     if (campusFilter) {
       query.campus = campusFilter;
@@ -445,22 +500,36 @@ exports.searchPosts = async (req, res) => {
       .populate("user", "name username email verified")
       .lean();
 
-    // 5. Get profile pictures for all users
+    // 5. Get profile pictures and comment counts
     const userIds = posts.map((post) => post.user._id);
-    const profiles = await Profile.find({ user: { $in: userIds } })
-      .select("user profilePicture")
-      .lean();
+    const postIds = posts.map((post) => post._id);
+
+    const [profiles, commentCounts] = await Promise.all([
+      Profile.find({ user: { $in: userIds } })
+        .select("user profilePicture")
+        .lean(),
+      Comment.aggregate([
+        { $match: { post: { $in: postIds }, isDeleted: false } },
+        { $group: { _id: "$post", count: { $sum: 1 } } },
+      ]),
+    ]);
 
     const profilePictureMap = {};
     profiles.forEach((profile) => {
       profilePictureMap[profile.user.toString()] = profile.profilePicture;
     });
 
+    const commentCountMap = {};
+    commentCounts.forEach((item) => {
+      commentCountMap[item._id.toString()] = item.count;
+    });
+
     // 6. Process each post
     posts.forEach((post) => {
-      // ANONYMOUS POST: Hide user info if post is anonymous
+      post.commentCount = commentCountMap[post._id.toString()] || 0;
+
       if (post.isAnonymous) {
-        post.originalUser = post.user; // For admin use
+        post.originalUser = post.user;
         post.user = {
           _id: null,
           name: "Anonymous",
@@ -477,7 +546,7 @@ exports.searchPosts = async (req, res) => {
 
     res.json({
       success: true,
-      posts, // Send relative paths to frontend
+      posts,
       searchCampus: campusFilter,
     });
   } catch (error) {
@@ -559,84 +628,13 @@ exports.toggleLike = async (req, res) => {
 };
 
 /**
- * Add comment to a post
+ * Add comment to a post - REMOVED (now handled by commentController)
+ * This function is kept for backward compatibility but will be deprecated
  */
 exports.addComment = async (req, res) => {
-  try {
-    const { content } = req.body;
-    const postId = req.params.id;
-    const userId = req.user._id;
-
-    const post = await Post.findById(postId);
-    if (!post) {
-      return res.status(404).json({
-        success: false,
-        error: "Post not found",
-      });
-    }
-
-    // Check if user can see the post before allowing comment
-    const currentUserProfile = await Profile.findOne({ user: userId });
-    const currentUserCampus = currentUserProfile?.campus || "Unknown Campus";
-
-    const currentUser = await User.findById(userId);
-    const followingIds = currentUser.following || [];
-
-    const connectionsQuery = await User.find({
-      $or: [{ _id: { $in: followingIds } }, { following: userId }],
-    }).select("_id");
-    const connectionIds = connectionsQuery.map((u) => u._id);
-
-    const canViewPost =
-      post.user.toString() === userId.toString() ||
-      (post.visibility === "campus" && post.campus === currentUserCampus) ||
-      (post.visibility === "following" &&
-        followingIds.includes(post.user.toString())) ||
-      (post.visibility === "connections" &&
-        connectionIds.includes(post.user.toString())) ||
-      (post.visibility === "private" &&
-        post.user.toString() === userId.toString());
-
-    if (!canViewPost) {
-      return res.status(403).json({
-        success: false,
-        error: "You don't have permission to comment on this post",
-      });
-    }
-
-    const comment = {
-      user: userId,
-      content,
-    };
-
-    post.comments.push(comment);
-    await post.save();
-
-    const lastComment = post.comments[post.comments.length - 1];
-    const populatedComment = await Post.populate(lastComment, {
-      path: "user",
-      select: "name username",
-    });
-
-    // Get profile picture - relative path
-    const commentUserProfile = await Profile.findOne({ user: userId })
-      .select("profilePicture")
-      .lean();
-
-    populatedComment.user.profilePicture =
-      commentUserProfile?.profilePicture || null;
-
-    res.status(201).json({
-      success: true,
-      comment: populatedComment, // Send relative path to frontend
-    });
-  } catch (error) {
-    console.error("Error adding comment:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to add comment",
-    });
-  }
+  // Redirect to comment controller
+  const commentController = require("./commentController");
+  return commentController.addComment(req, res);
 };
 
 /**
@@ -660,6 +658,10 @@ exports.deletePost = async (req, res) => {
       });
     }
 
+    // Delete all comments associated with this post
+    await Comment.deleteMany({ post: post._id });
+
+    // Delete post images
     if (post.images && post.images.length > 0) {
       const filenames = post.images.map((img) => img.filename);
       deletePostImages(req.user._id.toString(), filenames);
@@ -685,7 +687,7 @@ exports.deletePost = async (req, res) => {
  */
 exports.updatePost = async (req, res) => {
   try {
-    const { content, removeImages, visibility, isAnonymous } = req.body; // Added visibility and isAnonymous
+    const { content, removeImages, visibility, isAnonymous } = req.body;
     const postId = req.params.id;
     const userId = req.user._id;
 
@@ -777,6 +779,12 @@ exports.updatePost = async (req, res) => {
       .lean();
     updatedPost.user.profilePicture = userProfile?.profilePicture || null;
 
+    // Get updated comment count
+    updatedPost.commentCount = await Comment.countDocuments({
+      post: postId,
+      isDeleted: false,
+    });
+
     res.json({
       success: true,
       message: "Post updated successfully",
@@ -820,13 +828,26 @@ exports.getAnonymousPostsForModeration = async (req, res) => {
       profileMap[profile.user.toString()] = profile;
     });
 
-    // Add campus and profile info to posts
+    // Get comment counts for each post
+    const postIds = posts.map((post) => post._id);
+    const commentCounts = await Comment.aggregate([
+      { $match: { post: { $in: postIds }, isDeleted: false } },
+      { $group: { _id: "$post", count: { $sum: 1 } } },
+    ]);
+
+    const commentCountMap = {};
+    commentCounts.forEach((item) => {
+      commentCountMap[item._id.toString()] = item.count;
+    });
+
+    // Add campus, profile info, and comment counts to posts
     posts.forEach((post) => {
       const profile = profileMap[post.user._id.toString()];
       if (profile) {
         post.user.campus = profile.campus;
         post.user.profilePicture = profile.profilePicture;
       }
+      post.commentCount = commentCountMap[post._id.toString()] || 0;
     });
 
     res.json({

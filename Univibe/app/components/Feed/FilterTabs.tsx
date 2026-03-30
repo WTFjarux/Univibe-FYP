@@ -39,7 +39,7 @@ const FilterTabs: React.FC<FilterTabsProps> = ({
               activeFilter === filter.id && styles.filterTextActive,
             ]}
           >
-            {filter.label}
+            {filter.id === "anonymous" ? "Anonymous" : filter.label}
           </Text>
         </TouchableOpacity>
       ))}

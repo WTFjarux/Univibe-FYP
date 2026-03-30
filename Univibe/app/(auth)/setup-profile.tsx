@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from "react";
+// app/(auth)/setup-profile.tsx
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -19,15 +20,172 @@ import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { profileService } from "../../lib/profileService";
 import { API_BASE_URL } from "../../constants/stringConstants";
 
+// Constants
+const GRADUATION_YEARS = Array.from({ length: 10 }, (_, i) =>
+  String(new Date().getFullYear() + i),
+);
+
+// MAJORS - removed "Other"
+const MAJORS = [
+  {
+    id: "bit",
+    label: "Bachelor in Information Technology (BIT)",
+    value: "Bachelor in Information Technology (BIT)",
+  },
+  {
+    id: "cs",
+    label: "Bachelor in Cyber Security",
+    value: "Bachelor in Cyber Security",
+  },
+  {
+    id: "ibm",
+    label: "Bachelor in International Business Management (BBIM)",
+    value: "Bachelor in International Business Management (BBIM)",
+  },
+  {
+    id: "mba",
+    label: "Master in Business Administration (MBA)",
+    value: "Master in Business Administration (MBA)",
+  },
+];
+
+const YEARS = [
+  { id: "upc", label: "UPC", value: "UPC" },
+  { id: "first", label: "First Year", value: "First" },
+  { id: "second", label: "Second Year", value: "Second" },
+  { id: "third", label: "Third Year", value: "Third" },
+];
+
+// COLLEGES - removed "Other"
+const COLLEGES = [
+  "Herald College Kathmandu",
+  "Kathmandu University",
+  "Tribhuvan University",
+  "Pokhara University",
+  "Purbanchal University",
+];
+
+// Scrollable Dropdown Component
+interface ScrollableDropdownProps {
+  label: string;
+  value: string;
+  options: string[] | Array<{ id: string; label: string; value: string }>;
+  onSelect: (value: string) => void;
+  placeholder: string;
+  required?: boolean;
+  icon?: React.ReactNode;
+}
+
+const ScrollableDropdown: React.FC<ScrollableDropdownProps> = ({
+  label,
+  value,
+  options,
+  onSelect,
+  placeholder,
+  required = false,
+  icon,
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const getDisplayValue = () => {
+    if (!value) return placeholder;
+
+    if (options.length > 0 && typeof options[0] === "object") {
+      const option = (
+        options as Array<{ id: string; label: string; value: string }>
+      ).find((opt) => opt.value === value);
+      return option ? option.label : value;
+    }
+    return value;
+  };
+
+  return (
+    <View style={styles.inputGroup}>
+      <View style={styles.labelContainer}>
+        {icon}
+        <Text style={styles.label}>
+          {label} {required && <Text style={styles.requiredStar}>*</Text>}
+        </Text>
+      </View>
+
+      <TouchableOpacity
+        style={styles.dropdownButton}
+        onPress={() => setIsOpen(!isOpen)}
+        activeOpacity={0.7}
+      >
+        <Text
+          style={[styles.dropdownText, !value && styles.dropdownPlaceholder]}
+          numberOfLines={1}
+        >
+          {getDisplayValue()}
+        </Text>
+        <Ionicons
+          name={isOpen ? "chevron-up" : "chevron-down"}
+          size={20}
+          color="#6b7280"
+          style={styles.dropdownIcon}
+        />
+      </TouchableOpacity>
+
+      {isOpen && (
+        <View style={styles.dropdownList}>
+          <ScrollView
+            nestedScrollEnabled={true}
+            showsVerticalScrollIndicator={true}
+            style={styles.dropdownScrollView}
+            keyboardShouldPersistTaps="handled"
+          >
+            {options.map((option, index) => {
+              const isObject = typeof option === "object" && option !== null;
+              const optionValue = isObject ? (option as any).value : option;
+              const optionLabel = isObject ? (option as any).label : option;
+              const isSelected = value === optionValue;
+
+              return (
+                <TouchableOpacity
+                  key={isObject ? (option as any).id : `option-${index}`}
+                  style={[
+                    styles.dropdownItem,
+                    isSelected && styles.dropdownItemSelected,
+                    index === options.length - 1 && styles.dropdownItemLast,
+                  ]}
+                  onPress={() => {
+                    onSelect(optionValue);
+                    setIsOpen(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.dropdownItemText,
+                      isSelected && styles.dropdownItemTextSelected,
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {optionLabel}
+                  </Text>
+                  {isSelected && (
+                    <Ionicons name="checkmark" size={18} color="#4f46e5" />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+    </View>
+  );
+};
+
 export default function SetupProfileScreen() {
   const [loading, setLoading] = useState(false);
   const [activeStep, setActiveStep] = useState(1);
 
   const [formData, setFormData] = useState({
     username: "",
+    campus: "",
     major: "",
     year: "",
-    graduationYear: String(new Date().getFullYear() + 1),
+    graduationYear: String(new Date().getFullYear() + 4),
     bio: "",
     pronouns: "",
     universityEmail: "",
@@ -39,6 +197,16 @@ export default function SetupProfileScreen() {
     available: false,
     error: "",
   });
+
+  // Handle campus selection
+  const handleCampusSelect = (value: string) => {
+    setFormData({ ...formData, campus: value });
+  };
+
+  // Handle major selection
+  const handleMajorSelect = (value: string) => {
+    setFormData({ ...formData, major: value });
+  };
 
   // Debounced username check
   useEffect(() => {
@@ -63,7 +231,6 @@ export default function SetupProfileScreen() {
         return;
       }
 
-      // Check length
       if (formData.username.length < 3) {
         setUsernameStatus({
           loading: false,
@@ -82,7 +249,6 @@ export default function SetupProfileScreen() {
         return;
       }
 
-      // Check availability via API
       setUsernameStatus((prev) => ({ ...prev, loading: true }));
 
       try {
@@ -99,24 +265,19 @@ export default function SetupProfileScreen() {
         const response = await fetch(
           `${API_BASE_URL}/api/profile/check-username/${formData.username}`,
           {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
+            headers: { Authorization: `Bearer ${token}` },
           },
         );
 
-        // ✅ IMPORTANT: Parse the JSON response
         const data = await response.json();
 
         if (response.status === 200 && data.available === true) {
-          // Username is available
           setUsernameStatus({
             loading: false,
             available: true,
             error: "",
           });
         } else if (response.status === 409 || data.success === false) {
-          // Username already taken
           setUsernameStatus({
             loading: false,
             available: false,
@@ -139,28 +300,22 @@ export default function SetupProfileScreen() {
       }
     };
 
-    // Debounce the API call
-    const timer = setTimeout(() => {
-      checkUsername();
-    }, 500); // 500ms delay
-
+    const timer = setTimeout(() => checkUsername(), 500);
     return () => clearTimeout(timer);
   }, [formData.username]);
 
-  // Handle profile submission
   const handleSubmit = async () => {
-    // Validate form
     if (
       !formData.username ||
       !formData.major ||
       !formData.year ||
-      !formData.universityEmail
+      !formData.universityEmail ||
+      !formData.campus
     ) {
       Alert.alert("Required Fields", "Please fill in all required fields (*)");
       return;
     }
 
-    // Validate username
     if (usernameStatus.loading) {
       Alert.alert("Please Wait", "Checking username availability...");
       return;
@@ -179,9 +334,7 @@ export default function SetupProfileScreen() {
     setLoading(true);
 
     try {
-      // Check for authentication token
       const token = await SecureStore.getItemAsync("authToken");
-
       if (!token) {
         Alert.alert("Session Expired", "Please log in again to continue.", [
           { text: "OK", onPress: () => router.replace("/(auth)/login") },
@@ -189,47 +342,41 @@ export default function SetupProfileScreen() {
         return;
       }
 
-      // Setup profile using profile service
-      const response = await profileService.setupProfile({
-        ...formData,
-        fullName: formData.username,
-      });
+      // Prepare data for submission - ensure field names match backend
+      const submitData = {
+        username: formData.username,
+        campus: formData.campus, // This is the correct field name in Profile model
+        major: formData.major,
+        year: formData.year,
+        graduationYear: formData.graduationYear,
+        bio: formData.bio,
+        pronouns: formData.pronouns,
+        universityEmail: formData.universityEmail,
+      };
 
-      // Handle successful response
+      console.log("📤 Submitting profile data:", submitData);
+
+      const response = await profileService.setupProfile(submitData);
+
       if (response.success) {
-        // Save user data to SecureStore
         if (response.data?.user) {
           await SecureStore.setItemAsync(
             "user_data",
-            JSON.stringify({
-              _id: response.data.user._id,
-              username: response.data.user.username,
-              email: response.data.user.email,
-              profileComplete: response.data.user.profileComplete,
-            }),
+            JSON.stringify(response.data.user),
           );
         }
-
-        // Save profile data to SecureStore
         if (response.data?.profile) {
           await SecureStore.setItemAsync(
             "profile_data",
             JSON.stringify(response.data.profile),
           );
         }
-
-        // Mark profile as complete
         await SecureStore.setItemAsync("profile_complete", "true");
 
         Alert.alert(
-          "Profile Complete",
+          "🎉 Profile Complete!",
           "Your profile has been set up successfully!",
-          [
-            {
-              text: "Get Started",
-              onPress: () => router.replace("../(tabs)"),
-            },
-          ],
+          [{ text: "Get Started", onPress: () => router.replace("/(tabs)") }],
         );
       } else {
         Alert.alert(
@@ -238,6 +385,7 @@ export default function SetupProfileScreen() {
         );
       }
     } catch (error: any) {
+      console.error("Submit error:", error);
       Alert.alert("Error", error.message || "Unable to complete profile setup");
     } finally {
       setLoading(false);
@@ -245,24 +393,24 @@ export default function SetupProfileScreen() {
   };
 
   const nextStep = () => {
-    // Validate username before proceeding to step 2
     if (activeStep === 1) {
       if (usernameStatus.loading) {
         Alert.alert("Please Wait", "Checking username availability...");
         return;
       }
-
       if (usernameStatus.error && !usernameStatus.available) {
         Alert.alert("Invalid Username", usernameStatus.error);
         return;
       }
-
       if (!formData.username.trim()) {
         Alert.alert("Username Required", "Please enter a username");
         return;
       }
+      if (!formData.campus) {
+        Alert.alert("Campus Required", "Please select your campus");
+        return;
+      }
     }
-
     if (activeStep < 2) setActiveStep(activeStep + 1);
   };
 
@@ -270,21 +418,16 @@ export default function SetupProfileScreen() {
     if (activeStep > 1) setActiveStep(activeStep - 1);
   };
 
-  // Username validation indicator
   const renderUsernameValidation = () => {
     if (!formData.username.trim()) return null;
-
     if (usernameStatus.loading) {
       return (
         <View style={styles.validationContainer}>
           <ActivityIndicator size="small" color="#4f46e5" />
-          <Text style={styles.validationTextLoading}>
-            Checking username availability...
-          </Text>
+          <Text style={styles.validationTextLoading}>Checking username...</Text>
         </View>
       );
     }
-
     if (usernameStatus.error) {
       return (
         <View style={styles.validationContainer}>
@@ -293,20 +436,17 @@ export default function SetupProfileScreen() {
         </View>
       );
     }
-
     if (usernameStatus.available) {
       return (
         <View style={styles.validationContainer}>
           <Ionicons name="checkmark-circle" size={16} color="#10b981" />
-          <Text style={styles.validationTextSuccess}>Username available</Text>
+          <Text style={styles.validationTextSuccess}>Username available!</Text>
         </View>
       );
     }
-
     return null;
   };
 
-  // Step indicator component
   const StepIndicator = () => (
     <View style={styles.stepContainer}>
       <View style={styles.stepCirclesContainer}>
@@ -323,9 +463,7 @@ export default function SetupProfileScreen() {
               <Text
                 style={[
                   styles.stepNumber,
-                  activeStep >= step
-                    ? styles.stepNumberActive
-                    : styles.stepNumberInactive,
+                  activeStep >= step && styles.stepNumberActive,
                 ]}
               >
                 {step}
@@ -344,82 +482,30 @@ export default function SetupProfileScreen() {
           </View>
         ))}
       </View>
-
       <View style={styles.stepLabelsContainer}>
-        {[
-          { id: 1, label: "Basic Info" },
-          { id: 2, label: "Academic Details" },
-        ].map((step) => (
-          <View key={step.id} style={styles.stepLabelWrapper}>
-            <Text
-              style={[
-                styles.stepLabel,
-                activeStep === step.id
-                  ? styles.stepLabelActive
-                  : styles.stepLabelInactive,
-              ]}
-            >
-              {step.label}
-            </Text>
-            {activeStep === step.id && <View style={styles.activeUnderline} />}
-          </View>
-        ))}
+        <View style={styles.stepLabelWrapper}>
+          <Text
+            style={[
+              styles.stepLabel,
+              activeStep === 1 && styles.stepLabelActive,
+            ]}
+          >
+            Basic Info
+          </Text>
+          {activeStep === 1 && <View style={styles.activeUnderline} />}
+        </View>
+        <View style={styles.stepLabelWrapper}>
+          <Text
+            style={[
+              styles.stepLabel,
+              activeStep === 2 && styles.stepLabelActive,
+            ]}
+          >
+            Academic Details
+          </Text>
+          {activeStep === 2 && <View style={styles.activeUnderline} />}
+        </View>
       </View>
-    </View>
-  );
-
-  // Navigation buttons
-  const renderButtons = () => (
-    <View
-      style={[
-        styles.buttonContainer,
-        { justifyContent: activeStep > 1 ? "space-between" : "flex-end" },
-      ]}
-    >
-      {activeStep > 1 && (
-        <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={prevStep}
-          disabled={loading}
-        >
-          <Ionicons name="arrow-back" size={18} color="#4f46e5" />
-          <Text style={styles.secondaryButtonText}>Back</Text>
-        </TouchableOpacity>
-      )}
-
-      {activeStep < 2 ? (
-        <TouchableOpacity
-          style={[
-            styles.primaryButton,
-            usernameStatus.error &&
-              !usernameStatus.available &&
-              styles.disabledButton,
-          ]}
-          onPress={nextStep}
-          disabled={
-            loading ||
-            (Boolean(usernameStatus.error) && !usernameStatus.available)
-          }
-        >
-          <Text style={styles.primaryButtonText}>Continue</Text>
-          <Ionicons name="arrow-forward" size={18} color="white" />
-        </TouchableOpacity>
-      ) : (
-        <TouchableOpacity
-          style={[styles.submitButton, loading && styles.submitButtonDisabled]}
-          onPress={handleSubmit}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="white" size="small" />
-          ) : (
-            <>
-              <Text style={styles.submitButtonText}>Complete Profile</Text>
-              <Ionicons name="checkmark-circle" size={18} color="white" />
-            </>
-          )}
-        </TouchableOpacity>
-      )}
     </View>
   );
 
@@ -429,14 +515,12 @@ export default function SetupProfileScreen() {
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={styles.keyboardAvoidingView}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
         >
           <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
           >
-            {/* Header */}
             <View style={styles.header}>
               <TouchableOpacity
                 style={styles.backButton}
@@ -454,22 +538,22 @@ export default function SetupProfileScreen() {
               </View>
             </View>
 
-            {/* Progress Indicator */}
             <StepIndicator />
 
-            {/* Form */}
             <View style={styles.formCard}>
-              {/* Step 1: Basic Info */}
               {activeStep === 1 && (
                 <View style={styles.stepContent}>
+                  {/* Username */}
                   <View style={styles.inputGroup}>
                     <View style={styles.labelContainer}>
                       <Ionicons
                         name="person-circle-outline"
-                        size={18}
+                        size={20}
                         color="#4f46e5"
                       />
-                      <Text style={styles.label}>Username *</Text>
+                      <Text style={styles.label}>
+                        Username <Text style={styles.requiredStar}>*</Text>
+                      </Text>
                     </View>
                     <TextInput
                       style={[
@@ -484,18 +568,35 @@ export default function SetupProfileScreen() {
                         setFormData({ ...formData, username: text })
                       }
                       autoCapitalize="none"
-                      returnKeyType="next"
                       maxLength={20}
                     />
                     {renderUsernameValidation()}
                     <Text style={styles.inputHint}>
-                      You can not change this later.
+                      This will be your unique identifier
                     </Text>
                   </View>
 
+                  {/* Campus / College - Scrollable Dropdown */}
+                  <ScrollableDropdown
+                    label="Campus / College"
+                    value={formData.campus}
+                    options={COLLEGES}
+                    onSelect={handleCampusSelect}
+                    placeholder="Select your campus"
+                    required={true}
+                    icon={
+                      <Ionicons
+                        name="business-outline"
+                        size={20}
+                        color="#4f46e5"
+                      />
+                    }
+                  />
+
+                  {/* Pronouns */}
                   <View style={styles.inputGroup}>
                     <View style={styles.labelContainer}>
-                      <MaterialIcons name="badge" size={18} color="#4f46e5" />
+                      <MaterialIcons name="badge" size={20} color="#4f46e5" />
                       <Text style={styles.label}>Pronouns</Text>
                     </View>
                     <View style={styles.pronounContainer}>
@@ -525,14 +626,15 @@ export default function SetupProfileScreen() {
                     </View>
                   </View>
 
+                  {/* Bio */}
                   <View style={styles.inputGroup}>
                     <View style={styles.labelContainer}>
                       <Ionicons
                         name="document-text-outline"
-                        size={18}
+                        size={20}
                         color="#4f46e5"
                       />
-                      <Text style={styles.label}>Bio (Optional)</Text>
+                      <Text style={styles.label}>Bio</Text>
                     </View>
                     <TextInput
                       style={[styles.input, styles.bioInput]}
@@ -545,22 +647,24 @@ export default function SetupProfileScreen() {
                       multiline
                       numberOfLines={3}
                       maxLength={150}
-                      returnKeyType="done"
                     />
                     <Text style={styles.charCount}>
-                      {150 - formData.bio.length} characters remaining
+                      {150 - formData.bio.length} characters left
                     </Text>
                   </View>
                 </View>
               )}
 
-              {/* Step 2: Academic Details */}
               {activeStep === 2 && (
                 <View style={styles.stepContent}>
+                  {/* University Email */}
                   <View style={styles.inputGroup}>
                     <View style={styles.labelContainer}>
-                      <Ionicons name="mail-outline" size={18} color="#4f46e5" />
-                      <Text style={styles.label}>University Email *</Text>
+                      <Ionicons name="mail-outline" size={20} color="#4f46e5" />
+                      <Text style={styles.label}>
+                        University Email{" "}
+                        <Text style={styles.requiredStar}>*</Text>
+                      </Text>
                     </View>
                     <TextInput
                       style={styles.input}
@@ -572,97 +676,143 @@ export default function SetupProfileScreen() {
                       }
                       keyboardType="email-address"
                       autoCapitalize="none"
-                      returnKeyType="next"
                     />
-                    <Text style={styles.inputHint}>
-                      Used for verification purposes only
-                    </Text>
                   </View>
 
-                  <View style={styles.inputGroup}>
-                    <View style={styles.labelContainer}>
+                  {/* Major - Scrollable Dropdown */}
+                  <ScrollableDropdown
+                    label="Major / Department"
+                    value={formData.major}
+                    options={MAJORS}
+                    onSelect={handleMajorSelect}
+                    placeholder="Select your major"
+                    required={true}
+                    icon={
                       <Ionicons
                         name="school-outline"
-                        size={18}
+                        size={20}
                         color="#4f46e5"
                       />
-                      <Text style={styles.label}>Major/Department *</Text>
-                    </View>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="e.g., Computer Science"
-                      placeholderTextColor="#9ca3af"
-                      value={formData.major}
-                      onChangeText={(text) =>
-                        setFormData({ ...formData, major: text })
-                      }
-                      autoCapitalize="words"
-                      returnKeyType="next"
-                    />
-                  </View>
+                    }
+                  />
 
+                  {/* Current Year */}
                   <View style={styles.inputGroup}>
                     <View style={styles.labelContainer}>
                       <MaterialIcons
                         name="calendar-today"
-                        size={18}
+                        size={20}
                         color="#4f46e5"
                       />
-                      <Text style={styles.label}>Current Year *</Text>
+                      <Text style={styles.label}>
+                        Current Year <Text style={styles.requiredStar}>*</Text>
+                      </Text>
                     </View>
                     <View style={styles.yearGrid}>
-                      {["UPC", "First", "Second", "Third"].map((year) => (
+                      {YEARS.map((year) => (
                         <TouchableOpacity
-                          key={year}
+                          key={year.id}
                           style={[
                             styles.yearCard,
-                            formData.year === year && styles.yearCardActive,
+                            formData.year === year.value &&
+                              styles.yearCardActive,
                           ]}
-                          onPress={() => setFormData({ ...formData, year })}
+                          onPress={() =>
+                            setFormData({ ...formData, year: year.value })
+                          }
                         >
                           <Text
                             style={[
                               styles.yearCardText,
-                              formData.year === year &&
+                              formData.year === year.value &&
                                 styles.yearCardTextActive,
                             ]}
                           >
-                            {year}
+                            {year.label}
                           </Text>
                         </TouchableOpacity>
                       ))}
                     </View>
                   </View>
 
-                  <View style={styles.inputGroup}>
-                    <View style={styles.labelContainer}>
+                  {/* Graduation Year - Scrollable Dropdown */}
+                  <ScrollableDropdown
+                    label="Expected Graduation Year"
+                    value={formData.graduationYear}
+                    options={GRADUATION_YEARS}
+                    onSelect={(value) =>
+                      setFormData({ ...formData, graduationYear: value })
+                    }
+                    placeholder="Select graduation year"
+                    icon={
                       <Ionicons
                         name="today-outline"
-                        size={18}
+                        size={20}
                         color="#4f46e5"
                       />
-                      <Text style={styles.label}>Expected Graduation Year</Text>
-                    </View>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="e.g., 2025"
-                      placeholderTextColor="#9ca3af"
-                      value={formData.graduationYear.toString()}
-                      onChangeText={(text) =>
-                        setFormData({ ...formData, graduationYear: text })
-                      }
-                      keyboardType="number-pad"
-                      returnKeyType="done"
-                    />
-                  </View>
+                    }
+                  />
                 </View>
               )}
 
-              {/* Navigation Buttons */}
-              {renderButtons()}
+              <View
+                style={[
+                  styles.buttonContainer,
+                  activeStep > 1 && styles.buttonContainerSpaced,
+                ]}
+              >
+                {activeStep > 1 && (
+                  <TouchableOpacity
+                    style={styles.secondaryButton}
+                    onPress={prevStep}
+                    disabled={loading}
+                  >
+                    <Ionicons name="arrow-back" size={18} color="#4f46e5" />
+                    <Text style={styles.secondaryButtonText}>Back</Text>
+                  </TouchableOpacity>
+                )}
+
+                {activeStep < 2 ? (
+                  <TouchableOpacity
+                    style={[
+                      styles.primaryButton,
+                      (!formData.username || !formData.campus) &&
+                        styles.disabledButton,
+                    ]}
+                    onPress={nextStep}
+                    disabled={!formData.username || !formData.campus}
+                  >
+                    <Text style={styles.primaryButtonText}>Continue</Text>
+                    <Ionicons name="arrow-forward" size={18} color="white" />
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={[
+                      styles.submitButton,
+                      loading && styles.submitButtonDisabled,
+                    ]}
+                    onPress={handleSubmit}
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <ActivityIndicator color="white" size="small" />
+                    ) : (
+                      <>
+                        <Text style={styles.submitButtonText}>
+                          Complete Profile
+                        </Text>
+                        <Ionicons
+                          name="checkmark-circle"
+                          size={18}
+                          color="white"
+                        />
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
 
-            {/* Footer */}
             <View style={styles.footer}>
               <Text style={styles.footerText}>
                 By continuing, you agree to our Terms of Service and Privacy
@@ -677,22 +827,10 @@ export default function SetupProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  // Main container styles
-  container: {
-    flex: 1,
-  },
-  safeArea: {
-    flex: 1,
-  },
-  keyboardAvoidingView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 40,
-  },
-
-  // Header styles
+  container: { flex: 1 },
+  safeArea: { flex: 1 },
+  keyboardAvoidingView: { flex: 1 },
+  scrollContent: { paddingHorizontal: 20, paddingBottom: 40 },
   header: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -710,36 +848,17 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
-  headerContent: {
-    flex: 1,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "700",
-    color: "#111827",
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 15,
-    color: "#6b7280",
-    lineHeight: 22,
-  },
-
-  // Step indicator styles
-  stepContainer: {
-    alignItems: "center",
-    marginBottom: 40,
-  },
+  headerContent: { flex: 1 },
+  title: { fontSize: 28, fontWeight: "700", color: "#111827", marginBottom: 8 },
+  subtitle: { fontSize: 15, color: "#6b7280", lineHeight: 22 },
+  stepContainer: { alignItems: "center", marginBottom: 40 },
   stepCirclesContainer: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 14,
   },
-  stepWithLine: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
+  stepWithLine: { flexDirection: "row", alignItems: "center" },
   stepCircle: {
     width: 40,
     height: 40,
@@ -748,62 +867,33 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 1,
   },
-  stepCircleActive: {
-    backgroundColor: "#4f46e5",
-  },
-  stepCircleInactive: {
-    backgroundColor: "#e5e7eb",
-  },
-  stepNumber: {
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  stepNumberActive: {
-    color: "white",
-  },
-  stepNumberInactive: {
-    color: "#9ca3af",
-  },
-  stepLine: {
-    width: 150,
-    height: 3,
-    marginHorizontal: 2,
-  },
-  stepLineActive: {
-    backgroundColor: "#4f46e5",
-  },
-  stepLineInactive: {
-    backgroundColor: "#e5e7eb",
-  },
+  stepCircleActive: { backgroundColor: "#4f46e5" },
+  stepCircleInactive: { backgroundColor: "#e5e7eb" },
+  stepNumber: { fontSize: 16, fontWeight: "600", color: "#9ca3af" },
+  stepNumberActive: { color: "white" },
+  stepLine: { width: 150, height: 3, marginHorizontal: 2 },
+  stepLineActive: { backgroundColor: "#4f46e5" },
+  stepLineInactive: { backgroundColor: "#e5e7eb" },
   stepLabelsContainer: {
     flexDirection: "row",
     justifyContent: "space-between",
     width: "100%",
     marginTop: 8,
   },
-  stepLabelWrapper: {
-    alignItems: "center",
-    flex: 1,
-  },
+  stepLabelWrapper: { alignItems: "center", flex: 1 },
   stepLabel: {
     fontSize: 14,
     fontWeight: "600",
     marginBottom: 6,
-  },
-  stepLabelActive: {
-    color: "#4f46e5",
-  },
-  stepLabelInactive: {
     color: "#9ca3af",
   },
+  stepLabelActive: { color: "#4f46e5" },
   activeUnderline: {
     width: "80%",
     height: 3,
     backgroundColor: "#4f46e5",
     borderRadius: 2,
   },
-
-  // Form styles
   formCard: {
     backgroundColor: "white",
     borderRadius: 18,
@@ -815,23 +905,16 @@ const styles = StyleSheet.create({
     elevation: 5,
     marginBottom: 30,
   },
-  stepContent: {
-    minHeight: 320,
-  },
-  inputGroup: {
-    marginBottom: 24,
-  },
+  stepContent: { minHeight: 320 },
+  inputGroup: { marginBottom: 24 },
   labelContainer: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 10,
+    gap: 8,
   },
-  label: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#374151",
-    marginLeft: 8,
-  },
+  label: { fontSize: 15, fontWeight: "600", color: "#374151" },
+  requiredStar: { color: "#ef4444", fontSize: 15 },
   input: {
     backgroundColor: "#f9fafb",
     borderWidth: 1,
@@ -842,39 +925,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#000000",
   },
-  inputError: {
-    borderColor: "#ef4444",
-  },
-  inputSuccess: {
-    borderColor: "#10b981",
-  },
-  inputHint: {
-    fontSize: 13,
-    color: "#848484",
-    marginTop: 8,
-  },
-
-  // Username validation styles
+  inputError: { borderColor: "#ef4444" },
+  inputSuccess: { borderColor: "#10b981" },
+  inputHint: { fontSize: 12, color: "#9ca3af", marginTop: 8 },
   validationContainer: {
     flexDirection: "row",
     alignItems: "center",
     marginTop: 8,
     gap: 6,
   },
-  validationTextLoading: {
-    fontSize: 13,
-    color: "#4f46e5",
-  },
-  validationTextError: {
-    fontSize: 13,
-    color: "#ef4444",
-  },
-  validationTextSuccess: {
-    fontSize: 13,
-    color: "#10b981",
-  },
-
-  // Pronouns selection styles
+  validationTextLoading: { fontSize: 12, color: "#4f46e5" },
+  validationTextError: { fontSize: 12, color: "#ef4444" },
+  validationTextSuccess: { fontSize: 12, color: "#10b981" },
   pronounContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -889,26 +951,79 @@ const styles = StyleSheet.create({
     borderColor: "#d1d5db",
     backgroundColor: "white",
   },
-  pronounButtonActive: {
-    backgroundColor: "#4f46e5",
-    borderColor: "#4f46e5",
+  pronounButtonActive: { backgroundColor: "#4f46e5", borderColor: "#4f46e5" },
+  pronounButtonText: { fontSize: 14, color: "#374151" },
+  pronounButtonTextActive: { color: "white", fontWeight: "600" },
+  bioInput: { minHeight: 100, textAlignVertical: "top" },
+  charCount: {
+    fontSize: 12,
+    color: "#9ca3af",
+    textAlign: "right",
+    marginTop: 6,
   },
-  pronounButtonText: {
-    fontSize: 14,
-    color: "#374151",
-  },
-  pronounButtonTextActive: {
-    color: "white",
-    fontWeight: "600",
-  },
-
-  // Year selection styles
-  yearGrid: {
+  dropdownButton: {
+    backgroundColor: "#f9fafb",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    marginTop: 10,
+    justifyContent: "space-between",
+    alignItems: "center",
   },
+  dropdownText: {
+    fontSize: 15,
+    color: "#000000",
+    flex: 1,
+  },
+  dropdownPlaceholder: {
+    color: "#9ca3af",
+  },
+  dropdownIcon: {
+    marginLeft: 8,
+  },
+  dropdownList: {
+    marginTop: 8,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 12,
+    maxHeight: 250,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  dropdownScrollView: {
+    maxHeight: 250,
+  },
+  dropdownItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f3f4f6",
+  },
+  dropdownItemLast: {
+    borderBottomWidth: 0,
+  },
+  dropdownItemSelected: {
+    backgroundColor: "#f5f3ff",
+  },
+  dropdownItemText: {
+    fontSize: 15,
+    color: "#374151",
+    flex: 1,
+  },
+  dropdownItemTextSelected: {
+    color: "#4f46e5",
+    fontWeight: "500",
+  },
+  yearGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 10 },
   yearCard: {
     flex: 1,
     minWidth: "30%",
@@ -920,38 +1035,16 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
     alignItems: "center",
   },
-  yearCardActive: {
-    backgroundColor: "#4f46e5",
-    borderColor: "#4f46e5",
-  },
+  yearCardActive: { backgroundColor: "#4f46e5", borderColor: "#4f46e5" },
   yearCardText: {
     fontSize: 14,
     fontWeight: "500",
     color: "#374151",
     textAlign: "center",
   },
-  yearCardTextActive: {
-    color: "white",
-  },
-
-  // Bio input specific styles
-  bioInput: {
-    minHeight: 100,
-    textAlignVertical: "top",
-  },
-  charCount: {
-    fontSize: 12,
-    color: "#9ca3af",
-    textAlign: "right",
-    marginTop: 6,
-  },
-
-  // Button styles
-  buttonContainer: {
-    flexDirection: "row",
-    marginTop: 30,
-    gap: 12,
-  },
+  yearCardTextActive: { color: "white" },
+  buttonContainer: { flexDirection: "row", marginTop: 30, gap: 12 },
+  buttonContainerSpaced: { justifyContent: "space-between" },
   secondaryButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -976,10 +1069,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
     backgroundColor: "#4f46e5",
+    flex: 1,
   },
-  disabledButton: {
-    backgroundColor: "#9ca3af",
-  },
+  disabledButton: { backgroundColor: "#9ca3af" },
   primaryButtonText: {
     fontSize: 16,
     fontWeight: "600",
@@ -994,22 +1086,16 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
     backgroundColor: "#10b981",
+    flex: 1,
   },
-  submitButtonDisabled: {
-    opacity: 0.7,
-  },
+  submitButtonDisabled: { opacity: 0.7 },
   submitButtonText: {
     fontSize: 16,
     fontWeight: "600",
     color: "white",
     marginRight: 8,
   },
-
-  // Footer styles
-  footer: {
-    alignItems: "center",
-    paddingHorizontal: 20,
-  },
+  footer: { alignItems: "center", paddingHorizontal: 20 },
   footerText: {
     fontSize: 12,
     color: "#9ca3af",
