@@ -1,4 +1,4 @@
-// app/(tabs)/_layout.tsx - UPDATED WITH AUTH
+// app/(tabs)/_layout.tsx 
 import { Tabs, Redirect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../lib/AuthContext";

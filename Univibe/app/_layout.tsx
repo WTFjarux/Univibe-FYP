@@ -47,8 +47,10 @@ export default function RootLayout() {
             }}
           />
 
-          {/* Protected routes - require auth */}
+          {/* ✅ Profile routes - includes both index and dynamic [id] */}
           <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="profile" />
+
           {/* Add other protected screens here */}
         </Stack>
       </ProfileProvider>

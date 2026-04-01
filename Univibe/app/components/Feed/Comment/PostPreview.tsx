@@ -10,14 +10,14 @@ import {
   ImageSourcePropType,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Post } from "../../../../lib/postService";
-import { formatTimeAgo } from "../../../../lib/formatTime";
+import { Post } from "@/lib/postService";
+import { formatTimeAgo } from "@/lib/formatTime";
 import {
   getFullImageUrl,
-  getUserProfileImage,
+  // REMOVED: getUserProfileImage,
   formatUserDisplay,
-} from "../../../../lib/postService";
-import { API_BASE_URL } from "../../../../constants/stringConstants";
+} from "@/lib/postService";
+import { API_BASE_URL } from "@/constants/ipConstants";
 
 const { width: screenWidth } = Dimensions.get("window");
 const imageWidth = screenWidth - 32;

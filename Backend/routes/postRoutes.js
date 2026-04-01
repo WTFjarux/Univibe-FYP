@@ -12,6 +12,7 @@ router.use(protect);
 router.post("/", uploadPostImages, postController.createPost);
 router.get("/", postController.getPosts);
 router.get("/search", postController.searchPosts);
+router.get("/user/:userId/count", postController.getUserPostCount); // ✅ Move this BEFORE the /:id route
 router.get("/:id", postController.getPostById);
 router.put("/:id", uploadPostImages, postController.updatePost);
 router.delete("/:id", postController.deletePost);

@@ -20,16 +20,18 @@ import {
   ImageSourcePropType,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Comment, areRepliesPopulated } from "../../../../lib/postService";
+import { useRouter } from "expo-router";
+import { Comment, areRepliesPopulated } from "@/lib/postService";
 import {
   formatCommentUserDisplay,
-  getCommentUserProfileImage,
+  // REMOVED: getCommentUserProfileImage,
   getCommentDepthColor,
   isCommentFromPostAuthor,
   formatCommentTimestamp,
-} from "../../../../lib/postService";
+} from "@/lib/postService";
 import CommentOptionsModal from "./CommentOptionsModal";
-import { API_BASE_URL } from "../../../../constants/stringConstants";
+import { API_BASE_URL } from "@/constants/ipConstants";
+import { useAuth } from "@/lib/AuthContext";
 
 // ✅ Local default avatar
 const DEFAULT_AVATAR: ImageSourcePropType = require("../../../../assets/images/default-avatar.png");
@@ -74,8 +76,9 @@ const getProfileImageSource = (
 };
 
 /**
- * Helper to extract mention from text - only captures @username format
- * Mentions are stored as @username (no spaces)
+ * Helper to extract mention from text - captures full display name with spaces
+ * Format: @Full Display Name (can include spaces) followed by space or end of string
+ * Example: "@John Doe" or "@Jane Smith hello there"
  */
 const extractMention = (
   content: string,
@@ -85,18 +88,30 @@ const extractMention = (
     return { mention: "", remaining: content };
   }
 
-  // Find the first space after the @username
-  const firstSpaceIndex = content.indexOf(" ");
+  // Remove the @ symbol temporarily
+  const withoutAt = content.substring(1);
 
-  if (firstSpaceIndex > 0) {
-    // We have a mention followed by text
-    const mention = content.substring(0, firstSpaceIndex);
-    const remaining = content.substring(firstSpaceIndex).trimStart();
-    return { mention, remaining };
+  // Find where the mention ends:
+  // Look for a space that is followed by text that doesn't start with @
+  // This allows names with spaces like "John Doe Smith"
+  let mentionEnd = content.length;
+
+  for (let i = 1; i < content.length; i++) {
+    if (
+      content[i] === " " &&
+      i + 1 < content.length &&
+      content[i + 1] !== "@"
+    ) {
+      // Found a space that separates mention from message
+      mentionEnd = i;
+      break;
+    }
   }
 
-  // No space found - the whole content is just the mention
-  return { mention: content, remaining: "" };
+  const mention = content.substring(0, mentionEnd).trim();
+  const remaining = content.substring(mentionEnd).trimStart();
+
+  return { mention, remaining };
 };
 
 /**
@@ -107,7 +122,7 @@ const CommentItem: React.FC<CommentItemProps> = ({
   postId,
   postAuthorId,
   isAnonymousPost,
-  depth = comment?.depth ?? 1, // ✅ Fixed: Use nullish coalescing
+  depth = comment?.depth ?? 1,
   onReply,
   onLike,
   onUpdate,
@@ -119,6 +134,10 @@ const CommentItem: React.FC<CommentItemProps> = ({
   level = 0,
   onEditStateChange,
 }) => {
+  // ===== Hooks =====
+  const router = useRouter();
+  const { user: currentUserData } = useAuth();
+
   // ===== State =====
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(comment.content);
@@ -189,6 +208,22 @@ const CommentItem: React.FC<CommentItemProps> = ({
   const mentionText = mentionData.mention;
   const remainingText = mentionData.remaining;
 
+  // ===== Navigation Handler =====
+  const handleUserPress = useCallback(() => {
+    // Don't navigate for anonymous comments
+    if (isAnonymous) return;
+
+    const userId = comment.user?._id?.toString();
+    if (!userId) return;
+
+    // Check if it's the current user's own profile
+    if (userId === currentUserData?.id?.toString()) {
+      router.push("/(tabs)/profile");
+    } else {
+      router.push(`/profile/${userId}`);
+    }
+  }, [isAnonymous, comment.user?._id, currentUserData?.id, router]);
+
   // ===== Handlers =====
   const handlePressIn = () => {
     Animated.spring(scaleAnim, {
@@ -216,10 +251,10 @@ const CommentItem: React.FC<CommentItemProps> = ({
   };
 
   const handleReplyPress = useCallback(() => {
-    const username =
+    const usernameForBackend =
       comment.user?.username ||
       displayInfo.name.toLowerCase().replace(/\s/g, "");
-    onReply(comment._id, displayInfo.name, username, false);
+    onReply(comment._id, displayInfo.name, usernameForBackend, false);
   }, [comment._id, displayInfo.name, comment.user?.username, onReply]);
 
   const handleLike = useCallback(async () => {
@@ -270,10 +305,10 @@ const CommentItem: React.FC<CommentItemProps> = ({
   }, [comment._id, onShare]);
 
   const handleModalReply = useCallback(() => {
-    const username =
+    const usernameForBackend =
       comment.user?.username ||
       displayInfo.name.toLowerCase().replace(/\s/g, "");
-    onReply(comment._id, displayInfo.name, username, false);
+    onReply(comment._id, displayInfo.name, usernameForBackend, false);
   }, [comment._id, displayInfo.name, comment.user?.username, onReply]);
 
   const handleCancelEdit = useCallback(() => {
@@ -298,11 +333,13 @@ const CommentItem: React.FC<CommentItemProps> = ({
 
     if (avatarError) {
       return (
-        <View style={[styles.avatar, styles.fallbackAvatar]}>
-          <Text style={styles.fallbackAvatarText}>
-            {displayInfo.name.charAt(0).toUpperCase()}
-          </Text>
-        </View>
+        <TouchableOpacity onPress={handleUserPress}>
+          <View style={[styles.avatar, styles.fallbackAvatar]}>
+            <Text style={styles.fallbackAvatarText}>
+              {displayInfo.name.charAt(0).toUpperCase()}
+            </Text>
+          </View>
+        </TouchableOpacity>
       );
     }
 
@@ -310,15 +347,21 @@ const CommentItem: React.FC<CommentItemProps> = ({
     const imageSource = getProfileImageSource(profileImageUrl);
 
     if (imageSource === DEFAULT_AVATAR) {
-      return <Image source={DEFAULT_AVATAR} style={styles.avatar} />;
+      return (
+        <TouchableOpacity onPress={handleUserPress}>
+          <Image source={DEFAULT_AVATAR} style={styles.avatar} />
+        </TouchableOpacity>
+      );
     }
 
     return (
-      <Image
-        source={imageSource}
-        style={styles.avatar}
-        onError={() => setAvatarError(true)}
-      />
+      <TouchableOpacity onPress={handleUserPress}>
+        <Image
+          source={imageSource}
+          style={styles.avatar}
+          onError={() => setAvatarError(true)}
+        />
+      </TouchableOpacity>
     );
   };
 
@@ -407,6 +450,27 @@ const CommentItem: React.FC<CommentItemProps> = ({
       </View>
     </View>
   );
+
+  const renderCommentContent = () => {
+    if (isEditing) return renderEditMode();
+
+    if (hasMention && mentionText) {
+      return (
+        <View style={styles.commentContentWrapper}>
+          <Text style={styles.mentionText}>{mentionText}</Text>
+          {remainingText ? (
+            <Text style={styles.commentText}>{remainingText}</Text>
+          ) : null}
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.commentContentWrapper}>
+        <Text style={styles.commentText}>{comment.content}</Text>
+      </View>
+    );
+  };
 
   const renderReplies = () => {
     if (!hasReplies) return null;
@@ -497,34 +561,25 @@ const CommentItem: React.FC<CommentItemProps> = ({
             <View style={styles.contentContainer}>
               <View style={styles.header}>
                 <View style={styles.userInfo}>
-                  <Text
-                    style={[
-                      styles.userName,
-                      isAnonymous && styles.anonymousName,
-                    ]}
+                  <TouchableOpacity
+                    onPress={handleUserPress}
+                    disabled={isAnonymous}
+                    activeOpacity={0.7}
                   >
-                    {displayInfo.name}
-                  </Text>
+                    <Text
+                      style={[
+                        styles.userName,
+                        isAnonymous && styles.anonymousName,
+                      ]}
+                    >
+                      {displayInfo.name}
+                    </Text>
+                  </TouchableOpacity>
                   {renderBadges()}
                 </View>
               </View>
 
-              {isEditing ? (
-                renderEditMode()
-              ) : (
-                <View style={styles.commentContentWrapper}>
-                  {hasMention ? (
-                    <>
-                      <Text style={styles.mentionText}>{mentionText}</Text>
-                      {remainingText ? (
-                        <Text style={styles.commentText}>{remainingText}</Text>
-                      ) : null}
-                    </>
-                  ) : (
-                    <Text style={styles.commentText}>{comment.content}</Text>
-                  )}
-                </View>
-              )}
+              {renderCommentContent()}
               {renderActions()}
             </View>
           </View>

@@ -18,7 +18,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useAuth } from "../../../../lib/AuthContext";
 import { getPostById, updatePost, Post } from "../../../../lib/postService";
-import { API_BASE_URL } from "../../../../constants/stringConstants";
+import { API_BASE_URL } from "../../../../constants/ipConstants";
 
 export default function EditPostScreen() {
   const router = useRouter();

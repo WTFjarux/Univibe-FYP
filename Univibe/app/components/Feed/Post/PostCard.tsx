@@ -1,5 +1,5 @@
 // app/components/Feed/Post/PostCard.tsx
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -14,11 +14,11 @@ import {
   ImageSourcePropType,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Post } from "../../../../lib/postService";
-import { formatTimeAgo } from "../../../../lib/formatTime";
-import { API_BASE_URL } from "../../../../constants/stringConstants";
+import { useRouter } from "expo-router";
+import { Post, getFullImageUrl } from "@/lib/postService";
+import { formatTimeAgo } from "@/lib/formatTime";
 import PostOptionsModal from "./PostOptionsModal";
-import { useAuth } from "../../../../lib/AuthContext";
+import { useAuth } from "@/lib/AuthContext";
 
 const DEFAULT_AVATAR: ImageSourcePropType = require("../../../../assets/images/default-avatar.png");
 
@@ -55,6 +55,7 @@ const PostCard: React.FC<PostCardProps> = ({
   onMuteUser,
   onBlockUser,
 }) => {
+  const router = useRouter();
   const [optionsVisible, setOptionsVisible] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [isReported, setIsReported] = useState(false);
@@ -65,6 +66,12 @@ const PostCard: React.FC<PostCardProps> = ({
 
   const scrollViewRef = useRef<ScrollView>(null);
   const { user, profile } = useAuth();
+
+  // Early return if post is missing
+  if (!post) {
+    console.warn("PostCard: post is null or undefined");
+    return null;
+  }
 
   const windowWidth = Dimensions.get("window").width;
   const imageWidth = windowWidth - 40;
@@ -88,15 +95,12 @@ const PostCard: React.FC<PostCardProps> = ({
 
   const ownPost = isOwnPost();
 
-  const getFullImageUrl = (url: string): string => {
-    if (!url) return "";
-    if (url.startsWith("http://") || url.startsWith("https://")) return url;
-
-    const baseUrl = API_BASE_URL.endsWith("/")
-      ? API_BASE_URL.slice(0, -1)
-      : API_BASE_URL;
-    const cleanUrl = url.startsWith("/") ? url : `/${url}`;
-    return `${baseUrl}${cleanUrl}`;
+  // Get the actual user ID for navigation (original user if anonymous)
+  const getUserIdForNavigation = (): string | null => {
+    if (post.isAnonymous && post.originalUser) {
+      return post.originalUser._id?.toString();
+    }
+    return post.user?._id?.toString();
   };
 
   const getProfileImage = (): ImageSourcePropType => {
@@ -118,7 +122,6 @@ const PostCard: React.FC<PostCardProps> = ({
   };
 
   const postImages = getPostImages();
-  const userImage = getProfileImage();
 
   useEffect(() => {
     if (postImages.length > 0) {
@@ -147,6 +150,26 @@ const PostCard: React.FC<PostCardProps> = ({
       });
     }
   };
+
+  // Navigate to user profile - with error handling
+  const handleUserPress = useCallback(() => {
+    try {
+      const userId = getUserIdForNavigation();
+      if (!userId) {
+        console.warn("No user ID found for navigation");
+        return;
+      }
+
+      if (userId === currentUserId) {
+        router.push("/(tabs)/profile");
+      } else {
+        router.push(`/profile/${userId}`);
+      }
+    } catch (error) {
+      console.error("Navigation error in PostCard:", error);
+      Alert.alert("Error", "Could not navigate to profile");
+    }
+  }, [currentUserId, router]);
 
   const getVisibilityIconName = (): IconName => {
     const icons: Record<string, IconName> = {
@@ -183,32 +206,20 @@ const PostCard: React.FC<PostCardProps> = ({
   const handleSave = (postId: string) => {
     setIsSaved(!isSaved);
     if (onSave) onSave(postId);
-    Alert.alert(
-      isSaved ? "Post Unsaved" : "Post Saved",
-      isSaved
-        ? "Post removed from your saved items"
-        : "Post added to your saved items",
-    );
   };
 
   const handleReport = (postId: string) => {
     setIsReported(true);
     if (onReport) onReport(postId);
-    Alert.alert(
-      "Report Submitted",
-      "Thank you for reporting this post. Our team will review it.",
-    );
   };
 
   const handleHide = (postId: string) => {
     setIsHidden(true);
     if (onHide) onHide(postId);
-    Alert.alert("Post Hidden", "You won't see this post anymore");
   };
 
   const handleCopyLink = (postId: string) => {
     if (onCopyLink) onCopyLink(postId);
-    Alert.alert("Link Copied", "Post link copied to clipboard");
   };
 
   const renderIndicators = () => {
@@ -327,15 +338,21 @@ const PostCard: React.FC<PostCardProps> = ({
 
     if (!avatarError && post.user?.profilePicture) {
       return (
-        <Image
-          source={{ uri: getFullImageUrl(post.user.profilePicture) }}
-          style={styles.postAvatar}
-          onError={() => setAvatarError(true)}
-        />
+        <TouchableOpacity onPress={handleUserPress}>
+          <Image
+            source={{ uri: getFullImageUrl(post.user.profilePicture) }}
+            style={styles.postAvatar}
+            onError={() => setAvatarError(true)}
+          />
+        </TouchableOpacity>
       );
     }
 
-    return <Image source={DEFAULT_AVATAR} style={styles.postAvatar} />;
+    return (
+      <TouchableOpacity onPress={handleUserPress}>
+        <Image source={DEFAULT_AVATAR} style={styles.postAvatar} />
+      </TouchableOpacity>
+    );
   };
 
   const visibilityIconName = getVisibilityIconName();
@@ -348,34 +365,69 @@ const PostCard: React.FC<PostCardProps> = ({
           {renderAvatar()}
 
           <View style={styles.postUserInfo}>
-            <View style={styles.postUser}>
-              <Text style={styles.postUserName}>{getUserDisplayName()}</Text>
+            {!post.isAnonymous ? (
+              <TouchableOpacity onPress={handleUserPress}>
+                <View style={styles.postUser}>
+                  <Text style={styles.postUserName}>
+                    {getUserDisplayName()}
+                  </Text>
 
-              {!post.isAnonymous && post.user?.verified && (
-                <Ionicons name="checkmark-circle" size={16} color="#10b981" />
-              )}
+                  {post.user?.verified && (
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={16}
+                      color="#10b981"
+                    />
+                  )}
 
-              <View
-                style={[
-                  styles.visibilityBadge,
-                  { backgroundColor: `${visibilityBadgeColor}15` },
-                ]}
-              >
-                <Ionicons
-                  name={visibilityIconName}
-                  size={12}
-                  color={visibilityBadgeColor}
-                />
-                <Text
+                  <View
+                    style={[
+                      styles.visibilityBadge,
+                      { backgroundColor: `${visibilityBadgeColor}15` },
+                    ]}
+                  >
+                    <Ionicons
+                      name={visibilityIconName}
+                      size={12}
+                      color={visibilityBadgeColor}
+                    />
+                    <Text
+                      style={[
+                        styles.visibilityBadgeText,
+                        { color: visibilityBadgeColor },
+                      ]}
+                    >
+                      {getVisibilityDisplayName()}
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.postUser}>
+                <Text style={styles.postUserName}>{getUserDisplayName()}</Text>
+
+                <View
                   style={[
-                    styles.visibilityBadgeText,
-                    { color: visibilityBadgeColor },
+                    styles.visibilityBadge,
+                    { backgroundColor: `${visibilityBadgeColor}15` },
                   ]}
                 >
-                  {getVisibilityDisplayName()}
-                </Text>
+                  <Ionicons
+                    name={visibilityIconName}
+                    size={12}
+                    color={visibilityBadgeColor}
+                  />
+                  <Text
+                    style={[
+                      styles.visibilityBadgeText,
+                      { color: visibilityBadgeColor },
+                    ]}
+                  >
+                    {getVisibilityDisplayName()}
+                  </Text>
+                </View>
               </View>
-            </View>
+            )}
 
             <Text style={styles.postUserDetails}>
               @{getUserDisplayHandle()} • {formatTimeAgo(post.createdAt)}

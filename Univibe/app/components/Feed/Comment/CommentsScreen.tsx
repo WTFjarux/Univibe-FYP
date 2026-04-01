@@ -20,7 +20,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useAuth } from "../../../../lib/AuthContext";
+import { useAuth } from "@/lib/AuthContext";
 
 // Components
 import CommentHeader from "./CommentHeader";
@@ -39,7 +39,7 @@ import {
   getFullImageUrl,
   Post,
   Comment,
-} from "../../../../lib/postService";
+} from "@/lib/postService";
 
 const { width: screenWidth } = Dimensions.get("window");
 

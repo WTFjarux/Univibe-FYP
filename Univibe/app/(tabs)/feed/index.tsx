@@ -1,5 +1,4 @@
-// app/(tabs)/feed/index.tsx
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -10,15 +9,15 @@ import {
   TouchableOpacity,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect, useRouter, useNavigation } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useAuth } from "../../../lib/AuthContext";
 import Ionicons from "@expo/vector-icons/Ionicons";
 
 // Components
-import FeedHeader from "../../components/Feed/FeedHeader";
-import CreatePostButton from "../../components/Feed/CreatePostButton";
-import FilterTabs from "../../components/Feed/FilterTabs";
-import PostCard from "../../components/Feed/Post/PostCard";
+import FeedHeader from "@/app/components/Feed/FeedHeader";
+import CreatePostButton from "@/app/components/Feed/CreatePostButton";
+import FilterTabs from "@/app/components/Feed/FilterTabs";
+import PostCard from "@/app/components/Feed/Post/PostCard";
 
 // Services
 import {
@@ -29,13 +28,11 @@ import {
 } from "../../../lib/postService";
 
 // Styles
-import styles from "../../components/Feed/styles";
+import styles from "@/app/components/Feed/styles";
 
 export default function FeedScreen() {
   const router = useRouter();
-  const navigation = useNavigation();
   const { token, user } = useAuth();
-  const needsRefresh = useRef(false);
 
   // State
   const [activeFilter, setActiveFilter] = useState("all");
@@ -47,6 +44,7 @@ export default function FeedScreen() {
   const [error, setError] = useState<string | null>(null);
 
   // User interaction states
+  const [savedPosts, setSavedPosts] = useState<Set<string>>(new Set());
   const [hiddenPosts, setHiddenPosts] = useState<Set<string>>(new Set());
   const [mutedUsers, setMutedUsers] = useState<Set<string>>(new Set());
   const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
@@ -63,11 +61,7 @@ export default function FeedScreen() {
   /**
    * Fetch posts from API with current filter and pagination
    */
-  const fetchPosts = async (
-    filter = activeFilter,
-    pageNum = 1,
-    shouldRefresh = false,
-  ) => {
+  const fetchPosts = async (filter = activeFilter, pageNum = 1) => {
     try {
       setError(null);
       const response = await getPosts(filter, pageNum);
@@ -80,7 +74,7 @@ export default function FeedScreen() {
           !blockedUsers.has(post.user?._id || ""),
       );
 
-      if (pageNum === 1 || shouldRefresh) {
+      if (pageNum === 1) {
         setPosts(filteredPosts);
       } else {
         setPosts((prev) => [...prev, ...filteredPosts]);
@@ -107,7 +101,6 @@ export default function FeedScreen() {
     } finally {
       setLoading(false);
       setRefreshing(false);
-      needsRefresh.current = false;
     }
   };
 
@@ -121,13 +114,11 @@ export default function FeedScreen() {
     }
   }, [token]);
 
-  // ✅ Refresh on focus - always refresh when coming back from comments
+  // Refresh on focus
   useFocusEffect(
     useCallback(() => {
-      console.log("📱 FeedScreen focused - refreshing posts");
       if (token) {
-        // Always refresh when screen comes into focus
-        fetchPosts(activeFilter, 1, true);
+        fetchPosts(activeFilter, 1);
       }
     }, [activeFilter, token]),
   );
@@ -139,7 +130,7 @@ export default function FeedScreen() {
     if (token) {
       setRefreshing(true);
       setPage(1);
-      fetchPosts(activeFilter, 1, true);
+      fetchPosts(activeFilter, 1);
     }
   };
 
@@ -151,7 +142,7 @@ export default function FeedScreen() {
       setActiveFilter(filterId);
       setPage(1);
       setLoading(true);
-      fetchPosts(filterId, 1, true);
+      fetchPosts(filterId, 1);
     }
   };
 
@@ -208,9 +199,6 @@ export default function FeedScreen() {
       return;
     }
 
-    // Set flag that we'll need to refresh when coming back
-    needsRefresh.current = true;
-
     router.push({
       pathname: "/components/Feed/Comment/CommentsScreen",
       params: { postId },
@@ -220,14 +208,18 @@ export default function FeedScreen() {
   /**
    * Handle repost (coming soon)
    */
-  const handleRepost = () => {
+  const handleRepost = (postId: string) => {
+    if (!token) {
+      Alert.alert("Login Required", "Please login to repost");
+      return;
+    }
     Alert.alert("Repost", "Repost feature coming soon!");
   };
 
   /**
    * Handle share (coming soon)
    */
-  const handleShare = () => {
+  const handleShare = (postId: string) => {
     Alert.alert("Share", "Share feature coming soon!");
   };
 
@@ -247,36 +239,38 @@ export default function FeedScreen() {
    * Handle post deletion
    */
   const handleDeletePost = async (postId: string) => {
-    Alert.alert("Delete Post", "Are you sure you want to delete this post?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await deletePost(postId);
-            setPosts((prev) => prev.filter((post) => post._id !== postId));
-            Alert.alert("Success", "Post deleted successfully");
-          } catch (error: any) {
-            console.error("Error deleting post:", error);
-            Alert.alert("Error", error.message || "Failed to delete post");
-          }
-        },
-      },
-    ]);
+    try {
+      console.log("Deleting post:", postId);
+      await deletePost(postId);
+      setPosts((prev) => prev.filter((post) => post._id !== postId));
+      Alert.alert("Success", "Post deleted successfully");
+    } catch (error: any) {
+      console.error("Error deleting post:", error);
+      Alert.alert("Error", error.message || "Failed to delete post");
+    }
   };
 
   /**
    * Handle save/unsave post
    */
-  const handleSavePost = () => {
-    Alert.alert("Save Post", "Save feature coming soon!");
+  const handleSavePost = (postId: string) => {
+    setSavedPosts((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(postId)) {
+        newSet.delete(postId);
+        Alert.alert("Post Unsaved", "Post removed from your saved items");
+      } else {
+        newSet.add(postId);
+        Alert.alert("Post Saved", "Post added to your saved items");
+      }
+      return newSet;
+    });
   };
 
   /**
    * Handle post report
    */
-  const handleReportPost = () => {
+  const handleReportPost = (postId: string) => {
     Alert.alert(
       "Report Submitted",
       "Thank you for reporting this post. Our team will review it.",
@@ -299,7 +293,7 @@ export default function FeedScreen() {
   /**
    * Handle copy link
    */
-  const handleCopyLink = () => {
+  const handleCopyLink = (postId: string) => {
     Alert.alert("Link Copied", "Post link copied to clipboard");
   };
 
@@ -307,54 +301,54 @@ export default function FeedScreen() {
    * Handle mute user
    */
   const handleMuteUser = (userId: string) => {
-    Alert.alert("Mute User", "Are you sure you want to mute this user?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Mute",
-        onPress: () => {
-          setMutedUsers((prev) => {
-            const newSet = new Set(prev);
-            newSet.add(userId);
-            return newSet;
-          });
-          setPosts((prev) => prev.filter((post) => post.user?._id !== userId));
-          Alert.alert(
-            "User Muted",
-            "You won't see posts from this user anymore",
-          );
-        },
-      },
-    ]);
+    setMutedUsers((prev) => {
+      const newSet = new Set(prev);
+      newSet.add(userId);
+      return newSet;
+    });
+    setPosts((prev) => prev.filter((post) => post.user?._id !== userId));
+    Alert.alert("User Muted", "You won't see posts from this user anymore");
+  };
+
+  /**
+   * Handle unmute user
+   */
+  const handleUnmuteUser = (userId: string) => {
+    setMutedUsers((prev) => {
+      const newSet = new Set(prev);
+      newSet.delete(userId);
+      return newSet;
+    });
+    fetchPosts(activeFilter, 1);
+    Alert.alert("User Unmuted", "You will now see posts from this user again");
   };
 
   /**
    * Handle block user
    */
   const handleBlockUser = (userId: string) => {
+    setBlockedUsers((prev) => {
+      const newSet = new Set(prev);
+      newSet.add(userId);
+      return newSet;
+    });
+    setPosts((prev) => prev.filter((post) => post.user?._id !== userId));
+    Alert.alert("User Blocked", "You won't see posts from this user anymore");
+  };
+
+  /**
+   * Handle unblock user
+   */
+  const handleUnblockUser = (userId: string) => {
+    setBlockedUsers((prev) => {
+      const newSet = new Set(prev);
+      newSet.delete(userId);
+      return newSet;
+    });
+    fetchPosts(activeFilter, 1);
     Alert.alert(
-      "Block User",
-      "Are you sure you want to block this user? They won't be able to interact with you.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Block",
-          style: "destructive",
-          onPress: () => {
-            setBlockedUsers((prev) => {
-              const newSet = new Set(prev);
-              newSet.add(userId);
-              return newSet;
-            });
-            setPosts((prev) =>
-              prev.filter((post) => post.user?._id !== userId),
-            );
-            Alert.alert(
-              "User Blocked",
-              "You won't see posts from this user anymore",
-            );
-          },
-        },
-      ],
+      "User Unblocked",
+      "You will now see posts from this user again",
     );
   };
 
@@ -447,7 +441,7 @@ export default function FeedScreen() {
       <Text style={styles.errorText}>{error}</Text>
       <TouchableOpacity
         style={styles.retryButton}
-        onPress={() => fetchPosts(activeFilter, 1, true)}
+        onPress={() => fetchPosts(activeFilter, 1)}
       >
         <Text style={styles.retryButtonText}>Retry</Text>
       </TouchableOpacity>

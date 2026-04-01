@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+// app/components/Profile/ProfileHeader.tsx
+import React, { useState, useMemo } from "react";
 import {
   View,
   Text,
@@ -9,7 +10,7 @@ import {
   ImageSourcePropType,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { API_BASE_URL } from "../../../constants/stringConstants";
+import { API_BASE_URL } from "../../../constants/ipConstants";
 import ImageViewModal from "./ImageViewModal";
 
 // ============================================
@@ -41,6 +42,7 @@ interface ProfileHeaderProps {
   coverUploading?: boolean;
   onImagePress: () => void;
   onCoverPhotoPress: () => void;
+  isPublicView?: boolean; // ✅ ADDED: Flag to indicate if this is a public profile view
 }
 
 // ============================================
@@ -73,26 +75,10 @@ const normalizeCoverPhotoUrl = (
 };
 
 /**
- * Returns profile picture source (local or remote)
- * ✅ Uses local default avatar as fallback when no custom image exists
+ * Checks if profile picture exists and is valid
  */
-const getProfilePictureSource = (
-  profilePic: string | undefined,
-): ImageSourcePropType => {
-  // If there's a custom profile picture, use it
-  if (profilePic && profilePic.trim() !== "") {
-    let imageUrl = profilePic;
-
-    // Normalize relative paths
-    if (imageUrl.startsWith("/")) {
-      imageUrl = `${API_BASE_URL}${imageUrl}`;
-    }
-
-    return { uri: imageUrl };
-  }
-
-  // ✅ Fallback to local default avatar
-  return DEFAULT_AVATAR;
+const isValidProfilePicture = (profilePic: string | undefined): boolean => {
+  return !!profilePic && profilePic.trim() !== "";
 };
 
 // ============================================
@@ -106,21 +92,41 @@ export default function ProfileHeader({
   coverUploading = false,
   onImagePress,
   onCoverPhotoPress,
+  isPublicView = false, // ✅ ADDED: Default to false for own profile
 }: ProfileHeaderProps) {
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   // Extract data from props
   const username = user?.username || profile?.username || "user";
   const fullName = profile?.fullName || user?.name || "User";
   const coverPhotoUrl = normalizeCoverPhotoUrl(profile?.coverPhoto);
-  const hasCustomProfilePicture =
-    profile?.profilePicture && profile.profilePicture.trim() !== "";
+
+  // Check if there's a valid custom profile picture
+  const hasValidProfilePicture = useMemo(() => {
+    return isValidProfilePicture(profile?.profilePicture);
+  }, [profile?.profilePicture]);
+
   const showVerifiedBadge = user?.profileComplete;
-  const profilePictureSource = getProfilePictureSource(profile?.profilePicture);
+
+  // Get profile picture source based on whether there's a valid picture
+  const profilePictureSource = useMemo((): ImageSourcePropType => {
+    // If there's a valid profile picture and no image error, use it
+    if (hasValidProfilePicture && !imageError) {
+      let imageUrl = profile.profilePicture!;
+      if (imageUrl.startsWith("/")) {
+        imageUrl = `${API_BASE_URL}${imageUrl}`;
+      }
+      return { uri: imageUrl };
+    }
+
+    // Otherwise, use default avatar
+    return DEFAULT_AVATAR;
+  }, [hasValidProfilePicture, profile?.profilePicture, imageError]);
 
   // Get remote URL for image viewer (only for custom images)
-  const getImageViewerUri = (): string | undefined => {
-    if (hasCustomProfilePicture && profile?.profilePicture) {
+  const getImageViewerUri = useMemo((): string | undefined => {
+    if (hasValidProfilePicture && profile?.profilePicture) {
       let pic = profile.profilePicture;
       if (pic.startsWith("/")) {
         pic = `${API_BASE_URL}${pic}`;
@@ -128,23 +134,35 @@ export default function ProfileHeader({
       return pic;
     }
     return undefined;
-  };
+  }, [hasValidProfilePicture, profile?.profilePicture]);
+
+  // Reset image error when profile picture changes
+  React.useEffect(() => {
+    setImageError(false);
+  }, [profile?.profilePicture]);
 
   // Handlers
   const handleProfilePicturePress = () => {
-    if (!uploading) {
+    // ✅ Only allow editing if not in public view
+    if (!uploading && !isPublicView) {
       onImagePress();
     }
   };
 
   const handleProfilePictureLongPress = () => {
-    if (hasCustomProfilePicture && !uploading) {
+    // ✅ Allow viewing even in public view
+    if (hasValidProfilePicture && !uploading) {
       setImageViewerVisible(true);
     }
   };
 
   const closeImageViewer = () => {
     setImageViewerVisible(false);
+  };
+
+  const handleImageError = () => {
+    console.log("Failed to load profile image");
+    setImageError(true);
   };
 
   // Render functions
@@ -158,50 +176,70 @@ export default function ProfileHeader({
         />
       ) : (
         <View style={styles.defaultCover}>
-          <Ionicons name="images" size={40} color="rgba(0, 0, 0, 0.7)" />
+          <Ionicons
+            name="image-outline"
+            size={40}
+            color="rgba(255, 255, 255, 0.8)"
+          />
         </View>
       )}
 
-      <TouchableOpacity
-        style={styles.coverCameraButton}
-        onPress={onCoverPhotoPress}
-        disabled={coverUploading}
-      >
-        <View style={styles.cameraButtonInner}>
-          {coverUploading ? (
-            <ActivityIndicator color="white" size="small" />
-          ) : (
-            <Ionicons name="camera" size={20} color="white" />
-          )}
-        </View>
-      </TouchableOpacity>
+      {/* ✅ Only show camera button for own profile (not public view) */}
+      {!isPublicView && (
+        <TouchableOpacity
+          style={styles.coverCameraButton}
+          onPress={onCoverPhotoPress}
+          disabled={coverUploading}
+        >
+          <View style={styles.cameraButtonInner}>
+            {coverUploading ? (
+              <ActivityIndicator color="white" size="small" />
+            ) : (
+              <Ionicons name="camera" size={20} color="white" />
+            )}
+          </View>
+        </TouchableOpacity>
+      )}
     </View>
   );
 
-  const renderProfilePicture = () => (
-    <TouchableOpacity
-      onPress={handleProfilePicturePress}
-      onLongPress={handleProfilePictureLongPress}
-      activeOpacity={0.7}
-      disabled={uploading}
-      style={styles.profileImageWrapper}
-      delayLongPress={500}
-    >
-      <View style={styles.imageContainer}>
-        <Image source={profilePictureSource} style={styles.profileImage} />
+  const renderProfilePicture = () => {
+    // Determine if we should show the camera overlay
+    // ✅ Only show camera overlay for own profile (not public view)
+    const showCameraOverlay = !uploading && !isPublicView;
+    const canLongPress = hasValidProfilePicture && !uploading;
 
-        <View style={styles.profileCameraOverlay}>
-          <Ionicons name="camera" size={16} color="white" />
+    return (
+      <TouchableOpacity
+        onPress={handleProfilePicturePress}
+        onLongPress={canLongPress ? handleProfilePictureLongPress : undefined}
+        activeOpacity={0.7}
+        disabled={uploading || isPublicView} // ✅ Disable editing for public view
+        style={styles.profileImageWrapper}
+        delayLongPress={500}
+      >
+        <View style={styles.imageContainer}>
+          <Image
+            source={profilePictureSource}
+            style={styles.profileImage}
+            onError={handleImageError}
+          />
+
+          {showCameraOverlay && (
+            <View style={styles.profileCameraOverlay}>
+              <Ionicons name="camera" size={16} color="white" />
+            </View>
+          )}
+
+          {uploading && (
+            <View style={styles.uploadingOverlay}>
+              <ActivityIndicator color="white" size="small" />
+            </View>
+          )}
         </View>
-
-        {uploading && (
-          <View style={styles.uploadingOverlay}>
-            <ActivityIndicator color="white" size="small" />
-          </View>
-        )}
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   const renderNameSection = () => (
     <View style={styles.nameUsernameContainer}>
@@ -230,14 +268,12 @@ export default function ProfileHeader({
   };
 
   const renderImageViewerModal = () => {
-    const imageUri = getImageViewerUri();
-
-    if (!imageUri) return null;
+    if (!getImageViewerUri) return null;
 
     return (
       <ImageViewModal
         visible={imageViewerVisible}
-        imageUri={imageUri}
+        imageUri={getImageViewerUri}
         onClose={closeImageViewer}
         title={fullName}
         isCoverPhoto={false}
@@ -291,7 +327,7 @@ const styles = StyleSheet.create({
   defaultCover: {
     width: "100%",
     height: "100%",
-    backgroundColor: "#9b9b9b8f",
+    backgroundColor: "#8b5cf6",
     justifyContent: "center",
     alignItems: "center",
   },

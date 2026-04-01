@@ -6,7 +6,7 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { jwtDecode } from "jwt-decode";
 import { useAuth } from "../lib/AuthContext";
-import { API_BASE_URL } from "../constants/stringConstants";
+import { API_BASE_URL } from "../constants/ipConstants";
 
 interface CustomJwtPayload {
   id: string;

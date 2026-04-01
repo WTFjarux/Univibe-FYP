@@ -1,7 +1,10 @@
-// lib/postService.ts - COMPLETE UPDATED VERSION WITH ANONYMOUS COMMENT SUPPORT
+// lib/postService.ts - UPDATED VERSION WITHOUT DICEBEAR
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-import { API_BASE_URL } from '../constants/stringConstants'; 
+import { API_BASE_URL } from '../constants/ipConstants'; 
+
+// Default avatar constant (will be provided by the component)
+export const DEFAULT_AVATAR = "default-avatar";
 
 export interface Post {
   _id: string;
@@ -43,12 +46,12 @@ export interface Post {
   isReposted?: boolean;
   isAnonymous?: boolean;
   commentCount?: number;
-  recentComments?: Comment[]; // Added for post detail view
+  recentComments?: Comment[];
 }
 
 export interface Comment {
   _id: string;
-  post: string; // Added post reference
+  post: string;
   user: {
     _id: string;
     name: string;
@@ -58,13 +61,13 @@ export interface Comment {
   };
   content: string;
   parentComment: string | null;
-  rootComment?: string | null; // Added for thread tracking
-  replies: Comment[] | string[]; // Can be populated or just IDs
+  rootComment?: string | null;
+  replies: Comment[] | string[];
   likes: string[];
   isEdited: boolean;
   editedAt?: string;
   isFromAnonymousPost: boolean;
-  isAnonymous: boolean; // Added for comment-level anonymity
+  isAnonymous: boolean;
   depth: number;
   isDeleted?: boolean;
   deletedAt?: string;
@@ -72,7 +75,7 @@ export interface Comment {
   updatedAt: string;
   isLiked?: boolean;
   likeCount?: number;
-  replyCount?: number; // Added for UI
+  replyCount?: number;
 }
 
 export interface CommentsResponse {
@@ -129,17 +132,13 @@ export interface PostsResponse {
 }
 
 // Get auth token
-const getAuthToken = async (): Promise<string> => {
+export const getAuthToken = async (): Promise<string | null> => {
   try {
     const token = await SecureStore.getItemAsync('authToken');
-    
-    if (!token) {
-      throw new Error('No authentication token found. Please login again.');
-    }
-    
-    return token;
+    return token || null;
   } catch (error) {
-    throw new Error('Authentication error. Please login again.');
+    console.error('Error getting auth token:', error);
+    return null;
   }
 };
 
@@ -476,7 +475,7 @@ export const getPostComments = async (
 export const addComment = async (
   postId: string,
   content: string,
-  isAnonymous: boolean = false // NEW: anonymous option
+  isAnonymous: boolean = false
 ): Promise<{ success: boolean; comment: Comment }> => {
   try {
     const token = await getAuthToken();
@@ -490,7 +489,7 @@ export const addComment = async (
       },
       body: JSON.stringify({ 
         content,
-        isAnonymous // Send anonymous flag
+        isAnonymous
       }),
     });
     
@@ -511,7 +510,7 @@ export const addReply = async (
   postId: string,
   commentId: string,
   content: string,
-  isAnonymous: boolean = false // NEW: anonymous option
+  isAnonymous: boolean = false
 ): Promise<{ success: boolean; reply: Comment }> => {
   try {
     const token = await getAuthToken();
@@ -525,7 +524,7 @@ export const addReply = async (
       },
       body: JSON.stringify({ 
         content,
-        isAnonymous // Send anonymous flag
+        isAnonymous
       }),
     });
     
@@ -658,7 +657,7 @@ export const deleteComment = async (
   }
 };
 
-// ============ NEW COMMENT UTILITY FUNCTIONS ============
+// ============ COMMENT UTILITY FUNCTIONS ============
 
 // Get reply count for a comment
 export const getCommentReplyCount = async (
@@ -805,36 +804,6 @@ export const getVisibilityIcon = (visibility: string): string => {
   }
 };
 
-// Get user profile image with fallback
-export const getUserProfileImage = (
-  user: { profilePicture?: string | null; username?: string },
-  isAnonymous: boolean = false
-): string => {
-  if (isAnonymous) {
-    return `https://api.dicebear.com/7.x/avataaars/svg?seed=anonymous`;
-  }
-  
-  if (!user?.profilePicture) {
-    const seed = user?.username || 'user';
-    return `https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}`;
-  }
-  
-  return getFullImageUrl(user.profilePicture);
-};
-
-// Get comment user profile image (handles anonymous)
-export const getCommentUserProfileImage = (
-  comment: Comment,
-  isPostAnonymous: boolean = false
-): string => {
-  // Check if should be anonymous
-  if ((isPostAnonymous && comment.isFromAnonymousPost) || comment.isAnonymous) {
-    return `https://api.dicebear.com/7.x/avataaars/svg?seed=anonymous_${comment._id}`;
-  }
-  
-  return getUserProfileImage(comment.user);
-};
-
 // Format comment content with reply indicator
 export const formatCommentContent = (
   content: string,
@@ -858,7 +827,7 @@ export const getCommentDepthColor = (depth: number): string => {
   return colors[Math.min(depth - 1, colors.length - 1)];
 };
 
-// FIXED: Check if comment is from post author (handles anonymous and edge cases)
+// Check if comment is from post author (handles anonymous and edge cases)
 export const isCommentFromPostAuthor = (
   comment: Comment,
   postUserId: string
@@ -892,7 +861,7 @@ export const formatCommentTimestamp = (createdAt: string): string => {
 
 // ============ TYPE GUARDS ============
 
-// ADD THIS TYPE GUARD FUNCTION (MISSING)
+// Type guard to check if replies are populated
 export function areRepliesPopulated(replies: string[] | Comment[]): replies is Comment[] {
   return replies.length > 0 && typeof replies[0] !== 'string';
 }

@@ -13,5 +13,5 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
-, "lib/AuthContext.tsx", "app/(auth)/verify-link.tsx"  ]
+, "lib/AuthContext.tsx", "app/(auth)/verify-link.tsx", "app/components/Profile/FormComponent.tsx"  ]
 }

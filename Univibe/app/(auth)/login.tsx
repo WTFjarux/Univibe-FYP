@@ -4,7 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../lib/AuthContext";
 import React, { useState } from "react";
-import { API_BASE_URL } from "../../constants/stringConstants";
+import { API_BASE_URL } from "../../constants/ipConstants";
 import {
   View,
   Text,
@@ -79,7 +79,7 @@ export default function LoginScreen() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ email }),
-        }
+        },
       );
 
       const data = await response.json();
@@ -87,7 +87,7 @@ export default function LoginScreen() {
       if (!response.ok) {
         Alert.alert(
           "Error",
-          data.message || "Failed to resend verification email"
+          data.message || "Failed to resend verification email",
         );
         return;
       }

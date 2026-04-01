@@ -164,20 +164,24 @@ exports.setupProfile = async (req, res) => {
       });
     }
 
-    // Update user
+    // ✅ Update user with username and mark profile complete
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       {
         profileComplete: true,
         username: profileData.username.trim(),
+        // ✅ Also update name if fullName is provided during setup
+        ...(profileData.fullName && { name: profileData.fullName }),
       },
       { new: true },
     );
 
-    // ✅ REMOVED DICEBEAR - use empty string for default profile picture
+    // Use fullName from input or fallback to user's name
+    const fullName = profileData.fullName || existingUser.name;
+
     const profileFields = {
       user: userId,
-      fullName: existingUser.name,
+      fullName: fullName,
       username: profileData.username.trim(),
       campus: profileData.campus || "Herald College Kathmandu",
       major: profileData.major.trim(),
@@ -189,7 +193,7 @@ exports.setupProfile = async (req, res) => {
       universityEmail: (profileData.universityEmail || existingUser.email)
         .toLowerCase()
         .trim(),
-      profilePicture: "", // ✅ Empty string - will use local default avatar
+      profilePicture: "", // Empty string - will use local default avatar
       coverPhoto: "",
       socialLinks: {
         instagram: (profileData.instagram || "").trim(),
@@ -236,7 +240,7 @@ exports.setupProfile = async (req, res) => {
       data: {
         user: {
           _id: updatedUser._id,
-          name: updatedUser.name,
+          name: updatedUser.name, // ✅ Now has updated name
           username: updatedUser.username,
           email: updatedUser.email,
           profileComplete: updatedUser.profileComplete,
@@ -738,6 +742,10 @@ exports.getProfileByUsername = async (req, res) => {
 /**
  * Get public profile by user ID
  */
+/**
+ * Get public profile by user ID
+ */
+
 exports.getPublicProfile = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -755,7 +763,7 @@ exports.getPublicProfile = async (req, res) => {
 
     const profile = await Profile.findOne({ user: userId })
       .select(
-        "fullName username profilePicture coverPhoto bio major year graduationYear pronouns interests stats",
+        "fullName username profilePicture coverPhoto bio major year graduationYear pronouns interests stats socialLinks",
       )
       .lean();
 
@@ -766,8 +774,34 @@ exports.getPublicProfile = async (req, res) => {
       });
     }
 
+    if (!profile.socialLinks) {
+      profile.socialLinks = {
+        instagram: "",
+        linkedin: "",
+        github: "",
+      };
+    }
+
+    if (!profile.stats) {
+      profile.stats = {
+        posts: 0,
+        connections: 0,
+        groups: 0,
+      };
+    }
+
     profile.profilePicture = getFullImageUrl(profile.profilePicture, req);
     profile.coverPhoto = getFullImageUrl(profile.coverPhoto, req);
+
+    // Get post count for this user - EXCLUDE ANONYMOUS POSTS
+    const Post = require("../models/Post");
+    const postCount = await Post.countDocuments({
+      user: userId,
+      isAnonymous: false, // ✅ Exclude anonymous posts
+      isDeleted: { $ne: true },
+    });
+
+    profile.stats.posts = postCount;
 
     res.status(200).json({
       success: true,
@@ -778,13 +812,28 @@ exports.getPublicProfile = async (req, res) => {
           username: user.username,
           profileComplete: user.profileComplete,
         },
-        profile,
+        profile: {
+          _id: profile._id,
+          fullName: profile.fullName,
+          username: profile.username,
+          bio: profile.bio || "",
+          major: profile.major || "",
+          year: profile.year || "",
+          graduationYear: profile.graduationYear || "",
+          pronouns: profile.pronouns || "",
+          profilePicture: profile.profilePicture || "",
+          coverPhoto: profile.coverPhoto || "",
+          socialLinks: profile.socialLinks,
+          stats: profile.stats,
+        },
       },
     });
   } catch (error) {
+    console.error("Error fetching public profile:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch public profile",
+      error: error.message,
     });
   }
 };
@@ -809,9 +858,21 @@ exports.updateProfile = async (req, res) => {
       });
     }
 
-    const profileUpdate = {
-      fullName: currentUser.name,
-    };
+    const profileUpdate = {};
+
+    // ✅ CRITICAL FIX: Handle fullName update - sync with User model
+    if (
+      updateData.fullName !== undefined &&
+      updateData.fullName !== currentUser.name
+    ) {
+      // Update User model's name field
+      currentUser.name = updateData.fullName;
+      await currentUser.save();
+
+      // Also update profile's fullName
+      profileUpdate.fullName = updateData.fullName;
+      console.log(`✅ Synced user name: ${currentUser.name}`);
+    }
 
     // Handle username change
     if (updateData.username && updateData.username !== currentUser.username) {
@@ -884,6 +945,10 @@ exports.updateProfile = async (req, res) => {
       if (!profileUpdate.username && currentUser.username) {
         profileUpdate.username = currentUser.username;
       }
+      // Set default fullName from user if not provided
+      if (!profileUpdate.fullName) {
+        profileUpdate.fullName = currentUser.name;
+      }
 
       profile = await Profile.create({
         user: userId,
@@ -893,11 +958,15 @@ exports.updateProfile = async (req, res) => {
       if (!profileUpdate.username && currentUser.username) {
         profileUpdate.username = currentUser.username;
       }
+      // Keep existing fullName if not updating
+      if (!profileUpdate.fullName) {
+        profileUpdate.fullName = profile.fullName;
+      }
 
       profile = await Profile.findOneAndUpdate(
         { user: userId },
         { $set: profileUpdate },
-        { new: true },
+        { new: true, runValidators: true },
       );
     }
 
@@ -918,7 +987,7 @@ exports.updateProfile = async (req, res) => {
       data: {
         user: {
           _id: currentUser._id,
-          name: currentUser.name,
+          name: currentUser.name, // ✅ This will now have the updated name
           username: currentUser.username,
           email: currentUser.email,
         },
@@ -926,6 +995,8 @@ exports.updateProfile = async (req, res) => {
       },
     });
   } catch (error) {
+    console.error("Profile update error:", error);
+
     if (error.code === 11000 && error.keyPattern?.username) {
       return res.status(400).json({
         success: false,

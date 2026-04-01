@@ -1,21 +1,115 @@
 // app/components/Profile/ProfileCard.tsx
 import React from "react";
-import { View, Text, Image, TouchableOpacity, StyleSheet } from "react-native";
+import {
+  View,
+  Text,
+  Image,
+  TouchableOpacity,
+  StyleSheet,
+  ImageSourcePropType,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { useAuth } from "../../../lib/AuthContext";
+import { API_BASE_URL } from "../../../constants/ipConstants";
+
+// Local default avatar
+const DEFAULT_AVATAR: ImageSourcePropType = require("../../../assets/images/default-avatar.png");
+
+interface ProfileCardProps {
+  user: {
+    _id: string;
+    fullName: string;
+    username: string;
+    profilePicture?: string;
+    coverPhoto?: string;
+    major?: string;
+    year?: string;
+    verificationStatus?: string;
+    stats?: {
+      posts: number;
+      connections: number;
+      groups: number;
+    };
+  };
+  onPress?: () => void;
+  showFollowButton?: boolean;
+  isFollowing?: boolean;
+  onFollowPress?: () => void;
+}
 
 export default function ProfileCard({
   user,
   onPress,
-}: {
-  user: any;
-  onPress?: () => void;
-}) {
+  showFollowButton = false,
+  isFollowing = false,
+  onFollowPress,
+}: ProfileCardProps) {
+  const router = useRouter();
+  const { user: currentUser } = useAuth();
+
+  // ✅ Add null check for user
+  if (!user) {
+    return null;
+  }
+
+  const handlePress = () => {
+    if (onPress) {
+      onPress();
+    } else {
+      // Navigate to profile
+      if (user._id === currentUser?.id) {
+        router.push("/(tabs)/profile");
+      } else {
+        router.push(`/profile/${user._id}`);
+      }
+    }
+  };
+
+  const handleFollowPress = (e: any) => {
+    e.stopPropagation();
+    if (onFollowPress) {
+      onFollowPress();
+    }
+  };
+
+  // Get profile picture source
+  const getProfilePictureSource = (): ImageSourcePropType => {
+    if (user.profilePicture && user.profilePicture.trim() !== "") {
+      let url = user.profilePicture;
+      if (url.startsWith("/")) {
+        url = `${API_BASE_URL}${url}`;
+      }
+      return { uri: url };
+    }
+    return DEFAULT_AVATAR;
+  };
+
+  // Get cover photo source (returns ImageSourcePropType or null)
+  const getCoverPhotoSource = (): ImageSourcePropType | null => {
+    if (user.coverPhoto && user.coverPhoto.trim() !== "") {
+      let url = user.coverPhoto;
+      if (url.startsWith("/")) {
+        url = `${API_BASE_URL}${url}`;
+      }
+      return { uri: url };
+    }
+    return null;
+  };
+
+  const isOwnProfile = user._id === currentUser?.id;
+  const coverPhotoSource = getCoverPhotoSource();
+
   return (
-    <TouchableOpacity onPress={onPress} style={styles.card}>
+    <TouchableOpacity
+      onPress={handlePress}
+      style={styles.card}
+      activeOpacity={0.7}
+    >
       {/* Cover Photo Section */}
       <View style={styles.coverSection}>
-        {user.coverPhoto ? (
-          <Image source={{ uri: user.coverPhoto }} style={styles.coverImage} />
+        {coverPhotoSource ? (
+          <Image source={coverPhotoSource} style={styles.coverImage} />
         ) : (
           <View style={styles.defaultCover}>
             <Ionicons
@@ -25,17 +119,41 @@ export default function ProfileCard({
             />
           </View>
         )}
-        <Image
-          source={{ uri: user.profilePicture }}
-          style={styles.profileImage}
-        />
+        <Image source={getProfilePictureSource()} style={styles.profileImage} />
+
+        {/* Follow Button Overlay (optional) */}
+        {showFollowButton && !isOwnProfile && (
+          <TouchableOpacity
+            style={[
+              styles.followOverlayButton,
+              isFollowing && styles.followingOverlayButton,
+            ]}
+            onPress={handleFollowPress}
+          >
+            <Ionicons
+              name={isFollowing ? "checkmark" : "person-add"}
+              size={16}
+              color={isFollowing ? "#8b5cf6" : "white"}
+            />
+            <Text
+              style={[
+                styles.followOverlayText,
+                isFollowing && styles.followingOverlayText,
+              ]}
+            >
+              {isFollowing ? "Following" : "Follow"}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.cardContent}>
         <View style={styles.cardHeader}>
           <View style={styles.cardInfo}>
             <View style={styles.nameContainer}>
-              <Text style={styles.name}>{user.fullName}</Text>
+              <Text style={styles.name} numberOfLines={1}>
+                {user.fullName}
+              </Text>
               {user.verificationStatus === "verified" && (
                 <Ionicons
                   name="checkmark-circle"
@@ -45,10 +163,14 @@ export default function ProfileCard({
                 />
               )}
             </View>
-            <Text style={styles.username}>@{user.username}</Text>
-            <Text style={styles.details}>
-              {user.major} • {user.year}
+            <Text style={styles.username} numberOfLines={1}>
+              @{user.username}
             </Text>
+            {user.major && user.year && (
+              <Text style={styles.details} numberOfLines={1}>
+                {user.major} • {user.year}
+              </Text>
+            )}
           </View>
         </View>
 
@@ -103,7 +225,7 @@ const styles = StyleSheet.create({
   defaultCover: {
     width: "100%",
     height: "100%",
-    backgroundColor: "#f5f3ff",
+    backgroundColor: "#8b5cf6",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -117,10 +239,37 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: -40,
     left: 16,
+    zIndex: 2,
+  },
+  followOverlayButton: {
+    position: "absolute",
+    bottom: 12,
+    right: 12,
+    backgroundColor: "#8b5cf6",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 4,
+    zIndex: 3,
+  },
+  followingOverlayButton: {
+    backgroundColor: "white",
+    borderWidth: 1,
+    borderColor: "#8b5cf6",
+  },
+  followOverlayText: {
+    color: "white",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  followingOverlayText: {
+    color: "#8b5cf6",
   },
   cardContent: {
     padding: 16,
-    paddingTop: 48, 
+    paddingTop: 48,
   },
   cardHeader: {
     flexDirection: "row",
@@ -133,11 +282,13 @@ const styles = StyleSheet.create({
   nameContainer: {
     flexDirection: "row",
     alignItems: "center",
+    flexWrap: "wrap",
   },
   name: {
     fontSize: 18,
     fontWeight: "bold",
     color: "#111827",
+    flex: 1,
   },
   verifiedIcon: {
     marginLeft: 4,
@@ -162,6 +313,7 @@ const styles = StyleSheet.create({
   },
   statItem: {
     alignItems: "center",
+    flex: 1,
   },
   statNumber: {
     fontSize: 20,

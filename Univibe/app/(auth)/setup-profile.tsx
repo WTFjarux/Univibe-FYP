@@ -16,165 +16,22 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { profileService } from "../../lib/profileService";
-import { API_BASE_URL } from "../../constants/stringConstants";
+import { API_BASE_URL } from "../../constants/ipConstants";
 
-// Constants
-const GRADUATION_YEARS = Array.from({ length: 10 }, (_, i) =>
-  String(new Date().getFullYear() + i),
-);
-
-// MAJORS - removed "Other"
-const MAJORS = [
-  {
-    id: "bit",
-    label: "Bachelor in Information Technology (BIT)",
-    value: "Bachelor in Information Technology (BIT)",
-  },
-  {
-    id: "cs",
-    label: "Bachelor in Cyber Security",
-    value: "Bachelor in Cyber Security",
-  },
-  {
-    id: "ibm",
-    label: "Bachelor in International Business Management (BBIM)",
-    value: "Bachelor in International Business Management (BBIM)",
-  },
-  {
-    id: "mba",
-    label: "Master in Business Administration (MBA)",
-    value: "Master in Business Administration (MBA)",
-  },
-];
-
-const YEARS = [
-  { id: "upc", label: "UPC", value: "UPC" },
-  { id: "first", label: "First Year", value: "First" },
-  { id: "second", label: "Second Year", value: "Second" },
-  { id: "third", label: "Third Year", value: "Third" },
-];
-
-// COLLEGES - removed "Other"
-const COLLEGES = [
-  "Herald College Kathmandu",
-  "Kathmandu University",
-  "Tribhuvan University",
-  "Pokhara University",
-  "Purbanchal University",
-];
-
-// Scrollable Dropdown Component
-interface ScrollableDropdownProps {
-  label: string;
-  value: string;
-  options: string[] | Array<{ id: string; label: string; value: string }>;
-  onSelect: (value: string) => void;
-  placeholder: string;
-  required?: boolean;
-  icon?: React.ReactNode;
-}
-
-const ScrollableDropdown: React.FC<ScrollableDropdownProps> = ({
-  label,
-  value,
-  options,
-  onSelect,
-  placeholder,
-  required = false,
-  icon,
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
-
-  const getDisplayValue = () => {
-    if (!value) return placeholder;
-
-    if (options.length > 0 && typeof options[0] === "object") {
-      const option = (
-        options as Array<{ id: string; label: string; value: string }>
-      ).find((opt) => opt.value === value);
-      return option ? option.label : value;
-    }
-    return value;
-  };
-
-  return (
-    <View style={styles.inputGroup}>
-      <View style={styles.labelContainer}>
-        {icon}
-        <Text style={styles.label}>
-          {label} {required && <Text style={styles.requiredStar}>*</Text>}
-        </Text>
-      </View>
-
-      <TouchableOpacity
-        style={styles.dropdownButton}
-        onPress={() => setIsOpen(!isOpen)}
-        activeOpacity={0.7}
-      >
-        <Text
-          style={[styles.dropdownText, !value && styles.dropdownPlaceholder]}
-          numberOfLines={1}
-        >
-          {getDisplayValue()}
-        </Text>
-        <Ionicons
-          name={isOpen ? "chevron-up" : "chevron-down"}
-          size={20}
-          color="#6b7280"
-          style={styles.dropdownIcon}
-        />
-      </TouchableOpacity>
-
-      {isOpen && (
-        <View style={styles.dropdownList}>
-          <ScrollView
-            nestedScrollEnabled={true}
-            showsVerticalScrollIndicator={true}
-            style={styles.dropdownScrollView}
-            keyboardShouldPersistTaps="handled"
-          >
-            {options.map((option, index) => {
-              const isObject = typeof option === "object" && option !== null;
-              const optionValue = isObject ? (option as any).value : option;
-              const optionLabel = isObject ? (option as any).label : option;
-              const isSelected = value === optionValue;
-
-              return (
-                <TouchableOpacity
-                  key={isObject ? (option as any).id : `option-${index}`}
-                  style={[
-                    styles.dropdownItem,
-                    isSelected && styles.dropdownItemSelected,
-                    index === options.length - 1 && styles.dropdownItemLast,
-                  ]}
-                  onPress={() => {
-                    onSelect(optionValue);
-                    setIsOpen(false);
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.dropdownItemText,
-                      isSelected && styles.dropdownItemTextSelected,
-                    ]}
-                    numberOfLines={2}
-                  >
-                    {optionLabel}
-                  </Text>
-                  {isSelected && (
-                    <Ionicons name="checkmark" size={18} color="#4f46e5" />
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-      )}
-    </View>
-  );
-};
+// Import shared components and constants
+import {
+  ScrollableDropdown,
+  YearSelector,
+  PronounsSelector,
+  BioInput,
+} from "../components/Profile/FormComponent";
+import {
+  GRADUATION_YEARS,
+  MAJORS,
+  COLLEGES,
+} from "../../constants/profileConstants";
 
 export default function SetupProfileScreen() {
   const [loading, setLoading] = useState(false);
@@ -206,6 +63,21 @@ export default function SetupProfileScreen() {
   // Handle major selection
   const handleMajorSelect = (value: string) => {
     setFormData({ ...formData, major: value });
+  };
+
+  // Handle year selection
+  const handleYearSelect = (year: string) => {
+    setFormData({ ...formData, year });
+  };
+
+  // Handle pronouns selection
+  const handlePronounsSelect = (pronouns: string) => {
+    setFormData({ ...formData, pronouns });
+  };
+
+  // Handle graduation year selection
+  const handleGraduationYearSelect = (year: string) => {
+    setFormData({ ...formData, graduationYear: year });
   };
 
   // Debounced username check
@@ -342,10 +214,9 @@ export default function SetupProfileScreen() {
         return;
       }
 
-      // Prepare data for submission - ensure field names match backend
       const submitData = {
         username: formData.username,
-        campus: formData.campus, // This is the correct field name in Profile model
+        campus: formData.campus,
         major: formData.major,
         year: formData.year,
         graduationYear: formData.graduationYear,
@@ -564,7 +435,7 @@ export default function SetupProfileScreen() {
                       placeholder="@ username"
                       placeholderTextColor="#9ca3af"
                       value={formData.username}
-                      onChangeText={(text) =>
+                      onChangeText={(text: string) =>
                         setFormData({ ...formData, username: text })
                       }
                       autoCapitalize="none"
@@ -593,65 +464,20 @@ export default function SetupProfileScreen() {
                     }
                   />
 
-                  {/* Pronouns */}
-                  <View style={styles.inputGroup}>
-                    <View style={styles.labelContainer}>
-                      <MaterialIcons name="badge" size={20} color="#4f46e5" />
-                      <Text style={styles.label}>Pronouns</Text>
-                    </View>
-                    <View style={styles.pronounContainer}>
-                      {["he/him", "she/her", "they/them"].map((pronoun) => (
-                        <TouchableOpacity
-                          key={pronoun}
-                          style={[
-                            styles.pronounButton,
-                            formData.pronouns === pronoun &&
-                              styles.pronounButtonActive,
-                          ]}
-                          onPress={() =>
-                            setFormData({ ...formData, pronouns: pronoun })
-                          }
-                        >
-                          <Text
-                            style={[
-                              styles.pronounButtonText,
-                              formData.pronouns === pronoun &&
-                                styles.pronounButtonTextActive,
-                            ]}
-                          >
-                            {pronoun}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
+                  {/* Pronouns Selector */}
+                  <PronounsSelector
+                    value={formData.pronouns}
+                    onSelect={handlePronounsSelect}
+                  />
 
-                  {/* Bio */}
-                  <View style={styles.inputGroup}>
-                    <View style={styles.labelContainer}>
-                      <Ionicons
-                        name="document-text-outline"
-                        size={20}
-                        color="#4f46e5"
-                      />
-                      <Text style={styles.label}>Bio</Text>
-                    </View>
-                    <TextInput
-                      style={[styles.input, styles.bioInput]}
-                      placeholder="Tell us a bit about yourself..."
-                      placeholderTextColor="#9ca3af"
-                      value={formData.bio}
-                      onChangeText={(text) =>
-                        setFormData({ ...formData, bio: text })
-                      }
-                      multiline
-                      numberOfLines={3}
-                      maxLength={150}
-                    />
-                    <Text style={styles.charCount}>
-                      {150 - formData.bio.length} characters left
-                    </Text>
-                  </View>
+                  {/* Bio Input */}
+                  <BioInput
+                    value={formData.bio}
+                    onChange={(text: string) =>
+                      setFormData({ ...formData, bio: text })
+                    }
+                    maxLength={150}
+                  />
                 </View>
               )}
 
@@ -671,7 +497,7 @@ export default function SetupProfileScreen() {
                       placeholder="name@university.edu"
                       placeholderTextColor="#9ca3af"
                       value={formData.universityEmail}
-                      onChangeText={(text) =>
+                      onChangeText={(text: string) =>
                         setFormData({ ...formData, universityEmail: text })
                       }
                       keyboardType="email-address"
@@ -696,53 +522,19 @@ export default function SetupProfileScreen() {
                     }
                   />
 
-                  {/* Current Year */}
-                  <View style={styles.inputGroup}>
-                    <View style={styles.labelContainer}>
-                      <MaterialIcons
-                        name="calendar-today"
-                        size={20}
-                        color="#4f46e5"
-                      />
-                      <Text style={styles.label}>
-                        Current Year <Text style={styles.requiredStar}>*</Text>
-                      </Text>
-                    </View>
-                    <View style={styles.yearGrid}>
-                      {YEARS.map((year) => (
-                        <TouchableOpacity
-                          key={year.id}
-                          style={[
-                            styles.yearCard,
-                            formData.year === year.value &&
-                              styles.yearCardActive,
-                          ]}
-                          onPress={() =>
-                            setFormData({ ...formData, year: year.value })
-                          }
-                        >
-                          <Text
-                            style={[
-                              styles.yearCardText,
-                              formData.year === year.value &&
-                                styles.yearCardTextActive,
-                            ]}
-                          >
-                            {year.label}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
+                  {/* Year Selector */}
+                  <YearSelector
+                    value={formData.year}
+                    onSelect={handleYearSelect}
+                    required={true}
+                  />
 
                   {/* Graduation Year - Scrollable Dropdown */}
                   <ScrollableDropdown
                     label="Expected Graduation Year"
                     value={formData.graduationYear}
                     options={GRADUATION_YEARS}
-                    onSelect={(value) =>
-                      setFormData({ ...formData, graduationYear: value })
-                    }
+                    onSelect={handleGraduationYearSelect}
                     placeholder="Select graduation year"
                     icon={
                       <Ionicons
@@ -937,112 +729,6 @@ const styles = StyleSheet.create({
   validationTextLoading: { fontSize: 12, color: "#4f46e5" },
   validationTextError: { fontSize: 12, color: "#ef4444" },
   validationTextSuccess: { fontSize: 12, color: "#10b981" },
-  pronounContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    marginTop: 8,
-  },
-  pronounButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "#d1d5db",
-    backgroundColor: "white",
-  },
-  pronounButtonActive: { backgroundColor: "#4f46e5", borderColor: "#4f46e5" },
-  pronounButtonText: { fontSize: 14, color: "#374151" },
-  pronounButtonTextActive: { color: "white", fontWeight: "600" },
-  bioInput: { minHeight: 100, textAlignVertical: "top" },
-  charCount: {
-    fontSize: 12,
-    color: "#9ca3af",
-    textAlign: "right",
-    marginTop: 6,
-  },
-  dropdownButton: {
-    backgroundColor: "#f9fafb",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  dropdownText: {
-    fontSize: 15,
-    color: "#000000",
-    flex: 1,
-  },
-  dropdownPlaceholder: {
-    color: "#9ca3af",
-  },
-  dropdownIcon: {
-    marginLeft: 8,
-  },
-  dropdownList: {
-    marginTop: 8,
-    backgroundColor: "#ffffff",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 12,
-    maxHeight: 250,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  dropdownScrollView: {
-    maxHeight: 250,
-  },
-  dropdownItem: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
-  },
-  dropdownItemLast: {
-    borderBottomWidth: 0,
-  },
-  dropdownItemSelected: {
-    backgroundColor: "#f5f3ff",
-  },
-  dropdownItemText: {
-    fontSize: 15,
-    color: "#374151",
-    flex: 1,
-  },
-  dropdownItemTextSelected: {
-    color: "#4f46e5",
-    fontWeight: "500",
-  },
-  yearGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 10 },
-  yearCard: {
-    flex: 1,
-    minWidth: "30%",
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    backgroundColor: "white",
-    alignItems: "center",
-  },
-  yearCardActive: { backgroundColor: "#4f46e5", borderColor: "#4f46e5" },
-  yearCardText: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#374151",
-    textAlign: "center",
-  },
-  yearCardTextActive: { color: "white" },
   buttonContainer: { flexDirection: "row", marginTop: 30, gap: 12 },
   buttonContainerSpaced: { justifyContent: "space-between" },
   secondaryButton: {

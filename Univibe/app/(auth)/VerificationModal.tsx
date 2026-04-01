@@ -11,7 +11,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import * as SecureStore from "expo-secure-store";
 import { jwtDecode } from "jwt-decode";
-import { API_BASE_URL } from "../../constants/stringConstants";
+import { API_BASE_URL } from "../../constants/ipConstants";
 
 interface CustomJwtPayload {
   id: string;

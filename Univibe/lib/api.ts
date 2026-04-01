@@ -1,6 +1,6 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
-import { API_BASE_URL } from '../constants/stringConstants';
+import { API_BASE_URL } from '../constants/ipConstants';
 
 // Create axios instance
 const api = axios.create({
