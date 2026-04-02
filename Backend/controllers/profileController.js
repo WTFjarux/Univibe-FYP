@@ -13,8 +13,6 @@ const path = require("path");
  */
 const getFullImageUrl = (imagePath, req) => {
   if (!imagePath) return null;
-
-  // Already a full URL
   if (imagePath.startsWith("http://") || imagePath.startsWith("https://")) {
     return imagePath;
   }
@@ -25,48 +23,41 @@ const getFullImageUrl = (imagePath, req) => {
     return `${baseUrl}${imagePath}`;
   }
 
-  // Determine correct directory based on filename pattern
   if (imagePath.includes("profilePicture-")) {
     return `${baseUrl}/uploads/profile-pictures/${imagePath}`;
   } else if (imagePath.includes("coverPhoto-")) {
     return `${baseUrl}/uploads/cover-photos/${imagePath}`;
-  } else if (imagePath.includes("user-")) {
-    return `${baseUrl}/uploads/profile-pictures/${imagePath}`;
   }
 
   return `${baseUrl}/uploads/${imagePath}`;
 };
 
 /**
- * Clean up uploaded file on server if operation fails
+ * Delete uploaded file from server on failure
  */
 const cleanupUploadedFile = (filename, fileType = "profile-picture") => {
   try {
     const directory =
       fileType === "cover-photo" ? "cover-photos" : "profile-pictures";
     const filePath = path.join(__dirname, "..", "uploads", directory, filename);
-
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
   } catch (error) {
-    // Silently fail - cleanup is best effort
+    // Silent fail - cleanup is best effort
   }
 };
 
 // ============================================
-// PROFILE SETUP & BASIC INFO
+// PROFILE SETUP
 // ============================================
 
 /**
- * Check if a username is available for registration/profile setup
+ * Check username availability
  */
 exports.checkUsernameAvailability = async (req, res) => {
   try {
     const { username } = req.params;
     const userId = req.user.id;
 
-    // Validation
     if (!username || username.trim().length < 3) {
       return res.status(400).json({
         success: false,
@@ -115,6 +106,7 @@ exports.checkUsernameAvailability = async (req, res) => {
       available: true,
     });
   } catch (error) {
+    console.error("Username check error:", error);
     res.status(500).json({
       success: false,
       message: "Error checking username availability",
@@ -145,7 +137,6 @@ exports.setupProfile = async (req, res) => {
       });
     }
 
-    // Check username availability
     const lowercaseUsername = profileData.username.trim().toLowerCase();
 
     const usernameTakenInUser = await User.findOne({
@@ -164,19 +155,17 @@ exports.setupProfile = async (req, res) => {
       });
     }
 
-    // ✅ Update user with username and mark profile complete
+    // Update user with username and mark profile complete
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       {
         profileComplete: true,
         username: profileData.username.trim(),
-        // ✅ Also update name if fullName is provided during setup
         ...(profileData.fullName && { name: profileData.fullName }),
       },
       { new: true },
     );
 
-    // Use fullName from input or fallback to user's name
     const fullName = profileData.fullName || existingUser.name;
 
     const profileFields = {
@@ -193,7 +182,7 @@ exports.setupProfile = async (req, res) => {
       universityEmail: (profileData.universityEmail || existingUser.email)
         .toLowerCase()
         .trim(),
-      profilePicture: "", // Empty string - will use local default avatar
+      profilePicture: "",
       coverPhoto: "",
       socialLinks: {
         instagram: (profileData.instagram || "").trim(),
@@ -203,27 +192,24 @@ exports.setupProfile = async (req, res) => {
       interests: Array.isArray(profileData.interests)
         ? profileData.interests
         : [],
-      stats: {
-        posts: 0,
-        connections: 0,
-        groups: 0,
-      },
+      stats: { posts: 0, connections: 0, groups: 0 },
     };
 
-    // Create or update profile
     let profile = await Profile.findOne({ user: userId });
 
     if (profile) {
       profile = await Profile.findOneAndUpdate(
         { user: userId },
         profileFields,
-        { new: true, runValidators: true },
+        {
+          new: true,
+          runValidators: true,
+        },
       );
     } else {
       profile = await Profile.create(profileFields);
     }
 
-    // Prepare response
     const profileResponse = profile.toObject();
     profileResponse.profilePicture = getFullImageUrl(
       profileResponse.profilePicture,
@@ -240,7 +226,7 @@ exports.setupProfile = async (req, res) => {
       data: {
         user: {
           _id: updatedUser._id,
-          name: updatedUser.name, // ✅ Now has updated name
+          name: updatedUser.name,
           username: updatedUser.username,
           email: updatedUser.email,
           profileComplete: updatedUser.profileComplete,
@@ -253,28 +239,23 @@ exports.setupProfile = async (req, res) => {
 
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((val) => val.message);
-      return res.status(400).json({
-        success: false,
-        message: messages.join(", "),
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: messages.join(", ") });
     }
 
     if (error.code === 11000 && error.keyPattern?.username) {
-      return res.status(400).json({
-        success: false,
-        message: "Username already exists",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Username already exists" });
     }
 
-    res.status(500).json({
-      success: false,
-      message: "Profile setup failed",
-    });
+    res.status(500).json({ success: false, message: "Profile setup failed" });
   }
 };
 
 /**
- * Check if user has completed their profile
+ * Check if user has completed profile setup
  */
 exports.checkProfileStatus = async (req, res) => {
   try {
@@ -283,15 +264,14 @@ exports.checkProfileStatus = async (req, res) => {
     );
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
     }
 
     let profile = await Profile.findOne({ user: req.user.id });
 
-    // Create basic profile if user is marked complete but profile doesn't exist
+    // Auto-create profile if user is marked complete but profile doesn't exist
     if (!profile && user.profileComplete) {
       profile = await Profile.create({
         user: req.user.id,
@@ -327,10 +307,10 @@ exports.checkProfileStatus = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to check profile status",
-    });
+    console.error("Profile status check error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to check profile status" });
   }
 };
 
@@ -344,10 +324,9 @@ exports.checkProfileStatus = async (req, res) => {
 exports.uploadProfilePicture = async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: "No image file uploaded",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "No image file uploaded" });
     }
 
     const userId = req.user.id;
@@ -361,7 +340,6 @@ exports.uploadProfilePicture = async (req, res) => {
       { new: true },
     );
 
-    // Create profile if it doesn't exist
     if (!updatedProfile) {
       const user = await User.findById(userId);
       const newProfile = await Profile.create({
@@ -381,29 +359,22 @@ exports.uploadProfilePicture = async (req, res) => {
       return res.status(200).json({
         success: true,
         message: "Profile picture uploaded and profile created",
-        data: {
-          profilePicture: fullImageUrl,
-          profile: newProfile,
-        },
+        data: { profilePicture: fullImageUrl, profile: newProfile },
       });
     }
 
     res.status(200).json({
       success: true,
       message: "Profile picture uploaded successfully",
-      data: {
-        profilePicture: fullImageUrl,
-      },
+      data: { profilePicture: fullImageUrl },
     });
   } catch (error) {
-    if (req.file && req.file.filename) {
+    if (req.file?.filename)
       cleanupUploadedFile(req.file.filename, "profile-picture");
-    }
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to upload profile picture",
-    });
+    console.error("Profile picture upload error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to upload profile picture" });
   }
 };
 
@@ -415,14 +386,12 @@ exports.deleteProfilePicture = async (req, res) => {
     const userId = req.user.id;
     const profile = await Profile.findOne({ user: userId });
 
-    if (!profile || !profile.profilePicture) {
-      return res.status(404).json({
-        success: false,
-        message: "No profile picture found",
-      });
+    if (!profile?.profilePicture) {
+      return res
+        .status(404)
+        .json({ success: false, message: "No profile picture found" });
     }
 
-    // Delete uploaded file if it's not an external URL
     const isUploadedFile = !profile.profilePicture.includes("http");
     if (isUploadedFile) {
       let filename;
@@ -438,7 +407,6 @@ exports.deleteProfilePicture = async (req, res) => {
       cleanupUploadedFile(filename, "profile-picture");
     }
 
-    // Reset to default avatar
     const user = await User.findById(userId);
     const defaultAvatar = `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username || userId}`;
 
@@ -451,16 +419,13 @@ exports.deleteProfilePicture = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Profile picture removed",
-      data: {
-        profilePicture: defaultAvatar,
-        profile: updatedProfile,
-      },
+      data: { profilePicture: defaultAvatar, profile: updatedProfile },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete profile picture",
-    });
+    console.error("Profile picture deletion error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to delete profile picture" });
   }
 };
 
@@ -470,10 +435,9 @@ exports.deleteProfilePicture = async (req, res) => {
 exports.uploadCoverPhoto = async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: "No cover photo file provided",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "No cover photo file provided" });
     }
 
     const userId = req.user.id;
@@ -488,10 +452,9 @@ exports.uploadCoverPhoto = async (req, res) => {
 
     if (!updatedProfile) {
       cleanupUploadedFile(imageFilename, "cover-photo");
-      return res.status(404).json({
-        success: false,
-        message: "Profile not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Profile not found" });
     }
 
     const fullImageUrl = getFullImageUrl(coverPhotoPath, req);
@@ -499,21 +462,15 @@ exports.uploadCoverPhoto = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Cover photo uploaded successfully",
-      data: {
-        coverPhoto: fullImageUrl,
-        profile: updatedProfile,
-      },
+      data: { coverPhoto: fullImageUrl, profile: updatedProfile },
     });
   } catch (error) {
-    if (req.file && req.file.filename) {
+    if (req.file?.filename)
       cleanupUploadedFile(req.file.filename, "cover-photo");
-    }
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to upload cover photo",
-      error: error.message,
-    });
+    console.error("Cover photo upload error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to upload cover photo" });
   }
 };
 
@@ -526,20 +483,17 @@ exports.deleteCoverPhoto = async (req, res) => {
     const profile = await Profile.findOne({ user: userId });
 
     if (!profile) {
-      return res.status(404).json({
-        success: false,
-        message: "Profile not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Profile not found" });
     }
 
     if (!profile.coverPhoto || profile.coverPhoto === "") {
-      return res.status(400).json({
-        success: false,
-        message: "No cover photo to delete",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "No cover photo to delete" });
     }
 
-    // Extract filename from path
     let coverPhotoUrl = profile.coverPhoto;
     let filename;
 
@@ -562,16 +516,13 @@ exports.deleteCoverPhoto = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Cover photo deleted successfully",
-      data: {
-        profile: updatedProfile,
-      },
+      data: { profile: updatedProfile },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete cover photo",
-      error: error.message,
-    });
+    console.error("Cover photo deletion error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to delete cover photo" });
   }
 };
 
@@ -580,21 +531,19 @@ exports.deleteCoverPhoto = async (req, res) => {
 // ============================================
 
 /**
- * Get authenticated user's detailed profile information
+ * Get authenticated user's detailed profile
  */
 exports.getProfileDetails = async (req, res) => {
   try {
     const userId = req.user.id;
-
     const user = await User.findById(userId).select(
       "name username email profileComplete",
     );
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
     }
 
     const profile = await Profile.findOne({ user: userId })
@@ -602,15 +551,12 @@ exports.getProfileDetails = async (req, res) => {
       .lean();
 
     if (!profile) {
-      return res.status(404).json({
-        success: false,
-        message: "Profile not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Profile not found" });
     }
 
-    if (!profile.username && user.username) {
-      profile.username = user.username;
-    }
+    if (!profile.username && user.username) profile.username = user.username;
 
     profile.profilePicture = getFullImageUrl(profile.profilePicture, req);
     profile.coverPhoto = getFullImageUrl(profile.coverPhoto, req);
@@ -629,15 +575,15 @@ exports.getProfileDetails = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch profile details",
-    });
+    console.error("Profile details error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch profile details" });
   }
 };
 
 /**
- * Get authenticated user's full profile with timestamps
+ * Get authenticated user's full profile with real connection count
  */
 exports.getMyProfile = async (req, res) => {
   try {
@@ -648,10 +594,9 @@ exports.getMyProfile = async (req, res) => {
     );
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
     }
 
     const profile = await Profile.findOne({ user: userId })
@@ -664,6 +609,15 @@ exports.getMyProfile = async (req, res) => {
         message: "Profile not found. Please complete your profile setup.",
       });
     }
+
+    // Get real connection count from User model
+    const currentUser = await User.findById(userId).select("connectionCount");
+    const Post = require("../models/Post");
+    const postCount = await Post.countDocuments({
+      user: userId,
+      isAnonymous: false,
+      isDeleted: { $ne: true },
+    });
 
     profile.profilePicture = getFullImageUrl(profile.profilePicture, req);
     profile.coverPhoto = getFullImageUrl(profile.coverPhoto, req);
@@ -681,16 +635,21 @@ exports.getMyProfile = async (req, res) => {
         },
         profile: {
           ...profile,
+          stats: {
+            posts: postCount,
+            connections: currentUser?.connectionCount || 0,
+            groups: profile.stats?.groups || 0,
+          },
           createdAt: profile.createdAt,
           updatedAt: profile.updatedAt,
         },
       },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch profile",
-    });
+    console.error("Get my profile error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch profile" });
   }
 };
 
@@ -709,10 +668,9 @@ exports.getProfileByUsername = async (req, res) => {
       .lean();
 
     if (!profile) {
-      return res.status(404).json({
-        success: false,
-        message: "Profile not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Profile not found" });
     }
 
     profile.profilePicture = getFullImageUrl(profile.profilePicture, req);
@@ -732,20 +690,16 @@ exports.getProfileByUsername = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch profile",
-    });
+    console.error("Get profile by username error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch profile" });
   }
 };
 
 /**
- * Get public profile by user ID
+ * Get public profile by user ID with real connection count
  */
-/**
- * Get public profile by user ID
- */
-
 exports.getPublicProfile = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -755,10 +709,9 @@ exports.getPublicProfile = async (req, res) => {
     );
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
     }
 
     const profile = await Profile.findOne({ user: userId })
@@ -768,40 +721,39 @@ exports.getPublicProfile = async (req, res) => {
       .lean();
 
     if (!profile) {
-      return res.status(404).json({
-        success: false,
-        message: "Profile not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Profile not found" });
     }
 
-    if (!profile.socialLinks) {
-      profile.socialLinks = {
-        instagram: "",
-        linkedin: "",
-        github: "",
-      };
-    }
-
-    if (!profile.stats) {
-      profile.stats = {
-        posts: 0,
-        connections: 0,
-        groups: 0,
-      };
-    }
+    // Set defaults for missing fields
+    profile.socialLinks = profile.socialLinks || {
+      instagram: "",
+      linkedin: "",
+      github: "",
+    };
+    profile.stats = profile.stats || { posts: 0, connections: 0, groups: 0 };
 
     profile.profilePicture = getFullImageUrl(profile.profilePicture, req);
     profile.coverPhoto = getFullImageUrl(profile.coverPhoto, req);
 
-    // Get post count for this user - EXCLUDE ANONYMOUS POSTS
+    // Get real connection count from User model
+    const targetUser = await User.findById(userId).select("connectionCount");
     const Post = require("../models/Post");
     const postCount = await Post.countDocuments({
       user: userId,
-      isAnonymous: false, // ✅ Exclude anonymous posts
+      isAnonymous: false,
       isDeleted: { $ne: true },
     });
 
-    profile.stats.posts = postCount;
+    const profileResponse = {
+      ...profile,
+      stats: {
+        posts: postCount,
+        connections: targetUser?.connectionCount || 0,
+        groups: profile.stats?.groups || 0,
+      },
+    };
 
     res.status(200).json({
       success: true,
@@ -813,18 +765,18 @@ exports.getPublicProfile = async (req, res) => {
           profileComplete: user.profileComplete,
         },
         profile: {
-          _id: profile._id,
-          fullName: profile.fullName,
-          username: profile.username,
-          bio: profile.bio || "",
-          major: profile.major || "",
-          year: profile.year || "",
-          graduationYear: profile.graduationYear || "",
-          pronouns: profile.pronouns || "",
-          profilePicture: profile.profilePicture || "",
-          coverPhoto: profile.coverPhoto || "",
-          socialLinks: profile.socialLinks,
-          stats: profile.stats,
+          _id: profileResponse._id,
+          fullName: profileResponse.fullName,
+          username: profileResponse.username,
+          bio: profileResponse.bio || "",
+          major: profileResponse.major || "",
+          year: profileResponse.year || "",
+          graduationYear: profileResponse.graduationYear || "",
+          pronouns: profileResponse.pronouns || "",
+          profilePicture: profileResponse.profilePicture || "",
+          coverPhoto: profileResponse.coverPhoto || "",
+          socialLinks: profileResponse.socialLinks,
+          stats: profileResponse.stats,
         },
       },
     });
@@ -852,26 +804,21 @@ exports.updateProfile = async (req, res) => {
 
     const currentUser = await User.findById(userId);
     if (!currentUser) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
     }
 
     const profileUpdate = {};
 
-    // ✅ CRITICAL FIX: Handle fullName update - sync with User model
+    // Sync fullName with User model's name field
     if (
       updateData.fullName !== undefined &&
       updateData.fullName !== currentUser.name
     ) {
-      // Update User model's name field
       currentUser.name = updateData.fullName;
       await currentUser.save();
-
-      // Also update profile's fullName
       profileUpdate.fullName = updateData.fullName;
-      console.log(`✅ Synced user name: ${currentUser.name}`);
     }
 
     // Handle username change
@@ -880,16 +827,14 @@ exports.updateProfile = async (req, res) => {
         username: updateData.username,
         _id: { $ne: userId },
       });
-
       const existingProfile = await Profile.findOne({
         username: updateData.username,
       });
 
       if (existingUser || existingProfile) {
-        return res.status(400).json({
-          success: false,
-          message: "Username is already taken",
-        });
+        return res
+          .status(400)
+          .json({ success: false, message: "Username is already taken" });
       }
 
       currentUser.username = updateData.username;
@@ -908,7 +853,7 @@ exports.updateProfile = async (req, res) => {
     if (updateData.universityEmail)
       profileUpdate.universityEmail = updateData.universityEmail;
 
-    // Handle profile picture (only external URLs)
+    // Handle profile picture (external URLs only)
     if (
       updateData.profilePicture &&
       updateData.profilePicture.includes("http")
@@ -942,26 +887,15 @@ exports.updateProfile = async (req, res) => {
     let profile = await Profile.findOne({ user: userId });
 
     if (!profile) {
-      if (!profileUpdate.username && currentUser.username) {
+      if (!profileUpdate.username && currentUser.username)
         profileUpdate.username = currentUser.username;
-      }
-      // Set default fullName from user if not provided
-      if (!profileUpdate.fullName) {
-        profileUpdate.fullName = currentUser.name;
-      }
+      if (!profileUpdate.fullName) profileUpdate.fullName = currentUser.name;
 
-      profile = await Profile.create({
-        user: userId,
-        ...profileUpdate,
-      });
+      profile = await Profile.create({ user: userId, ...profileUpdate });
     } else {
-      if (!profileUpdate.username && currentUser.username) {
+      if (!profileUpdate.username && currentUser.username)
         profileUpdate.username = currentUser.username;
-      }
-      // Keep existing fullName if not updating
-      if (!profileUpdate.fullName) {
-        profileUpdate.fullName = profile.fullName;
-      }
+      if (!profileUpdate.fullName) profileUpdate.fullName = profile.fullName;
 
       profile = await Profile.findOneAndUpdate(
         { user: userId },
@@ -970,7 +904,6 @@ exports.updateProfile = async (req, res) => {
       );
     }
 
-    // Prepare response
     const profileResponse = profile.toObject();
     profileResponse.profilePicture = getFullImageUrl(
       profileResponse.profilePicture,
@@ -987,7 +920,7 @@ exports.updateProfile = async (req, res) => {
       data: {
         user: {
           _id: currentUser._id,
-          name: currentUser.name, // ✅ This will now have the updated name
+          name: currentUser.name,
           username: currentUser.username,
           email: currentUser.email,
         },
@@ -998,24 +931,21 @@ exports.updateProfile = async (req, res) => {
     console.error("Profile update error:", error);
 
     if (error.code === 11000 && error.keyPattern?.username) {
-      return res.status(400).json({
-        success: false,
-        message: "Username already exists",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Username already exists" });
     }
 
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((err) => err.message);
-      return res.status(400).json({
-        success: false,
-        message: messages.join(", "),
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: messages.join(", ") });
     }
 
-    res.status(500).json({
-      success: false,
-      message: "Failed to update profile",
-    });
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to update profile" });
   }
 };
 
@@ -1061,10 +991,10 @@ exports.getAllProfiles = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch profiles",
-    });
+    console.error("Get all profiles error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch profiles" });
   }
 };
 
@@ -1105,9 +1035,9 @@ exports.searchProfiles = async (req, res) => {
       data: profiles,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to search profiles",
-    });
+    console.error("Search profiles error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to search profiles" });
   }
 };

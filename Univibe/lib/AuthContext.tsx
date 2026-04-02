@@ -1,4 +1,9 @@
 // Univibe/lib/AuthContext.tsx
+/**
+ * Authentication Context
+ * Manages user authentication state, token handling, and profile data
+ */
+
 import React, {
   createContext,
   useState,
@@ -11,6 +16,10 @@ import { AppState, AppStateStatus } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import { profileService } from "./profileService";
 import { API_BASE_URL } from "../constants/ipConstants";
+
+// ============================================
+// TYPES
+// ============================================
 
 interface CustomJwtPayload {
   id: string;
@@ -37,15 +46,16 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   profile: any | null;
+  isLoading: boolean;
+  isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   setupProfile: (profileData: any) => Promise<any>;
-  isLoading: boolean;
-  isAuthenticated: boolean;
   refreshProfile: () => Promise<void>;
   loadProfile: () => Promise<void>;
   refreshToken: () => Promise<boolean>;
+  refreshUserProfile: () => Promise<void>;
   checkVerificationStatus: () => Promise<{
     isEmailVerified: boolean;
     email?: string;
@@ -60,6 +70,10 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// ============================================
+// PROVIDER COMPONENT
+// ============================================
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
@@ -70,10 +84,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const isAuthenticated = !!token;
   const appState = useRef(AppState.currentState);
 
+  // Initialize auth state on mount
   useEffect(() => {
     checkAuthState();
   }, []);
 
+  // Monitor app state to refresh verification status when app returns to foreground
   useEffect(() => {
     const subscription = AppState.addEventListener(
       "change",
@@ -106,19 +122,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
               await refreshToken();
             }
           } catch (error) {
-            // Silently fail
+            // Silent fail
           }
         }
-
         appState.current = nextAppState;
       },
     );
 
-    return () => {
-      subscription.remove();
-    };
+    return () => subscription.remove();
   }, [token]);
 
+  // ============================================
+  // TOKEN MANAGEMENT
+  // ============================================
+
+  /**
+   * Refresh authentication token
+   */
   const refreshToken = async (): Promise<boolean> => {
     try {
       const currentToken =
@@ -140,157 +160,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         setToken(data.token);
 
         const decoded = jwtDecode<CustomJwtPayload>(data.token);
-        const updatedUser = {
+        setUser({
           id: decoded.id,
           email: decoded.email,
           role: decoded.role,
           isEmailVerified: decoded.isEmailVerified,
           exp: decoded.exp,
           iat: decoded.iat,
-        };
+        });
 
-        setUser(updatedUser);
         await fetchUserProfile();
-
         return true;
       }
 
       return false;
     } catch (error) {
+      console.error("Refresh token error:", error);
       return false;
     }
   };
 
-  const checkVerificationStatus = async () => {
-    try {
-      const currentToken =
-        token || (await SecureStore.getItemAsync("authToken"));
-      if (!currentToken) return { isEmailVerified: false };
-
-      const response = await fetch(
-        `${API_BASE_URL}/api/auth/check-verification`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${currentToken}`,
-            "Content-Type": "application/json",
-          },
-        },
-      );
-
-      const data = await response.json();
-
-      if (data.success) {
-        if (data.isEmailVerified && token) {
-          try {
-            const decoded = jwtDecode<CustomJwtPayload>(token);
-            if (!decoded.isEmailVerified) {
-              await refreshToken();
-            }
-          } catch (err) {
-            // Ignore decode errors
-          }
-        }
-
-        return {
-          isEmailVerified: data.isEmailVerified,
-          email: data.user?.email,
-          canResend: data.canResend,
-          tokenExpired: data.tokenExpired,
-        };
-      }
-
-      return { isEmailVerified: false };
-    } catch (error) {
-      return { isEmailVerified: false };
-    }
-  };
-
-  const resendVerificationEmail = async (email: string) => {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/auth/resend-verification`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email }),
-        },
-      );
-
-      const data = await response.json();
-      return { success: data.success, message: data.message };
-    } catch (error) {
-      return { success: false, message: "Network error" };
-    }
-  };
-
-  const checkAuthState = async () => {
-    try {
-      const storedToken = await SecureStore.getItemAsync("authToken");
-
-      if (storedToken) {
-        try {
-          const decoded = jwtDecode<CustomJwtPayload>(storedToken);
-          const currentTime = Date.now() / 1000;
-
-          if (decoded.exp && decoded.exp > currentTime) {
-            setToken(storedToken);
-            setUser({
-              id: decoded.id,
-              email: decoded.email,
-              role: decoded.role,
-              isEmailVerified: decoded.isEmailVerified,
-              exp: decoded.exp,
-              iat: decoded.iat,
-            });
-
-            try {
-              const response = await fetch(
-                `${API_BASE_URL}/api/auth/check-verification`,
-                {
-                  method: "GET",
-                  headers: {
-                    Authorization: `Bearer ${storedToken}`,
-                    "Content-Type": "application/json",
-                  },
-                },
-              );
-
-              const data = await response.json();
-
-              if (
-                data.success &&
-                data.isEmailVerified &&
-                !decoded.isEmailVerified
-              ) {
-                await refreshToken();
-              }
-            } catch (error) {
-              // Ignore verification check errors on startup
-            }
-
-            await fetchUserProfile();
-          } else {
-            await clearAuthData();
-          }
-        } catch (error) {
-          await clearAuthData();
-        }
-      }
-    } catch (error) {
-      // Ignore auth state errors
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
+  /**
+   * Clear all authentication data
+   */
   const clearAuthData = async () => {
-    await SecureStore.deleteItemAsync("authToken");
+    try {
+      await SecureStore.deleteItemAsync("authToken");
+    } catch (error) {
+      console.error("Error clearing token:", error);
+    }
     setToken(null);
     setUser(null);
     setProfile(null);
   };
 
+  // ============================================
+  // PROFILE MANAGEMENT
+  // ============================================
+
+  /**
+   * Fetch and update user profile data
+   */
   const fetchUserProfile = async () => {
     try {
       const response = await profileService.getProfileDetails();
@@ -326,11 +236,184 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       setProfile(null);
       return null;
     } catch (error) {
+      console.error("Fetch profile error:", error);
       setProfile(null);
       return null;
     }
   };
 
+  /**
+   * Refresh current user's profile data
+   */
+  const refreshUserProfile = async () => {
+    try {
+      const currentToken =
+        token || (await SecureStore.getItemAsync("authToken"));
+      if (!currentToken) {
+        return;
+      }
+
+      const response = await profileService.getMyProfile();
+      if (response.success && response.data) {
+        setUser(response.data.user);
+        setProfile(response.data.profile);
+      }
+    } catch (error) {
+      console.error("Refresh user profile error:", error);
+    }
+  };
+
+  /**
+   * Legacy refresh method
+   */
+  const refreshProfile = async () => {
+    await fetchUserProfile();
+  };
+
+  /**
+   * Load profile if token exists
+   */
+  const loadProfile = async () => {
+    if (!token) return;
+    await fetchUserProfile();
+  };
+
+  // ============================================
+  // AUTH STATE MANAGEMENT
+  // ============================================
+
+  /**
+   * Check and restore authentication state on app start
+   */
+  const checkAuthState = async () => {
+    try {
+      const storedToken = await SecureStore.getItemAsync("authToken");
+      console.log("🔐 Checking auth state, token exists:", !!storedToken);
+
+      if (!storedToken) {
+        console.log("🔐 No token found, user not authenticated");
+        setIsLoading(false);
+        return;
+      }
+
+      // Verify token is valid
+      let decoded: CustomJwtPayload;
+      try {
+        decoded = jwtDecode<CustomJwtPayload>(storedToken);
+      } catch (decodeError) {
+        console.error("🔐 Invalid token format:", decodeError);
+        await clearAuthData();
+        setIsLoading(false);
+        return;
+      }
+
+      const currentTime = Date.now() / 1000;
+
+      if (decoded.exp && decoded.exp > currentTime) {
+        // Token is valid
+        console.log("🔐 Token is valid, restoring session");
+        setToken(storedToken);
+        setUser({
+          id: decoded.id,
+          email: decoded.email,
+          role: decoded.role,
+          isEmailVerified: decoded.isEmailVerified,
+          exp: decoded.exp,
+          iat: decoded.iat,
+        });
+
+        await fetchUserProfile();
+        console.log("🔐 Session restored successfully");
+      } else {
+        // Token expired
+        console.log("🔐 Token expired, clearing session");
+        await clearAuthData();
+      }
+    } catch (error) {
+      console.error("🔐 Auth state check error:", error);
+      await clearAuthData();
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  /**
+   * Check if user's email is verified
+   */
+  const checkVerificationStatus = async () => {
+    try {
+      const currentToken =
+        token || (await SecureStore.getItemAsync("authToken"));
+      if (!currentToken) return { isEmailVerified: false };
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/auth/check-verification`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${currentToken}`,
+            "Content-Type": "application/json",
+          },
+        },
+      );
+
+      const data = await response.json();
+
+      if (data.success) {
+        if (data.isEmailVerified && token) {
+          try {
+            const decoded = jwtDecode<CustomJwtPayload>(token);
+            if (!decoded.isEmailVerified) {
+              await refreshToken();
+            }
+          } catch (err) {
+            // Silent fail
+          }
+        }
+
+        return {
+          isEmailVerified: data.isEmailVerified,
+          email: data.user?.email,
+          canResend: data.canResend,
+          tokenExpired: data.tokenExpired,
+        };
+      }
+
+      return { isEmailVerified: false };
+    } catch (error) {
+      console.error("Check verification error:", error);
+      return { isEmailVerified: false };
+    }
+  };
+
+  /**
+   * Resend email verification link
+   */
+  const resendVerificationEmail = async (email: string) => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/auth/resend-verification`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        },
+      );
+
+      const data = await response.json();
+      return { success: data.success, message: data.message };
+    } catch (error) {
+      return { success: false, message: "Network error" };
+    }
+  };
+
+  // ============================================
+  // AUTHENTICATION ACTIONS
+  // ============================================
+
+  /**
+   * Login user with email and password
+   */
   const login = async (email: string, password: string) => {
     try {
       setIsLoading(true);
@@ -351,7 +434,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       if (responseData.token) {
+        // Store token
         await SecureStore.setItemAsync("authToken", responseData.token);
+
+        // Verify storage
+        const savedToken = await SecureStore.getItemAsync("authToken");
+        console.log("🔐 Token saved successfully:", !!savedToken);
+
         setToken(responseData.token);
 
         const decoded = jwtDecode<CustomJwtPayload>(responseData.token);
@@ -365,6 +454,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         });
 
         await fetchUserProfile();
+        console.log("🔐 Login successful, user:", decoded.email);
       } else {
         throw new Error("Authentication failed");
       }
@@ -375,6 +465,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
+  /**
+   * Register new user account
+   */
   const signup = async (name: string, email: string, password: string) => {
     try {
       setIsLoading(true);
@@ -416,6 +509,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
+  /**
+   * Complete profile setup after registration
+   */
   const setupProfile = async (profileData: any) => {
     try {
       setIsLoading(true);
@@ -435,22 +531,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
+  /**
+   * Logout user and clear all data
+   */
   const logout = async () => {
     try {
       await clearAuthData();
+      console.log("🔐 Logout successful");
     } catch (error) {
+      console.error("Logout error:", error);
       throw error;
     }
   };
 
-  const refreshProfile = async () => {
-    await fetchUserProfile();
-  };
-
-  const loadProfile = async () => {
-    if (!token) return;
-    await fetchUserProfile();
-  };
+  // ============================================
+  // CONTEXT PROVIDER
+  // ============================================
 
   return (
     <AuthContext.Provider
@@ -458,15 +554,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         user,
         token,
         profile,
+        isLoading,
+        isAuthenticated,
         login,
         signup,
         logout,
         setupProfile,
-        isLoading,
-        isAuthenticated,
         refreshProfile,
         loadProfile,
         refreshToken,
+        refreshUserProfile,
         checkVerificationStatus,
         resendVerificationEmail,
       }}
@@ -475,6 +572,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     </AuthContext.Provider>
   );
 };
+
+// ============================================
+// CUSTOM HOOK
+// ============================================
 
 export const useAuth = () => {
   const context = useContext(AuthContext);

@@ -10,9 +10,15 @@ const {
 } = require("../middleware/uploadMiddleware");
 
 const profileController = require("../controllers/profileController");
+const connectionRoutes = require("./connectionRoutes");
 
 // Apply authentication to all routes
 router.use(protect);
+
+// ============================================
+// Mount Connection Routes
+// ============================================
+router.use("/connections", connectionRoutes);
 
 // ============================================
 // Routes Without Email Verification

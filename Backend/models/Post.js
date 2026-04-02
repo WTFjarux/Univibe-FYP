@@ -42,7 +42,7 @@ const postSchema = new mongoose.Schema(
       },
     ],
 
-    // CHANGED: Now just a count, not the actual comments
+    // Comment count (denormalized for performance)
     commentCount: {
       type: Number,
       default: 0,
@@ -53,13 +53,6 @@ const postSchema = new mongoose.Schema(
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Comment",
-      },
-    ],
-
-    reposts: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
       },
     ],
 
@@ -83,9 +76,10 @@ const postSchema = new mongoose.Schema(
       required: true,
     },
 
+    // SIMPLIFIED VISIBILITY - Only campus and connections
     visibility: {
       type: String,
-      enum: ["campus", "connections", "following", "private"],
+      enum: ["campus", "connections"], // Removed: "following", "private"
       default: "campus",
     },
 
@@ -116,6 +110,8 @@ postSchema.index({ tags: 1 });
 postSchema.index({ visibility: 1 });
 postSchema.index({ isAnonymous: 1 });
 postSchema.index({ commentCount: -1 });
+postSchema.index({ user: 1, visibility: 1 }); // Added for connection queries
+postSchema.index({ campus: 1, visibility: 1 }); // Added for campus queries
 
 // === VIRTUAL FOR COMMENTS (lazy loading) ===
 postSchema.virtual("comments", {
@@ -161,6 +157,34 @@ postSchema.methods.getRecentComments = async function (limit = 5) {
 postSchema.methods.getCommentThread = async function (commentId) {
   const Comment = mongoose.model("Comment");
   return await Comment.getThread(commentId);
+};
+
+// === METHOD TO CHECK IF USER CAN VIEW POST ===
+postSchema.methods.canUserView = async function (
+  userId,
+  userConnections,
+  userCampus,
+) {
+  // Always visible to post owner
+  if (this.user.toString() === userId.toString()) {
+    return true;
+  }
+
+  // Anonymous posts visible to everyone
+  if (this.isAnonymous) {
+    return true;
+  }
+
+  // Check visibility settings
+  if (this.visibility === "campus") {
+    return this.campus === userCampus;
+  }
+
+  if (this.visibility === "connections") {
+    return userConnections.includes(this.user.toString());
+  }
+
+  return false;
 };
 
 const Post = mongoose.model("Post", postSchema);

@@ -1,3 +1,4 @@
+// app/components/Feed/create.tsx
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -22,13 +23,13 @@ import { createPost } from "@/lib/postService";
 import { useAuth } from "@/lib/AuthContext";
 import { API_BASE_URL } from "@/constants/ipConstants";
 
-// ✅ Local default avatar
+// Local default avatar
 const DEFAULT_AVATAR: ImageSourcePropType = require("../../../assets/images/default-avatar.png");
 
 const { width } = Dimensions.get("window");
 
-// Visibility options
-type Visibility = "campus" | "connections" | "following" | "private";
+// Updated visibility options - only campus and connections
+type Visibility = "campus" | "connections";
 
 export default function CreatePostScreen() {
   const router = useRouter();
@@ -46,7 +47,6 @@ export default function CreatePostScreen() {
     }
   }, [isAnonymous]);
 
-  // Check if there's anything to post
   const hasContentToPost = () => {
     return content.trim().length > 0 || images.length > 0;
   };
@@ -62,16 +62,10 @@ export default function CreatePostScreen() {
     return `${API_BASE_URL}/${url}`;
   };
 
-  /**
-   * ✅ Get user avatar with local default fallback
-   */
   const getUserAvatar = (): ImageSourcePropType => {
-    // If user has a profile picture
     if (profile?.profilePicture && profile.profilePicture.trim() !== "") {
       return { uri: getFullImageUrl(profile.profilePicture) };
     }
-
-    // ✅ Fallback to local default avatar
     return DEFAULT_AVATAR;
   };
 
@@ -117,10 +111,6 @@ export default function CreatePostScreen() {
         return "school-outline";
       case "connections":
         return "people-outline";
-      case "following":
-        return "eye-outline";
-      case "private":
-        return "lock-closed-outline";
       default:
         return "globe-outline";
     }
@@ -132,10 +122,6 @@ export default function CreatePostScreen() {
         return "Campus";
       case "connections":
         return "Connections";
-      case "following":
-        return "Following";
-      case "private":
-        return "Only Me";
       default:
         return "Public";
     }
@@ -150,7 +136,6 @@ export default function CreatePostScreen() {
     try {
       setLoading(true);
 
-      // Prepare image objects if any
       const imageObjects =
         images.length > 0
           ? await Promise.all(
@@ -179,7 +164,6 @@ export default function CreatePostScreen() {
         isAnonymous,
       });
 
-      // For anonymous posts, always use "campus" visibility
       const finalVisibility = isAnonymous ? "campus" : visibility;
 
       await createPost(content, imageObjects, finalVisibility, isAnonymous);
@@ -205,47 +189,34 @@ export default function CreatePostScreen() {
     }
   };
 
-  // Get user's full name with proper fallbacks
   const getUserName = () => {
     if (isAnonymous) return "Anonymous";
-
-    // First try profile fullName (most accurate)
     if (profile?.fullName) return profile.fullName;
-
-    // Then try other name fields as fallbacks
     if (profile?.name) return profile.name;
     if (user?.name) return user.name;
     if (profile?.username) {
       const cleanUsername = profile.username.replace("@", "");
       return cleanUsername.charAt(0).toUpperCase() + cleanUsername.slice(1);
     }
-
     return "You";
   };
 
-  // Get user's handle/username
   const getUserHandle = () => {
     if (isAnonymous) return "Hidden identity";
-
-    // Try profile username first
     if (profile?.username) return `@${profile.username}`;
-
-    // Try email username
     if (user?.email) {
       const emailUsername = user.email.split("@")[0];
       return `@${emailUsername}`;
     }
-
     return "@user";
   };
 
-  // Visibility options - hide some options when anonymous
+  // Updated visibility options - only campus and connections
   const getVisibilityOptions = (): Visibility[] => {
     if (isAnonymous) {
-      // For anonymous posts, only show campus option (and it's disabled/selected)
       return ["campus"];
     }
-    return ["campus", "connections", "following"]; // Remove "private" if you don't want it
+    return ["campus", "connections"]; // Removed "following" and "private"
   };
 
   const visibilityOptions = getVisibilityOptions();
@@ -280,7 +251,7 @@ export default function CreatePostScreen() {
 
         {/* Content Area */}
         <ScrollView style={styles.content}>
-          {/* User Info - Show user's full name */}
+          {/* User Info */}
           <View style={styles.userInfo}>
             {isAnonymous ? (
               <View style={[styles.avatar, styles.anonymousAvatar]}>
@@ -294,7 +265,7 @@ export default function CreatePostScreen() {
               <Text style={styles.userHandle}>{getUserHandle()}</Text>
             </View>
 
-            {/* Anonymous toggle on the right */}
+            {/* Anonymous toggle */}
             <TouchableOpacity
               style={styles.anonymousToggleRight}
               onPress={() => setIsAnonymous(!isAnonymous)}
@@ -319,7 +290,7 @@ export default function CreatePostScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Anonymous warning message */}
+          {/* Anonymous warning */}
           {isAnonymous && (
             <View style={styles.anonymousWarning}>
               <Ionicons
@@ -389,7 +360,7 @@ export default function CreatePostScreen() {
             </View>
           )}
 
-          {/* Visibility Options - Show disabled when anonymous */}
+          {/* Visibility Options */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>
               Who can see this?
@@ -425,7 +396,6 @@ export default function CreatePostScreen() {
                     ]}
                   >
                     {getVisibilityLabel(option)}
-                    {isAnonymous && option === "campus"}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -433,12 +403,9 @@ export default function CreatePostScreen() {
             <Text style={styles.visibilityDescription}>
               {isAnonymous
                 ? "Anonymous posts are always visible to everyone in your campus for maximum reach while protecting your identity."
-                : visibility === "campus" &&
-                  "Visible to all users in your campus"}
-              {visibility === "connections" &&
-                "Visible to your connections only"}
-              {visibility === "following" && "Visible to people you follow"}
-              {visibility === "private" && "Only visible to you"}
+                : visibility === "campus"
+                  ? "Visible to all users in your campus"
+                  : "Visible to your connections only"}
             </Text>
           </View>
 

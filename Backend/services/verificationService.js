@@ -4,7 +4,7 @@ const emailService = require("./emailService");
 const BASE_URL =
   process.env.NODE_ENV === "production"
     ? process.env.PRODUCTION_URL
-    : process.env.BASE_URL || "http://192.168.1.5:5001";
+    : process.env.BASE_URL || "http://192.168.1.2:5001";
 
 const EXPO_GO_URL = "exp://10.21.6.88:8081";
 

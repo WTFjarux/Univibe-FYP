@@ -1,3 +1,4 @@
+// app/components/Feed/FilterTabs.tsx
 import React from "react";
 import { ScrollView, TouchableOpacity, Text, StyleSheet } from "react-native";
 
@@ -39,7 +40,7 @@ const FilterTabs: React.FC<FilterTabsProps> = ({
               activeFilter === filter.id && styles.filterTextActive,
             ]}
           >
-            {filter.id === "anonymous" ? "Anonymous" : filter.label}
+            {filter.label}
           </Text>
         </TouchableOpacity>
       ))}

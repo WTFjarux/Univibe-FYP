@@ -1,3 +1,4 @@
+// app/(tabs)/feed.tsx
 import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
@@ -49,13 +50,12 @@ export default function FeedScreen() {
   const [mutedUsers, setMutedUsers] = useState<Set<string>>(new Set());
   const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
 
-  // Filter options
+  // Updated filter options - only what you requested
   const filters = [
     { id: "all", label: "All" },
-    { id: "following", label: "Following" },
     { id: "campus", label: "Campus" },
+    { id: "connections", label: "Connections" },
     { id: "anonymous", label: "Anonymous" },
-    { id: "trending", label: "Trending" },
   ];
 
   /**
@@ -159,9 +159,6 @@ export default function FeedScreen() {
 
   // ============ POST INTERACTION HANDLERS ============
 
-  /**
-   * Handle like/unlike post
-   */
   const handleLike = async (postId: string) => {
     if (!token) {
       Alert.alert("Login Required", "Please login to like posts");
@@ -190,9 +187,6 @@ export default function FeedScreen() {
     }
   };
 
-  /**
-   * Navigate to comments screen
-   */
   const handleComment = (postId: string) => {
     if (!token) {
       Alert.alert("Login Required", "Please login to comment");
@@ -205,9 +199,6 @@ export default function FeedScreen() {
     });
   };
 
-  /**
-   * Handle repost (coming soon)
-   */
   const handleRepost = (postId: string) => {
     if (!token) {
       Alert.alert("Login Required", "Please login to repost");
@@ -216,18 +207,12 @@ export default function FeedScreen() {
     Alert.alert("Repost", "Repost feature coming soon!");
   };
 
-  /**
-   * Handle share (coming soon)
-   */
   const handleShare = (postId: string) => {
     Alert.alert("Share", "Share feature coming soon!");
   };
 
   // ============ POST OPTION HANDLERS ============
 
-  /**
-   * Handle edit post - navigate to edit screen
-   */
   const handleEditPost = (postId: string) => {
     router.push({
       pathname: "/components/Feed/Post/EditPost",
@@ -235,9 +220,6 @@ export default function FeedScreen() {
     });
   };
 
-  /**
-   * Handle post deletion
-   */
   const handleDeletePost = async (postId: string) => {
     try {
       console.log("Deleting post:", postId);
@@ -250,9 +232,6 @@ export default function FeedScreen() {
     }
   };
 
-  /**
-   * Handle save/unsave post
-   */
   const handleSavePost = (postId: string) => {
     setSavedPosts((prev) => {
       const newSet = new Set(prev);
@@ -267,9 +246,6 @@ export default function FeedScreen() {
     });
   };
 
-  /**
-   * Handle post report
-   */
   const handleReportPost = (postId: string) => {
     Alert.alert(
       "Report Submitted",
@@ -277,9 +253,6 @@ export default function FeedScreen() {
     );
   };
 
-  /**
-   * Handle hide post
-   */
   const handleHidePost = (postId: string) => {
     setHiddenPosts((prev) => {
       const newSet = new Set(prev);
@@ -290,16 +263,10 @@ export default function FeedScreen() {
     Alert.alert("Post Hidden", "You won't see this post anymore");
   };
 
-  /**
-   * Handle copy link
-   */
   const handleCopyLink = (postId: string) => {
     Alert.alert("Link Copied", "Post link copied to clipboard");
   };
 
-  /**
-   * Handle mute user
-   */
   const handleMuteUser = (userId: string) => {
     setMutedUsers((prev) => {
       const newSet = new Set(prev);
@@ -310,9 +277,6 @@ export default function FeedScreen() {
     Alert.alert("User Muted", "You won't see posts from this user anymore");
   };
 
-  /**
-   * Handle unmute user
-   */
   const handleUnmuteUser = (userId: string) => {
     setMutedUsers((prev) => {
       const newSet = new Set(prev);
@@ -323,9 +287,6 @@ export default function FeedScreen() {
     Alert.alert("User Unmuted", "You will now see posts from this user again");
   };
 
-  /**
-   * Handle block user
-   */
   const handleBlockUser = (userId: string) => {
     setBlockedUsers((prev) => {
       const newSet = new Set(prev);
@@ -336,9 +297,6 @@ export default function FeedScreen() {
     Alert.alert("User Blocked", "You won't see posts from this user anymore");
   };
 
-  /**
-   * Handle unblock user
-   */
   const handleUnblockUser = (userId: string) => {
     setBlockedUsers((prev) => {
       const newSet = new Set(prev);
@@ -354,9 +312,6 @@ export default function FeedScreen() {
 
   // ============ UI ACTION HANDLERS ============
 
-  /**
-   * Navigate to create post screen
-   */
   const handleCreatePost = () => {
     if (!token) {
       Alert.alert("Login Required", "Please login to create posts");
@@ -365,9 +320,6 @@ export default function FeedScreen() {
     router.push("/components/Feed/create");
   };
 
-  /**
-   * Handle notifications press (coming soon)
-   */
   const handleNotifications = () => {
     if (!token) {
       Alert.alert("Login Required", "Please login to view notifications");
@@ -376,18 +328,12 @@ export default function FeedScreen() {
     Alert.alert("Notifications", "Notifications screen coming soon!");
   };
 
-  /**
-   * Navigate to profile screen
-   */
   const handleProfilePress = () => {
     router.push("/(tabs)/profile");
   };
 
   // ============ RENDER HELPERS ============
 
-  /**
-   * Render login prompt when user is not authenticated
-   */
   const renderLoginPrompt = () => (
     <SafeAreaView style={styles.container}>
       <View style={styles.centered}>
@@ -403,9 +349,6 @@ export default function FeedScreen() {
     </SafeAreaView>
   );
 
-  /**
-   * Render loading state
-   */
   const renderLoading = () => (
     <SafeAreaView style={styles.container}>
       <View style={styles.centered}>
@@ -414,9 +357,6 @@ export default function FeedScreen() {
     </SafeAreaView>
   );
 
-  /**
-   * Render empty state when no posts
-   */
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
       <Ionicons name="newspaper-outline" size={64} color="#9ca3af" />
@@ -433,9 +373,6 @@ export default function FeedScreen() {
     </View>
   );
 
-  /**
-   * Render error state with retry option
-   */
   const renderError = () => (
     <View style={styles.errorContainer}>
       <Text style={styles.errorText}>{error}</Text>
@@ -480,7 +417,7 @@ export default function FeedScreen() {
         {/* Create Post Button */}
         <CreatePostButton onPress={handleCreatePost} />
 
-        {/* Filter Tabs */}
+        {/* Filter Tabs - Updated */}
         <FilterTabs
           filters={filters}
           activeFilter={activeFilter}

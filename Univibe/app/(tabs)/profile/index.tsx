@@ -1,4 +1,4 @@
-// app/(tabs)/profile/index.tsx - FIXED infinite loop
+// app/(tabs)/profile/index.tsx - Fixed version
 
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import {
@@ -20,6 +20,7 @@ import * as SecureStore from "expo-secure-store";
 import { useAuth } from "../../../lib/AuthContext";
 import { useImageUpload } from "../../../hooks/useImageUpload";
 import { useCoverPhotoUpload } from "../../../hooks/useCoverPhotoUpload";
+import { connectionService } from "../../../lib/connectionService";
 import { API_BASE_URL } from "../../../constants/ipConstants";
 
 import ProfileHeader from "@/app/components/Profile/ProfileHeader";
@@ -29,23 +30,24 @@ import UploadModal from "@/app/components/Profile/UploadModal";
 import ImageViewModal from "@/app/components/Profile/ImageViewModal";
 import { styles } from "@/app/components/Profile/profileStyles";
 
-// Helper to get auth token
 const getAuthToken = async (): Promise<string | null> => {
   try {
-    const token = await SecureStore.getItemAsync("authToken");
-    return token || null;
+    return await SecureStore.getItemAsync("authToken");
   } catch (error) {
-    console.error("Error getting auth token:", error);
     return null;
   }
 };
 
 export default function ProfileScreen() {
-  const { user, profile, isLoading, logout, loadProfile } = useAuth();
+  const { user, profile, isLoading, logout, loadProfile, refreshUserProfile } =
+    useAuth();
   const [postCount, setPostCount] = useState(0);
-  const [isFetchingCount, setIsFetchingCount] = useState(false);
+  const [connectionCount, setConnectionCount] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const isMounted = useRef(true);
+  const refreshInProgress = useRef(false);
 
-  // Profile picture upload hook
+  // Image upload hooks
   const {
     uploadModal,
     viewPhotoModal,
@@ -58,7 +60,6 @@ export default function ProfileScreen() {
     deleteProfileImage,
   } = useImageUpload();
 
-  // Cover photo upload hook
   const {
     coverModal,
     coverViewModal,
@@ -71,68 +72,107 @@ export default function ProfileScreen() {
     deleteCoverPhoto,
   } = useCoverPhotoUpload();
 
-  const [refreshing, setRefreshing] = useState(false);
   const pickerActiveRef = useRef(false);
   const router = useRouter();
 
-  // Load profile on mount if not loaded
+  // Cleanup on unmount
   useEffect(() => {
-    if (!profile && !isLoading) {
-      loadProfile();
-    }
-  }, [profile, isLoading]);
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
 
-  // Fetch user's post count - ✅ FIXED: Use stable callback with proper dependencies
+  /**
+   * Fetch user's post count
+   */
   const fetchPostCount = useCallback(async () => {
-    if (!user?.id || isFetchingCount) return;
+    if (!user?.id) return;
 
-    setIsFetchingCount(true);
     try {
-      const url = `${API_BASE_URL}/api/posts/user/${user.id}/count`;
       const token = await getAuthToken();
-
-      const response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
+      const response = await fetch(
+        `${API_BASE_URL}/api/posts/user/${user.id}/count`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
         },
-      });
-
+      );
       const data = await response.json();
-      if (data.success) {
+      if (data.success && isMounted.current) {
         setPostCount(data.count);
       }
     } catch (error) {
-      console.error("Error fetching post count:", error);
-    } finally {
-      setIsFetchingCount(false);
+      // Silent fail
     }
   }, [user?.id]);
 
-  // Load profile and post count on mount - ✅ FIXED: Only run when profile is available
+  /**
+   * Fetch user's connection count
+   */
+  const fetchConnectionCount = useCallback(async () => {
+    if (!user?.id) return;
+
+    try {
+      const response = await connectionService.getConnectionCount(user.id);
+      if (response.success && response.data && isMounted.current) {
+        setConnectionCount(response.data.connectionCount);
+      }
+    } catch (error) {
+      // Silent fail
+    }
+  }, [user?.id]);
+
+  /**
+   * Load initial data
+   */
+  const loadInitialData = useCallback(async () => {
+    if (refreshInProgress.current) return;
+    refreshInProgress.current = true;
+
+    await loadProfile();
+    await fetchPostCount();
+    await fetchConnectionCount();
+
+    refreshInProgress.current = false;
+  }, [loadProfile, fetchPostCount, fetchConnectionCount]);
+
+  /**
+   * Refresh all data (for pull-to-refresh)
+   */
+  const onRefresh = async () => {
+    if (refreshing || refreshInProgress.current) return;
+
+    setRefreshing(true);
+    await loadProfile();
+    await refreshUserProfile();
+    await fetchPostCount();
+    await fetchConnectionCount();
+    setRefreshing(false);
+  };
+
+  // Load profile on mount only once
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
+
+  // Reload counts when profile changes
   useEffect(() => {
     if (profile) {
       fetchPostCount();
+      fetchConnectionCount();
     }
-  }, [profile, fetchPostCount]);
+  }, [profile, fetchPostCount, fetchConnectionCount]);
 
-  // Reload profile when screen comes into focus - ✅ FIXED: Proper dependencies
+  // Refresh on screen focus - but only once per focus
   useFocusEffect(
     useCallback(() => {
-      const reloadProfile = async () => {
-        await loadProfile();
-        await fetchPostCount();
-      };
-      reloadProfile();
-    }, [loadProfile, fetchPostCount]),
+      // Don't auto-refresh on every focus to avoid loops
+      // Just update counts silently
+      if (user?.id && !refreshInProgress.current) {
+        fetchPostCount();
+        fetchConnectionCount();
+      }
+    }, [user?.id, fetchPostCount, fetchConnectionCount]),
   );
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadProfile();
-    await fetchPostCount();
-    setRefreshing(false);
-  };
 
   const handleLogoutConfirm = () => {
     Alert.alert("Logout", "Are you sure you want to logout?", [
@@ -148,7 +188,8 @@ export default function ProfileScreen() {
     ]);
   };
 
-  // PROFILE PICTURE HANDLERS
+  // ============ PROFILE PICTURE HANDLERS ============
+
   const handleGalleryPick = async () => {
     if (pickerActiveRef.current) return;
     pickerActiveRef.current = true;
@@ -163,7 +204,6 @@ export default function ProfileScreen() {
             "Permission Required",
             "Please allow photo access to upload profile pictures.",
           );
-          pickerActiveRef.current = false;
           return;
         }
       }
@@ -181,13 +221,14 @@ export default function ProfileScreen() {
         const success = await uploadProfileImage(result.assets[0].uri);
         if (success) {
           await loadProfile();
+          await refreshUserProfile();
           await fetchPostCount();
+          await fetchConnectionCount();
         }
       }
     } catch (error) {
-      console.error("Gallery picker error:", error);
-      Alert.alert("Error", "Failed to select image from gallery");
-      closeUploadModal();
+      console.error("Gallery pick error:", error);
+      Alert.alert("Error", "Failed to select image");
     } finally {
       pickerActiveRef.current = false;
     }
@@ -207,7 +248,6 @@ export default function ProfileScreen() {
             "Camera Permission",
             "Please allow camera access to take photos.",
           );
-          pickerActiveRef.current = false;
           return;
         }
       }
@@ -225,13 +265,14 @@ export default function ProfileScreen() {
         const success = await uploadProfileImage(result.assets[0].uri);
         if (success) {
           await loadProfile();
+          await refreshUserProfile();
           await fetchPostCount();
+          await fetchConnectionCount();
         }
       }
     } catch (error) {
       console.error("Camera error:", error);
       Alert.alert("Error", "Failed to take photo");
-      closeUploadModal();
     } finally {
       pickerActiveRef.current = false;
     }
@@ -242,7 +283,9 @@ export default function ProfileScreen() {
     if (success) {
       closeUploadModal();
       await loadProfile();
+      await refreshUserProfile();
       await fetchPostCount();
+      await fetchConnectionCount();
     }
   };
 
@@ -261,10 +304,7 @@ export default function ProfileScreen() {
     }
   };
 
-  // COVER PHOTO HANDLERS
-  const handleCoverPhotoPress = () => {
-    openCoverModal();
-  };
+  // ============ COVER PHOTO HANDLERS ============
 
   const handleCoverGalleryPick = async () => {
     if (pickerActiveRef.current) return;
@@ -280,7 +320,6 @@ export default function ProfileScreen() {
             "Permission Required",
             "Please allow photo access to upload cover photos.",
           );
-          pickerActiveRef.current = false;
           return;
         }
       }
@@ -298,13 +337,14 @@ export default function ProfileScreen() {
         const success = await uploadCoverPhoto(result.assets[0].uri);
         if (success) {
           await loadProfile();
+          await refreshUserProfile();
           await fetchPostCount();
+          await fetchConnectionCount();
         }
       }
     } catch (error) {
-      console.error("Cover gallery picker error:", error);
-      Alert.alert("Error", "Failed to select image from gallery");
-      closeCoverModal();
+      console.error("Cover gallery error:", error);
+      Alert.alert("Error", "Failed to select image");
     } finally {
       pickerActiveRef.current = false;
     }
@@ -324,7 +364,6 @@ export default function ProfileScreen() {
             "Camera Permission",
             "Please allow camera access to take photos.",
           );
-          pickerActiveRef.current = false;
           return;
         }
       }
@@ -342,13 +381,14 @@ export default function ProfileScreen() {
         const success = await uploadCoverPhoto(result.assets[0].uri);
         if (success) {
           await loadProfile();
+          await refreshUserProfile();
           await fetchPostCount();
+          await fetchConnectionCount();
         }
       }
     } catch (error) {
       console.error("Cover camera error:", error);
       Alert.alert("Error", "Failed to take photo");
-      closeCoverModal();
     } finally {
       pickerActiveRef.current = false;
     }
@@ -359,11 +399,16 @@ export default function ProfileScreen() {
     if (success) {
       closeCoverModal();
       await loadProfile();
+      await refreshUserProfile();
       await fetchPostCount();
+      await fetchConnectionCount();
     }
   };
 
-  // Format user data for ProfileHeader component
+  const handleCoverPhotoPress = () => openCoverModal();
+
+  // ============ RENDER HELPERS ============
+
   const formattedUser = {
     _id: user?.id,
     name: user?.name || profile?.fullName,
@@ -371,38 +416,6 @@ export default function ProfileScreen() {
     username: user?.username || profile?.username,
     profileComplete: user?.profileComplete,
   };
-
-  // Loading state
-  if (isLoading && !profile) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#8b5cf6" />
-        <Text style={styles.loadingText}>Loading your profile...</Text>
-      </View>
-    );
-  }
-
-  // No profile state
-  if (!profile) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.noProfileContainer}>
-          <Ionicons name="person-circle-outline" size={100} color="#d1d5db" />
-          <Text style={styles.noProfileTitle}>Complete Your Profile</Text>
-          <Text style={styles.noProfileDescription}>
-            Setup your profile to connect with other students
-          </Text>
-          <TouchableOpacity
-            style={styles.setupButton}
-            onPress={() => router.push("/(auth)/setup-profile")}
-          >
-            <Ionicons name="person-add-outline" size={20} color="white" />
-            <Text style={styles.setupButtonText}>Setup Profile</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   const renderMenuItems = () => (
     <View style={menuStyles.menuSection}>
@@ -423,7 +436,7 @@ export default function ProfileScreen() {
       <TouchableOpacity
         style={menuStyles.menuItem}
         onPress={() =>
-          Alert.alert("Coming Soon", "Settings feature will be available soon!")
+          Alert.alert("Coming Soon", "Settings feature coming soon!")
         }
         activeOpacity={0.7}
       >
@@ -439,10 +452,7 @@ export default function ProfileScreen() {
       <TouchableOpacity
         style={menuStyles.menuItem}
         onPress={() =>
-          Alert.alert(
-            "Coming Soon",
-            "Help & Support feature will be available soon!",
-          )
+          Alert.alert("Coming Soon", "Help & Support coming soon!")
         }
         activeOpacity={0.7}
       >
@@ -470,6 +480,38 @@ export default function ProfileScreen() {
       </TouchableOpacity>
     </View>
   );
+
+  // Loading state
+  if (isLoading && !profile) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#8b5cf6" />
+        <Text style={styles.loadingText}>Loading profile...</Text>
+      </View>
+    );
+  }
+
+  // No profile state
+  if (!profile) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.noProfileContainer}>
+          <Ionicons name="person-circle-outline" size={100} color="#d1d5db" />
+          <Text style={styles.noProfileTitle}>Complete Your Profile</Text>
+          <Text style={styles.noProfileDescription}>
+            Setup your profile to connect with other students
+          </Text>
+          <TouchableOpacity
+            style={styles.setupButton}
+            onPress={() => router.push("/(auth)/setup-profile")}
+          >
+            <Ionicons name="person-add-outline" size={20} color="white" />
+            <Text style={styles.setupButtonText}>Setup Profile</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -499,7 +541,7 @@ export default function ProfileScreen() {
           <ProfileStats
             stats={{
               posts: postCount,
-              connections: profile?.stats?.connections || 0,
+              connections: connectionCount,
               groups: profile?.stats?.groups || 0,
             }}
           />
@@ -507,7 +549,7 @@ export default function ProfileScreen() {
         </View>
       </ScrollView>
 
-      {/* Modals remain the same */}
+      {/* Modals */}
       <UploadModal
         visible={uploadModal}
         onClose={closeUploadModal}

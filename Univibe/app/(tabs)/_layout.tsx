@@ -1,25 +1,34 @@
-// app/(tabs)/_layout.tsx 
+// app/(tabs)/_layout.tsx
+
 import { Tabs, Redirect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../lib/AuthContext";
-import { View, ActivityIndicator } from "react-native";
+import { View, ActivityIndicator, Text } from "react-native";
 
 export default function TabLayout() {
   const { isLoading, token } = useAuth();
 
-  // Show loading while checking auth
+  // Show loading screen while checking auth
   if (isLoading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          backgroundColor: "#fff",
+        }}
+      >
         <ActivityIndicator size="large" color="#8b5cf6" />
+        <Text style={{ marginTop: 12, color: "#6b7280" }}>Loading...</Text>
       </View>
     );
   }
 
-  // If no token, redirect to login
+  // If no token, redirect to landing page
   if (!token) {
-    console.log("🚫 No token in tabs layout, redirecting to login");
-    return <Redirect href="./landingPage" />;
+    console.log("🚫 No token in tabs layout, redirecting to landing page");
+    return <Redirect href="/landingPage" />;
   }
 
   // User is authenticated, show tabs
@@ -39,14 +48,13 @@ export default function TabLayout() {
         tabBarInactiveTintColor: "#000000ff",
         tabBarLabelStyle: {
           fontSize: 12,
-          fontWeight: "500", // Changed from number to string
+          fontWeight: "500",
         },
         tabBarIconStyle: {
           marginBottom: 5,
         },
       }}
     >
-      {/* Regular tab screens */}
       <Tabs.Screen
         name="index"
         options={{
