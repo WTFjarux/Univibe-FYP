@@ -11,14 +11,17 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  Dimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useAuth } from "../../../../lib/AuthContext";
-import { getPostById, updatePost, Post } from "../../../../lib/postService";
+import { getPostById, Post } from "../../../../lib/postService";
 import { API_BASE_URL } from "../../../../constants/ipConstants";
+
+const { width } = Dimensions.get("window");
 
 export default function EditPostScreen() {
   const router = useRouter();
@@ -35,12 +38,10 @@ export default function EditPostScreen() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  // Visibility options
+  // Visibility options - Only campus and connections
   const visibilityOptions = [
     { id: "campus", label: "Campus", icon: "school-outline" },
     { id: "connections", label: "Connections", icon: "people-outline" },
-    { id: "following", label: "Following", icon: "eye-outline" },
-    { id: "private", label: "Only Me", icon: "lock-closed-outline" },
   ];
 
   // Fetch post data on mount
@@ -77,21 +78,33 @@ export default function EditPostScreen() {
    */
   const pickImages = async () => {
     try {
+      const { status } =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission needed",
+          "Please grant photo library permissions to add images",
+        );
+        return;
+      }
+
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsMultipleSelection: true,
+        allowsEditing: false,
+        aspect: [4, 3],
         quality: 0.8,
-        base64: false,
+        selectionLimit: 4 - images.length,
       });
 
       if (!result.canceled && result.assets) {
-        // Check total images limit (max 4)
-        if (images.length + result.assets.length > 4) {
-          Alert.alert("Error", "Maximum 4 images allowed per post");
-          return;
-        }
-
-        setImages((prev) => [...prev, ...result.assets]);
+        const newImages = [
+          ...images,
+          ...result.assets
+            .map((asset) => asset.uri)
+            .slice(0, 4 - images.length),
+        ];
+        setImages(newImages);
       }
     } catch (error) {
       Alert.alert("Error", "Failed to pick images");
@@ -141,10 +154,18 @@ export default function EditPostScreen() {
       const newImages = images.filter((img) => !img.filename);
       for (let i = 0; i < newImages.length; i++) {
         const image = newImages[i];
+        const filename = image.split("/").pop() || `image_${i}.jpg`;
+        const ext = filename.split(".").pop()?.toLowerCase() || "jpg";
+
+        let mimeType = "image/jpeg";
+        if (ext === "png") mimeType = "image/png";
+        else if (ext === "gif") mimeType = "image/gif";
+        else if (ext === "webp") mimeType = "image/webp";
+
         const fileObject = {
-          uri: image.uri,
-          name: image.uri.split("/").pop() || `image_${i}.jpg`,
-          type: "image/jpeg",
+          uri: image,
+          name: `post_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${ext}`,
+          type: mimeType,
         };
         formData.append("images", fileObject as any);
       }
@@ -175,6 +196,28 @@ export default function EditPostScreen() {
     }
   };
 
+  const getVisibilityIcon = (option: string) => {
+    switch (option) {
+      case "campus":
+        return "school-outline";
+      case "connections":
+        return "people-outline";
+      default:
+        return "globe-outline";
+    }
+  };
+
+  const getVisibilityLabel = (option: string) => {
+    switch (option) {
+      case "campus":
+        return "Campus";
+      case "connections":
+        return "Connections";
+      default:
+        return "Campus";
+    }
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -196,8 +239,9 @@ export default function EditPostScreen() {
           <TouchableOpacity
             onPress={() => router.back()}
             style={styles.backButton}
+            disabled={submitting}
           >
-            <Ionicons name="arrow-back" size={24} color="#111827" />
+            <Ionicons name="close" size={28} color="#000" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Edit Post</Text>
           <TouchableOpacity
@@ -216,73 +260,96 @@ export default function EditPostScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Content Area */}
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Post Content Input */}
-          <View style={styles.inputSection}>
-            <TextInput
-              style={styles.contentInput}
-              placeholder="What's on your mind?"
-              placeholderTextColor="#9ca3af"
-              value={content}
-              onChangeText={setContent}
-              multiline
-              maxLength={500}
-              textAlignVertical="top"
-            />
-            <Text style={styles.charCount}>{content.length}/500</Text>
-          </View>
+          {/* Text Input */}
+          <TextInput
+            style={styles.input}
+            placeholder="What's on your mind?"
+            value={content}
+            onChangeText={setContent}
+            multiline
+            maxLength={500}
+            editable={!submitting}
+            placeholderTextColor="#999"
+          />
 
-          {/* Images Section */}
+          {/* Character Count */}
+          <Text style={styles.charCount}>{content.length}/500</Text>
+
+          {/* Images Section - Similar to Create Post */}
           {images.length > 0 && (
-            <View style={styles.imagesSection}>
-              <Text style={styles.sectionTitle}>Images</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <View style={styles.imagesContainer}>
-                  {images.map((image, index) => (
-                    <View key={index} style={styles.imageWrapper}>
-                      <Image
-                        source={{
-                          uri: image.filename
-                            ? getFullImageUrl(image.url)
-                            : image.uri,
-                        }}
-                        style={styles.image}
-                      />
-                      <TouchableOpacity
-                        style={styles.removeImageButton}
-                        onPress={() => removeImage(index)}
-                      >
-                        <Ionicons
-                          name="close-circle"
-                          size={24}
-                          color="#ef4444"
-                        />
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-
-                  {/* Add More Images Button */}
-                  {images.length < 4 && (
+            <View style={styles.imagesContainer}>
+              <Text style={styles.imagesTitle}>Photos ({images.length}/4)</Text>
+              <View style={styles.imagesGrid}>
+                {images.map((image, index) => (
+                  <View key={index} style={styles.imageWrapper}>
+                    <Image
+                      source={{
+                        uri: image.filename
+                          ? getFullImageUrl(image.url)
+                          : image,
+                      }}
+                      style={styles.previewImage}
+                    />
                     <TouchableOpacity
-                      style={styles.addImageButton}
-                      onPress={pickImages}
+                      style={styles.removeButton}
+                      onPress={() => removeImage(index)}
                     >
-                      <Ionicons
-                        name="images-outline"
-                        size={24}
-                        color="#6b7280"
-                      />
-                      <Text style={styles.addImageText}>Add More</Text>
+                      <Ionicons name="close-circle" size={24} color="#fff" />
                     </TouchableOpacity>
-                  )}
-                </View>
-              </ScrollView>
+                    {images.length > 1 && (
+                      <View style={styles.imageNumber}>
+                        <Text style={styles.imageNumberText}>{index + 1}</Text>
+                      </View>
+                    )}
+                    {image.filename && (
+                      <View style={styles.existingBadge}>
+                        <Text style={styles.existingBadgeText}>Existing</Text>
+                      </View>
+                    )}
+                  </View>
+                ))}
+                {images.length < 4 && (
+                  <TouchableOpacity
+                    style={styles.addMoreButton}
+                    onPress={pickImages}
+                    disabled={submitting}
+                  >
+                    <Ionicons
+                      name="add-circle-outline"
+                      size={32}
+                      color="#8b5cf6"
+                    />
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
+          )}
+
+          {/* Add Image Button - When no images exist (similar to create post) */}
+          {images.length === 0 && (
+            <TouchableOpacity
+              style={styles.addImageButtonSimple}
+              onPress={pickImages}
+              disabled={submitting}
+            >
+              <Ionicons name="image-outline" size={24} color="#8b5cf6" />
+              <Text style={styles.addImageTextSimple}>Add Photo</Text>
+            </TouchableOpacity>
           )}
 
           {/* Visibility Options */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Who can see this post?</Text>
+            <Text style={styles.sectionTitle}>
+              Who can see this?
+              {isAnonymous && (
+                <Text style={styles.anonymousNote}>
+                  {" "}
+                  (Campus only for anonymous posts)
+                </Text>
+              )}
+            </Text>
             <View style={styles.visibilityOptions}>
               {visibilityOptions.map((option) => (
                 <TouchableOpacity
@@ -290,33 +357,43 @@ export default function EditPostScreen() {
                   style={[
                     styles.visibilityOption,
                     visibility === option.id && styles.visibilityOptionActive,
+                    isAnonymous && styles.visibilityOptionDisabled,
                   ]}
-                  onPress={() => setVisibility(option.id)}
+                  onPress={() => !isAnonymous && setVisibility(option.id)}
+                  disabled={submitting || isAnonymous}
                 >
                   <Ionicons
-                    name={option.icon as any}
-                    size={20}
-                    color={visibility === option.id ? "#8b5cf6" : "#6b7280"}
+                    name={getVisibilityIcon(option.id)}
+                    size={18}
+                    color={visibility === option.id ? "#fff" : "#666"}
                   />
                   <Text
                     style={[
-                      styles.visibilityOptionText,
-                      visibility === option.id &&
-                        styles.visibilityOptionTextActive,
+                      styles.visibilityText,
+                      visibility === option.id && styles.visibilityTextActive,
+                      isAnonymous && styles.visibilityTextDisabled,
                     ]}
                   >
-                    {option.label}
+                    {getVisibilityLabel(option.id)}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
+            <Text style={styles.visibilityDescription}>
+              {isAnonymous
+                ? "Anonymous posts are always visible to everyone in your campus for maximum reach while protecting your identity."
+                : visibility === "campus"
+                  ? "Visible to all users in your campus"
+                  : "Visible to your connections only"}
+            </Text>
           </View>
 
           {/* Anonymous Toggle */}
-          <View style={styles.section}>
+          <View style={styles.anonymousSection}>
             <TouchableOpacity
               style={styles.anonymousToggle}
               onPress={() => setIsAnonymous(!isAnonymous)}
+              disabled={submitting}
             >
               <View style={styles.anonymousToggleLeft}>
                 <Ionicons
@@ -338,9 +415,10 @@ export default function EditPostScreen() {
             </TouchableOpacity>
 
             {isAnonymous && (
-              <Text style={styles.anonymousNote}>
+              <Text style={styles.anonymousNoteText}>
                 Your identity will be hidden. Your name and profile picture
-                won't be visible.
+                won't be visible. Anonymous posts are always visible to your
+                entire campus.
               </Text>
             )}
           </View>
@@ -384,104 +462,143 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
-    backgroundColor: "#fff",
+    borderBottomColor: "#eee",
   },
   backButton: {
-    width: 40,
-    height: 40,
-    justifyContent: "center",
+    padding: 4,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#111827",
   },
   postButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
     backgroundColor: "#8b5cf6",
+    paddingHorizontal: 20,
+    paddingVertical: 8,
     borderRadius: 20,
+    minWidth: 60,
+    alignItems: "center",
   },
   postButtonDisabled: {
-    opacity: 0.5,
+    backgroundColor: "#d1d5db",
   },
   postButtonText: {
     color: "#fff",
-    fontSize: 14,
     fontWeight: "600",
+    fontSize: 14,
   },
   content: {
     flex: 1,
-  },
-  inputSection: {
     padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
   },
-  contentInput: {
+  input: {
     fontSize: 16,
-    color: "#111827",
     minHeight: 120,
-    padding: 0,
+    textAlignVertical: "top",
   },
   charCount: {
-    fontSize: 12,
-    color: "#9ca3af",
     textAlign: "right",
+    color: "#999",
+    fontSize: 12,
     marginTop: 8,
-  },
-  imagesSection: {
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#111827",
-    marginBottom: 12,
+    marginBottom: 20,
   },
   imagesContainer: {
+    marginBottom: 20,
+  },
+  imagesTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#333",
+    marginBottom: 12,
+  },
+  imagesGrid: {
     flexDirection: "row",
-    gap: 12,
+    flexWrap: "wrap",
+    gap: 8,
   },
   imageWrapper: {
+    width: (width - 64) / 2,
+    height: (width - 64) / 2,
+    borderRadius: 8,
+    overflow: "hidden",
     position: "relative",
   },
-  image: {
-    width: 100,
-    height: 100,
-    borderRadius: 12,
-    backgroundColor: "#f3f4f6",
+  previewImage: {
+    width: "100%",
+    height: "100%",
   },
-  removeImageButton: {
+  removeButton: {
     position: "absolute",
-    top: -8,
-    right: -8,
-    backgroundColor: "#fff",
+    top: 8,
+    right: 8,
+    backgroundColor: "rgba(0,0,0,0.5)",
     borderRadius: 12,
   },
-  addImageButton: {
-    width: 100,
-    height: 100,
+  imageNumber: {
+    position: "absolute",
+    top: 8,
+    left: 8,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    width: 24,
+    height: 24,
     borderRadius: 12,
-    backgroundColor: "#f3f4f6",
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 1,
+  },
+  imageNumberText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  existingBadge: {
+    position: "absolute",
+    bottom: 8,
+    left: 8,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  existingBadgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "500",
+  },
+  addMoreButton: {
+    width: (width - 64) / 2,
+    height: (width - 64) / 2,
+    borderRadius: 8,
+    borderWidth: 2,
     borderColor: "#e5e7eb",
     borderStyle: "dashed",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  addImageText: {
-    fontSize: 12,
-    color: "#6b7280",
-    marginTop: 4,
+  addImageButtonSimple: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  addImageTextSimple: {
+    marginLeft: 8,
+    fontSize: 16,
+    color: "#000000",
+    fontWeight: "500",
   },
   section: {
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
+    marginBottom: 20,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#333",
+    marginBottom: 12,
+  },
+  anonymousNote: {
+    fontSize: 12,
+    color: "#6b7280",
+    fontStyle: "italic",
   },
   visibilityOptions: {
     flexDirection: "row",
@@ -491,25 +608,40 @@ const styles = StyleSheet.create({
   visibilityOption: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: "#f3f4f6",
-    gap: 8,
-    minWidth: 120,
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: "#f5f5f5",
+    borderWidth: 1,
+    borderColor: "#eee",
   },
   visibilityOptionActive: {
-    backgroundColor: "#ede9fe",
-    borderWidth: 1,
+    backgroundColor: "#8b5cf6",
     borderColor: "#8b5cf6",
   },
-  visibilityOptionText: {
-    fontSize: 14,
-    color: "#6b7280",
+  visibilityOptionDisabled: {
+    backgroundColor: "#8b5cf6",
+    borderColor: "#8b5cf6",
   },
-  visibilityOptionTextActive: {
-    color: "#8b5cf6",
+  visibilityText: {
+    fontSize: 12,
     fontWeight: "500",
+    color: "#666",
+  },
+  visibilityTextActive: {
+    color: "#fff",
+  },
+  visibilityTextDisabled: {
+    color: "#ffffff",
+  },
+  visibilityDescription: {
+    fontSize: 12,
+    color: "#8b5cf6",
+    marginTop: 10,
+  },
+  anonymousSection: {
+    marginBottom: 20,
   },
   anonymousToggle: {
     flexDirection: "row",
@@ -539,7 +671,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#8b5cf6",
     borderColor: "#8b5cf6",
   },
-  anonymousNote: {
+  anonymousNoteText: {
     fontSize: 12,
     color: "#6b7280",
     marginTop: 8,

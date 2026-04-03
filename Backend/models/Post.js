@@ -11,9 +11,10 @@ const postSchema = new mongoose.Schema(
 
     content: {
       type: String,
-      required: true,
+      required: false, // Changed from true to false
       trim: true,
       maxlength: 500,
+      default: "", // Add default empty string
     },
 
     // === ANONYMOUS POSTING FIELDS ===
@@ -102,6 +103,19 @@ const postSchema = new mongoose.Schema(
     toObject: { virtuals: true },
   },
 );
+
+// === CUSTOM VALIDATION: Ensure either content or images exist ===
+postSchema.pre("validate", function (next) {
+  // Check if there's content (not empty string) OR images
+  const hasContent = this.content && this.content.trim().length > 0;
+  const hasImages = this.images && this.images.length > 0;
+
+  if (!hasContent && !hasImages) {
+    next(new Error("Post must have either content or at least one image"));
+  } else {
+    next();
+  }
+});
 
 // === DATABASE INDEXES FOR PERFORMANCE ===
 postSchema.index({ user: 1, createdAt: -1 });

@@ -16,7 +16,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 
 // Components
 import FeedHeader from "@/app/components/Feed/FeedHeader";
-import CreatePostButton from "@/app/components/Feed/CreatePostButton";
+import CreatePostButton from "@/app/components/Feed/Post/CreatePostButton";
 import FilterTabs from "@/app/components/Feed/FilterTabs";
 import PostCard from "@/app/components/Feed/Post/PostCard";
 
@@ -317,7 +317,7 @@ export default function FeedScreen() {
       Alert.alert("Login Required", "Please login to create posts");
       return;
     }
-    router.push("/components/Feed/create");
+    router.push("/components/Feed/Post/create");
   };
 
   const handleNotifications = () => {

@@ -24,7 +24,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { API_BASE_URL } from "@/constants/ipConstants";
 
 // Local default avatar
-const DEFAULT_AVATAR: ImageSourcePropType = require("../../../assets/images/default-avatar.png");
+const DEFAULT_AVATAR: ImageSourcePropType = require("../../../../assets/images/default-avatar.png");
 
 const { width } = Dimensions.get("window");
 
