@@ -7,7 +7,8 @@ const { connectDB } = require("./config/database");
 const authRoutes = require("./routes/authRoutes");
 const profileRoutes = require("./routes/profileRoutes");
 const postRoutes = require("./routes/postRoutes");
-const connectionRoutes = require("./routes/connectionRoutes"); // ADDED: Connection routes
+const connectionRoutes = require("./routes/connectionRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
 
 // Connect to database
 connectDB();
@@ -37,7 +38,8 @@ app.use(
 app.use("/api/auth", authRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/posts", postRoutes);
-app.use("/api/connections", connectionRoutes); // ADDED: Connection routes at root level
+app.use("/api/connections", connectionRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 // Redirect for old verification links
 app.get("/verify-email/:token", (req, res) => {
@@ -49,12 +51,13 @@ app.get("/verify-email/:token", (req, res) => {
 app.get("/", (req, res) => {
   res.json({
     message: "Univibe API is running!",
-    version: "1.2.0", // Updated version
+    version: "1.3.0",
     endpoints: {
       auth: "/api/auth",
       profile: "/api/profile",
       posts: "/api/posts",
-      connections: "/api/connections", // ADDED
+      connections: "/api/connections",
+      notifications: "/api/notifications",
     },
   });
 });
@@ -69,7 +72,7 @@ app.use("*", (req, res) => {
 
 // Error handling middleware
 app.use((error, req, res, next) => {
-  console.error("Server Error:", error);
+  console.error("Server Error:", error.message);
   res.status(500).json({
     success: false,
     message: "Internal server error",
@@ -79,41 +82,11 @@ app.use((error, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ Server running on port ${PORT}`);
-  console.log(`📁 Uploads available at:`);
-  console.log(
-    `   Profile Pictures: http://localhost:${PORT}/uploads/profile-pictures/`,
-  );
-  console.log(
-    `   Cover Photos: http://localhost:${PORT}/uploads/cover-photos/`,
-  );
-  console.log(`   Post Images: http://localhost:${PORT}/uploads/posts/`);
-  console.log(`\n📱 API Endpoints:`);
-  console.log(`   Auth: http://localhost:${PORT}/api/auth`);
-  console.log(`   Profile: http://localhost:${PORT}/api/profile`);
-  console.log(`   Posts: http://localhost:${PORT}/api/posts`);
-  console.log(`   Connections: http://localhost:${PORT}/api/connections`);
-  console.log(`\n🔗 Connection Endpoints:`);
-  console.log(`   Send Request: POST /api/connections/request/:userId`);
-  console.log(`   Accept Request: POST /api/connections/accept/:requestId`);
-  console.log(`   Reject Request: POST /api/connections/reject/:requestId`);
-  console.log(`   Remove Connection: DELETE /api/connections/remove/:connectionId`);
-  console.log(`   Get Connections: GET /api/connections/:userId/connections`);
-  console.log(`   Get Pending: GET /api/connections/requests/pending`);
-  console.log(`   Check Status: GET /api/connections/status/:userId`);
-  console.log(`   Get Mutual: GET /api/connections/mutual/:userId`);
-  console.log(`   Get Suggestions: GET /api/connections/suggestions`);
-  console.log(`\n📝 Post Endpoints:`);
-  console.log(`   Create: POST /api/posts`);
-  console.log(`   Get All: GET /api/posts`);
-  console.log(`   Get by ID: GET /api/posts/:id`);
-  console.log(`   Update: PUT /api/posts/:id`);
-  console.log(`   Delete: DELETE /api/posts/:id`);
-  console.log(`   Like: POST /api/posts/:id/like`);
-  console.log(`   Search: GET /api/posts/search`);
-  console.log(`\n👤 Profile Endpoints:`);
-  console.log(`   Get My Profile: GET /api/profile/my-profile`);
-  console.log(`   Update Profile: PUT /api/profile/update`);
-  console.log(`   Get Public Profile: GET /api/profile/public/:userId`);
-  console.log(`   Search Profiles: GET /api/profile/search`);
+  console.log(` Server running on port ${PORT}`);
+  console.log(`\n API Endpoints:`);
+  console.log(`   Auth: /api/auth`);
+  console.log(`   Profile: /api/profile`);
+  console.log(`   Posts: /api/posts`);
+  console.log(`   Connections: /api/connections`);
+  console.log(`   Notifications: /api/notifications`);
 });

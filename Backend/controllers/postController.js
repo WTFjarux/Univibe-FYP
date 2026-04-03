@@ -3,6 +3,7 @@ const Post = require("../models/Post");
 const Comment = require("../models/Comment");
 const User = require("../models/User");
 const Profile = require("../models/Profile");
+const Notification = require("../models/Notification");
 const {
   getPostImageRelativePath,
   deletePostImages,
@@ -27,6 +28,36 @@ function extractMentions(content) {
   const matches = content.match(mentionRegex);
   return matches ? matches.map((mention) => mention.substring(1)) : [];
 }
+
+/**
+ * Create a notification for post interactions
+ */
+const createPostNotification = async (
+  recipientId,
+  senderId,
+  type,
+  title,
+  message,
+  targetId,
+  targetModel,
+) => {
+  try {
+    const notification = new Notification({
+      recipient: recipientId,
+      sender: senderId,
+      type,
+      title,
+      message,
+      targetId,
+      targetModel,
+    });
+    await notification.save();
+    return notification;
+  } catch (error) {
+    console.error("Create notification error:", error);
+    return null;
+  }
+};
 
 // ===================== POST CRUD OPERATIONS =====================
 
@@ -760,8 +791,27 @@ exports.toggleLike = async (req, res) => {
       (like) => like.toString() === req.user._id.toString(),
     );
 
-    if (likeIndex === -1) {
+    const wasLiked = likeIndex === -1;
+
+    if (wasLiked) {
       post.likes.push(req.user._id);
+
+      // Create notification for post owner (if not liking own post and post is not anonymous)
+      if (
+        post.user.toString() !== currentUserId.toString() &&
+        !post.isAnonymous
+      ) {
+        const sender = await User.findById(currentUserId);
+        await createPostNotification(
+          post.user,
+          currentUserId,
+          "like",
+          "New Like",
+          content,
+          post._id,
+          "Post",
+        );
+      }
     } else {
       post.likes.splice(likeIndex, 1);
     }
@@ -771,7 +821,7 @@ exports.toggleLike = async (req, res) => {
     res.json({
       success: true,
       likes: post.likes.length,
-      isLiked: likeIndex === -1,
+      isLiked: wasLiked,
     });
   } catch (error) {
     console.error("Toggle like error:", error);

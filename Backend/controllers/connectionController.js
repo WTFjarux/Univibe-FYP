@@ -1,6 +1,39 @@
 // Backend/controllers/connectionController.js
 const User = require("../models/User");
 const Profile = require("../models/Profile");
+const Notification = require("../models/Notification");
+
+// ============================================
+// NOTIFICATION HELPER
+// ============================================
+
+/**
+ * Create a notification for connection events
+ */
+const createConnectionNotification = async (
+  recipientId,
+  senderId,
+  type,
+  title,
+  message,
+) => {
+  try {
+    const notification = new Notification({
+      recipient: recipientId,
+      sender: senderId,
+      type,
+      title,
+      message,
+      targetId: null,
+      targetModel: null,
+    });
+    await notification.save();
+    return notification;
+  } catch (error) {
+    console.error("Create notification error:", error);
+    return null;
+  }
+};
 
 // ============================================
 // CONNECTION REQUEST MANAGEMENT
@@ -63,6 +96,15 @@ exports.sendConnectionRequest = async (req, res) => {
       receiver.connectionCount = receiver.connections.length;
       await receiver.save();
 
+      // Create notification for auto-accept
+      await createConnectionNotification(
+        receiverId,
+        senderId,
+        "connection_accepted",
+        "Connection Accepted",
+        `${sender.name} accepted your connection request`,
+      );
+
       return res.status(200).json({
         success: true,
         message: "Connected!",
@@ -81,6 +123,15 @@ exports.sendConnectionRequest = async (req, res) => {
 
     receiver.connectionRequestsReceived.push(senderId);
     await receiver.save();
+
+    // Create notification for the receiver
+    await createConnectionNotification(
+      receiverId,
+      senderId,
+      "connection_request",
+      "Connection Request",
+      `${sender.name} wants to connect with you`,
+    );
 
     res.status(200).json({
       success: true,
@@ -133,6 +184,15 @@ exports.acceptConnectionRequest = async (req, res) => {
 
     // Accept the connection
     await user.acceptConnectionRequest(requestId);
+
+    // Create notification for the requester
+    await createConnectionNotification(
+      requestId,
+      userId,
+      "connection_accepted",
+      "Connection Accepted",
+      `${user.name} accepted your connection request`,
+    );
 
     // Get updated counts
     const updatedUser = await User.findById(userId).select("connectionCount");

@@ -77,7 +77,7 @@ exports.checkUsernameAvailability = async (req, res) => {
       return res.status(400).json({
         success: false,
         message:
-          "Username can only contain letters, numbers, dots, underscores and hyphens",
+          "Username can only contain letters, numbers, underscores, dots and hyphens",
       });
     }
 
@@ -281,7 +281,7 @@ exports.checkProfileStatus = async (req, res) => {
         year: "UPC",
         graduationYear: String(new Date().getFullYear() + 1),
         universityEmail: user.email,
-        profilePicture: `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username || `user-${user._id}`}`,
+        profilePicture: "", // Empty string - frontend will use default avatar
         coverPhoto: "",
       });
     }
@@ -379,7 +379,7 @@ exports.uploadProfilePicture = async (req, res) => {
 };
 
 /**
- * Delete profile picture and reset to default avatar
+ * Delete profile picture - sets to empty string (frontend will show default avatar)
  */
 exports.deleteProfilePicture = async (req, res) => {
   try {
@@ -392,7 +392,12 @@ exports.deleteProfilePicture = async (req, res) => {
         .json({ success: false, message: "No profile picture found" });
     }
 
-    const isUploadedFile = !profile.profilePicture.includes("http");
+    // Delete the uploaded file from server if it exists
+    const isUploadedFile =
+      profile.profilePicture &&
+      !profile.profilePicture.startsWith("http") &&
+      profile.profilePicture.trim() !== "";
+
     if (isUploadedFile) {
       let filename;
       if (profile.profilePicture.includes("/uploads/profile-pictures/")) {
@@ -404,22 +409,22 @@ exports.deleteProfilePicture = async (req, res) => {
       } else {
         filename = profile.profilePicture;
       }
-      cleanupUploadedFile(filename, "profile-picture");
+      if (filename) {
+        cleanupUploadedFile(filename, "profile-picture");
+      }
     }
 
-    const user = await User.findById(userId);
-    const defaultAvatar = `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username || userId}`;
-
+    // Set profile picture to empty string - frontend will use default avatar
     const updatedProfile = await Profile.findOneAndUpdate(
       { user: userId },
-      { profilePicture: defaultAvatar },
+      { profilePicture: "" },
       { new: true },
     );
 
     res.status(200).json({
       success: true,
-      message: "Profile picture removed",
-      data: { profilePicture: defaultAvatar, profile: updatedProfile },
+      message: "Profile picture removed successfully",
+      data: { profilePicture: "", profile: updatedProfile },
     });
   } catch (error) {
     console.error("Profile picture deletion error:", error);
@@ -853,12 +858,15 @@ exports.updateProfile = async (req, res) => {
     if (updateData.universityEmail)
       profileUpdate.universityEmail = updateData.universityEmail;
 
-    // Handle profile picture (external URLs only)
-    if (
-      updateData.profilePicture &&
-      updateData.profilePicture.includes("http")
-    ) {
-      profileUpdate.profilePicture = updateData.profilePicture;
+    // Handle profile picture (allow empty string for deletion)
+    if (updateData.profilePicture !== undefined) {
+      if (updateData.profilePicture === "") {
+        profileUpdate.profilePicture = "";
+      } else if (updateData.profilePicture.includes("http")) {
+        profileUpdate.profilePicture = updateData.profilePicture;
+      } else if (updateData.profilePicture.startsWith("/uploads/")) {
+        profileUpdate.profilePicture = updateData.profilePicture;
+      }
     }
 
     // Handle cover photo

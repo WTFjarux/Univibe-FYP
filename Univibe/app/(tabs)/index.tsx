@@ -12,102 +12,188 @@ import { Ionicons } from "@expo/vector-icons";
 import { Link } from "expo-router";
 
 export default function HomeScreen() {
+  // Mock data for campus moments (stories)
+  const campusMoments = [
+    {
+      id: 1,
+      user: "Alex Chen",
+      image: null,
+      viewed: false,
+      timestamp: "10 min ago",
+    },
+    {
+      id: 2,
+      user: "Maria G.",
+      image: null,
+      viewed: false,
+      timestamp: "1 hour ago",
+    },
+    {
+      id: 3,
+      user: "James W.",
+      image: null,
+      viewed: true,
+      timestamp: "3 hours ago",
+    },
+    {
+      id: 4,
+      user: "Sarah K.",
+      image: null,
+      viewed: false,
+      timestamp: "5 hours ago",
+    },
+    {
+      id: 5,
+      user: "Mike T.",
+      image: null,
+      viewed: true,
+      timestamp: "1 day ago",
+    },
+  ];
+
+  // Mock data for upcoming events
+  const upcomingEvents = [
+    {
+      id: 1,
+      name: "Tech Symposium 2024",
+      date: "Tomorrow, 2 PM",
+      location: "Engineering Hall",
+      attendees: 45,
+    },
+    {
+      id: 2,
+      name: "Career Fair",
+      date: "Apr 10, 10 AM",
+      location: "Student Center",
+      attendees: 128,
+    },
+    {
+      id: 3,
+      name: "Spring Festival",
+      date: "Apr 15, 4 PM",
+      location: "Main Campus",
+      attendees: 234,
+    },
+  ];
+
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView>
-        {/* Header */}
+      <ScrollView showsVerticalScrollIndicator={false}>
+        {/* Header with Univibe and Icons */}
         <View style={styles.header}>
-          <Text style={styles.welcome}>Welcome back! 👋</Text>
-          <Text style={styles.subtitle}>Your campus feed</Text>
-        </View>
-
-        {/* Quick Actions */}
-        <View style={styles.quickActions}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.actionRow}>
-            {/* Updated links to point to correct tab routes */}
-            <Link href="./(tabs)/profile" asChild>
-              <TouchableOpacity style={styles.actionCard}>
-                <Ionicons name="person" size={24} color="#8b5cf6" />
-                <Text style={styles.actionText}>Profile</Text>
+          <Text style={styles.logoText}>UNIVIBE</Text>
+          <View style={styles.headerIcons}>
+            {/* Notification Icon */}
+            <Link href="./notifications" asChild>
+              <TouchableOpacity style={styles.iconButton}>
+                <Ionicons
+                  name="notifications-outline"
+                  size={30}
+                  color="#374151"
+                />
+                <View style={styles.badge} />
               </TouchableOpacity>
             </Link>
 
-            <Link href="./(tabs)/search" asChild>
-              <TouchableOpacity style={styles.actionCard}>
-                <Ionicons name="search" size={24} color="#055ff1ff" />
-                <Text style={styles.actionText}>Search</Text>
-              </TouchableOpacity>
-            </Link>
-
-            <Link href="./(tabs)/events" asChild>
-              <TouchableOpacity style={styles.actionCard}>
-                <Ionicons name="calendar" size={24} color="#10b981" />
-                <Text style={styles.actionText}>Events</Text>
-              </TouchableOpacity>
-            </Link>
-
-            <Link href="./(tabs)/feed" asChild>
-              <TouchableOpacity style={styles.actionCard}>
-                <Ionicons name="newspaper" size={24} color="#f59e0b" />
-                <Text style={styles.actionText}>Feed</Text>
+            {/* Messages Icon */}
+            <Link href="./(tabs)/messages" asChild>
+              <TouchableOpacity style={styles.iconButton}>
+                <Ionicons name="chatbubble-outline" size={30} color="#374151" />
               </TouchableOpacity>
             </Link>
           </View>
         </View>
 
-        {/* Feed Placeholder */}
-        <View style={styles.feedSection}>
-          <Text style={styles.sectionTitle}>Latest Posts</Text>
-          <View style={styles.emptyState}>
-            <Ionicons name="chatbubble-outline" size={48} color="#d1d5db" />
-            <Text style={styles.emptyText}>No posts yet</Text>
-            <Text style={styles.emptySubtext}>
-              Be the first to share something with your campus!
-            </Text>
-            <Link href="./lan" asChild>
-              <TouchableOpacity style={styles.createButton}>
-                <Text style={styles.createButtonText}>Go to Feed</Text>
-              </TouchableOpacity>
-            </Link>
+        {/* Campus Moments Section (Stories Style) */}
+        <View style={styles.momentsSection}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Campus Moments</Text>
+            <TouchableOpacity>
+              <Text style={styles.seeAllText}>See All</Text>
+            </TouchableOpacity>
           </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.storiesContainer}
+          >
+            {/* Add Your Story */}
+            <TouchableOpacity style={styles.storyCard}>
+              <View style={[styles.storyRing, styles.addStoryRing]}>
+                <View style={styles.addStoryContainer}>
+                  <Ionicons name="add" size={24} color="#8b5cf6" />
+                </View>
+              </View>
+              <Text style={styles.storyName}>Add Your Moment</Text>
+            </TouchableOpacity>
+
+            {/* Campus Moments Stories */}
+            {campusMoments.map((moment) => (
+              <TouchableOpacity key={moment.id} style={styles.storyCard}>
+                <View
+                  style={[
+                    styles.storyRing,
+                    !moment.viewed && styles.unviewedRing,
+                  ]}
+                >
+                  <View style={styles.storyAvatar}>
+                    <Text style={styles.avatarText}>
+                      {moment.user.charAt(0)}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.storyName} numberOfLines={1}>
+                  {moment.user.split(" ")[0]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         </View>
 
-        {/* Campus Events */}
+        {/* Track My Events Section */}
         <View style={styles.eventsSection}>
-          <Text style={styles.sectionTitle}>Upcoming Events</Text>
-          <View style={styles.emptyState}>
-            <Ionicons name="calendar-outline" size={48} color="#d1d5db" />
-            <Text style={styles.emptyText}>No upcoming events</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Track My Events</Text>
             <Link href="./(tabs)/events" asChild>
-              <TouchableOpacity style={styles.createButton}>
-                <Text style={styles.createButtonText}>Browse Events</Text>
+              <TouchableOpacity>
+                <Text style={styles.seeAllText}>View Calendar</Text>
               </TouchableOpacity>
             </Link>
           </View>
-        </View>
 
-        {/* Quick Stats */}
-        <View style={styles.statsSection}>
-          <Text style={styles.sectionTitle}>Your Stats</Text>
-          <View style={styles.statsGrid}>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>156</Text>
-              <Text style={styles.statLabel}>Connections</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>8</Text>
-              <Text style={styles.statLabel}>Groups</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>24</Text>
-              <Text style={styles.statLabel}>Posts</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>3</Text>
-              <Text style={styles.statLabel}>Events</Text>
-            </View>
-          </View>
+          {upcomingEvents.map((event) => (
+            <TouchableOpacity key={event.id} style={styles.eventCard}>
+              <View style={styles.eventDate}>
+                <Text style={styles.eventDateDay}>
+                  {event.date.split(",")[0] === "Tomorrow"
+                    ? "Tom"
+                    : event.date.split(",")[0].slice(0, 3)}
+                </Text>
+              </View>
+              <View style={styles.eventDetails}>
+                <Text style={styles.eventName}>{event.name}</Text>
+                <View style={styles.eventMeta}>
+                  <Ionicons name="time-outline" size={14} color="#6b7280" />
+                  <Text style={styles.eventMetaText}>{event.date}</Text>
+                  <Ionicons
+                    name="location-outline"
+                    size={14}
+                    color="#6b7280"
+                    style={{ marginLeft: 12 }}
+                  />
+                  <Text style={styles.eventMetaText}>{event.location}</Text>
+                </View>
+                <View style={styles.eventAttendees}>
+                  <Ionicons name="people-outline" size={12} color="#8b5cf6" />
+                  <Text style={styles.attendeesText}>
+                    {event.attendees} attending
+                  </Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#d1d5db" />
+            </TouchableOpacity>
+          ))}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -120,128 +206,169 @@ const styles = StyleSheet.create({
     backgroundColor: "#f8fafc",
   },
   header: {
-    padding: 20,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
     paddingTop: 10,
+    paddingBottom: 20,
   },
-  welcome: {
-    fontSize: 28,
-    fontWeight: "bold",
+  logoText: {
+    fontSize: 30,
+    fontWeight: "700",
+    fontFamily: "Sofia-Regular",
     color: "#111827",
   },
-  subtitle: {
-    fontSize: 16,
-    color: "#6b7280",
-    marginTop: 4,
+  headerIcons: {
+    flexDirection: "row",
+    gap: 30,
   },
-  quickActions: {
-    padding: 20,
-    paddingTop: 0,
+  iconButton: {
+    position: "relative",
+    padding: 8,
+  },
+  badge: {
+    position: "absolute",
+    top: 2,
+    right: 2,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#ef4444",
+    borderWidth: 1,
+    borderColor: "white",
+  },
+  momentsSection: {
+    marginBottom: 24,
+    paddingHorizontal: 20,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: "600",
     color: "#111827",
-    marginBottom: 16,
   },
-  actionRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
-    gap: 12,
-  },
-  actionCard: {
-    backgroundColor: "white",
-    borderRadius: 12,
-    padding: 16,
-    alignItems: "center",
-    width: "48%",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  actionText: {
-    marginTop: 8,
+  seeAllText: {
     fontSize: 14,
+    color: "#8b5cf6",
     fontWeight: "500",
-    color: "#374151",
   },
-  feedSection: {
-    padding: 20,
-    paddingTop: 0,
+  storiesContainer: {
+    flexDirection: "row",
   },
-  emptyState: {
-    backgroundColor: "white",
-    borderRadius: 12,
-    padding: 40,
+  storyCard: {
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    marginRight: 16,
+    width: 70,
   },
-  emptyText: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#374151",
-    marginTop: 16,
+  storyRing: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#f0f0f0",
+    marginBottom: 8,
   },
-  emptySubtext: {
-    fontSize: 14,
-    color: "#6b7280",
-    textAlign: "center",
-    marginTop: 8,
-    marginBottom: 20,
+  unviewedRing: {
+    borderWidth: 2,
+    borderColor: "#8b5cf6",
+    padding: 2,
   },
-  createButton: {
+  addStoryRing: {
+    borderWidth: 1.5,
+    borderColor: "#d1d5db",
+    borderStyle: "dashed",
+  },
+  addStoryContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "#f3e8ff",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  storyAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     backgroundColor: "#8b5cf6",
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 24,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  createButtonText: {
+  avatarText: {
     color: "white",
+    fontSize: 24,
     fontWeight: "600",
-    fontSize: 16,
+  },
+  storyName: {
+    fontSize: 12,
+    color: "#374151",
+    textAlign: "center",
   },
   eventsSection: {
-    padding: 20,
-    paddingTop: 0,
-  },
-  statsSection: {
-    padding: 20,
-    paddingTop: 0,
+    paddingHorizontal: 20,
     marginBottom: 40,
   },
-  statsGrid: {
+  eventCard: {
     backgroundColor: "white",
     borderRadius: 12,
-    padding: 20,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  statItem: {
-    width: "48%",
-    alignItems: "center",
-    padding: 12,
+    padding: 14,
     marginBottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
-  statNumber: {
-    fontSize: 28,
-    fontWeight: "bold",
+  eventDate: {
+    width: 60,
+    height: 60,
+    borderRadius: 10,
+    backgroundColor: "#f3e8ff",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  eventDateDay: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#8b5cf6",
+    textAlign: "center",
+  },
+  eventDetails: {
+    flex: 1,
+  },
+  eventName: {
+    fontSize: 16,
+    fontWeight: "600",
     color: "#111827",
+    marginBottom: 4,
   },
-  statLabel: {
+  eventMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  eventMetaText: {
     fontSize: 12,
     color: "#6b7280",
-    marginTop: 4,
+    marginLeft: 4,
+  },
+  eventAttendees: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  attendeesText: {
+    fontSize: 11,
+    color: "#8b5cf6",
+    marginLeft: 4,
   },
 });

@@ -2,6 +2,7 @@ const Post = require("../models/Post");
 const Comment = require("../models/Comment");
 const User = require("../models/User");
 const Profile = require("../models/Profile");
+const Notification = require("../models/Notification");
 
 // ===================== HELPER FUNCTIONS =====================
 
@@ -9,7 +10,6 @@ const Profile = require("../models/Profile");
  * Check if user can view a post based on visibility settings
  */
 async function canUserViewPost(userId, post) {
-  // User can always view their own posts
   if (post.user.toString() === userId.toString()) {
     return true;
   }
@@ -44,6 +44,41 @@ async function canUserViewPost(userId, post) {
 async function canUserCommentOnPost(userId, post) {
   return await canUserViewPost(userId, post);
 }
+
+/**
+ * Create a notification for comment events
+ */
+const createCommentNotification = async (
+  recipientId,
+  senderId,
+  type,
+  title,
+  message,
+  targetId,
+  targetModel,
+) => {
+  // Don't create notification for self-actions
+  if (recipientId.toString() === senderId.toString()) {
+    return null;
+  }
+
+  try {
+    const notification = new Notification({
+      recipient: recipientId,
+      sender: senderId,
+      type,
+      title,
+      message,
+      targetId,
+      targetModel,
+    });
+    await notification.save();
+    return notification;
+  } catch (error) {
+    console.error("Create notification error:", error);
+    return null;
+  }
+};
 
 /**
  * Extract mentions from comment content
@@ -121,7 +156,7 @@ async function fetchReplies(commentId, userId, post, profilePictureMap) {
 }
 
 /**
- * ✅ Get all child comments recursively (for deletion)
+ * Get all child comments recursively (for deletion)
  */
 async function getAllChildCommentIds(commentId) {
   const children = await Comment.find({
@@ -140,7 +175,7 @@ async function getAllChildCommentIds(commentId) {
 }
 
 /**
- * ✅ Update post comment count accurately
+ * Update post comment count accurately
  */
 async function updatePostCommentCount(postId) {
   const actualCount = await Comment.countDocuments({
@@ -149,7 +184,6 @@ async function updatePostCommentCount(postId) {
   });
 
   await Post.findByIdAndUpdate(postId, { commentCount: actualCount });
-  console.log(`📊 Updated post ${postId} commentCount to: ${actualCount}`);
   return actualCount;
 }
 
@@ -210,8 +244,6 @@ exports.addComment = async (req, res) => {
     });
 
     await newComment.save();
-
-    // ✅ Update post comment count
     await updatePostCommentCount(postId);
 
     // Update recent comments
@@ -229,6 +261,22 @@ exports.addComment = async (req, res) => {
       path: "user",
       select: "name username email verified",
     });
+
+    // Create notification for post owner (if not commenting on own post and post is not anonymous)
+    if (post.user.toString() !== userId.toString() && !post.isAnonymous) {
+      const commenter = await User.findById(userId);
+      const truncatedContent =
+        content.length > 50 ? content.substring(0, 50) + "..." : content;
+      await createCommentNotification(
+        post.user,
+        userId,
+        "comment",
+        "New Comment",
+        content,
+        postId,
+        "Post",
+      );
+    }
 
     const userProfile = await Profile.findOne({ user: userId })
       .select("profilePicture")
@@ -342,9 +390,26 @@ exports.addReply = async (req, res) => {
     });
 
     await reply.save();
-
-    // ✅ Update post comment count
     await updatePostCommentCount(postId);
+
+    // Create notification for parent comment owner (if not replying to own comment)
+    if (
+      parentComment.user.toString() !== userId.toString() &&
+      !post.isAnonymous
+    ) {
+      const replier = await User.findById(userId);
+      const truncatedContent =
+        content.length > 50 ? content.substring(0, 50) + "..." : content;
+      await createCommentNotification(
+        parentComment.user,
+        userId,
+        "comment",
+        "New Reply",
+        `${replier.name} replied to your comment: "${truncatedContent}"`,
+        postId,
+        "Post",
+      );
+    }
 
     await reply.populate({
       path: "user",
@@ -465,7 +530,6 @@ exports.getPostComments = async (req, res) => {
       );
     }
 
-    // ✅ Get accurate total comment count
     const totalComments = await Comment.countDocuments({
       post: postId,
       isDeleted: false,
@@ -625,17 +689,13 @@ exports.toggleCommentLike = async (req, res) => {
 };
 
 /**
- * ✅ FIXED: Delete a comment and all its replies with proper count update
+ * Delete a comment and all its replies with proper count update
  */
 exports.deleteComment = async (req, res) => {
   try {
     const postId = req.params.id;
     const commentId = req.params.commentId;
     const userId = req.user._id;
-
-    console.log("=== DELETE COMMENT ===");
-    console.log("Post ID:", postId);
-    console.log("Comment ID:", commentId);
 
     const post = await Post.findById(postId);
     if (!post) {
@@ -668,15 +728,9 @@ exports.deleteComment = async (req, res) => {
       });
     }
 
-    // ✅ Get all child comment IDs
     const childIds = await getAllChildCommentIds(commentId);
     const allCommentIds = [commentId, ...childIds];
 
-    console.log(
-      `   Deleting ${allCommentIds.length} comments (1 parent + ${childIds.length} replies)`,
-    );
-
-    // ✅ Soft delete all comments in the tree
     await Comment.updateMany(
       { _id: { $in: allCommentIds } },
       {
@@ -686,7 +740,6 @@ exports.deleteComment = async (req, res) => {
       },
     );
 
-    // ✅ Update post comment count accurately
     const updatedCount = await updatePostCommentCount(postId);
 
     res.json({
