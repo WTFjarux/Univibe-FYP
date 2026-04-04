@@ -1,5 +1,5 @@
-// app/(tabs)/feed.tsx
-import React, { useState, useEffect, useCallback } from "react";
+// app/(tabs)/feed/index.tsx
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   Alert,
   TouchableOpacity,
+  Animated,
+  StyleSheet,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -25,11 +27,21 @@ import {
   getPosts,
   toggleLike,
   deletePost,
+  restorePost,
   Post,
 } from "../../../lib/postService";
 
 // Styles
 import styles from "@/app/components/Feed/styles";
+
+interface UndoAction {
+  type: "mute" | "block" | "hide" | "save" | "delete";
+  userId?: string;
+  postId?: string;
+  post?: Post;
+  userName?: string;
+  deletedPost?: Post;
+}
 
 export default function FeedScreen() {
   const router = useRouter();
@@ -50,13 +62,189 @@ export default function FeedScreen() {
   const [mutedUsers, setMutedUsers] = useState<Set<string>>(new Set());
   const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
 
-  // Updated filter options - only what you requested
+  // Info bar state
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [infoType, setInfoType] = useState<"success" | "error" | "info">(
+    "info",
+  );
+  const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
+  const slideAnim = useRef(new Animated.Value(100)).current;
+  const undoTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+
+  // Filters
   const filters = [
     { id: "all", label: "All" },
     { id: "campus", label: "Campus" },
     { id: "connections", label: "Connections" },
     { id: "anonymous", label: "Anonymous" },
   ];
+
+  // Show info bar message from bottom with undo option
+  const showInfoBar = (
+    message: string,
+    type: "success" | "error" | "info" = "info",
+    action?: UndoAction,
+    autoHide = true,
+  ) => {
+    setInfoMessage(message);
+    setInfoType(type);
+    setUndoAction(action || null);
+
+    // Clear existing timeout
+    if (undoTimeoutRef.current) {
+      clearTimeout(undoTimeoutRef.current);
+      undoTimeoutRef.current = undefined;
+    }
+
+    Animated.sequence([
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      ...(autoHide
+        ? [
+            Animated.delay(3000),
+            Animated.timing(slideAnim, {
+              toValue: 100,
+              duration: 300,
+              useNativeDriver: true,
+            }),
+          ]
+        : []),
+    ]).start(() => {
+      if (autoHide) {
+        setInfoMessage(null);
+        setUndoAction(null);
+        slideAnim.setValue(100);
+      }
+    });
+
+    // Auto hide after 5 seconds if not undone
+    if (autoHide) {
+      undoTimeoutRef.current = setTimeout(() => {
+        setInfoMessage(null);
+        setUndoAction(null);
+        slideAnim.setValue(100);
+        undoTimeoutRef.current = undefined;
+      }, 5000);
+    }
+  };
+
+  // Hide info bar
+  const hideInfoBar = () => {
+    if (undoTimeoutRef.current) {
+      clearTimeout(undoTimeoutRef.current);
+      undoTimeoutRef.current = undefined;
+    }
+    Animated.timing(slideAnim, {
+      toValue: 100,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      setInfoMessage(null);
+      setUndoAction(null);
+      slideAnim.setValue(100);
+    });
+  };
+
+  // Undo action
+  const handleUndo = async () => {
+    if (!undoAction) return;
+
+    switch (undoAction.type) {
+      case "mute":
+        if (undoAction.userId) {
+          setMutedUsers((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(undoAction.userId!);
+            return newSet;
+          });
+          fetchPosts(activeFilter, 1);
+          showInfoBar(
+            `User ${undoAction.userName || "muted"} unmuted`,
+            "success",
+          );
+        }
+        break;
+
+      case "block":
+        if (undoAction.userId) {
+          setBlockedUsers((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(undoAction.userId!);
+            return newSet;
+          });
+          fetchPosts(activeFilter, 1);
+          showInfoBar(
+            `User ${undoAction.userName || "blocked"} unblocked`,
+            "success",
+          );
+        }
+        break;
+
+      case "hide":
+        if (undoAction.postId && undoAction.post) {
+          setHiddenPosts((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(undoAction.postId!);
+            return newSet;
+          });
+          setPosts((prev) => {
+            const newPosts = [...prev, undoAction.post!];
+            return newPosts.sort(
+              (a, b) =>
+                new Date(b.createdAt).getTime() -
+                new Date(a.createdAt).getTime(),
+            );
+          });
+          showInfoBar("Post restored", "success");
+        }
+        break;
+
+      case "save":
+        if (undoAction.postId) {
+          setSavedPosts((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(undoAction.postId!);
+            return newSet;
+          });
+          showInfoBar("Post removed from saved items", "info");
+        }
+        break;
+
+      case "delete":
+        if (undoAction.postId && undoAction.deletedPost) {
+          try {
+            // Call API to restore the post
+            await restorePost(undoAction.postId);
+
+            // Restore to UI
+            setPosts((prev) => {
+              // Check if post already exists
+              if (prev.some((p) => p._id === undoAction.postId)) {
+                return prev;
+              }
+              const newPosts = [...prev, undoAction.deletedPost!];
+              return newPosts.sort(
+                (a, b) =>
+                  new Date(b.createdAt).getTime() -
+                  new Date(a.createdAt).getTime(),
+              );
+            });
+            showInfoBar("Post restored successfully", "success");
+          } catch (error: any) {
+            console.error("Error restoring post:", error);
+            showInfoBar(error.message || "Failed to restore post", "error");
+          }
+        }
+        break;
+    }
+
+    hideInfoBar();
+  };
 
   /**
    * Fetch posts from API with current filter and pagination
@@ -87,9 +275,9 @@ export default function FeedScreen() {
 
       // Handle session expiry
       if (
-        error.message.includes("401") ||
-        error.message.includes("unauthorized") ||
-        error.message.includes("token")
+        error.message?.includes("401") ||
+        error.message?.includes("unauthorized") ||
+        error.message?.includes("token")
       ) {
         Alert.alert("Session Expired", "Please login again to continue", [
           {
@@ -161,7 +349,7 @@ export default function FeedScreen() {
 
   const handleLike = async (postId: string) => {
     if (!token) {
-      Alert.alert("Login Required", "Please login to like posts");
+      showInfoBar("Please login to like posts", "info");
       return;
     }
 
@@ -183,13 +371,13 @@ export default function FeedScreen() {
       );
     } catch (error: any) {
       console.error("Error liking post:", error);
-      Alert.alert("Error", error.message || "Failed to like post");
+      showInfoBar(error.message || "Failed to like post", "error");
     }
   };
 
   const handleComment = (postId: string) => {
     if (!token) {
-      Alert.alert("Login Required", "Please login to comment");
+      showInfoBar("Please login to comment", "info");
       return;
     }
 
@@ -201,14 +389,29 @@ export default function FeedScreen() {
 
   const handleRepost = (postId: string) => {
     if (!token) {
-      Alert.alert("Login Required", "Please login to repost");
+      showInfoBar("Please login to repost", "info");
       return;
     }
-    Alert.alert("Repost", "Repost feature coming soon!");
+    showInfoBar("Repost feature coming soon!", "info");
   };
 
   const handleShare = (postId: string) => {
-    Alert.alert("Share", "Share feature coming soon!");
+    showInfoBar("Share feature coming soon!", "info");
+  };
+
+  // ============ PROFILE NAVIGATION HANDLER ============
+
+  const handleProfilePressFromPost = (userId: string) => {
+    if (!token) {
+      showInfoBar("Please login to view profiles", "info");
+      return;
+    }
+
+    if (userId === user?.id) {
+      router.push("/(tabs)/profile");
+    } else {
+      router.push(`/profile/${userId}`);
+    }
   };
 
   // ============ POST OPTION HANDLERS ============
@@ -220,61 +423,116 @@ export default function FeedScreen() {
     });
   };
 
-  const handleDeletePost = async (postId: string) => {
+  const handleDeletePost = async (postId: string, post: Post) => {
     try {
-      console.log("Deleting post:", postId);
+      // Store the deleted post for potential undo
+      setPosts((prev) => prev.filter((p) => p._id !== postId));
+      showInfoBar(
+        "Post deleted",
+        "info",
+        {
+          type: "delete",
+          postId,
+          deletedPost: post,
+        },
+        true,
+      );
+
+      // Soft delete from server
       await deletePost(postId);
-      setPosts((prev) => prev.filter((post) => post._id !== postId));
-      Alert.alert("Success", "Post deleted successfully");
     } catch (error: any) {
       console.error("Error deleting post:", error);
-      Alert.alert("Error", error.message || "Failed to delete post");
+      // Restore the post if deletion failed
+      setPosts((prev) => {
+        if (prev.some((p) => p._id === postId)) return prev;
+        const newPosts = [...prev, post];
+        return newPosts.sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        );
+      });
+      showInfoBar(error.message || "Failed to delete post", "error");
     }
   };
 
   const handleSavePost = (postId: string) => {
+    const wasSaved = savedPosts.has(postId);
+
     setSavedPosts((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(postId)) {
         newSet.delete(postId);
-        Alert.alert("Post Unsaved", "Post removed from your saved items");
       } else {
         newSet.add(postId);
-        Alert.alert("Post Saved", "Post added to your saved items");
       }
       return newSet;
     });
+
+    if (!wasSaved) {
+      showInfoBar(
+        "Post saved to your items",
+        "success",
+        {
+          type: "save",
+          postId,
+        },
+        true,
+      );
+    } else {
+      showInfoBar("Post removed from saved items", "info");
+    }
   };
 
   const handleReportPost = (postId: string) => {
     Alert.alert(
-      "Report Submitted",
-      "Thank you for reporting this post. Our team will review it.",
+      "Report Post",
+      "Are you sure you want to report this post? We'll review it and take appropriate action.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Report",
+          style: "destructive",
+          onPress: () => {
+            showInfoBar("Thank you for reporting this post", "success");
+          },
+        },
+      ],
     );
   };
 
-  const handleHidePost = (postId: string) => {
+  const handleHidePost = (postId: string, post: Post) => {
     setHiddenPosts((prev) => {
       const newSet = new Set(prev);
       newSet.add(postId);
       return newSet;
     });
-    setPosts((prev) => prev.filter((post) => post._id !== postId));
-    Alert.alert("Post Hidden", "You won't see this post anymore");
+    setPosts((prev) => prev.filter((p) => p._id !== postId));
+    showInfoBar("Post hidden", "info", { type: "hide", postId, post }, true);
   };
 
   const handleCopyLink = (postId: string) => {
-    Alert.alert("Link Copied", "Post link copied to clipboard");
+    showInfoBar("Post link copied to clipboard", "success");
   };
 
-  const handleMuteUser = (userId: string) => {
+  const handleMuteUser = (userId: string, userName?: string) => {
+    const displayName = userName || "this user";
+
     setMutedUsers((prev) => {
       const newSet = new Set(prev);
       newSet.add(userId);
       return newSet;
     });
     setPosts((prev) => prev.filter((post) => post.user?._id !== userId));
-    Alert.alert("User Muted", "You won't see posts from this user anymore");
+    showInfoBar(
+      `User ${displayName} muted`,
+      "info",
+      {
+        type: "mute",
+        userId,
+        userName: displayName,
+      },
+      true,
+    );
   };
 
   const handleUnmuteUser = (userId: string) => {
@@ -284,17 +542,31 @@ export default function FeedScreen() {
       return newSet;
     });
     fetchPosts(activeFilter, 1);
-    Alert.alert("User Unmuted", "You will now see posts from this user again");
+    showInfoBar(
+      "User unmuted, you will now see posts from this user again",
+      "success",
+    );
   };
 
-  const handleBlockUser = (userId: string) => {
+  const handleBlockUser = (userId: string, userName?: string) => {
+    const displayName = userName || "this user";
+
     setBlockedUsers((prev) => {
       const newSet = new Set(prev);
       newSet.add(userId);
       return newSet;
     });
     setPosts((prev) => prev.filter((post) => post.user?._id !== userId));
-    Alert.alert("User Blocked", "You won't see posts from this user anymore");
+    showInfoBar(
+      `User ${displayName} blocked`,
+      "info",
+      {
+        type: "block",
+        userId,
+        userName: displayName,
+      },
+      true,
+    );
   };
 
   const handleUnblockUser = (userId: string) => {
@@ -304,9 +576,9 @@ export default function FeedScreen() {
       return newSet;
     });
     fetchPosts(activeFilter, 1);
-    Alert.alert(
-      "User Unblocked",
-      "You will now see posts from this user again",
+    showInfoBar(
+      "User unblocked, you will now see posts from this user again",
+      "success",
     );
   };
 
@@ -314,7 +586,7 @@ export default function FeedScreen() {
 
   const handleCreatePost = () => {
     if (!token) {
-      Alert.alert("Login Required", "Please login to create posts");
+      showInfoBar("Please login to create posts", "info");
       return;
     }
     router.push("/components/Feed/Post/create");
@@ -322,10 +594,10 @@ export default function FeedScreen() {
 
   const handleNotifications = () => {
     if (!token) {
-      Alert.alert("Login Required", "Please login to view notifications");
+      showInfoBar("Please login to view notifications", "info");
       return;
     }
-    Alert.alert("Notifications", "Notifications screen coming soon!");
+    router.push("/notifications");
   };
 
   const handleProfilePress = () => {
@@ -333,6 +605,44 @@ export default function FeedScreen() {
   };
 
   // ============ RENDER HELPERS ============
+
+  const renderInfoBar = () => {
+    if (!infoMessage) return null;
+
+    const backgroundColor =
+      infoType === "success"
+        ? "#10b981"
+        : infoType === "error"
+          ? "#ef4444"
+          : "#8b5cf6";
+
+    const iconName =
+      infoType === "success"
+        ? "checkmark-circle"
+        : infoType === "error"
+          ? "alert-circle"
+          : "information-circle";
+
+    return (
+      <Animated.View
+        style={[
+          localStyles.infoBar,
+          {
+            backgroundColor,
+            transform: [{ translateY: slideAnim }],
+          },
+        ]}
+      >
+        <Ionicons name={iconName} size={20} color="#fff" />
+        <Text style={localStyles.infoBarText}>{infoMessage}</Text>
+        {undoAction && (
+          <TouchableOpacity onPress={handleUndo} style={localStyles.undoButton}>
+            <Text style={localStyles.undoButtonText}>UNDO</Text>
+          </TouchableOpacity>
+        )}
+      </Animated.View>
+    );
+  };
 
   const renderLoginPrompt = () => (
     <SafeAreaView style={styles.container}>
@@ -417,7 +727,7 @@ export default function FeedScreen() {
         {/* Create Post Button */}
         <CreatePostButton onPress={handleCreatePost} />
 
-        {/* Filter Tabs - Updated */}
+        {/* Filter Tabs */}
         <FilterTabs
           filters={filters}
           activeFilter={activeFilter}
@@ -440,13 +750,24 @@ export default function FeedScreen() {
                   onRepostPress={handleRepost}
                   onSharePress={handleShare}
                   onEdit={handleEditPost}
-                  onDelete={handleDeletePost}
+                  onDelete={() => handleDeletePost(post._id, post)}
                   onSave={handleSavePost}
                   onReport={handleReportPost}
-                  onHide={handleHidePost}
+                  onHide={() => handleHidePost(post._id, post)}
                   onCopyLink={handleCopyLink}
-                  onMuteUser={handleMuteUser}
-                  onBlockUser={handleBlockUser}
+                  onMuteUser={(userId) =>
+                    handleMuteUser(
+                      userId,
+                      post.user?.name || post.user?.username,
+                    )
+                  }
+                  onBlockUser={(userId) =>
+                    handleBlockUser(
+                      userId,
+                      post.user?.name || post.user?.username,
+                    )
+                  }
+                  onProfilePress={handleProfilePressFromPost}
                 />
               ))}
         </View>
@@ -463,6 +784,51 @@ export default function FeedScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Info bar rendered at the bottom */}
+      {renderInfoBar()}
     </SafeAreaView>
   );
 }
+
+const localStyles = StyleSheet.create({
+  infoBar: {
+    position: "absolute" as "absolute",
+    bottom: 30,
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    gap: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+    zIndex: 1000,
+    minHeight: 56,
+  },
+  infoBarText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "500" as "500",
+    flex: 1,
+    textAlign: "left" as "left",
+    lineHeight: 20,
+  },
+  undoButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    borderRadius: 6,
+  },
+  undoButtonText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "600" as "600",
+    letterSpacing: 0.5,
+  },
+});

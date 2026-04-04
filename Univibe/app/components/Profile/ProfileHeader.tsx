@@ -304,7 +304,7 @@ export default function ProfileHeader({
 
 const styles = StyleSheet.create({
   headerContainer: {
-    marginBottom: 8,
+    marginBottom: 16,
   },
 
   header: {
@@ -436,13 +436,13 @@ const styles = StyleSheet.create({
   },
 
   bioContainer: {
-    marginTop: 8,
-    marginHorizontal: 20,
+    marginTop: 18,
+    marginHorizontal: 25,
     marginBottom: 8,
   },
 
   bio: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "500",
     lineHeight: 20,
     color: "#000000",

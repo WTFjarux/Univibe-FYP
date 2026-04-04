@@ -1,17 +1,54 @@
 // app/(tabs)/home/index.tsx
-import React from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { Link } from "expo-router";
+import { Link, useFocusEffect } from "expo-router";
+import { useAuth } from "../../lib/AuthContext";
+import { notificationService } from "../../lib/notificationService";
 
 export default function HomeScreen() {
+  const { token } = useAuth();
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Fetch unread notification count
+  const fetchUnreadCount = async () => {
+    if (!token) return;
+
+    try {
+      const response = await notificationService.getUnreadCount();
+      if (response.success && response.count !== undefined) {
+        setUnreadCount(response.count);
+      }
+    } catch (error) {
+      console.error("Error fetching unread count:", error);
+    }
+  };
+
+  // Refresh unread count when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      fetchUnreadCount();
+    }, [token]),
+  );
+
+  // Also fetch on mount
+  useEffect(() => {
+    fetchUnreadCount();
+  }, [token]);
+
+  // Handle chat press - coming soon
+  const handleChatPress = () => {
+    Alert.alert("Coming Soon", "Messaging feature will be available soon!");
+  };
+
   // Mock data for campus moments (stories)
   const campusMoments = [
     {
@@ -79,29 +116,33 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header with Univibe and Icons */}
+        {/* Header with Chat left, Univibe center, Notifications right */}
         <View style={styles.header}>
-          <Text style={styles.logoText}>UNIVIBE</Text>
-          <View style={styles.headerIcons}>
-            {/* Notification Icon */}
-            <Link href="./notifications" asChild>
-              <TouchableOpacity style={styles.iconButton}>
-                <Ionicons
-                  name="notifications-outline"
-                  size={30}
-                  color="#374151"
-                />
-                <View style={styles.badge} />
-              </TouchableOpacity>
-            </Link>
+          {/* Chat Icon - Left (Coming Soon) */}
+          <TouchableOpacity style={styles.iconButton} onPress={handleChatPress}>
+            <Ionicons name="chatbubble-outline" size={28} color="#374151" />
+          </TouchableOpacity>
 
-            {/* Messages Icon */}
-            <Link href="./(tabs)/messages" asChild>
-              <TouchableOpacity style={styles.iconButton}>
-                <Ionicons name="chatbubble-outline" size={30} color="#374151" />
-              </TouchableOpacity>
-            </Link>
-          </View>
+          {/* Univibe Logo - Center */}
+          <Text style={styles.logoText}>UNIVIBE</Text>
+
+          {/* Notification Icon - Right with badge */}
+          <Link href="/notifications" asChild>
+            <TouchableOpacity style={styles.iconButton}>
+              <Ionicons
+                name="notifications-outline"
+                size={28}
+                color="#374151"
+              />
+              {unreadCount > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </Link>
         </View>
 
         {/* Campus Moments Section (Stories Style) */}
@@ -155,7 +196,7 @@ export default function HomeScreen() {
         <View style={styles.eventsSection}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Track My Events</Text>
-            <Link href="./(tabs)/events" asChild>
+            <Link href="/(tabs)/events" asChild>
               <TouchableOpacity>
                 <Text style={styles.seeAllText}>View Calendar</Text>
               </TouchableOpacity>
@@ -214,14 +255,11 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   logoText: {
-    fontSize: 30,
+    fontSize: 28,
     fontWeight: "700",
     fontFamily: "Sofia-Regular",
     color: "#111827",
-  },
-  headerIcons: {
-    flexDirection: "row",
-    gap: 30,
+    letterSpacing: 1,
   },
   iconButton: {
     position: "relative",
@@ -229,14 +267,20 @@ const styles = StyleSheet.create({
   },
   badge: {
     position: "absolute",
-    top: 2,
-    right: 2,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    top: 0,
+    right: 0,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: "#ef4444",
-    borderWidth: 1,
-    borderColor: "white",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 4,
+  },
+  badgeText: {
+    color: "white",
+    fontSize: 10,
+    fontWeight: "600",
   },
   momentsSection: {
     marginBottom: 24,

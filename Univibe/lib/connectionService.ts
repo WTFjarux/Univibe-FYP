@@ -1,6 +1,7 @@
 // lib/connectionService.ts
 import api from './api';
 import { API_BASE_URL } from '@/constants/ipConstants';
+import { notificationService } from './notificationService';
 
 export type ConnectionStatusType = 'connected' | 'pending_sent' | 'pending_received' | 'not_connected';
 
@@ -146,23 +147,32 @@ export const connectionService = {
   },
 
   /**
-   * Cancel a sent connection request
+   * Cancel a sent connection request - FIXED
    */
-  cancelConnectionRequest: async (userId: string): Promise<ConnectionResponse> => {
-    try {
-      const response = await api.post(`${API_BASE_URL}/api/connections/reject/${userId}`);
-      return {
-        success: true,
-        message: response.data.message,
-      };
-    } catch (error: any) {
-      console.error('Cancel connection request error:', error);
-      return {
-        success: false,
-        message: error.response?.data?.message || 'Failed to cancel connection request',
-      };
-    }
-  },
+cancelConnectionRequest: async (userId: string): Promise<ConnectionResponse> => {
+  try {
+    // First, delete any pending notifications
+    await notificationService.deletePendingConnectionNotifications(userId);
+    
+    // Then cancel the request
+    const response = await api.delete(`${API_BASE_URL}/api/connections/cancel/${userId}`);
+    console.log('Cancel connection response:', response.data);
+    
+    return {
+      success: true,
+      message: response.data.message,
+      data: {
+        userConnectionCount: response.data.data?.userConnectionCount,
+      }
+    };
+  } catch (error: any) {
+    console.error('Cancel connection request error:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to cancel connection request',
+    };
+  }
+},
 
   /**
    * Remove an existing connection
@@ -177,7 +187,7 @@ export const connectionService = {
         message: response.data.message,
         data: {
           userConnectionCount: response.data.data?.userConnectionCount,
-          connectionUserCount: response.data.data?.connectionUserCount,
+          connectionUserCount: response.data.data?.removedUserConnectionCount,
         }
       };
     } catch (error: any) {

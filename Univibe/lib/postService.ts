@@ -1,4 +1,4 @@
-// lib/postService.ts - CLEANED VERSION
+// lib/postService.ts - UPDATED WITH RESTORE FUNCTIONALITY
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { API_BASE_URL } from '../constants/ipConstants'; 
@@ -51,6 +51,8 @@ export interface Post {
   isAnonymous?: boolean;
   commentCount?: number;
   recentComments?: Comment[];
+  isDeleted?: boolean; // Soft delete flag
+  deletedAt?: string; // When post was deleted
 }
 
 export interface Comment {
@@ -149,6 +151,22 @@ export interface ProfilePostsResponse {
     };
   };
   message?: string;
+}
+
+export interface DeletePostResponse {
+  success: boolean;
+  message: string;
+  post?: {
+    _id: string;
+    isDeleted: boolean;
+    deletedAt?: string;
+  };
+}
+
+export interface RestorePostResponse {
+  success: boolean;
+  message: string;
+  post?: Post;
 }
 
 // ============================================
@@ -396,7 +414,10 @@ export const getPostById = async (postId: string): Promise<{success: boolean; po
   }
 };
 
-export const deletePost = async (postId: string): Promise<{success: boolean; message: string}> => {
+/**
+ * Soft delete a post (marks as deleted, can be restored)
+ */
+export const deletePost = async (postId: string): Promise<DeletePostResponse> => {
   try {
     const token = await getAuthToken();
     const url = buildApiUrl(`posts/${postId}`);
@@ -416,6 +437,73 @@ export const deletePost = async (postId: string): Promise<{success: boolean; mes
     return await response.json();
   } catch (error) {
     console.error('Error deleting post:', error);
+    throw error;
+  }
+};
+
+/**
+ * Restore a soft-deleted post
+ */
+export const restorePost = async (postId: string): Promise<RestorePostResponse> => {
+  try {
+    const token = await getAuthToken();
+    const url = buildApiUrl(`posts/${postId}/restore`);
+    
+    console.log('Restore post URL:', url); // Debug log
+    console.log('Post ID:', postId); // Debug log
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    console.log('Restore response status:', response.status); // Debug log
+    
+    if (!response.ok) {
+      let errorMessage = `Failed to restore post: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorData.message || errorMessage;
+      } catch {
+        const errorText = await response.text();
+        if (errorText) errorMessage = errorText;
+      }
+      throw new Error(errorMessage);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error restoring post:', error);
+    throw error;
+  }
+};
+
+/**
+ * Permanently delete a post (cannot be restored)
+ */
+export const permanentlyDeletePost = async (postId: string): Promise<{success: boolean; message: string}> => {
+  try {
+    const token = await getAuthToken();
+    const url = buildApiUrl(`posts/${postId}/permanent`);
+    
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to permanently delete post: ${response.status}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error permanently deleting post:', error);
     throw error;
   }
 };
@@ -477,6 +565,85 @@ export const searchPosts = async (
     return await response.json();
   } catch (error) {
     console.error('Error searching posts:', error);
+    throw error;
+  }
+};
+
+// ============================================
+// REPOST FUNCTIONS
+// ============================================
+
+export const repostPost = async (postId: string): Promise<{ success: boolean; message: string; data: Post }> => {
+  try {
+    const token = await getAuthToken();
+    const url = buildApiUrl(`posts/repost/${postId}`);
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to repost');
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error reposting:', error);
+    throw error;
+  }
+};
+
+// ============================================
+// FEED FUNCTIONS
+// ============================================
+
+export const getFeed = async (
+  filter: 'campus' | 'connections' = 'campus',
+  page: number = 1,
+  limit: number = 10
+): Promise<{
+  success: boolean;
+  data: Post[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+}> => {
+  try {
+    const token = await getAuthToken();
+    const params = new URLSearchParams({
+      filter,
+      page: page.toString(),
+      limit: limit.toString(),
+    });
+    
+    const url = `${buildApiUrl('posts/feed')}?${params.toString()}`;
+    
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      if (response.status === 401) {
+        await SecureStore.deleteItemAsync('authToken');
+        throw new Error('Session expired. Please login again.');
+      }
+      throw new Error(`Failed to fetch feed: ${response.status}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching feed:', error);
     throw error;
   }
 };

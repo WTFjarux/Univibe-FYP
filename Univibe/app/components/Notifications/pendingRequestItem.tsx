@@ -1,8 +1,19 @@
 // app/components/Notifications/pendingRequestItem.tsx
 import React from "react";
-import { View, Text, TouchableOpacity, StyleSheet, Image } from "react-native";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Image,
+  ActivityIndicator,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { API_BASE_URL } from "@/constants/ipConstants";
+
+// Default avatar from assets
+const DEFAULT_AVATAR = require("../../../assets/images/default-avatar.png");
 
 interface PendingRequestItemProps {
   request: {
@@ -14,15 +25,39 @@ interface PendingRequestItemProps {
   };
   onAccept: (id: string, name: string) => void;
   onReject: (id: string, name: string) => void;
+  isProcessing?: boolean;
 }
 
 export default function PendingRequestItem({
   request,
   onAccept,
   onReject,
+  isProcessing = false,
 }: PendingRequestItemProps) {
   const displayName = request.fullName || request.name;
-  const initial = displayName.charAt(0).toUpperCase();
+  const displayUsername = request.username.startsWith("@")
+    ? request.username
+    : `@${request.username}`;
+
+  /**
+   * Get full image URL for profile picture
+   */
+  const getFullImageUrl = (url: string): string => {
+    if (!url) return "";
+    if (url.startsWith("http://") || url.startsWith("https://")) return url;
+    if (url.startsWith("/")) return `${API_BASE_URL}${url}`;
+    return `${API_BASE_URL}/${url}`;
+  };
+
+  /**
+   * Get avatar source
+   */
+  const getAvatarSource = () => {
+    if (request.profilePicture && request.profilePicture.trim() !== "") {
+      return { uri: getFullImageUrl(request.profilePicture) };
+    }
+    return DEFAULT_AVATAR;
+  };
 
   return (
     <View style={styles.container}>
@@ -30,26 +65,19 @@ export default function PendingRequestItem({
       <TouchableOpacity
         style={styles.avatarContainer}
         onPress={() => router.push(`/profile/${request._id}`)}
+        disabled={isProcessing}
       >
-        {request.profilePicture ? (
-          <Image
-            source={{ uri: request.profilePicture }}
-            style={styles.avatar}
-          />
-        ) : (
-          <View style={styles.avatarPlaceholder}>
-            <Text style={styles.avatarText}>{initial}</Text>
-          </View>
-        )}
+        <Image source={getAvatarSource()} style={styles.avatar} />
       </TouchableOpacity>
 
       {/* Info */}
       <TouchableOpacity
         style={styles.infoContainer}
         onPress={() => router.push(`/profile/${request._id}`)}
+        disabled={isProcessing}
       >
         <Text style={styles.name}>{displayName}</Text>
-        <Text style={styles.username}>@{request.username}</Text>
+        <Text style={styles.username}>{displayUsername}</Text>
         <Text style={styles.requestText}>wants to connect with you</Text>
       </TouchableOpacity>
 
@@ -58,12 +86,18 @@ export default function PendingRequestItem({
         <TouchableOpacity
           style={[styles.actionButton, styles.acceptButton]}
           onPress={() => onAccept(request._id, displayName)}
+          disabled={isProcessing}
         >
-          <Ionicons name="checkmark" size={20} color="white" />
+          {isProcessing ? (
+            <ActivityIndicator size="small" color="white" />
+          ) : (
+            <Ionicons name="checkmark" size={20} color="white" />
+          )}
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.actionButton, styles.rejectButton]}
           onPress={() => onReject(request._id, displayName)}
+          disabled={isProcessing}
         >
           <Ionicons name="close" size={20} color="#ef4444" />
         </TouchableOpacity>
@@ -93,19 +127,7 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-  },
-  avatarPlaceholder: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: "#8b5cf6",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  avatarText: {
-    color: "white",
-    fontSize: 22,
-    fontWeight: "600",
+    backgroundColor: "#f3f4f6",
   },
   infoContainer: {
     flex: 1,

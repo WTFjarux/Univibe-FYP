@@ -37,6 +37,7 @@ import {
   getPostById,
   getPostComments,
   getFullImageUrl,
+  toggleLike,
   Post,
   Comment,
 } from "@/lib/postService";
@@ -80,6 +81,10 @@ export default function CommentScreen() {
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [imageModalVisible, setImageModalVisible] = useState(false);
   const [isAnyCommentEditing, setIsAnyCommentEditing] = useState(false);
+  
+  // Post like state
+  const [isPostLiked, setIsPostLiked] = useState(false);
+  const [postLikesCount, setPostLikesCount] = useState(0);
 
   // ===== Refs =====
   const flatListRef = useRef<FlatList>(null);
@@ -109,6 +114,8 @@ export default function CommentScreen() {
     try {
       const response = await getPostById(postId);
       setPost(response.post);
+      setIsPostLiked(response.post.isLiked || false);
+      setPostLikesCount(response.post.likes?.length || 0);
     } catch (error) {
       console.error("Error fetching post:", error);
       Alert.alert("Error", "Failed to load post details");
@@ -165,7 +172,39 @@ export default function CommentScreen() {
     }
   };
 
-  // ✅ Updated to accept both displayName and username
+  const handlePostLike = async () => {
+    if (!token || !post) return;
+
+    try {
+      // Optimistically update UI
+      const newLikedState = !isPostLiked;
+      setIsPostLiked(newLikedState);
+      setPostLikesCount(prev => newLikedState ? prev + 1 : prev - 1);
+
+      // Call API to toggle like
+      const response = await toggleLike(postId);
+      
+      // Update with actual response
+      setIsPostLiked(response.isLiked);
+      setPostLikesCount(response.likes);
+      
+      // Update the post object
+      setPost(prev => prev ? {
+        ...prev,
+        isLiked: response.isLiked,
+        likes: response.isLiked 
+          ? [...(prev.likes || []), { _id: user?.id }]
+          : (prev.likes || []).filter((like: any) => like._id !== user?.id)
+      } : null);
+    } catch (error: any) {
+      console.error("Error liking post:", error);
+      // Revert on error
+      setIsPostLiked(!isPostLiked);
+      setPostLikesCount(prev => isPostLiked ? prev + 1 : prev - 1);
+      Alert.alert("Error", error.message || "Failed to like post");
+    }
+  };
+
   const handleReplyPress = (
     commentId: string,
     displayName: string,
@@ -213,8 +252,16 @@ export default function CommentScreen() {
   // ===== Render Helpers =====
   const renderPostHeader = useMemo(() => {
     if (!post) return null;
-    return <PostPreview post={post} onImagePress={handleImagePress} />;
-  }, [post]);
+    return (
+      <PostPreview 
+        post={post}
+        isLiked={isPostLiked}
+        likesCount={postLikesCount}
+        onLikePress={handlePostLike}
+        onImagePress={handleImagePress}
+      />
+    );
+  }, [post, isPostLiked, postLikesCount]);
 
   const renderCommentItem = useCallback(
     ({ item }: { item: Comment }) => (

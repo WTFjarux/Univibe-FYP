@@ -12,22 +12,21 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { Post } from "@/lib/postService";
 import { formatTimeAgo } from "@/lib/formatTime";
-import {
-  getFullImageUrl,
-  // REMOVED: getUserProfileImage,
-  formatUserDisplay,
-} from "@/lib/postService";
+import { getFullImageUrl, formatUserDisplay } from "@/lib/postService";
 import { API_BASE_URL } from "@/constants/ipConstants";
 
 const { width: screenWidth } = Dimensions.get("window");
 const imageWidth = screenWidth - 32;
 const imageHeight = 400;
 
-// ✅ Local default avatar
+// Local default avatar
 const DEFAULT_AVATAR: ImageSourcePropType = require("../../../../assets/images/default-avatar.png");
 
 interface PostPreviewProps {
   post: Post;
+  isLiked?: boolean;
+  likesCount?: number;
+  onLikePress?: () => void;
   onImagePress: (index: number) => void;
 }
 
@@ -47,7 +46,13 @@ const getProfileImageSource = (
   return DEFAULT_AVATAR;
 };
 
-const PostPreview: React.FC<PostPreviewProps> = ({ post, onImagePress }) => {
+const PostPreview: React.FC<PostPreviewProps> = ({
+  post,
+  isLiked = false,
+  likesCount = 0,
+  onLikePress,
+  onImagePress,
+}) => {
   const [avatarError, setAvatarError] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const isScrollingRef = React.useRef(false);
@@ -74,11 +79,9 @@ const PostPreview: React.FC<PostPreviewProps> = ({ post, onImagePress }) => {
       );
     }
 
-    // ✅ Get profile image from post user
     const profileImageUrl = post.user?.profilePicture || undefined;
     const imageSource = getProfileImageSource(profileImageUrl);
 
-    // If it's the default avatar (local image), we don't need an onError handler
     if (imageSource === DEFAULT_AVATAR) {
       return <Image source={DEFAULT_AVATAR} style={styles.avatar} />;
     }
@@ -182,14 +185,25 @@ const PostPreview: React.FC<PostPreviewProps> = ({ post, onImagePress }) => {
         </View>
       )}
 
-      {/* Stats */}
+      {/* Stats with Like Button */}
       <View style={styles.stats}>
+        <TouchableOpacity
+          style={styles.stat}
+          onPress={onLikePress}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name={isLiked ? "heart" : "heart-outline"}
+            size={18}
+            color={isLiked ? "#ef4444" : "#6b7280"}
+          />
+          <Text style={[styles.statText, isLiked && styles.statTextActive]}>
+            {likesCount || 0}
+          </Text>
+        </TouchableOpacity>
+
         <View style={styles.stat}>
-          <Ionicons name="heart-outline" size={16} color="#6b7280" />
-          <Text style={styles.statText}>{post.likes?.length || 0}</Text>
-        </View>
-        <View style={styles.stat}>
-          <Ionicons name="chatbubble-outline" size={16} color="#6b7280" />
+          <Ionicons name="chatbubble-outline" size={18} color="#6b7280" />
           <Text style={styles.statText}>{post.commentCount || 0}</Text>
         </View>
       </View>
@@ -317,11 +331,14 @@ const styles = StyleSheet.create({
   stat: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: 6,
   },
   statText: {
     fontSize: 14,
     color: "#6b7280",
+  },
+  statTextActive: {
+    color: "#ef4444",
   },
   commentsHeader: {
     paddingTop: 16,

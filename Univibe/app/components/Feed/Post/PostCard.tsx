@@ -1,4 +1,5 @@
-// app/components/Feed/Post/PostCard.tsx
+// app/components/Feed/Post/PostCard.tsx - Updated with onProfilePress prop
+
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   View,
@@ -38,6 +39,7 @@ interface PostCardProps {
   onCopyLink?: (postId: string) => void;
   onMuteUser?: (userId: string) => void;
   onBlockUser?: (userId: string) => void;
+  onProfilePress?: (userId: string) => void; // Add this prop
 }
 
 const PostCard: React.FC<PostCardProps> = ({
@@ -54,6 +56,7 @@ const PostCard: React.FC<PostCardProps> = ({
   onCopyLink,
   onMuteUser,
   onBlockUser,
+  onProfilePress, // Add this prop
 }) => {
   const router = useRouter();
   const [optionsVisible, setOptionsVisible] = useState(false);
@@ -151,7 +154,7 @@ const PostCard: React.FC<PostCardProps> = ({
     }
   };
 
-  // Navigate to user profile - with error handling
+  // Navigate to user profile - with error handling and onProfilePress support
   const handleUserPress = useCallback(() => {
     try {
       const userId = getUserIdForNavigation();
@@ -160,16 +163,22 @@ const PostCard: React.FC<PostCardProps> = ({
         return;
       }
 
-      if (userId === currentUserId) {
-        router.push("/(tabs)/profile");
+      // Use the onProfilePress callback if provided (from parent)
+      if (onProfilePress) {
+        onProfilePress(userId);
       } else {
-        router.push(`/profile/${userId}`);
+        // Fallback logic
+        if (userId === currentUserId) {
+          router.push("/(tabs)/profile");
+        } else {
+          router.push(`/profile/${userId}`);
+        }
       }
     } catch (error) {
       console.error("Navigation error in PostCard:", error);
       Alert.alert("Error", "Could not navigate to profile");
     }
-  }, [currentUserId, router]);
+  }, [currentUserId, router, onProfilePress]);
 
   const getVisibilityIconName = (): IconName => {
     const icons: Record<string, IconName> = {
@@ -534,13 +543,14 @@ const styles = StyleSheet.create({
   postCard: {
     backgroundColor: "white",
     marginBottom: 16,
+    borderRadius: 16,
   },
   postHeader: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 12,
     paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingTop: 25,
   },
   postAvatar: {
     width: 40,
@@ -594,6 +604,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: "#374151",
     marginBottom: 12,
+    padding:16,
     paddingHorizontal: 20,
   },
   imagesContainer: {

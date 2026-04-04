@@ -272,7 +272,6 @@ export const useComments = (
         setPost((prev: any) => {
           const oldCount = prev?.commentCount || 0;
           const newCount = Math.max(0, oldCount - commentsToDelete);
-          console.log(`📊 Post commentCount update - Old: ${oldCount}, Deleted: ${commentsToDelete}, New: ${newCount}`);
           return {
             ...prev,
             commentCount: newCount,
@@ -280,7 +279,7 @@ export const useComments = (
         });
       }
       
-      Alert.alert("Success", `Comment and ${commentsToDelete - 1} repl${commentsToDelete - 1 === 1 ? 'y' : 'ies'} deleted`);
+      
     } catch (error: any) {
       console.error("Error deleting comment:", error);
       Alert.alert("Error", error.message || "Failed to delete comment");

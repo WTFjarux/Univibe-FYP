@@ -174,6 +174,36 @@ export const notificationService = {
     }
   },
 
+  /**
+   * Delete all pending connection request notifications from a specific sender
+   * This prevents duplicate/spam notifications when users cancel and resend requests
+   */
+  deletePendingConnectionNotifications: async (senderId: string): Promise<{ success: boolean; message?: string; deletedCount?: number }> => {
+    try {
+      const token = await getAuthToken();
+      if (!token) {
+        return { success: false, message: "No authentication token" };
+      }
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/notifications/connection-requests/${senderId}`,
+        {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error deleting pending connection notifications:', error);
+      return { success: false, message: 'Failed to delete pending connection notifications' };
+    }
+  },
+
   getUnreadCount: async (): Promise<{ success: boolean; count?: number; message?: string }> => {
     try {
       const token = await getAuthToken();

@@ -1,5 +1,5 @@
 // app/notifications.tsx
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useRef } from "react";
 import {
   View,
   Text,
@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
-  Alert,
+  Animated,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -35,6 +35,66 @@ export default function NotificationsScreen() {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [processingRequestId, setProcessingRequestId] = useState<string | null>(
+    null,
+  );
+
+  // Info bar state
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [infoType, setInfoType] = useState<"success" | "error" | "info">(
+    "info",
+  );
+  const [deletedNotification, setDeletedNotification] = useState<{
+    id: string;
+    data: Notification;
+  } | null>(null);
+  const slideAnim = useRef(new Animated.Value(100)).current; // Start below screen
+
+  // Show info bar message from bottom
+  const showInfoBar = (
+    message: string,
+    type: "success" | "error" | "info" = "info",
+    autoHide = true,
+  ) => {
+    setInfoMessage(message);
+    setInfoType(type);
+
+    Animated.sequence([
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      ...(autoHide
+        ? [
+            Animated.delay(3000),
+            Animated.timing(slideAnim, {
+              toValue: 100,
+              duration: 300,
+              useNativeDriver: true,
+            }),
+          ]
+        : []),
+    ]).start(() => {
+      if (autoHide) {
+        setInfoMessage(null);
+        slideAnim.setValue(100);
+      }
+    });
+  };
+
+  // Hide info bar manually
+  const hideInfoBar = () => {
+    Animated.timing(slideAnim, {
+      toValue: 100,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      setInfoMessage(null);
+      setDeletedNotification(null);
+      slideAnim.setValue(100);
+    });
+  };
 
   // Group notifications by date
   const groupedNotifications = useMemo(() => {
@@ -140,83 +200,112 @@ export default function NotificationsScreen() {
     setUnreadCount((prev) => prev + 1);
   };
 
-  // Delete notification
-  const handleDeleteNotification = (notificationId: string) => {
-    Alert.alert(
-      "Delete Notification",
-      "Are you sure you want to delete this notification?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            const response =
-              await notificationService.deleteNotification(notificationId);
-            if (response.success) {
-              setNotifications((prev) =>
-                prev.filter((n) => n._id !== notificationId),
-              );
-              // Update unread count if the deleted notification was unread
-              const wasUnread =
-                notifications.find((n) => n._id === notificationId)?.read ===
-                false;
-              if (wasUnread) {
-                setUnreadCount((prev) => Math.max(0, prev - 1));
-              }
-            }
-          },
-        },
-      ],
+  // Delete notification with undo
+  const handleDeleteNotification = async (notificationId: string) => {
+    const notificationToDelete = notifications.find(
+      (n) => n._id === notificationId,
     );
+    if (!notificationToDelete) return;
+
+    // Store the deleted notification for potential undo
+    setDeletedNotification({
+      id: notificationId,
+      data: notificationToDelete,
+    });
+
+    // Remove from UI immediately
+    setNotifications((prev) => prev.filter((n) => n._id !== notificationId));
+
+    // Update unread count if needed
+    const wasUnread = !notificationToDelete.read;
+    if (wasUnread) {
+      setUnreadCount((prev) => Math.max(0, prev - 1));
+    }
+
+    // Show undo info bar
+    showInfoBar("Notification deleted", "info", false);
+
+    // Perform actual deletion after a delay
+    const timeoutId = setTimeout(async () => {
+      const response =
+        await notificationService.deleteNotification(notificationId);
+      if (!response.success) {
+        // If deletion failed, restore the notification
+        setNotifications((prev) => [...prev, notificationToDelete]);
+        if (wasUnread) {
+          setUnreadCount((prev) => prev + 1);
+        }
+        showInfoBar("Failed to delete notification", "error");
+      }
+      setDeletedNotification(null);
+      hideInfoBar();
+    }, 5000);
+
+    // Store timeout ID for undo
+    (window as any).deleteTimeoutId = timeoutId;
+  };
+
+  // Undo delete
+  const handleUndoDelete = () => {
+    if (deletedNotification) {
+      // Clear the timeout
+      if ((window as any).deleteTimeoutId) {
+        clearTimeout((window as any).deleteTimeoutId);
+      }
+
+      // Restore the notification
+      setNotifications((prev) => [...prev, deletedNotification.data]);
+      setNotifications((prev) =>
+        prev.sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        ),
+      );
+
+      // Restore unread count
+      if (!deletedNotification.data.read) {
+        setUnreadCount((prev) => prev + 1);
+      }
+
+      // Hide info bar
+      hideInfoBar();
+      setDeletedNotification(null);
+      showInfoBar("Notification restored", "success");
+    }
   };
 
   // Mark all as read
   const handleMarkAllAsRead = async () => {
     if (unreadCount === 0) {
-      Alert.alert("Info", "No unread notifications");
+      showInfoBar("No unread notifications", "info");
       return;
     }
 
-    Alert.alert(
-      "Mark All as Read",
-      `Mark all ${unreadCount} notification${unreadCount !== 1 ? "s" : ""} as read?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Mark All",
-          onPress: async () => {
-            try {
-              setRefreshing(true);
+    try {
+      setRefreshing(true);
 
-              const response = await notificationService.markAllAsRead();
+      const response = await notificationService.markAllAsRead();
 
-              if (response.success) {
-                setNotifications((prev) =>
-                  prev.map((n) => ({ ...n, read: true })),
-                );
-                setUnreadCount(0);
-                Alert.alert("Success", "All notifications marked as read");
-              } else {
-                Alert.alert(
-                  "Error",
-                  response.message || "Failed to mark all as read",
-                );
-              }
-            } catch (error) {
-              console.error("Mark all as read error:", error);
-              Alert.alert("Error", "Failed to mark all as read");
-            } finally {
-              setRefreshing(false);
-            }
-          },
-        },
-      ],
-    );
+      if (response.success) {
+        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+        setUnreadCount(0);
+        showInfoBar(`Marked ${unreadCount} notification(s) as read`, "success");
+      } else {
+        showInfoBar(response.message || "Failed to mark all as read", "error");
+      }
+    } catch (error) {
+      console.error("Mark all as read error:", error);
+      showInfoBar("Failed to mark all as read", "error");
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   // Accept connection request
   const handleAcceptRequest = async (requestId: string, userName: string) => {
+    if (processingRequestId) return;
+
+    setProcessingRequestId(requestId);
     try {
       const response =
         await connectionService.acceptConnectionRequest(requestId);
@@ -224,31 +313,82 @@ export default function NotificationsScreen() {
         setPendingRequests((prev) =>
           prev.filter((req) => req._id !== requestId),
         );
-        Alert.alert("Success", `You are now connected with ${userName}`);
+        await fetchNotifications(1, false);
+        showInfoBar(`Connected with ${userName}`, "success");
+      } else {
+        showInfoBar("Failed to accept connection request", "error");
       }
     } catch (error) {
-      Alert.alert("Error", "Failed to accept connection request");
+      showInfoBar("Failed to accept connection request", "error");
+    } finally {
+      setProcessingRequestId(null);
     }
   };
 
   // Reject connection request
   const handleRejectRequest = async (requestId: string, userName: string) => {
-    Alert.alert("Reject Request", `Reject ${userName}'s connection request?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Reject",
-        style: "destructive",
-        onPress: async () => {
-          const response =
-            await connectionService.rejectConnectionRequest(requestId);
-          if (response.success) {
-            setPendingRequests((prev) =>
-              prev.filter((req) => req._id !== requestId),
-            );
-          }
-        },
-      },
-    ]);
+    if (processingRequestId) return;
+
+    setProcessingRequestId(requestId);
+    try {
+      const response =
+        await connectionService.rejectConnectionRequest(requestId);
+      if (response.success) {
+        setPendingRequests((prev) =>
+          prev.filter((req) => req._id !== requestId),
+        );
+        await fetchNotifications(1, false);
+        showInfoBar(`Rejected ${userName}'s connection request`, "info");
+      } else {
+        showInfoBar("Failed to reject connection request", "error");
+      }
+    } catch (error) {
+      showInfoBar("Failed to reject connection request", "error");
+    } finally {
+      setProcessingRequestId(null);
+    }
+  };
+
+  // Render info bar
+  const renderInfoBar = () => {
+    if (!infoMessage) return null;
+
+    const backgroundColor =
+      infoType === "success"
+        ? "#10b981"
+        : infoType === "error"
+          ? "#ef4444"
+          : "#8b5cf6";
+
+    const iconName =
+      infoType === "success"
+        ? "checkmark-circle"
+        : infoType === "error"
+          ? "alert-circle"
+          : "information-circle";
+
+    return (
+      <Animated.View
+        style={[
+          styles.infoBar,
+          {
+            backgroundColor,
+            transform: [{ translateY: slideAnim }],
+          },
+        ]}
+      >
+        <Ionicons name={iconName} size={20} color="#fff" />
+        <Text style={styles.infoBarText}>{infoMessage}</Text>
+        {deletedNotification && (
+          <TouchableOpacity
+            onPress={handleUndoDelete}
+            style={styles.undoButton}
+          >
+            <Text style={styles.undoButtonText}>UNDO</Text>
+          </TouchableOpacity>
+        )}
+      </Animated.View>
+    );
   };
 
   useFocusEffect(
@@ -258,22 +398,6 @@ export default function NotificationsScreen() {
         fetchNotifications(1, false);
       }
     }, [token]),
-  );
-
-  // Render section
-  const renderSection = ({ section }: { section: SectionData }) => (
-    <>
-      <DateSectionHeader title={section.title} />
-      {section.data.map((item) => (
-        <NotificationItem
-          key={item._id}
-          notification={item}
-          onMarkAsRead={handleMarkAsRead}
-          onMarkAsUnread={handleMarkAsUnread}
-          onDelete={handleDeleteNotification}
-        />
-      ))}
-    </>
   );
 
   // Render empty state
@@ -344,6 +468,7 @@ export default function NotificationsScreen() {
               request={request}
               onAccept={handleAcceptRequest}
               onReject={handleRejectRequest}
+              isProcessing={processingRequestId === request._id}
             />
           ))}
         </>
@@ -411,6 +536,9 @@ export default function NotificationsScreen() {
         }
         ListEmptyComponent={renderEmptyState}
       />
+
+      {/* Info bar rendered at the bottom */}
+      {renderInfoBar()}
     </SafeAreaView>
   );
 }
@@ -482,5 +610,44 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 8,
     paddingHorizontal: 40,
+  },
+  infoBar: {
+    position: "absolute",
+    bottom: 50,
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    gap: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 1000,
+  },
+  infoBarText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "500",
+    flex: 1,
+    textAlign: "left",
+    lineHeight: 20,
+  },
+  undoButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    borderRadius: 6,
+  },
+  undoButtonText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "600",
+    letterSpacing: 0.5,
   },
 });

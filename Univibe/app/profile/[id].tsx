@@ -1,4 +1,4 @@
-// app/profile/[id].tsx - Updated with cleaner layout
+// app/profile/[id].tsx - With accept and cancel buttons for pending requests
 
 import React, { useState, useCallback, useEffect } from "react";
 import {
@@ -6,10 +6,10 @@ import {
   Text,
   ActivityIndicator,
   TouchableOpacity,
-  Alert,
   StyleSheet,
   FlatList,
   RefreshControl,
+  Animated,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -82,6 +82,13 @@ export default function PublicProfileScreen() {
     useState<ConnectionStatus>("not_connected");
   const [connectionLoading, setConnectionLoading] = useState(false);
 
+  // Info bar state
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [infoType, setInfoType] = useState<"success" | "error" | "info">(
+    "info",
+  );
+  const slideAnim = useState(new Animated.Value(100))[0]; // Start below screen
+
   // Posts state
   const [posts, setPosts] = useState<Post[]>([]);
   const [postsLoading, setPostsLoading] = useState(false);
@@ -99,6 +106,32 @@ export default function PublicProfileScreen() {
   const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
 
   const isOwnProfile = currentUser?.id === id;
+
+  // Show info bar message from bottom
+  const showInfoBar = (
+    message: string,
+    type: "success" | "error" | "info" = "info",
+  ) => {
+    setInfoMessage(message);
+    setInfoType(type);
+
+    Animated.sequence([
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.delay(3000),
+      Animated.timing(slideAnim, {
+        toValue: 100,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setInfoMessage(null);
+      slideAnim.setValue(100);
+    });
+  };
 
   // Hide tab bar when this screen mounts
   useEffect(() => {
@@ -140,6 +173,7 @@ export default function PublicProfileScreen() {
       }
     } catch (error) {
       console.error("Error loading profile posts:", error);
+      showInfoBar("Failed to load posts", "error");
     } finally {
       setPostsLoading(false);
     }
@@ -225,12 +259,12 @@ export default function PublicProfileScreen() {
 
         await loadProfilePosts(1, false);
       } else {
-        Alert.alert("Error", response.message || "Failed to load profile");
+        showInfoBar(response.message || "Failed to load profile", "error");
         goBack();
       }
     } catch (error: any) {
       console.error("Error loading profile:", error);
-      Alert.alert("Error", error.message || "Failed to load profile");
+      showInfoBar(error.message || "Failed to load profile", "error");
       goBack();
     } finally {
       setLoading(false);
@@ -257,7 +291,7 @@ export default function PublicProfileScreen() {
   // Handle like action
   const handleLike = async (postId: string) => {
     if (!token) {
-      Alert.alert("Login Required", "Please login to like posts");
+      showInfoBar("Please login to like posts", "info");
       return;
     }
 
@@ -284,13 +318,13 @@ export default function PublicProfileScreen() {
       );
     } catch (error: any) {
       console.error("Error liking post:", error);
-      Alert.alert("Error", error.message || "Failed to like post");
+      showInfoBar(error.message || "Failed to like post", "error");
     }
   };
 
   const handleComment = (postId: string) => {
     if (!token) {
-      Alert.alert("Login Required", "Please login to comment");
+      showInfoBar("Please login to comment", "info");
       return;
     }
 
@@ -302,14 +336,14 @@ export default function PublicProfileScreen() {
 
   const handleRepost = (postId: string) => {
     if (!token) {
-      Alert.alert("Login Required", "Please login to repost");
+      showInfoBar("Please login to repost", "info");
       return;
     }
-    Alert.alert("Repost", "Repost feature coming soon!");
+    showInfoBar("Repost feature coming soon!", "info");
   };
 
   const handleShare = (postId: string) => {
-    Alert.alert("Share", "Share feature coming soon!");
+    showInfoBar("Share feature coming soon!", "info");
   };
 
   const handleEditPost = (postId: string) => {
@@ -323,10 +357,10 @@ export default function PublicProfileScreen() {
     try {
       await deletePost(postId);
       setPosts((prev) => prev.filter((post) => post._id !== postId));
-      Alert.alert("Success", "Post deleted successfully");
+      showInfoBar("Post deleted successfully", "success");
     } catch (error: any) {
       console.error("Error deleting post:", error);
-      Alert.alert("Error", error.message || "Failed to delete post");
+      showInfoBar(error.message || "Failed to delete post", "error");
     }
   };
 
@@ -335,17 +369,17 @@ export default function PublicProfileScreen() {
       const newSet = new Set(prev);
       if (newSet.has(postId)) {
         newSet.delete(postId);
-        Alert.alert("Post Unsaved", "Post removed from your saved items");
+        showInfoBar("Post removed from your saved items", "info");
       } else {
         newSet.add(postId);
-        Alert.alert("Post Saved", "Post added to your saved items");
+        showInfoBar("Post added to your saved items", "success");
       }
       return newSet;
     });
   };
 
   const handleReportPost = (postId: string) => {
-    Alert.alert("Report Submitted", "Thank you for reporting this post.");
+    showInfoBar("Thank you for reporting this post", "success");
   };
 
   const handleHidePost = (postId: string) => {
@@ -355,11 +389,11 @@ export default function PublicProfileScreen() {
       return newSet;
     });
     setPosts((prev) => prev.filter((post) => post._id !== postId));
-    Alert.alert("Post Hidden", "You won't see this post anymore");
+    showInfoBar("Post hidden, you won't see this post anymore", "info");
   };
 
   const handleCopyLink = (postId: string) => {
-    Alert.alert("Link Copied", "Post link copied to clipboard");
+    showInfoBar("Post link copied to clipboard", "success");
   };
 
   const handleMuteUser = (userId: string) => {
@@ -369,7 +403,10 @@ export default function PublicProfileScreen() {
       return newSet;
     });
     setPosts((prev) => prev.filter((post) => post.user?._id !== userId));
-    Alert.alert("User Muted", "You won't see posts from this user anymore");
+    showInfoBar(
+      "User muted, you won't see posts from this user anymore",
+      "info",
+    );
   };
 
   const handleBlockUser = (userId: string) => {
@@ -379,7 +416,39 @@ export default function PublicProfileScreen() {
       return newSet;
     });
     setPosts((prev) => prev.filter((post) => post.user?._id !== userId));
-    Alert.alert("User Blocked", "You won't see posts from this user anymore");
+    showInfoBar(
+      "User blocked, you won't see posts from this user anymore",
+      "info",
+    );
+  };
+
+  // Handle cancel connection request (for received requests)
+  const handleCancelConnectionRequest = async () => {
+    if (!profile) return;
+    setConnectionLoading(true);
+
+    try {
+      const cancelResponse = await connectionService.cancelConnectionRequest(
+        profile.user._id,
+      );
+      if (cancelResponse.success) {
+        setConnectionStatus("not_connected");
+        showInfoBar(
+          `Rejected connection request from ${profile.fullName}`,
+          "info",
+        );
+      } else {
+        showInfoBar(
+          cancelResponse.message || "Failed to cancel request",
+          "error",
+        );
+      }
+    } catch (error: any) {
+      console.error("Error canceling request:", error);
+      showInfoBar(error.message || "Failed to cancel request", "error");
+    } finally {
+      setConnectionLoading(false);
+    }
   };
 
   // Handle connection action
@@ -412,143 +481,97 @@ export default function PublicProfileScreen() {
               );
               await refreshCurrentUserProfile();
               await loadProfilePosts(1, false);
-              Alert.alert(
-                "Connected!",
-                `You are now connected with ${profile.fullName}`,
-              );
+              showInfoBar(`Connected with ${profile.fullName}!`, "success");
             } else {
               setConnectionStatus("pending_sent");
-              Alert.alert(
-                "Request Sent",
+              showInfoBar(
                 `Connection request sent to ${profile.fullName}`,
+                "success",
               );
             }
           } else {
-            Alert.alert(
-              "Error",
+            showInfoBar(
               sendResponse.message || "Failed to send request",
+              "error",
             );
           }
           break;
 
         case "pending_sent":
-          Alert.alert(
-            "Cancel Request",
-            `Cancel request to ${profile.fullName}?`,
-            [
-              { text: "No", style: "cancel" },
-              {
-                text: "Yes",
-                onPress: async () => {
-                  const cancelResponse =
-                    await connectionService.cancelConnectionRequest(
-                      profile.user._id,
-                    );
-                  if (cancelResponse.success) {
-                    setConnectionStatus("not_connected");
-                    Alert.alert(
-                      "Request Cancelled",
-                      "Connection request cancelled",
-                    );
-                  }
-                },
-              },
-            ],
-          );
+          const cancelResponse =
+            await connectionService.cancelConnectionRequest(profile.user._id);
+          if (cancelResponse.success) {
+            setConnectionStatus("not_connected");
+            showInfoBar("Connection request cancelled", "info");
+          } else {
+            showInfoBar(
+              cancelResponse.message || "Failed to cancel request",
+              "error",
+            );
+          }
           break;
 
         case "pending_received":
-          Alert.alert(
-            "Accept Request",
-            `Accept connection request from ${profile.fullName}?`,
-            [
-              { text: "No", style: "cancel" },
-              {
-                text: "Yes",
-                onPress: async () => {
-                  const acceptResponse =
-                    await connectionService.acceptConnectionRequest(
-                      profile.user._id,
-                    );
-                  if (acceptResponse.success) {
-                    setConnectionStatus("connected");
-                    setProfile((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            stats: {
-                              ...prev.stats,
-                              connections: (prev.stats.connections || 0) + 1,
-                            },
-                          }
-                        : null,
-                    );
-                    await refreshCurrentUserProfile();
-                    await loadProfilePosts(1, false);
-                    Alert.alert(
-                      "Connected!",
-                      `You are now connected with ${profile.fullName}`,
-                    );
-                  } else {
-                    Alert.alert(
-                      "Error",
-                      acceptResponse.message || "Failed to accept request",
-                    );
+          const acceptResponse =
+            await connectionService.acceptConnectionRequest(profile.user._id);
+          if (acceptResponse.success) {
+            setConnectionStatus("connected");
+            setProfile((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    stats: {
+                      ...prev.stats,
+                      connections: (prev.stats.connections || 0) + 1,
+                    },
                   }
-                },
-              },
-            ],
-          );
+                : null,
+            );
+            await refreshCurrentUserProfile();
+            await loadProfilePosts(1, false);
+            showInfoBar(`Connected with ${profile.fullName}!`, "success");
+          } else {
+            showInfoBar(
+              acceptResponse.message || "Failed to accept request",
+              "error",
+            );
+          }
           break;
 
         case "connected":
-          Alert.alert(
-            "Remove Connection",
-            `Remove connection with ${profile.fullName}?`,
-            [
-              { text: "No", style: "cancel" },
-              {
-                text: "Yes",
-                onPress: async () => {
-                  const removeResponse =
-                    await connectionService.removeConnection(profile.user._id);
-                  if (removeResponse.success) {
-                    setConnectionStatus("not_connected");
-                    setProfile((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            stats: {
-                              ...prev.stats,
-                              connections: Math.max(
-                                (prev.stats.connections || 0) - 1,
-                                0,
-                              ),
-                            },
-                          }
-                        : null,
-                    );
-                    await refreshCurrentUserProfile();
-                    await loadProfilePosts(1, false);
-                    Alert.alert(
-                      "Connection Removed",
-                      `You are no longer connected with ${profile.fullName}`,
-                    );
-                  } else {
-                    Alert.alert(
-                      "Error",
-                      removeResponse.message || "Failed to remove connection",
-                    );
-                  }
-                },
-              },
-            ],
+          const removeResponse = await connectionService.removeConnection(
+            profile.user._id,
           );
+          if (removeResponse.success) {
+            setConnectionStatus("not_connected");
+            setProfile((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    stats: {
+                      ...prev.stats,
+                      connections: Math.max(
+                        (prev.stats.connections || 0) - 1,
+                        0,
+                      ),
+                    },
+                  }
+                : null,
+            );
+            await refreshCurrentUserProfile();
+            await loadProfilePosts(1, false);
+            showInfoBar(`Removed connection with ${profile.fullName}`, "info");
+          } else {
+            showInfoBar(
+              removeResponse.message || "Failed to remove connection",
+              "error",
+            );
+          }
           break;
       }
     } catch (error: any) {
       console.error("Connection action error:", error);
-      Alert.alert("Error", error.message || "Failed to process request");
+      showInfoBar(error.message || "Failed to process request", "error");
     } finally {
       setConnectionLoading(false);
     }
@@ -616,7 +639,41 @@ export default function PublicProfileScreen() {
     profileComplete: profile?.user.profileComplete,
   };
 
-  // Render posts header - Simplified to just "Posts"
+  // Render info bar from bottom
+  const renderInfoBar = () => {
+    if (!infoMessage) return null;
+
+    const backgroundColor =
+      infoType === "success"
+        ? "#10b981"
+        : infoType === "error"
+          ? "#ef4444"
+          : "#8b5cf6";
+
+    const iconName =
+      infoType === "success"
+        ? "checkmark-circle"
+        : infoType === "error"
+          ? "alert-circle"
+          : "information-circle";
+
+    return (
+      <Animated.View
+        style={[
+          publicStyles.infoBar,
+          {
+            backgroundColor,
+            transform: [{ translateY: slideAnim }],
+          },
+        ]}
+      >
+        <Ionicons name={iconName} size={20} color="#fff" />
+        <Text style={publicStyles.infoBarText}>{infoMessage}</Text>
+      </Animated.View>
+    );
+  };
+
+  // Render posts header
   const renderPostsHeader = () => (
     <View style={publicStyles.postsHeader}>
       <Text style={publicStyles.postsTitle}>Posts</Text>
@@ -729,36 +786,78 @@ export default function PublicProfileScreen() {
             <View style={styles.content}>
               {!isOwnProfile && (
                 <View style={publicStyles.connectionButtonContainer}>
-                  <TouchableOpacity
-                    style={[publicStyles.connectionButton, getButtonStyle()]}
-                    onPress={handleConnectionAction}
-                    disabled={connectionLoading}
-                  >
-                    {connectionLoading ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <>
+                  {connectionStatus === "pending_received" ? (
+                    // Show accept and cancel buttons side by side
+                    <View style={publicStyles.acceptCancelContainer}>
+                      <TouchableOpacity
+                        style={[
+                          publicStyles.connectionButton,
+                          publicStyles.acceptButton,
+                        ]}
+                        onPress={handleConnectionAction}
+                        disabled={connectionLoading}
+                      >
+                        {connectionLoading ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <>
+                            <Ionicons
+                              name="checkmark-circle"
+                              size={18}
+                              color="#fff"
+                            />
+                            <Text style={publicStyles.connectionButtonText}>
+                              Accept
+                            </Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={publicStyles.cancelButton}
+                        onPress={handleCancelConnectionRequest}
+                        disabled={connectionLoading}
+                      >
                         <Ionicons
-                          name={buttonConfig.icon as any}
-                          size={20}
-                          color={
-                            buttonConfig.style === "connected"
-                              ? "#10b981"
-                              : "#fff"
-                          }
+                          name="close-circle"
+                          size={32}
+                          color="#ef4444"
                         />
-                        <Text
-                          style={[
-                            publicStyles.connectionButtonText,
-                            buttonConfig.style === "connected" &&
-                              publicStyles.connectedButtonText,
-                          ]}
-                        >
-                          {buttonConfig.text}
-                        </Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    // Show normal connection button for other statuses
+                    <TouchableOpacity
+                      style={[publicStyles.connectionButton, getButtonStyle()]}
+                      onPress={handleConnectionAction}
+                      disabled={connectionLoading}
+                    >
+                      {connectionLoading ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <Ionicons
+                            name={buttonConfig.icon as any}
+                            size={20}
+                            color={
+                              buttonConfig.style === "connected"
+                                ? "#10b981"
+                                : "#fff"
+                            }
+                          />
+                          <Text
+                            style={[
+                              publicStyles.connectionButtonText,
+                              buttonConfig.style === "connected" &&
+                                publicStyles.connectedButtonText,
+                            ]}
+                          >
+                            {buttonConfig.text}
+                          </Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  )}
                 </View>
               )}
 
@@ -781,6 +880,9 @@ export default function PublicProfileScreen() {
         onEndReached={loadMorePosts}
         onEndReachedThreshold={0.3}
       />
+
+      {/* Info bar rendered at the bottom of the screen */}
+      {renderInfoBar()}
     </SafeAreaView>
   );
 }
@@ -807,6 +909,33 @@ const publicStyles = StyleSheet.create({
     flex: 1,
     textAlign: "center",
   },
+  infoBar: {
+    position: "absolute",
+    bottom: 50,
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    gap: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+    zIndex: 1000,
+  },
+  infoBarText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "500",
+    flex: 1,
+    textAlign: "left",
+    lineHeight: 20,
+  },
   connectionButtonContainer: {
     paddingHorizontal: 20,
     marginBottom: 16,
@@ -829,6 +958,25 @@ const publicStyles = StyleSheet.create({
   },
   connectionButtonText: { color: "white", fontSize: 16, fontWeight: "600" },
   connectedButtonText: { color: "#10b981" },
+  acceptCancelContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  acceptButton: {
+    flex: 1,
+    backgroundColor: "#10b981",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    borderRadius: 25,
+    gap: 8,
+  },
+  cancelButton: {
+    padding: 4,
+    borderRadius: 20,
+  },
   postsHeader: {
     marginTop: 16,
     marginBottom: 12,

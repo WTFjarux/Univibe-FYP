@@ -1,15 +1,25 @@
-// app/(tabs)/profile/index.tsx - Fixed version
+// app/(tabs)/profile/index.tsx - Fixed scrolling version
 
-import React, { useRef, useEffect, useState, useCallback } from "react";
+import React, {
+  useRef,
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+} from "react";
 import {
-  ScrollView,
   View,
   RefreshControl,
   ActivityIndicator,
   Text,
   TouchableOpacity,
+  ScrollView,
   Alert,
   StyleSheet,
+  LayoutAnimation,
+  UIManager,
+  Platform,
+  Dimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -21,14 +31,24 @@ import { useAuth } from "../../../lib/AuthContext";
 import { useImageUpload } from "../../../hooks/useImageUpload";
 import { useCoverPhotoUpload } from "../../../hooks/useCoverPhotoUpload";
 import { connectionService } from "../../../lib/connectionService";
+import {
+  getProfilePosts,
+  toggleLike,
+  deletePost,
+  Post,
+} from "../../../lib/postService";
 import { API_BASE_URL } from "../../../constants/ipConstants";
 
 import ProfileHeader from "@/app/components/Profile/ProfileHeader";
 import ProfileInfo from "@/app/components/Profile/ProfileInfo";
 import ProfileStats from "@/app/components/Profile/ProfileStats";
+import ProfileTabs from "@/app/components/Profile/ProfileTabs";
+import ProfilePosts from "@/app/components/Profile/ProfilePosts";
 import UploadModal from "@/app/components/Profile/UploadModal";
 import ImageViewModal from "@/app/components/Profile/ImageViewModal";
 import { styles } from "@/app/components/Profile/profileStyles";
+
+type TabType = "posts" | "about";
 
 const getAuthToken = async (): Promise<string | null> => {
   try {
@@ -38,14 +58,43 @@ const getAuthToken = async (): Promise<string | null> => {
   }
 };
 
+const MemoizedProfilePosts = React.memo(ProfilePosts);
+
+// Enable LayoutAnimation for Android
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 export default function ProfileScreen() {
-  const { user, profile, isLoading, logout, loadProfile, refreshUserProfile } =
-    useAuth();
+  const {
+    user,
+    profile,
+    isLoading,
+    logout,
+    loadProfile,
+    refreshUserProfile,
+    token,
+  } = useAuth();
   const [postCount, setPostCount] = useState(0);
   const [connectionCount, setConnectionCount] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabType>("about");
+
+  // Posts state
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [postsLoading, setPostsLoading] = useState(false);
+  const [postsPage, setPostsPage] = useState(1);
+  const [hasMorePosts, setHasMorePosts] = useState(true);
+  const [postsRefreshing, setPostsRefreshing] = useState(false);
+  const [postsLoaded, setPostsLoaded] = useState(false);
+
   const isMounted = useRef(true);
   const refreshInProgress = useRef(false);
+  const mainScrollViewRef = useRef<ScrollView>(null);
+  const flatListRef = useRef<any>(null);
 
   // Image upload hooks
   const {
@@ -81,6 +130,24 @@ export default function ProfileScreen() {
       isMounted.current = false;
     };
   }, []);
+
+  /**
+   * Handle tab change with smooth transition
+   */
+  const handleTabChange = useCallback(
+    (tab: TabType) => {
+      if (tab === activeTab) return;
+
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setActiveTab(tab);
+
+      // Load posts when switching to posts tab if not loaded
+      if (tab === "posts" && !postsLoaded && user?.id) {
+        fetchUserPosts(1, false);
+      }
+    },
+    [activeTab, postsLoaded, user?.id],
+  );
 
   /**
    * Fetch user's post count
@@ -122,6 +189,138 @@ export default function ProfileScreen() {
   }, [user?.id]);
 
   /**
+   * Fetch user's posts
+   */
+  const fetchUserPosts = useCallback(
+    async (page = 1, shouldAppend = false) => {
+      if (!user?.id || postsLoading) return;
+
+      setPostsLoading(true);
+      try {
+        const response = await getProfilePosts(user.id, page, 10);
+
+        if (response.success && response.data) {
+          const newPosts = response.data.posts;
+
+          if (shouldAppend) {
+            setPosts((prev) => [...prev, ...newPosts]);
+          } else {
+            setPosts(newPosts);
+          }
+
+          setHasMorePosts(response.data.pagination.pages > page);
+          setPostsPage(page);
+          setPostsLoaded(true);
+        }
+      } catch (error) {
+        console.error("Error fetching user posts:", error);
+      } finally {
+        setPostsLoading(false);
+        setPostsRefreshing(false);
+      }
+    },
+    [user?.id, postsLoading],
+  );
+
+  const loadMorePosts = () => {
+    if (!postsLoading && hasMorePosts && postsLoaded) {
+      fetchUserPosts(postsPage + 1, true);
+    }
+  };
+
+  const refreshPosts = () => {
+    setPostsRefreshing(true);
+    fetchUserPosts(1, false);
+  };
+
+  // Handle like action
+  const handleLike = async (postId: string) => {
+    if (!token) {
+      Alert.alert("Login Required", "Please login to like posts");
+      return;
+    }
+
+    try {
+      const response = await toggleLike(postId);
+      setPosts((prevPosts) =>
+        prevPosts.map((post) =>
+          post._id === postId
+            ? {
+                ...post,
+                likes: response.isLiked
+                  ? [...(post.likes || []), { _id: user?.id || "current-user" }]
+                  : post.likes?.filter((like: any) => like._id !== user?.id),
+                isLiked: response.isLiked,
+              }
+            : post,
+        ),
+      );
+    } catch (error: any) {
+      console.error("Error liking post:", error);
+      Alert.alert("Error", error.message || "Failed to like post");
+    }
+  };
+
+  const handleComment = (postId: string) => {
+    router.push({
+      pathname: "/components/Feed/Comment/CommentsScreen",
+      params: { postId },
+    });
+  };
+
+  const handleRepost = (postId: string) => {
+    Alert.alert("Repost", "Repost feature coming soon!");
+  };
+
+  const handleShare = (postId: string) => {
+    Alert.alert("Share", "Share feature coming soon!");
+  };
+
+  const handleEditPost = (postId: string) => {
+    router.push({
+      pathname: "/components/Feed/Post/EditPost",
+      params: { postId },
+    });
+  };
+
+  const handleDeletePost = async (postId: string) => {
+    try {
+      await deletePost(postId);
+      setPosts((prev) => prev.filter((post) => post._id !== postId));
+      setPostCount((prev) => Math.max(0, prev - 1));
+      Alert.alert("Success", "Post deleted successfully");
+    } catch (error: any) {
+      console.error("Error deleting post:", error);
+      Alert.alert("Error", error.message || "Failed to delete post");
+    }
+  };
+
+  const handleSavePost = (postId: string) => {
+    Alert.alert("Saved", "Post saved to your bookmarks");
+  };
+
+  const handleReportPost = (postId: string) => {
+    Alert.alert("Report Submitted", "Thank you for reporting this post.");
+  };
+
+  const handleHidePost = (postId: string) => {
+    setPosts((prev) => prev.filter((post) => post._id !== postId));
+    Alert.alert("Post Hidden", "You won't see this post anymore");
+  };
+
+  const handleCopyLink = (postId: string) => {
+    Alert.alert("Link Copied", "Post link copied to clipboard");
+  };
+
+  const handleMuteUser = (userId: string) => {
+    Alert.alert("User Muted", "You won't see posts from this user anymore");
+  };
+
+  const handleBlockUser = (userId: string) => {
+    Alert.alert("User Blocked", "You won't see posts from this user anymore");
+  };
+
+  /**
    * Load initial data
    */
   const loadInitialData = useCallback(async () => {
@@ -146,6 +345,9 @@ export default function ProfileScreen() {
     await refreshUserProfile();
     await fetchPostCount();
     await fetchConnectionCount();
+    if (activeTab === "posts") {
+      await fetchUserPosts(1, false);
+    }
     setRefreshing(false);
   };
 
@@ -162,16 +364,30 @@ export default function ProfileScreen() {
     }
   }, [profile, fetchPostCount, fetchConnectionCount]);
 
-  // Refresh on screen focus - but only once per focus
+  // Load posts only when switching to posts tab and posts haven't been loaded yet
+  useEffect(() => {
+    if (activeTab === "posts" && !postsLoaded && user?.id) {
+      fetchUserPosts(1, false);
+    }
+  }, [activeTab, postsLoaded, user?.id, fetchUserPosts]);
+
+  // Refresh on screen focus
   useFocusEffect(
     useCallback(() => {
-      // Don't auto-refresh on every focus to avoid loops
-      // Just update counts silently
       if (user?.id && !refreshInProgress.current) {
         fetchPostCount();
         fetchConnectionCount();
+        if (activeTab === "posts") {
+          fetchUserPosts(1, false);
+        }
       }
-    }, [user?.id, fetchPostCount, fetchConnectionCount]),
+    }, [
+      user?.id,
+      fetchPostCount,
+      fetchConnectionCount,
+      fetchUserPosts,
+      activeTab,
+    ]),
   );
 
   const handleLogoutConfirm = () => {
@@ -417,68 +633,140 @@ export default function ProfileScreen() {
     profileComplete: user?.profileComplete,
   };
 
-  const renderMenuItems = () => (
-    <View style={menuStyles.menuSection}>
-      <TouchableOpacity
-        style={menuStyles.menuItem}
-        onPress={() => router.push("/profile/edit")}
-        activeOpacity={0.7}
-      >
-        <View style={menuStyles.menuItemContent}>
-          <Ionicons name="create-outline" size={24} color="#4b5563" />
-          <Text style={menuStyles.menuText}>Edit Profile</Text>
+  // Memoize header
+  const profileHeader = useMemo(
+    () => (
+      <ProfileHeader
+        user={formattedUser}
+        profile={profile}
+        uploading={uploading || pickerActiveRef.current}
+        coverUploading={coverUploading}
+        onImagePress={handleImagePress}
+        onCoverPhotoPress={handleCoverPhotoPress}
+      />
+    ),
+    [
+      formattedUser,
+      profile,
+      uploading,
+      pickerActiveRef.current,
+      coverUploading,
+    ],
+  );
+
+  // Memoize tabs
+  const profileTabs = useMemo(
+    () => (
+      <ProfileTabs
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
+        postCount={postCount}
+      />
+    ),
+    [activeTab, postCount],
+  );
+
+  // Memoize posts props - WITHOUT header as listHeaderComponent
+  const postsProps = useMemo(
+    () => ({
+      posts,
+      loading: postsLoading && !postsLoaded,
+      refreshing: postsRefreshing,
+      onRefresh: refreshPosts,
+      onLoadMore: loadMorePosts,
+      hasMore: hasMorePosts,
+      onLikePress: handleLike,
+      onCommentPress: handleComment,
+      onRepostPress: handleRepost,
+      onSharePress: handleShare,
+      onEdit: handleEditPost,
+      onDelete: handleDeletePost,
+      onSave: handleSavePost,
+      onReport: handleReportPost,
+      onHide: handleHidePost,
+      onCopyLink: handleCopyLink,
+      onMuteUser: handleMuteUser,
+      onBlockUser: handleBlockUser,
+    }),
+    [posts, postsLoading, postsLoaded, postsRefreshing, hasMorePosts],
+  );
+
+  // Memoize about content (without header and tabs)
+  const aboutContentOnly = useMemo(
+    () => (
+      <View style={styles.aboutContent}>
+        <ProfileInfo profile={profile} user={user} />
+        <ProfileStats
+          stats={{
+            posts: postCount,
+            connections: connectionCount,
+            groups: profile?.stats?.groups || 0,
+          }}
+        />
+        <View style={menuStyles.menuSection}>
+          <TouchableOpacity
+            style={menuStyles.menuItem}
+            onPress={() => router.push("/profile/edit")}
+            activeOpacity={0.7}
+          >
+            <View style={menuStyles.menuItemContent}>
+              <Ionicons name="create-outline" size={22} color="#4b5563" />
+              <Text style={menuStyles.menuText}>Edit Profile</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+          </TouchableOpacity>
+
+          <View style={menuStyles.divider} />
+
+          <TouchableOpacity
+            style={menuStyles.menuItem}
+            onPress={() =>
+              Alert.alert("Coming Soon", "Settings feature coming soon!")
+            }
+            activeOpacity={0.7}
+          >
+            <View style={menuStyles.menuItemContent}>
+              <Ionicons name="settings-outline" size={22} color="#4b5563" />
+              <Text style={menuStyles.menuText}>Settings</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+          </TouchableOpacity>
+
+          <View style={menuStyles.divider} />
+
+          <TouchableOpacity
+            style={menuStyles.menuItem}
+            onPress={() =>
+              Alert.alert("Coming Soon", "Help & Support coming soon!")
+            }
+            activeOpacity={0.7}
+          >
+            <View style={menuStyles.menuItemContent}>
+              <Ionicons name="help-circle-outline" size={22} color="#4b5563" />
+              <Text style={menuStyles.menuText}>Help & Support</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+          </TouchableOpacity>
+
+          <View style={menuStyles.divider} />
+
+          <TouchableOpacity
+            style={menuStyles.menuItem}
+            onPress={handleLogoutConfirm}
+            activeOpacity={0.7}
+          >
+            <View style={menuStyles.menuItemContent}>
+              <Ionicons name="log-out-outline" size={22} color="#ef4444" />
+              <Text style={[menuStyles.menuText, { color: "#ef4444" }]}>
+                Logout
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#ef4444" />
+          </TouchableOpacity>
         </View>
-        <Ionicons name="chevron-forward" size={22} color="#9ca3af" />
-      </TouchableOpacity>
-
-      <View style={menuStyles.divider} />
-
-      <TouchableOpacity
-        style={menuStyles.menuItem}
-        onPress={() =>
-          Alert.alert("Coming Soon", "Settings feature coming soon!")
-        }
-        activeOpacity={0.7}
-      >
-        <View style={menuStyles.menuItemContent}>
-          <Ionicons name="settings-outline" size={24} color="#4b5563" />
-          <Text style={menuStyles.menuText}>Settings</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={22} color="#9ca3af" />
-      </TouchableOpacity>
-
-      <View style={menuStyles.divider} />
-
-      <TouchableOpacity
-        style={menuStyles.menuItem}
-        onPress={() =>
-          Alert.alert("Coming Soon", "Help & Support coming soon!")
-        }
-        activeOpacity={0.7}
-      >
-        <View style={menuStyles.menuItemContent}>
-          <Ionicons name="help-circle-outline" size={24} color="#4b5563" />
-          <Text style={menuStyles.menuText}>Help & Support</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={22} color="#9ca3af" />
-      </TouchableOpacity>
-
-      <View style={menuStyles.divider} />
-
-      <TouchableOpacity
-        style={menuStyles.menuItem}
-        onPress={handleLogoutConfirm}
-        activeOpacity={0.7}
-      >
-        <View style={menuStyles.menuItemContent}>
-          <Ionicons name="log-out-outline" size={24} color="#ef4444" />
-          <Text style={[menuStyles.menuText, { color: "#ef4444" }]}>
-            Logout
-          </Text>
-        </View>
-        <Ionicons name="chevron-forward" size={22} color="#ef4444" />
-      </TouchableOpacity>
-    </View>
+      </View>
+    ),
+    [profile, user, postCount, connectionCount],
   );
 
   // Loading state
@@ -513,41 +801,91 @@ export default function ProfileScreen() {
     );
   }
 
-  return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#8b5cf6"
-            colors={["#8b5cf6"]}
-          />
-        }
-      >
-        <ProfileHeader
-          user={formattedUser}
-          profile={profile}
-          uploading={uploading || pickerActiveRef.current}
-          coverUploading={coverUploading}
-          onImagePress={handleImagePress}
-          onCoverPhotoPress={handleCoverPhotoPress}
+  // FIX: Use a single ScrollView/FlatList for the entire screen
+  // For About tab: Everything scrolls together in a ScrollView
+  // For Posts tab: FlatList handles scrolling naturally
+
+  if (activeTab === "about") {
+    return (
+      <SafeAreaView style={styles.container} edges={["top"]}>
+        <ScrollView
+          ref={mainScrollViewRef}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={scrollStyles.scrollContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#8b5cf6"
+              colors={["#8b5cf6"]}
+            />
+          }
+        >
+          {profileHeader}
+          {profileTabs}
+          {aboutContentOnly}
+        </ScrollView>
+
+        {/* Modals */}
+        <UploadModal
+          visible={uploadModal}
+          onClose={closeUploadModal}
+          onViewImage={openImageViewer}
+          onPickImage={handleGalleryPick}
+          onTakePhoto={handleCameraPick}
+          onDeletePhoto={handleDeleteProfileImage}
+          hasExistingImage={
+            !!profile?.profilePicture &&
+            !profile.profilePicture.includes("dicebear.com")
+          }
+          title="Profile Picture"
+          viewLabel="View Profile Picture"
+          deleteLabel="Remove Profile Picture"
         />
 
-        <View style={styles.content}>
-          <ProfileInfo profile={profile} user={user} />
-          <ProfileStats
-            stats={{
-              posts: postCount,
-              connections: connectionCount,
-              groups: profile?.stats?.groups || 0,
-            }}
-          />
-          {renderMenuItems()}
-        </View>
-      </ScrollView>
+        <UploadModal
+          visible={coverModal}
+          onClose={closeCoverModal}
+          onViewImage={openCoverImageViewer}
+          onPickImage={handleCoverGalleryPick}
+          onTakePhoto={handleCoverCameraPick}
+          onDeletePhoto={handleDeleteCoverPhoto}
+          hasExistingImage={!!profile?.coverPhoto}
+          title="Cover Photo"
+          viewLabel="View Cover Photo"
+        />
+
+        <ImageViewModal
+          visible={viewPhotoModal}
+          imageUri={profile?.profilePicture}
+          onClose={closeImageViewer}
+          title="Profile Picture"
+          isCoverPhoto={false}
+        />
+
+        <ImageViewModal
+          visible={coverViewModal}
+          imageUri={profile?.coverPhoto}
+          onClose={closeCoverImageViewer}
+          title="Cover Photo"
+          isCoverPhoto={true}
+        />
+      </SafeAreaView>
+    );
+  }
+
+  // Posts tab - FlatList handles everything including header
+  return (
+    <SafeAreaView style={styles.container} edges={["top"]}>
+      <MemoizedProfilePosts
+        {...postsProps}
+        listHeaderComponent={
+          <>
+            {profileHeader}
+            {profileTabs}
+          </>
+        }
+      />
 
       {/* Modals */}
       <UploadModal
@@ -602,18 +940,19 @@ const menuStyles = StyleSheet.create({
     backgroundColor: "white",
     borderRadius: 16,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowRadius: 4,
+    elevation: 2,
     overflow: "hidden",
-    marginTop: 16,
+    marginTop: 8,
+    marginBottom: 20,
   },
   menuItem: {
     flexDirection: "row",
     justifyContent: "space-between",
     paddingVertical: 18,
-    paddingHorizontal: 20,
+    paddingHorizontal: 18,
     alignItems: "center",
   },
   menuItemContent: {
@@ -622,7 +961,7 @@ const menuStyles = StyleSheet.create({
     flex: 1,
   },
   menuText: {
-    fontSize: 16,
+    fontSize: 15,
     color: "#374151",
     fontWeight: "500",
     marginLeft: 12,
@@ -630,6 +969,12 @@ const menuStyles = StyleSheet.create({
   divider: {
     height: 1,
     backgroundColor: "#f3f4f6",
-    marginLeft: 20,
+    marginLeft: 52,
+  },
+});
+
+const scrollStyles = StyleSheet.create({
+  scrollContent: {
+    paddingBottom: 20,
   },
 });

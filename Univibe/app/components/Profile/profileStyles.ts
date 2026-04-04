@@ -5,12 +5,12 @@ export const styles = StyleSheet.create({
     flex: 1, 
     backgroundColor: '#f8fafc' 
   },
-  scrollContent: {  // ADD THIS
+  scrollContent: {  
     paddingBottom: 20,
   },
   content: { 
     padding: 20,
-    paddingTop: 10, 
+    paddingTop: 0, 
     gap: 1,
   },
   loadingContainer: {
@@ -66,6 +66,11 @@ export const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  aboutContent: {
+  paddingHorizontal: 16,
+  paddingTop: 8,
+  paddingBottom: 20,
+},
 });
 
 export default function ProfileStyles() {
