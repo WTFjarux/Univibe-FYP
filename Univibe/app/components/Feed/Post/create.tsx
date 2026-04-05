@@ -446,6 +446,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
   },
   postButton: {
     backgroundColor: "#8b5cf6",
@@ -462,6 +463,7 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "600",
     fontSize: 14,
+    fontFamily: "SofiaSans-Bold",
   },
   content: {
     flex: 1,
@@ -491,10 +493,12 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 16,
     fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
   },
   userHandle: {
     fontSize: 14,
     color: "#666",
+    fontFamily: "SofiaSans-Regular",
   },
   anonymousToggleRight: {
     flexDirection: "row",
@@ -521,6 +525,7 @@ const styles = StyleSheet.create({
   toggleTextRight: {
     fontSize: 12,
     color: "#666",
+    fontFamily: "SofiaSans-Regular",
     marginLeft: 8,
   },
   toggleTextRightActive: {
@@ -538,12 +543,14 @@ const styles = StyleSheet.create({
   },
   anonymousWarningText: {
     fontSize: 12,
+    fontFamily: "SofiaSans-Regular",
     color: "#92400e",
     flex: 1,
   },
   input: {
     fontSize: 16,
     minHeight: 120,
+    fontFamily: "SofiaSans-Regular",
     textAlignVertical: "top",
   },
   charCount: {
@@ -552,6 +559,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 8,
     marginBottom: 20,
+    fontFamily: "SofiaSans-Regular",
   },
   imagesContainer: {
     marginBottom: 20,
@@ -559,6 +567,7 @@ const styles = StyleSheet.create({
   imagesTitle: {
     fontSize: 14,
     fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
     color: "#333",
     marginBottom: 12,
   },
@@ -600,6 +609,7 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 12,
     fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
   },
   addMoreButton: {
     width: (width - 64) / 2,
@@ -619,11 +629,13 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#333",
     marginBottom: 12,
+    fontFamily: "SofiaSans-Bold",
   },
   anonymousNote: {
-    fontSize: 12,
+    fontSize: 14,
     color: "#6b7280",
     fontStyle: "italic",
+    fontFamily: "SofiaSans-Regular",
   },
   visibilityOptions: {
     flexDirection: "row",
@@ -653,6 +665,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "500",
     color: "#666",
+    fontFamily: "SofiaSans-Bold",
   },
   visibilityTextActive: {
     color: "#fff",
@@ -661,9 +674,10 @@ const styles = StyleSheet.create({
     color: "#ffffff",
   },
   visibilityDescription: {
-    fontSize: 12,
+    fontSize: 14,
     color: "#8b5cf6",
-    marginTop: 10,
+    marginTop: 16,
+    fontFamily: "SofiaSans-Regular",
   },
   addImageButtonSimple: {
     flexDirection: "row",
@@ -675,5 +689,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#000000",
     fontWeight: "500",
+    fontFamily: "SofiaSans-Bold",
   },
 });

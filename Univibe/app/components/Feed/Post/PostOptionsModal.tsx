@@ -300,7 +300,7 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    backgroundColor: "transparent", // Fully transparent background
+    backgroundColor: "transparent", 
     justifyContent: "flex-end",
   },
   modalContent: {
@@ -309,7 +309,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     paddingBottom: 20,
     maxHeight: "80%",
-    // Add shadow for better visibility on transparent background
     shadowColor: "#000",
     shadowOffset: {
       width: 0,
@@ -330,6 +329,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 18,
+    fontFamily: "SofiaSans-Bold",
     fontWeight: "600",
     color: "#111827",
   },
@@ -342,6 +342,7 @@ const styles = StyleSheet.create({
   },
   optionText: {
     fontSize: 16,
+    fontFamily: "SofiaSans-Regular",
     color: "#374151",
     flex: 1,
   },

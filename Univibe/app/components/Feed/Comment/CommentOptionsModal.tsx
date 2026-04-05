@@ -230,6 +230,7 @@ const styles = StyleSheet.create({
   },
   optionText: {
     fontSize: 16,
+    fontFamily: "SofiaSans-Regular",
     color: "#374151",
     fontWeight: "500",
   },
@@ -251,6 +252,7 @@ const styles = StyleSheet.create({
   },
   cancelButtonText: {
     fontSize: 16,
+    fontFamily: "SofiaSans-Regular",
     color: "#6b7280",
     fontWeight: "600",
   },

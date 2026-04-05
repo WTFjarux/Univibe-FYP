@@ -1,4 +1,4 @@
-// app/components/Feed/Post/PostCard.tsx - Updated with onProfilePress prop
+// app/components/Feed/Post/PostCard.tsx - Fixed for consistent rendering
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
@@ -39,7 +39,7 @@ interface PostCardProps {
   onCopyLink?: (postId: string) => void;
   onMuteUser?: (userId: string) => void;
   onBlockUser?: (userId: string) => void;
-  onProfilePress?: (userId: string) => void; // Add this prop
+  onProfilePress?: (userId: string) => void;
 }
 
 const PostCard: React.FC<PostCardProps> = ({
@@ -56,7 +56,7 @@ const PostCard: React.FC<PostCardProps> = ({
   onCopyLink,
   onMuteUser,
   onBlockUser,
-  onProfilePress, // Add this prop
+  onProfilePress,
 }) => {
   const router = useRouter();
   const [optionsVisible, setOptionsVisible] = useState(false);
@@ -66,6 +66,7 @@ const PostCard: React.FC<PostCardProps> = ({
   const [avatarError, setAvatarError] = useState(false);
   const [postImageError, setPostImageError] = useState<boolean[]>([]);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [containerWidth, setContainerWidth] = useState(0);
 
   const scrollViewRef = useRef<ScrollView>(null);
   const { user, profile } = useAuth();
@@ -76,8 +77,6 @@ const PostCard: React.FC<PostCardProps> = ({
     return null;
   }
 
-  const windowWidth = Dimensions.get("window").width;
-  const imageWidth = windowWidth - 40;
   const imageHeight = 400;
 
   const getCurrentUserId = (): string | null => {
@@ -140,15 +139,15 @@ const PostCard: React.FC<PostCardProps> = ({
 
   const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const scrollPosition = event.nativeEvent.contentOffset.x;
-    const index = Math.round(scrollPosition / imageWidth);
+    const index = Math.round(scrollPosition / containerWidth);
     setCurrentImageIndex(index);
   };
 
   const goToImage = (index: number) => {
     setCurrentImageIndex(index);
-    if (scrollViewRef.current) {
+    if (scrollViewRef.current && containerWidth > 0) {
       scrollViewRef.current.scrollTo({
-        x: index * imageWidth,
+        x: index * containerWidth,
         animated: true,
       });
     }
@@ -251,6 +250,8 @@ const PostCard: React.FC<PostCardProps> = ({
   };
 
   const renderSingleImage = () => {
+    if (containerWidth === 0) return null;
+
     const image = postImages[0];
 
     if (postImageError[0]) {
@@ -258,7 +259,7 @@ const PostCard: React.FC<PostCardProps> = ({
         <View
           style={[
             styles.imageErrorContainer,
-            { width: imageWidth, height: imageHeight },
+            { width: containerWidth, height: imageHeight },
           ]}
         >
           <Ionicons name="image-outline" size={48} color="#9ca3af" />
@@ -270,7 +271,10 @@ const PostCard: React.FC<PostCardProps> = ({
     return (
       <Image
         source={{ uri: image.url }}
-        style={[styles.postImage, { width: imageWidth, height: imageHeight }]}
+        style={[
+          styles.postImage,
+          { width: containerWidth, height: imageHeight },
+        ]}
         resizeMode="cover"
         onError={() => handleImageError(0)}
       />
@@ -278,6 +282,8 @@ const PostCard: React.FC<PostCardProps> = ({
   };
 
   const renderMultipleImages = () => {
+    if (containerWidth === 0) return null;
+
     return (
       <View style={styles.multiImageContainer}>
         <ScrollView
@@ -287,7 +293,7 @@ const PostCard: React.FC<PostCardProps> = ({
           showsHorizontalScrollIndicator={false}
           onScroll={handleScroll}
           scrollEventThrottle={16}
-          style={{ width: imageWidth }}
+          style={{ width: containerWidth }}
         >
           {postImages.map((image, index) => {
             if (postImageError[index]) {
@@ -296,7 +302,7 @@ const PostCard: React.FC<PostCardProps> = ({
                   key={index}
                   style={[
                     styles.imageErrorContainer,
-                    { width: imageWidth, height: imageHeight },
+                    { width: containerWidth, height: imageHeight },
                   ]}
                 >
                   <Ionicons name="image-outline" size={48} color="#9ca3af" />
@@ -313,7 +319,7 @@ const PostCard: React.FC<PostCardProps> = ({
                 source={{ uri: image.url }}
                 style={[
                   styles.postImage,
-                  { width: imageWidth, height: imageHeight },
+                  { width: containerWidth, height: imageHeight },
                 ]}
                 resizeMode="cover"
                 onError={() => handleImageError(index)}
@@ -368,52 +374,25 @@ const PostCard: React.FC<PostCardProps> = ({
   const visibilityBadgeColor = getVisibilityBadgeColor();
 
   return (
-    <>
-      <View style={styles.postCard}>
-        <View style={styles.postHeader}>
-          {renderAvatar()}
+    <View
+      style={styles.postCard}
+      onLayout={(event) => {
+        const { width } = event.nativeEvent.layout;
+        setContainerWidth(width);
+      }}
+    >
+      <View style={styles.postHeader}>
+        {renderAvatar()}
 
-          <View style={styles.postUserInfo}>
-            {!post.isAnonymous ? (
-              <TouchableOpacity onPress={handleUserPress}>
-                <View style={styles.postUser}>
-                  <Text style={styles.postUserName}>
-                    {getUserDisplayName()}
-                  </Text>
-
-                  {post.user?.verified && (
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={16}
-                      color="#10b981"
-                    />
-                  )}
-
-                  <View
-                    style={[
-                      styles.visibilityBadge,
-                      { backgroundColor: `${visibilityBadgeColor}15` },
-                    ]}
-                  >
-                    <Ionicons
-                      name={visibilityIconName}
-                      size={12}
-                      color={visibilityBadgeColor}
-                    />
-                    <Text
-                      style={[
-                        styles.visibilityBadgeText,
-                        { color: visibilityBadgeColor },
-                      ]}
-                    >
-                      {getVisibilityDisplayName()}
-                    </Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            ) : (
+        <View style={styles.postUserInfo}>
+          {!post.isAnonymous ? (
+            <TouchableOpacity onPress={handleUserPress}>
               <View style={styles.postUser}>
                 <Text style={styles.postUserName}>{getUserDisplayName()}</Text>
+
+                {post.user?.verified && (
+                  <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+                )}
 
                 <View
                   style={[
@@ -436,85 +415,108 @@ const PostCard: React.FC<PostCardProps> = ({
                   </Text>
                 </View>
               </View>
-            )}
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.postUser}>
+              <Text style={styles.postUserName}>{getUserDisplayName()}</Text>
 
-            <Text style={styles.postUserDetails}>
-              @{getUserDisplayHandle()} • {formatTimeAgo(post.createdAt)}
-            </Text>
-          </View>
-
-          <TouchableOpacity onPress={handleMorePress}>
-            <Ionicons name="ellipsis-horizontal" size={20} color="#9ca3af" />
-          </TouchableOpacity>
-        </View>
-
-        <Text style={styles.postContent}>{post.content}</Text>
-
-        {postImages.length > 0 && (
-          <View style={styles.imagesContainer}>
-            {postImages.length === 1
-              ? renderSingleImage()
-              : renderMultipleImages()}
-
-            {postImages.length > 1 && (
-              <View style={styles.imageCounter}>
-                <Ionicons name="images-outline" size={16} color="white" />
-                <Text style={styles.imageCounterText}>
-                  {currentImageIndex + 1}/{postImages.length}
+              <View
+                style={[
+                  styles.visibilityBadge,
+                  { backgroundColor: `${visibilityBadgeColor}15` },
+                ]}
+              >
+                <Ionicons
+                  name={visibilityIconName}
+                  size={12}
+                  color={visibilityBadgeColor}
+                />
+                <Text
+                  style={[
+                    styles.visibilityBadgeText,
+                    { color: visibilityBadgeColor },
+                  ]}
+                >
+                  {getVisibilityDisplayName()}
                 </Text>
               </View>
-            )}
-          </View>
-        )}
+            </View>
+          )}
 
-        <View style={styles.postActions}>
-          <TouchableOpacity
-            style={styles.postAction}
-            onPress={() => onLikePress(post._id)}
-          >
-            <Ionicons
-              name={post.isLiked ? "heart" : "heart-outline"}
-              size={20}
-              color={post.isLiked ? "#ef4444" : "#6b7280"}
-            />
-            <Text
-              style={[styles.postActionText, post.isLiked && styles.likedText]}
-            >
-              {post.likes?.length || 0}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.postAction}
-            onPress={() => onCommentPress(post._id)}
-          >
-            <Ionicons name="chatbubble-outline" size={20} color="#6b7280" />
-            <Text style={styles.postActionText}>
-              {post.commentCount || post.comments?.length || 0}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.postAction}
-            onPress={() => onRepostPress(post._id)}
-          >
-            <Ionicons
-              name={post.isReposted ? "repeat" : "repeat-outline"}
-              size={20}
-              color={post.isReposted ? "#10b981" : "#6b7280"}
-            />
-            <Text style={styles.postActionText}>
-              {post.reposts?.length || 0}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.postAction}
-            onPress={() => onSharePress(post._id)}
-          >
-            <Ionicons name="share-outline" size={20} color="#6b7280" />
-          </TouchableOpacity>
+          <Text style={styles.postUserDetails}>
+            @{getUserDisplayHandle()} • {formatTimeAgo(post.createdAt)}
+          </Text>
         </View>
+
+        <TouchableOpacity onPress={handleMorePress}>
+          <Ionicons name="ellipsis-horizontal" size={20} color="#9ca3af" />
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.postContent}>{post.content}</Text>
+
+      {postImages.length > 0 && containerWidth > 0 && (
+        <View style={styles.imagesContainer}>
+          {postImages.length === 1
+            ? renderSingleImage()
+            : renderMultipleImages()}
+
+          {postImages.length > 1 && (
+            <View style={styles.imageCounter}>
+              <Ionicons name="images-outline" size={16} color="white" />
+              <Text style={styles.imageCounterText}>
+                {currentImageIndex + 1}/{postImages.length}
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      <View style={styles.postActions}>
+        <TouchableOpacity
+          style={styles.postAction}
+          onPress={() => onLikePress(post._id)}
+        >
+          <Ionicons
+            name={post.isLiked ? "heart" : "heart-outline"}
+            size={20}
+            color={post.isLiked ? "#ef4444" : "#6b7280"}
+          />
+          <Text
+            style={[styles.postActionText, post.isLiked && styles.likedText]}
+          >
+            {post.likes?.length || 0}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.postAction}
+          onPress={() => onCommentPress(post._id)}
+        >
+          <Ionicons name="chatbubble-outline" size={20} color="#6b7280" />
+          <Text style={styles.postActionText}>
+            {post.commentCount || post.comments?.length || 0}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.postAction}
+          onPress={() => onRepostPress(post._id)}
+        >
+          <Ionicons
+            name={post.isReposted ? "repeat" : "repeat-outline"}
+            size={20}
+            color={post.isReposted ? "#10b981" : "#6b7280"}
+          />
+          <Text style={styles.postActionText}>{post.reposts?.length || 0}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.postAction}
+          onPress={() => onSharePress(post._id)}
+        >
+          <Ionicons name="share-outline" size={20} color="#6b7280" />
+        </TouchableOpacity>
       </View>
 
       <PostOptionsModal
@@ -535,7 +537,7 @@ const PostCard: React.FC<PostCardProps> = ({
         onBlockUser={onBlockUser}
         userId={post.user?._id}
       />
-    </>
+    </View>
   );
 };
 
@@ -544,6 +546,7 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
     marginBottom: 16,
     borderRadius: 16,
+    overflow: "hidden",
   },
   postHeader: {
     flexDirection: "row",
@@ -581,10 +584,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "600",
     color: "#111827",
+    fontFamily: "SofiaSans-Bold",
   },
   postUserDetails: {
     fontSize: 13,
     color: "#6b7280",
+    fontFamily: "SofiaSans-Regular",
   },
   visibilityBadge: {
     flexDirection: "row",
@@ -594,6 +599,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 10,
     marginLeft: 4,
+    fontFamily: "SofiaSans-Regular",
   },
   visibilityBadgeText: {
     fontSize: 10,
@@ -604,8 +610,9 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: "#374151",
     marginBottom: 12,
-    padding:16,
+    padding: 16,
     paddingHorizontal: 20,
+    fontFamily: "SofiaSans-Regular",
   },
   imagesContainer: {
     position: "relative",
@@ -682,7 +689,9 @@ const styles = StyleSheet.create({
   },
   postActionText: {
     fontSize: 14,
+    fontFamily: "SofiaSans-Regular",
     color: "#6b7280",
+    
     minWidth: 24,
   },
   likedText: {

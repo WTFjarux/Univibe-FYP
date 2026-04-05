@@ -654,6 +654,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 20,
     fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
     color: "#111827",
   },
   listContent: {
@@ -672,7 +673,9 @@ const styles = StyleSheet.create({
   commentsTitle: {
     fontSize: 18,
     fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
     color: "#111827",
+
   },
   footerLoader: {
     paddingVertical: 20,

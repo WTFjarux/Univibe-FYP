@@ -26,6 +26,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 14,
     fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
     color: "#6b7280",
     letterSpacing: 0.5,
     marginRight: 12,

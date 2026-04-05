@@ -195,6 +195,7 @@ const styles = StyleSheet.create({
   },
   replyingText: {
     fontSize: 13,
+    fontFamily: "SofiaSans-Regular",
     color: "#6b7280",
     flex: 1,
   },
@@ -219,6 +220,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 15,
+    fontFamily: "SofiaSans-Regular",
     maxHeight: 100,
     minHeight: 44,
     backgroundColor: "#f9fafb",
@@ -277,6 +279,7 @@ const styles = StyleSheet.create({
   },
   charCount: {
     fontSize: 11,
+    fontFamily: "SofiaSans-Regular",
     color: "#9ca3af",
   },
 

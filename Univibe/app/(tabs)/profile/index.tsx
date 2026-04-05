@@ -506,18 +506,7 @@ export default function ProfileScreen() {
   };
 
   const handleImagePress = () => {
-    if (profile?.profilePicture) {
-      openUploadModal();
-    } else {
-      Alert.alert(
-        "Upload Profile Picture",
-        "You don't have a profile picture yet. Would you like to add one?",
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Upload", onPress: openUploadModal },
-        ],
-      );
-    }
+    openUploadModal();
   };
 
   // ============ COVER PHOTO HANDLERS ============
@@ -961,10 +950,11 @@ const menuStyles = StyleSheet.create({
     flex: 1,
   },
   menuText: {
-    fontSize: 15,
+    fontSize: 18,
     color: "#374151",
     fontWeight: "500",
     marginLeft: 12,
+    fontFamily: "SofiaSans-Regular",
   },
   divider: {
     height: 1,

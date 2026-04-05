@@ -243,7 +243,7 @@ export default function ProfileHeader({
 
   const renderNameSection = () => (
     <View style={styles.nameUsernameContainer}>
-      <Text style={styles.fullName} numberOfLines={2}>
+      <Text style={styles.fullName} numberOfLines={2} ellipsizeMode="tail">
         {fullName}
       </Text>
       <View style={styles.usernameContainer}>
@@ -412,10 +412,11 @@ const styles = StyleSheet.create({
   },
 
   fullName: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: "bold",
     color: "#111827",
     marginBottom: 4,
+    fontFamily:"SofiaSans-Bold",
   },
 
   usernameContainer: {
@@ -427,6 +428,7 @@ const styles = StyleSheet.create({
     color: "#6b7280",
     fontSize: 16,
     marginRight: 8,
+    fontFamily:"SofiaSans-Regular",
   },
 
   verifiedBadge: {
@@ -442,9 +444,10 @@ const styles = StyleSheet.create({
   },
 
   bio: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: "500",
     lineHeight: 20,
     color: "#000000",
+    fontFamily:"SofiaSans-Regular",
   },
 });

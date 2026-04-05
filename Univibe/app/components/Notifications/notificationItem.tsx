@@ -374,15 +374,19 @@ const styles = StyleSheet.create({
   },
   messageText: {
     fontSize: 14,
+    fontFamily: "SofiaSans-Regular",
     lineHeight: 18,
     marginBottom: 4,
   },
   boldName: {
     fontWeight: "700",
+    fontSize: 15,
+    fontFamily: "SofiaSans-Bold",
     color: "#111827",
   },
   commentContent: {
     color: "#6b7280",
+    fontFamily: "SofiaSans-Regular",
     fontStyle: "italic",
   },
   unreadText: {
@@ -392,6 +396,7 @@ const styles = StyleSheet.create({
   time: {
     fontSize: 11,
     color: "#9ca3af",
+    fontFamily: "SofiaSans-Regular",
     marginTop: 2,
   },
   unreadIndicator: {
@@ -427,6 +432,7 @@ const styles = StyleSheet.create({
   },
   optionText: {
     fontSize: 13,
+    fontFamily: "SofiaSans-Regular",
     color: "#374151",
   },
   deleteOption: {
@@ -435,6 +441,7 @@ const styles = StyleSheet.create({
   },
   deleteOptionText: {
     fontSize: 13,
+    fontFamily: "SofiaSans-Regular",
     color: "#ef4444",
   },
 });

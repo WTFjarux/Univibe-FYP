@@ -238,10 +238,11 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "bold",
     color: "#111827",
     marginBottom: 16,
+    fontFamily:"SofiaSans-Bold",
   },
   infoItem: {
     flexDirection: "row",
@@ -255,16 +256,19 @@ const styles = StyleSheet.create({
   infoContent: {
     flex: 1,
     marginLeft: 12,
+
   },
   infoLabel: {
     color: "#6b7280",
     fontSize: 13,
     fontWeight: "500",
     marginBottom: 2,
+    fontFamily: "SofiaSans-Bold",
   },
   infoValue: {
     fontSize: 16,
     fontWeight: "500",
+    fontFamily: "SofiaSans-Regular",
     color: "#374151",
     lineHeight: 22,
   },

@@ -566,6 +566,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 20,
     fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
     color: "#111827",
     textAlign: "center",
   },
@@ -576,6 +577,7 @@ const styles = StyleSheet.create({
   markAllText: {
     fontSize: 14,
     color: "#8b5cf6",
+    fontFamily: "SofiaSans-Regular",
     fontWeight: "500",
   },
   placeholderButton: {
@@ -602,12 +604,14 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "600",
     color: "#374151",
+    fontFamily: "SofiaSans-Bold",
     marginTop: 16,
   },
   emptyStateSubtext: {
     fontSize: 14,
     color: "#6b7280",
     textAlign: "center",
+    fontFamily: "SofiaSans-Regular",
     marginTop: 8,
     paddingHorizontal: 40,
   },
@@ -634,6 +638,7 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 14,
     fontWeight: "500",
+    fontFamily: "SofiaSans-Regular",
     flex: 1,
     textAlign: "left",
     lineHeight: 20,
@@ -648,6 +653,7 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 12,
     fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
     letterSpacing: 0.5,
   },
 });

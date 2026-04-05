@@ -53,37 +53,9 @@ const FeedHeader: React.FC<FeedHeaderProps> = ({
       <View style={styles.actions}>
         {/* Search Button */}
         <TouchableOpacity style={styles.iconButton} onPress={handleSearchPress}>
-          <Ionicons name="search-outline" size={24} color="#111827" />
+          <Ionicons name="search-outline" size={30} color="#111827" />
         </TouchableOpacity>
 
-        {/* Notifications Button */}
-        <TouchableOpacity
-          style={styles.iconButton}
-          onPress={onNotificationPress}
-        >
-          <Ionicons name="notifications-outline" size={24} color="#111827" />
-          {/* Uncomment for notification badge */}
-          {/* <View style={styles.badge} /> */}
-        </TouchableOpacity>
-
-        {/* Profile Button */}
-        {/* <TouchableOpacity
-          style={styles.profileButton}
-          onPress={handleProfilePress}
-        >
-          {user?.profilePicture ? (
-            <Image
-              source={{ uri: user.profilePicture }}
-              style={styles.profileImage}
-            />
-          ) : (
-            <View style={styles.profileFallback}>
-              <Text style={styles.profileFallbackText}>
-                {getUserInitials()}
-              </Text>
-            </View>
-          )}
-        </TouchableOpacity> */}
       </View>
     </View>
   );
@@ -96,19 +68,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 20,
     paddingBottom: 16,
-    backgroundColor: "#fff",
     borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
+    borderBottomColor: "#ffffff",
   },
   title: {
     fontSize: 28,
     fontWeight: "bold",
     color: "#111827",
+    fontFamily:"SofiaSans-Bold",
   },
   subtitle: {
     fontSize: 14,
     color: "#6b7280",
     marginTop: 4,
+    fontFamily:"SofiaSans-Regular",
   },
   actions: {
     flexDirection: "row",

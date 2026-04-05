@@ -81,7 +81,7 @@ export default function CommentScreen() {
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [imageModalVisible, setImageModalVisible] = useState(false);
   const [isAnyCommentEditing, setIsAnyCommentEditing] = useState(false);
-  
+
   // Post like state
   const [isPostLiked, setIsPostLiked] = useState(false);
   const [postLikesCount, setPostLikesCount] = useState(0);
@@ -179,28 +179,34 @@ export default function CommentScreen() {
       // Optimistically update UI
       const newLikedState = !isPostLiked;
       setIsPostLiked(newLikedState);
-      setPostLikesCount(prev => newLikedState ? prev + 1 : prev - 1);
+      setPostLikesCount((prev) => (newLikedState ? prev + 1 : prev - 1));
 
       // Call API to toggle like
       const response = await toggleLike(postId);
-      
+
       // Update with actual response
       setIsPostLiked(response.isLiked);
       setPostLikesCount(response.likes);
-      
+
       // Update the post object
-      setPost(prev => prev ? {
-        ...prev,
-        isLiked: response.isLiked,
-        likes: response.isLiked 
-          ? [...(prev.likes || []), { _id: user?.id }]
-          : (prev.likes || []).filter((like: any) => like._id !== user?.id)
-      } : null);
+      setPost((prev) =>
+        prev
+          ? {
+              ...prev,
+              isLiked: response.isLiked,
+              likes: response.isLiked
+                ? [...(prev.likes || []), { _id: user?.id }]
+                : (prev.likes || []).filter(
+                    (like: any) => like._id !== user?.id,
+                  ),
+            }
+          : null,
+      );
     } catch (error: any) {
       console.error("Error liking post:", error);
       // Revert on error
       setIsPostLiked(!isPostLiked);
-      setPostLikesCount(prev => isPostLiked ? prev + 1 : prev - 1);
+      setPostLikesCount((prev) => (isPostLiked ? prev + 1 : prev - 1));
       Alert.alert("Error", error.message || "Failed to like post");
     }
   };
@@ -253,7 +259,7 @@ export default function CommentScreen() {
   const renderPostHeader = useMemo(() => {
     if (!post) return null;
     return (
-      <PostPreview 
+      <PostPreview
         post={post}
         isLiked={isPostLiked}
         likesCount={postLikesCount}
@@ -420,11 +426,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: "#111827",
+    fontFamily: "SofiaSans-Bold",
     marginTop: 12,
     marginBottom: 4,
   },
   emptyText: {
     fontSize: 14,
+    fontFamily: "SofiaSans-Regular",
+
     color: "#6b7280",
   },
   footerLoader: {

@@ -319,6 +319,7 @@ const styles = StyleSheet.create({
   counterText: {
     color: "#fff",
     fontSize: 12,
+    fontFamily: "SofiaSans-Regular",
     fontWeight: "600",
   },
   stats: {
@@ -335,6 +336,7 @@ const styles = StyleSheet.create({
   },
   statText: {
     fontSize: 14,
+    fontFamily: "SofiaSans-Regular",  
     color: "#6b7280",
   },
   statTextActive: {
@@ -347,6 +349,7 @@ const styles = StyleSheet.create({
   commentsTitle: {
     fontSize: 16,
     fontWeight: "600",
+    fontFamily: "SofiaSans-Bold", 
     color: "#111827",
   },
 });

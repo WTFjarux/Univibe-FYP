@@ -1,3 +1,5 @@
+// app/components/Feed/Post/EditPost.tsx - Fixed version
+
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -38,6 +40,12 @@ export default function EditPostScreen() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  // Track original values to detect changes
+  const [originalContent, setOriginalContent] = useState("");
+  const [originalVisibility, setOriginalVisibility] = useState("");
+  const [originalIsAnonymous, setOriginalIsAnonymous] = useState(false);
+  const [originalImages, setOriginalImages] = useState<any[]>([]);
+
   // Visibility options - Only campus and connections
   const visibilityOptions = [
     { id: "campus", label: "Campus", icon: "school-outline" },
@@ -64,6 +72,12 @@ export default function EditPostScreen() {
       setVisibility(postData.visibility);
       setIsAnonymous(postData.isAnonymous || false);
       setImages(postData.images || []);
+
+      // Store original values for change detection
+      setOriginalContent(postData.content);
+      setOriginalVisibility(postData.visibility);
+      setOriginalIsAnonymous(postData.isAnonymous || false);
+      setOriginalImages(postData.images || []);
     } catch (error: any) {
       console.error("Error fetching post:", error);
       Alert.alert("Error", "Failed to load post");
@@ -71,6 +85,55 @@ export default function EditPostScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  /**
+   * Handle anonymous toggle - Force visibility to campus when anonymous is ON
+   */
+  const handleAnonymousToggle = (value: boolean) => {
+    setIsAnonymous(value);
+
+    // If turning ON anonymous, force visibility to "campus"
+    if (value) {
+      setVisibility("campus");
+    }
+    // If turning OFF anonymous, keep current visibility (don't change)
+  };
+
+  /**
+   * Check if any changes have been made to the post
+   */
+  const hasChanges = () => {
+    // Check content change (trim both to ignore whitespace)
+    if (content.trim() !== originalContent.trim()) return true;
+
+    // Check visibility change
+    if (visibility !== originalVisibility) return true;
+
+    // Check anonymous status change
+    if (isAnonymous !== originalIsAnonymous) return true;
+
+    // Check if images were removed
+    if (imagesToRemove.length > 0) return true;
+
+    // Check if new images were added
+    const originalImageCount = originalImages.length;
+    const currentImageCount = images.length;
+    if (currentImageCount !== originalImageCount) return true;
+
+    // Check if image order changed or images were replaced
+    // Compare image URLs/filenames
+    const originalImageKeys = originalImages
+      .map((img) => img.filename || img.url || img)
+      .sort()
+      .join(",");
+    const currentImageKeys = images
+      .map((img) => img.filename || img.url || img)
+      .sort()
+      .join(",");
+    if (originalImageKeys !== currentImageKeys) return true;
+
+    return false;
   };
 
   /**
@@ -247,10 +310,10 @@ export default function EditPostScreen() {
           <TouchableOpacity
             style={[
               styles.postButton,
-              (!content.trim() || submitting) && styles.postButtonDisabled,
+              (!hasChanges() || submitting) && styles.postButtonDisabled,
             ]}
             onPress={handleSubmit}
-            disabled={!content.trim() || submitting}
+            disabled={!hasChanges() || submitting}
           >
             {submitting ? (
               <ActivityIndicator size="small" color="#fff" />
@@ -295,6 +358,7 @@ export default function EditPostScreen() {
                     <TouchableOpacity
                       style={styles.removeButton}
                       onPress={() => removeImage(index)}
+                      disabled={submitting}
                     >
                       <Ionicons name="close-circle" size={24} color="#fff" />
                     </TouchableOpacity>
@@ -351,33 +415,49 @@ export default function EditPostScreen() {
               )}
             </Text>
             <View style={styles.visibilityOptions}>
-              {visibilityOptions.map((option) => (
-                <TouchableOpacity
-                  key={option.id}
-                  style={[
-                    styles.visibilityOption,
-                    visibility === option.id && styles.visibilityOptionActive,
-                    isAnonymous && styles.visibilityOptionDisabled,
-                  ]}
-                  onPress={() => !isAnonymous && setVisibility(option.id)}
-                  disabled={submitting || isAnonymous}
-                >
-                  <Ionicons
-                    name={getVisibilityIcon(option.id)}
-                    size={18}
-                    color={visibility === option.id ? "#fff" : "#666"}
-                  />
-                  <Text
+              {visibilityOptions.map((option) => {
+                // Check if option is disabled (connections is disabled when anonymous)
+                const isDisabled = isAnonymous && option.id === "connections";
+
+                return (
+                  <TouchableOpacity
+                    key={option.id}
                     style={[
-                      styles.visibilityText,
-                      visibility === option.id && styles.visibilityTextActive,
-                      isAnonymous && styles.visibilityTextDisabled,
+                      styles.visibilityOption,
+                      visibility === option.id && styles.visibilityOptionActive,
+                      isDisabled && styles.visibilityOptionDisabled,
                     ]}
+                    onPress={() => {
+                      // Don't allow changing to connections if anonymous
+                      if (!isDisabled && !submitting) {
+                        setVisibility(option.id);
+                      }
+                    }}
+                    disabled={submitting || isDisabled}
                   >
-                    {getVisibilityLabel(option.id)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <Ionicons
+                      name={getVisibilityIcon(option.id)}
+                      size={18}
+                      color={
+                        visibility === option.id
+                          ? "#fff"
+                          : isDisabled
+                            ? "#9ca3af"
+                            : "#666"
+                      }
+                    />
+                    <Text
+                      style={[
+                        styles.visibilityText,
+                        visibility === option.id && styles.visibilityTextActive,
+                        isDisabled && styles.visibilityTextDisabled,
+                      ]}
+                    >
+                      {getVisibilityLabel(option.id)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
             <Text style={styles.visibilityDescription}>
               {isAnonymous
@@ -392,7 +472,7 @@ export default function EditPostScreen() {
           <View style={styles.anonymousSection}>
             <TouchableOpacity
               style={styles.anonymousToggle}
-              onPress={() => setIsAnonymous(!isAnonymous)}
+              onPress={() => handleAnonymousToggle(!isAnonymous)}
               disabled={submitting}
             >
               <View style={styles.anonymousToggleLeft}>
@@ -470,13 +550,14 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
   },
   postButton: {
     backgroundColor: "#8b5cf6",
     paddingHorizontal: 20,
     paddingVertical: 8,
     borderRadius: 20,
-    minWidth: 60,
+    minWidth: 50,
     alignItems: "center",
   },
   postButtonDisabled: {
@@ -486,6 +567,7 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "600",
     fontSize: 14,
+    fontFamily: "SofiaSans-Bold",
   },
   content: {
     flex: 1,
@@ -495,6 +577,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     minHeight: 120,
     textAlignVertical: "top",
+    fontFamily: "SofiaSans-Regular",
   },
   charCount: {
     textAlign: "right",
@@ -511,6 +594,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#333",
     marginBottom: 12,
+    fontFamily: "SofiaSans-Bold",
   },
   imagesGrid: {
     flexDirection: "row",
@@ -585,6 +669,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#000000",
     fontWeight: "500",
+    fontFamily: "SofiaSans-Regular",
   },
   section: {
     marginBottom: 20,
@@ -593,7 +678,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     color: "#333",
-    marginBottom: 12,
+    marginBottom: 16,
+    fontFamily: "SofiaSans-Bold",
   },
   anonymousNote: {
     fontSize: 12,
@@ -621,24 +707,27 @@ const styles = StyleSheet.create({
     borderColor: "#8b5cf6",
   },
   visibilityOptionDisabled: {
-    backgroundColor: "#8b5cf6",
-    borderColor: "#8b5cf6",
+    backgroundColor: "#e5e7eb",
+    borderColor: "#e5e7eb",
+    opacity: 0.6,
   },
   visibilityText: {
     fontSize: 12,
     fontWeight: "500",
     color: "#666",
+    fontFamily: "SofiaSans-Regular",
   },
   visibilityTextActive: {
     color: "#fff",
   },
   visibilityTextDisabled: {
-    color: "#ffffff",
+    color: "#9ca3af",
   },
   visibilityDescription: {
     fontSize: 12,
     color: "#8b5cf6",
     marginTop: 10,
+    fontFamily: "SofiaSans-Regular",
   },
   anonymousSection: {
     marginBottom: 20,
@@ -657,6 +746,7 @@ const styles = StyleSheet.create({
   anonymousToggleText: {
     fontSize: 16,
     color: "#111827",
+    fontFamily: "SofiaSans-Bold",
   },
   checkbox: {
     width: 24,
@@ -676,5 +766,6 @@ const styles = StyleSheet.create({
     color: "#6b7280",
     marginTop: 8,
     fontStyle: "italic",
+    fontFamily: "SofiaSans-Regular",
   },
 });

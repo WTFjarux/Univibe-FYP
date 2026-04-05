@@ -668,11 +668,12 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 14,
     fontWeight: "600",
+    fontFamily: "SofiaSans-SemiBold",
     color: "#111827",
   },
   anonymousName: {
     color: "#6b7280",
-    fontStyle: "italic",
+    fontFamily: "SofiaSans-Regular",
   },
   badgeContainer: {
     flexDirection: "row",
@@ -691,6 +692,7 @@ const styles = StyleSheet.create({
   },
   authorBadgeText: {
     fontSize: 10,
+    fontFamily: "SofiaSans-Regular",
     color: "#92400e",
     fontWeight: "500",
   },
@@ -711,6 +713,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#9ca3af",
     fontStyle: "italic",
+    fontFamily: "SofiaSans-Regular",
   },
   commentContentWrapper: {
     flexDirection: "row",
@@ -722,6 +725,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: "#8b5cf6",
+    fontFamily: "SofiaSans-Bold",
     fontWeight: "500",
     marginRight: 4,
   },
@@ -729,6 +733,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: "#374151",
+    fontFamily: "SofiaSans-Regular",
     flex: 1,
   },
   footer: {
@@ -747,6 +752,7 @@ const styles = StyleSheet.create({
   },
   footerActionText: {
     fontSize: 12,
+    fontFamily: "SofiaSans-Regular",
     color: "#6b7280",
   },
   likedText: {

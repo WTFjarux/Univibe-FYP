@@ -65,9 +65,10 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   tabText: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: "500",
     color: "#9ca3af",
+    fontFamily:"SofiaSans-Bold",
   },
   activeTabText: {
     color: "#111827",

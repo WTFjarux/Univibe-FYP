@@ -73,6 +73,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#6b7280",
     fontWeight: "500",
+    fontFamily:"SofiaSans-Bold",
   },
   filterTextActive: {
     color: "white",

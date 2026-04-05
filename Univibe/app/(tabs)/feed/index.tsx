@@ -814,6 +814,7 @@ const localStyles = StyleSheet.create({
   infoBarText: {
     color: "#fff",
     fontSize: 14,
+    fontFamily: "SofiaSans-Regular",
     fontWeight: "500" as "500",
     flex: 1,
     textAlign: "left" as "left",
@@ -828,6 +829,7 @@ const localStyles = StyleSheet.create({
   undoButtonText: {
     color: "#fff",
     fontSize: 12,
+    fontFamily: "SofiaSans-Bold",
     fontWeight: "600" as "600",
     letterSpacing: 0.5,
   },

@@ -956,7 +956,12 @@ const publicStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#10b981",
   },
-  connectionButtonText: { color: "white", fontSize: 16, fontWeight: "600" },
+  connectionButtonText: {
+    color: "white",
+    fontSize: 16,
+    fontFamily: "SofiaSans-Bold",
+    fontWeight: "600",
+  },
   connectedButtonText: { color: "#10b981" },
   acceptCancelContainer: {
     flexDirection: "row",
@@ -979,12 +984,12 @@ const publicStyles = StyleSheet.create({
   },
   postsHeader: {
     marginTop: 16,
-    marginBottom: 12,
     paddingHorizontal: 20,
   },
   postsTitle: {
-    fontSize: 18,
+    fontSize: 24,
     fontWeight: "bold",
+    fontFamily: "SofiaSans-Bold",
     color: "#111827",
   },
   emptyPostsContainer: {
@@ -1011,7 +1016,7 @@ const publicStyles = StyleSheet.create({
     paddingBottom: 20,
   },
   postCardContainer: {
-    paddingHorizontal: 16,
+    padding: 16,
     marginBottom: 8,
   },
 });

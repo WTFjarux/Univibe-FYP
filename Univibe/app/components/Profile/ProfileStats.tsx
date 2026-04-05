@@ -80,10 +80,11 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "bold",
     color: "#111827",
     marginBottom: 16,
+    fontFamily: "SofiaSans-Bold",
   },
   statsContainer: {
     flexDirection: "row",
@@ -100,11 +101,13 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: "bold",
     color: "#111827",
+    fontFamily: "SofiaSans-Bold",
     marginBottom: 4,
   },
   statLabel: {
     color: "#6b7280",
     fontSize: 13,
     fontWeight: "500",
+    fontFamily: "SofiaSans-Bold",
   },
 });

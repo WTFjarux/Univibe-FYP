@@ -49,6 +49,7 @@ export default function TabLayout() {
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: "500",
+          fontFamily: "SofiaSans-Bold", 
         },
         tabBarIconStyle: {
           marginBottom: 5,
