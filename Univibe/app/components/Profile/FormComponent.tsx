@@ -345,6 +345,7 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 15,
     fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
     color: "#374151",
   },
   requiredStar: {
@@ -359,6 +360,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 15,
+    fontFamily: "SofiaSans-Regular",
     color: "#111827",
   },
   bioInput: {
@@ -368,6 +370,7 @@ const styles = StyleSheet.create({
   charCount: {
     fontSize: 12,
     color: "#6b7280",
+    fontFamily: "SofiaSans-Regular",
     textAlign: "right",
     marginTop: 4,
   },
@@ -388,6 +391,7 @@ const styles = StyleSheet.create({
   dropdownText: {
     fontSize: 15,
     color: "#111827",
+    fontFamily: "SofiaSans-Regular",
     flex: 1,
   },
   dropdownPlaceholder: {
@@ -429,17 +433,20 @@ const styles = StyleSheet.create({
   },
   dropdownItemText: {
     fontSize: 15,
+    fontFamily: "SofiaSans-Regular",
     color: "#374151",
     flex: 1,
   },
   dropdownItemTextSelected: {
     color: "#4f46e5",
     fontWeight: "500",
+    fontFamily: "SofiaSans-Bold",
   },
   errorText: {
     fontSize: 12,
     color: "#ef4444",
     marginTop: 4,
+    fontFamily: "SofiaSans-Regular",
   },
   yearGrid: {
     flexDirection: "row",
@@ -464,12 +471,14 @@ const styles = StyleSheet.create({
   },
   yearCardText: {
     fontSize: 14,
-    fontWeight: "500",
+    fontFamily: "SofiaSans-Regular",
     color: "#374151",
     textAlign: "center",
   },
   yearCardTextActive: {
     color: "white",
+
+    fontFamily: "SofiaSans-Bold",
   },
   pronounContainer: {
     flexDirection: "row",
@@ -491,11 +500,13 @@ const styles = StyleSheet.create({
   },
   pronounButtonText: {
     fontSize: 14,
+    fontFamily: "SofiaSans-Regular",
     color: "#374151",
   },
   pronounButtonTextActive: {
     color: "white",
     fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
   },
   socialInputContainer: {
     flexDirection: "row",
@@ -510,13 +521,13 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 10,
     fontSize: 16,
+    fontFamily: "SofiaSans-Regular",
     color: "#111827",
     marginLeft: 8,
   },
 });
 
 // ==================== DEFAULT EXPORT ====================
-// Default export to satisfy Expo Router
 const FormComponents = () => {
   return null;
 };

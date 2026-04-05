@@ -856,7 +856,6 @@ export default function EditProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-
   container: {
     flex: 1,
     backgroundColor: "#f8fafc",
@@ -886,6 +885,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
     color: "#111827",
   },
   saveButton: {
@@ -898,6 +898,7 @@ const styles = StyleSheet.create({
   saveButtonText: {
     color: "#8b5cf6",
     fontSize: 16,
+    fontFamily: "SofiaSans-Bold",
     fontWeight: "600",
   },
   profilePictureSection: {
@@ -944,6 +945,7 @@ const styles = StyleSheet.create({
   imageHint: {
     fontSize: 14,
     color: "#6b7280",
+    fontFamily: "SofiaSans-Regular",
     textAlign: "center",
   },
   unsavedIndicator: {
@@ -958,6 +960,7 @@ const styles = StyleSheet.create({
   unsavedText: {
     fontSize: 12,
     color: "#92400e",
+    fontFamily: "SofiaSans-Regular",
     marginLeft: 4,
     fontWeight: "500",
   },
@@ -980,6 +983,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "600",
     color: "#111827",
+    fontFamily: "SofiaSans-Bold",
     marginBottom: 16,
   },
   inputGroup: {
@@ -994,6 +998,7 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 15,
     fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
     color: "#374151",
   },
   requiredStar: {
@@ -1008,6 +1013,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 15,
+    fontFamily: "SofiaSans-Regular",
     color: "#111827",
   },
   disabledInput: {
@@ -1017,6 +1023,7 @@ const styles = StyleSheet.create({
   inputHint: {
     fontSize: 12,
     color: "#6b7280",
+    fontFamily: "SofiaSans-Regular",
     marginTop: 4,
   },
   smallSpacer: {
