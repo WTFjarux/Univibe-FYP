@@ -34,6 +34,24 @@ const createNotification = async (
 };
 
 /**
+ * Delete pending connection request notifications from a specific sender
+ */
+const deletePendingConnectionNotifications = async (recipientId, senderId) => {
+  try {
+    const result = await Notification.deleteMany({
+      recipient: recipientId,
+      sender: senderId,
+      type: "connection_request",
+      read: false,
+    });
+    return result.deletedCount;
+  } catch (error) {
+    console.error("Delete pending connection notifications error:", error);
+    return 0;
+  }
+};
+
+/**
  * Get all notifications for current user
  */
 exports.getNotifications = async (req, res) => {
@@ -139,6 +157,40 @@ exports.markAsRead = async (req, res) => {
 };
 
 /**
+ * Mark a notification as unread
+ */
+exports.markAsUnread = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { notificationId } = req.params;
+
+    const notification = await Notification.findOneAndUpdate(
+      { _id: notificationId, recipient: userId },
+      { read: false },
+      { new: true },
+    );
+
+    if (!notification) {
+      return res.status(404).json({
+        success: false,
+        message: "Notification not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Notification marked as unread",
+    });
+  } catch (error) {
+    console.error("Mark as unread error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to mark as unread",
+    });
+  }
+};
+
+/**
  * Mark all notifications as read
  */
 exports.markAllAsRead = async (req, res) => {
@@ -197,6 +249,34 @@ exports.deleteNotification = async (req, res) => {
 };
 
 /**
+ * Delete all pending connection request notifications from a specific sender
+ * This is useful when a user cancels and resends a connection request
+ */
+exports.deletePendingConnectionNotifications = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { senderId } = req.params;
+
+    const deletedCount = await deletePendingConnectionNotifications(
+      userId,
+      senderId,
+    );
+
+    res.status(200).json({
+      success: true,
+      message: `${deletedCount} pending connection request notification(s) deleted`,
+      deletedCount,
+    });
+  } catch (error) {
+    console.error("Delete pending connection notifications error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to delete notifications",
+    });
+  }
+};
+
+/**
  * Get unread notification count
  */
 exports.getUnreadCount = async (req, res) => {
@@ -221,35 +301,5 @@ exports.getUnreadCount = async (req, res) => {
   }
 };
 
-exports.markAsUnread = async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const { notificationId } = req.params;
-
-    const notification = await Notification.findOneAndUpdate(
-      { _id: notificationId, recipient: userId },
-      { read: false },
-      { new: true },
-    );
-
-    if (!notification) {
-      return res.status(404).json({
-        success: false,
-        message: "Notification not found",
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "Notification marked as unread",
-    });
-  } catch (error) {
-    console.error("Mark as unread error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to mark as unread",
-    });
-  }
-};
 // Export helper for use in other controllers
 exports.createNotification = createNotification;

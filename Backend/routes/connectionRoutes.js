@@ -11,6 +11,10 @@ router.use(protect);
 router.post("/request/:userId", connectionController.sendConnectionRequest);
 router.post("/accept/:requestId", connectionController.acceptConnectionRequest);
 router.post("/reject/:requestId", connectionController.rejectConnectionRequest);
+router.delete(
+  "/cancel/:requestId",
+  connectionController.cancelConnectionRequest,
+);
 router.delete("/remove/:connectionId", connectionController.removeConnection);
 
 // Get connections and requests
@@ -19,8 +23,6 @@ router.get("/requests/pending", connectionController.getPendingRequests);
 router.get("/status/:userId", connectionController.getConnectionStatus);
 router.get("/mutual/:userId", connectionController.getMutualConnections);
 router.get("/suggestions", connectionController.getConnectionSuggestions);
-
-// ADD THIS ROUTE - Get connection count for a user
 router.get("/count/:userId", connectionController.getConnectionCount);
 
 module.exports = router;

@@ -138,11 +138,17 @@ exports.createPost = async (req, res) => {
 };
 
 /**
- * Delete a post
+ * Soft delete a post (mark as deleted instead of removing from DB)
  */
 exports.deletePost = async (req, res) => {
   try {
-    const post = await Post.findById(req.params.id);
+    // Use includeDeleted to find the post even if it's already deleted
+    const post = await Post.findOne({
+      _id: req.params.id,
+    }).includeDeleted();
+
+    console.log("Delete post - Found post:", post?._id);
+    console.log("Delete post - Current isDeleted:", post?.isDeleted);
 
     if (!post) {
       return res.status(404).json({
@@ -158,24 +164,139 @@ exports.deletePost = async (req, res) => {
       });
     }
 
-    await Comment.deleteMany({ post: post._id });
-
-    if (post.images && post.images.length > 0) {
-      const filenames = post.images.map((img) => img.filename);
-      deletePostImages(req.user._id.toString(), filenames);
+    // Check if already soft deleted
+    if (post.isDeleted) {
+      return res.status(400).json({
+        success: false,
+        error: "Post already deleted",
+      });
     }
 
-    await post.deleteOne();
+    // Use the softDelete method from schema
+    await post.softDelete();
+
+    console.log("Post soft deleted successfully:", post._id);
 
     res.json({
       success: true,
       message: "Post deleted successfully",
+      post: {
+        _id: post._id,
+        isDeleted: true,
+        deletedAt: post.deletedAt,
+      },
     });
   } catch (error) {
     console.error("Delete post error:", error);
     res.status(500).json({
       success: false,
       error: "Failed to delete post",
+    });
+  }
+};
+
+/**
+ * Restore a soft-deleted post
+ */
+exports.restorePost = async (req, res) => {
+  try {
+    // Use findOne with $or to bypass the pre-find middleware
+    // Or use the includeDeleted query helper
+    const post = await Post.findOne({
+      _id: req.params.id,
+    }).includeDeleted(); // This bypasses the isDeleted filter
+
+    console.log("Restore attempt - Post found:", post);
+    console.log("Restore attempt - isDeleted:", post?.isDeleted);
+
+    if (!post) {
+      return res.status(404).json({
+        success: false,
+        error: "Post not found",
+      });
+    }
+
+    if (post.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        error: "Not authorized to restore this post",
+      });
+    }
+
+    if (!post.isDeleted) {
+      return res.status(400).json({
+        success: false,
+        error: "Post is not deleted",
+      });
+    }
+
+    // Use the restore method from the schema
+    await post.restore();
+
+    // Get the restored post with populated fields
+    const restoredPost = await Post.findById(post._id)
+      .populate("user", "name username email verified")
+      .lean();
+
+    res.json({
+      success: true,
+      message: "Post restored successfully",
+      post: restoredPost,
+    });
+  } catch (error) {
+    console.error("Restore post error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to restore post",
+    });
+  }
+};
+
+/**
+ * Permanently delete a post (hard delete) - for cleanup
+ */
+exports.permanentlyDeletePost = async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+
+    if (!post) {
+      return res.status(404).json({
+        success: false,
+        error: "Post not found",
+      });
+    }
+
+    if (post.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        error: "Not authorized to permanently delete this post",
+      });
+    }
+
+    // Delete associated comments
+    await Comment.deleteMany({ post: post._id });
+
+    // Delete associated notifications
+    await Notification.deleteMany({ targetId: post._id, targetModel: "Post" });
+
+    // Delete images if they exist
+    if (post.images && post.images.length > 0) {
+      const filenames = post.images.map((img) => img.filename);
+      deletePostImages(req.user._id.toString(), filenames);
+    }
+
+    // Hard delete the post
+    await post.deleteOne();
+
+    res.json({
+      success: true,
+      message: "Post permanently deleted",
+    });
+  } catch (error) {
+    console.error("Permanent delete error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to permanently delete post",
     });
   }
 };
@@ -195,6 +316,14 @@ exports.updatePost = async (req, res) => {
       return res.status(404).json({
         success: false,
         error: "Post not found",
+      });
+    }
+
+    // Don't allow updating deleted posts
+    if (post.isDeleted) {
+      return res.status(400).json({
+        success: false,
+        error: "Cannot update a deleted post",
       });
     }
 
@@ -313,11 +442,16 @@ exports.getPosts = async (req, res) => {
     const connectionIds = currentUser?.connections || [];
 
     // Visibility rules: user can see own posts, campus posts, connection posts, and anonymous posts
+    // Exclude soft-deleted posts
     const visibilityConditions = [
-      { user: currentUserId },
-      { visibility: "campus", campus: currentUserCampus },
-      { visibility: "connections", user: { $in: connectionIds } },
-      { isAnonymous: true },
+      { user: currentUserId, isDeleted: false },
+      { visibility: "campus", campus: currentUserCampus, isDeleted: false },
+      {
+        visibility: "connections",
+        user: { $in: connectionIds },
+        isDeleted: false,
+      },
+      { isAnonymous: true, isDeleted: false },
     ];
 
     // Filter-specific conditions
@@ -325,19 +459,19 @@ exports.getPosts = async (req, res) => {
 
     switch (filter) {
       case "connections":
-        filterConditions = [{ user: { $in: connectionIds } }];
+        filterConditions = [{ user: { $in: connectionIds }, isDeleted: false }];
         break;
       case "campus":
         filterConditions = [
-          { campus: currentUserCampus },
-          { isAnonymous: true },
+          { campus: currentUserCampus, isDeleted: false },
+          { isAnonymous: true, isDeleted: false },
         ];
         break;
       case "anonymous":
-        filterConditions = [{ isAnonymous: true }];
+        filterConditions = [{ isAnonymous: true, isDeleted: false }];
         break;
       case "user":
-        if (userId) filterConditions = [{ user: userId }];
+        if (userId) filterConditions = [{ user: userId, isDeleted: false }];
         break;
       default:
         break;
@@ -462,10 +596,11 @@ exports.getProfilePosts = async (req, res) => {
     }
 
     // Build query based on connection status
+    // Exclude soft-deleted posts
     let query = {
       user: userId,
       isAnonymous: false,
-      isDeleted: { $ne: true },
+      isDeleted: false,
     };
 
     if (!isOwnProfile && !isConnected) {
@@ -560,6 +695,14 @@ exports.getPostById = async (req, res) => {
       .lean();
 
     if (!post) {
+      return res.status(404).json({
+        success: false,
+        error: "Post not found",
+      });
+    }
+
+    // Don't show soft-deleted posts
+    if (post.isDeleted) {
       return res.status(404).json({
         success: false,
         error: "Post not found",
@@ -669,11 +812,16 @@ exports.searchPosts = async (req, res) => {
     const currentUser = await User.findById(currentUserId);
     const connectionIds = currentUser?.connections || [];
 
+    // Exclude soft-deleted posts
     const visibilityConditions = [
-      { user: currentUserId },
-      { visibility: "campus", campus: currentUserCampus },
-      { visibility: "connections", user: { $in: connectionIds } },
-      { isAnonymous: true },
+      { user: currentUserId, isDeleted: false },
+      { visibility: "campus", campus: currentUserCampus, isDeleted: false },
+      {
+        visibility: "connections",
+        user: { $in: connectionIds },
+        isDeleted: false,
+      },
+      { isAnonymous: true, isDeleted: false },
     ];
 
     let searchQuery = {};
@@ -766,6 +914,14 @@ exports.toggleLike = async (req, res) => {
       });
     }
 
+    // Don't allow liking deleted posts
+    if (post.isDeleted) {
+      return res.status(404).json({
+        success: false,
+        error: "Post not found",
+      });
+    }
+
     const currentUserId = req.user._id;
     const currentUserProfile = await Profile.findOne({ user: currentUserId });
     const currentUserCampus = currentUserProfile?.campus || "Unknown Campus";
@@ -802,15 +958,17 @@ exports.toggleLike = async (req, res) => {
         !post.isAnonymous
       ) {
         const sender = await User.findById(currentUserId);
-        await createPostNotification(
-          post.user,
-          currentUserId,
-          "like",
-          "New Like",
-          content,
-          post._id,
-          "Post",
-        );
+        if (sender) {
+          await createPostNotification(
+            post.user,
+            currentUserId,
+            "like",
+            "New Like",
+            `${sender.name} liked your post`,
+            post._id,
+            "Post",
+          );
+        }
       }
     } else {
       post.likes.splice(likeIndex, 1);
@@ -827,7 +985,7 @@ exports.toggleLike = async (req, res) => {
     console.error("Toggle like error:", error);
     res.status(500).json({
       success: false,
-      error: "Failed to toggle like",
+      error: error.message || "Failed to toggle like",
     });
   }
 };
@@ -839,7 +997,8 @@ exports.toggleLike = async (req, res) => {
  */
 exports.getAnonymousPostsForModeration = async (req, res) => {
   try {
-    const posts = await Post.find({ isAnonymous: true })
+    // Exclude soft-deleted posts from admin view too
+    const posts = await Post.find({ isAnonymous: true, isDeleted: false })
       .sort({ createdAt: -1 })
       .populate("user", "name username email")
       .lean();
@@ -894,6 +1053,7 @@ exports.getUserPostCount = async (req, res) => {
     const postCount = await Post.countDocuments({
       user: userId,
       isAnonymous: false,
+      isDeleted: false, // Exclude soft-deleted posts
     });
 
     res.json({ success: true, count: postCount });

@@ -96,6 +96,21 @@ const postSchema = new mongoose.Schema(
     },
 
     editedAt: Date,
+
+    // === SOFT DELETE FIELDS ===
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true, // Add index for faster queries
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+    permanentlyDeleted: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,
@@ -106,6 +121,11 @@ const postSchema = new mongoose.Schema(
 
 // === CUSTOM VALIDATION: Ensure either content or images exist ===
 postSchema.pre("validate", function (next) {
+  // Skip validation if post is being soft deleted
+  if (this.isDeleted) {
+    return next();
+  }
+
   // Check if there's content (not empty string) OR images
   const hasContent = this.content && this.content.trim().length > 0;
   const hasImages = this.images && this.images.length > 0;
@@ -117,6 +137,16 @@ postSchema.pre("validate", function (next) {
   }
 });
 
+// === MIDDLEWARE: Automatically exclude soft-deleted posts from queries ===
+postSchema.pre(/^find/, function () {
+  // Only apply to find queries, not to countDocuments or other operations
+  if (this.getQuery().includeDeleted !== true) {
+    this.where({ isDeleted: false });
+  }
+  // Remove the flag so it doesn't affect other queries
+  delete this.getQuery().includeDeleted;
+});
+
 // === DATABASE INDEXES FOR PERFORMANCE ===
 postSchema.index({ user: 1, createdAt: -1 });
 postSchema.index({ campus: 1, createdAt: -1 });
@@ -126,6 +156,8 @@ postSchema.index({ isAnonymous: 1 });
 postSchema.index({ commentCount: -1 });
 postSchema.index({ user: 1, visibility: 1 }); // Added for connection queries
 postSchema.index({ campus: 1, visibility: 1 }); // Added for campus queries
+postSchema.index({ isDeleted: 1, createdAt: -1 }); // Index for soft-deleted posts
+postSchema.index({ isDeleted: 1, deletedAt: 1 }); // Index for cleanup queries
 
 // === VIRTUAL FOR COMMENTS (lazy loading) ===
 postSchema.virtual("comments", {
@@ -143,6 +175,69 @@ postSchema.virtual("topLevelComments", {
   match: { parentComment: null, isDeleted: false },
   options: { sort: { createdAt: -1 } },
 });
+
+// === METHOD TO SOFT DELETE A POST ===
+postSchema.methods.softDelete = async function () {
+  this.isDeleted = true;
+  this.deletedAt = new Date();
+  await this.save();
+  return this;
+};
+
+// === METHOD TO RESTORE A SOFT-DELETED POST ===
+postSchema.methods.restore = async function () {
+  this.isDeleted = false;
+  this.deletedAt = null;
+  await this.save();
+  return this;
+};
+
+// === METHOD TO PERMANENTLY DELETE A POST ===
+postSchema.methods.permanentDelete = async function () {
+  // Remove associated images
+  if (this.images && this.images.length > 0) {
+    // You'll need to import your deletePostImages function or handle here
+    const filenames = this.images.map((img) => img.filename);
+    // Note: This requires access to the deletePostImages function
+    // You might want to handle image deletion in the controller instead
+  }
+
+  await this.deleteOne();
+  return true;
+};
+
+// === STATIC METHOD TO GET SOFT-DELETED POSTS ===
+postSchema.statics.getDeletedPosts = function (options = {}) {
+  return this.find({ isDeleted: true, ...options }).sort({ deletedAt: -1 });
+};
+
+// === STATIC METHOD TO PERMANENTLY DELETE OLD SOFT-DELETED POSTS ===
+postSchema.statics.cleanupOldDeletedPosts = async function (daysToKeep = 30) {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+
+  const oldDeletedPosts = await this.find({
+    isDeleted: true,
+    deletedAt: { $lt: cutoffDate },
+  });
+
+  let deletedCount = 0;
+  for (const post of oldDeletedPosts) {
+    // Delete associated comments
+    const Comment = mongoose.model("Comment");
+    await Comment.deleteMany({ post: post._id });
+
+    // Delete associated notifications
+    const Notification = mongoose.model("Notification");
+    await Notification.deleteMany({ targetId: post._id, targetModel: "Post" });
+
+    // Delete the post
+    await post.deleteOne();
+    deletedCount++;
+  }
+
+  return deletedCount;
+};
 
 // === METHOD TO UPDATE COMMENT COUNT ===
 postSchema.methods.updateCommentCount = async function () {
@@ -179,6 +274,11 @@ postSchema.methods.canUserView = async function (
   userConnections,
   userCampus,
 ) {
+  // Don't show soft-deleted posts
+  if (this.isDeleted) {
+    return false;
+  }
+
   // Always visible to post owner
   if (this.user.toString() === userId.toString()) {
     return true;
@@ -199,6 +299,16 @@ postSchema.methods.canUserView = async function (
   }
 
   return false;
+};
+
+// === METHOD TO CHECK IF USER CAN DELETE/RESTORE POST ===
+postSchema.methods.canUserModify = function (userId) {
+  return this.user.toString() === userId.toString();
+};
+
+// === QUERY HELPER TO INCLUDE SOFT-DELETED POSTS ===
+postSchema.query.includeDeleted = function () {
+  return this.where({ includeDeleted: true });
 };
 
 const Post = mongoose.model("Post", postSchema);

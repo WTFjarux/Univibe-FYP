@@ -35,6 +35,24 @@ const createConnectionNotification = async (
   }
 };
 
+/**
+ * Delete pending connection request notifications
+ */
+const deletePendingConnectionNotifications = async (recipientId, senderId) => {
+  try {
+    const result = await Notification.deleteMany({
+      recipient: recipientId,
+      sender: senderId,
+      type: "connection_request",
+      read: false,
+    });
+    return result.deletedCount;
+  } catch (error) {
+    console.error("Delete pending notifications error:", error);
+    return 0;
+  }
+};
+
 // ============================================
 // CONNECTION REQUEST MANAGEMENT
 // ============================================
@@ -64,6 +82,7 @@ exports.sendConnectionRequest = async (req, res) => {
       });
     }
 
+    // Check if already connected
     if (sender.connections.includes(receiverId)) {
       return res.status(400).json({
         success: false,
@@ -71,6 +90,7 @@ exports.sendConnectionRequest = async (req, res) => {
       });
     }
 
+    // Check if request already sent
     if (sender.connectionRequestsSent.includes(receiverId)) {
       return res.status(400).json({
         success: false,
@@ -80,21 +100,10 @@ exports.sendConnectionRequest = async (req, res) => {
 
     // Auto-accept if they already sent a request to us
     if (sender.connectionRequestsReceived.includes(receiverId)) {
-      // Add to connections for both users
-      sender.connections.push(receiverId);
-      sender.connectionRequestsReceived =
-        sender.connectionRequestsReceived.filter(
-          (id) => id.toString() !== receiverId.toString(),
-        );
-      sender.connectionCount = sender.connections.length;
-      await sender.save();
+      await sender.acceptConnectionRequest(receiverId);
 
-      receiver.connections.push(senderId);
-      receiver.connectionRequestsSent = receiver.connectionRequestsSent.filter(
-        (id) => id.toString() !== senderId.toString(),
-      );
-      receiver.connectionCount = receiver.connections.length;
-      await receiver.save();
+      // Delete any pending notifications first
+      await deletePendingConnectionNotifications(receiverId, senderId);
 
       // Create notification for auto-accept
       await createConnectionNotification(
@@ -116,6 +125,9 @@ exports.sendConnectionRequest = async (req, res) => {
         },
       });
     }
+
+    // Delete any existing pending notification before creating new one
+    await deletePendingConnectionNotifications(receiverId, senderId);
 
     // Send new request
     sender.connectionRequestsSent.push(receiverId);
@@ -145,7 +157,7 @@ exports.sendConnectionRequest = async (req, res) => {
     console.error("Send request error:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to send request",
+      message: error.message || "Failed to send request",
     });
   }
 };
@@ -182,6 +194,9 @@ exports.acceptConnectionRequest = async (req, res) => {
       });
     }
 
+    // Delete pending notification before accepting
+    await deletePendingConnectionNotifications(userId, requestId);
+
     // Accept the connection
     await user.acceptConnectionRequest(requestId);
 
@@ -211,7 +226,7 @@ exports.acceptConnectionRequest = async (req, res) => {
     console.error("Accept request error:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to accept request",
+      message: error.message || "Failed to accept request",
     });
   }
 };
@@ -232,17 +247,95 @@ exports.rejectConnectionRequest = async (req, res) => {
       });
     }
 
+    // Check if request exists
+    if (!user.connectionRequestsReceived.includes(requestId)) {
+      return res.status(400).json({
+        success: false,
+        message: "No connection request from this user",
+      });
+    }
+
+    // Delete pending notification before rejecting
+    await deletePendingConnectionNotifications(userId, requestId);
+
     await user.rejectConnectionRequest(requestId);
 
     res.status(200).json({
       success: true,
       message: "Request rejected",
+      data: {
+        userConnectionCount: user.connectionCount,
+      },
     });
   } catch (error) {
     console.error("Reject request error:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to reject request",
+      message: error.message || "Failed to reject request",
+    });
+  }
+};
+
+/**
+ * CANCEL a connection request (sent by current user)
+ */
+exports.cancelConnectionRequest = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { requestId } = req.params;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const targetUser = await User.findById(requestId);
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Check if request exists in sent list
+    if (!user.connectionRequestsSent.includes(requestId)) {
+      return res.status(400).json({
+        success: false,
+        message: "No pending request to this user",
+      });
+    }
+
+    // Delete pending notification before cancelling
+    await deletePendingConnectionNotifications(requestId, userId);
+
+    // Remove from sender's sent list
+    user.connectionRequestsSent = user.connectionRequestsSent.filter(
+      (id) => id.toString() !== requestId.toString(),
+    );
+    await user.save();
+
+    // Remove from receiver's received list
+    targetUser.connectionRequestsReceived =
+      targetUser.connectionRequestsReceived.filter(
+        (id) => id.toString() !== userId.toString(),
+      );
+    await targetUser.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Connection request cancelled",
+      data: {
+        userConnectionCount: user.connectionCount,
+      },
+    });
+  } catch (error) {
+    console.error("Cancel request error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to cancel request",
     });
   }
 };
@@ -290,7 +383,38 @@ exports.removeConnection = async (req, res) => {
     console.error("Remove connection error:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to remove connection",
+      message: error.message || "Failed to remove connection",
+    });
+  }
+};
+
+// ============================================
+// NOTIFICATION MANAGEMENT ENDPOINTS
+// ============================================
+
+/**
+ * Delete all pending connection request notifications from a specific sender
+ */
+exports.deletePendingConnectionNotifications = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { senderId } = req.params;
+
+    const deletedCount = await deletePendingConnectionNotifications(
+      userId,
+      senderId,
+    );
+
+    res.status(200).json({
+      success: true,
+      message: `${deletedCount} notification(s) deleted`,
+      deletedCount,
+    });
+  } catch (error) {
+    console.error("Delete connection notifications error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to delete notifications",
     });
   }
 };
@@ -325,7 +449,7 @@ exports.getConnectionStatus = async (req, res) => {
     console.error("Connection status error:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to check status",
+      message: error.message || "Failed to check status",
     });
   }
 };
@@ -395,7 +519,7 @@ exports.getConnections = async (req, res) => {
     console.error("Get connections error:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to get connections",
+      message: error.message || "Failed to get connections",
     });
   }
 };
@@ -471,7 +595,7 @@ exports.getPendingRequests = async (req, res) => {
     console.error("Get pending requests error:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to get pending requests",
+      message: error.message || "Failed to get pending requests",
     });
   }
 };
@@ -501,7 +625,7 @@ exports.getConnectionCount = async (req, res) => {
     console.error("Get connection count error:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to get connection count",
+      message: error.message || "Failed to get connection count",
     });
   }
 };
@@ -573,7 +697,7 @@ exports.getMutualConnections = async (req, res) => {
     console.error("Get mutual connections error:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to get mutual connections",
+      message: error.message || "Failed to get mutual connections",
     });
   }
 };
@@ -629,7 +753,7 @@ exports.getConnectionSuggestions = async (req, res) => {
     console.error("Get suggestions error:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to get suggestions",
+      message: error.message || "Failed to get suggestions",
     });
   }
 };

@@ -18,6 +18,8 @@ router.get("/profile/:userId", postController.getProfilePosts);
 router.get("/:id", postController.getPostById);
 router.put("/:id", uploadPostImages, postController.updatePost);
 router.delete("/:id", postController.deletePost);
+router.post("/:id/restore", postController.restorePost); // NEW: Restore endpoint
+router.delete("/:id/permanent", postController.permanentlyDeletePost); // NEW: Permanent delete
 router.post("/:id/like", postController.toggleLike);
 
 // Admin routes
