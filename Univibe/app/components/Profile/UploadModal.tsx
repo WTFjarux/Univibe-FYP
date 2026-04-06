@@ -21,8 +21,8 @@ interface UploadModalProps {
   onDeletePhoto: () => void;
   hasExistingImage: boolean;
   title?: string;
-  viewLabel?: string; 
-  deleteLabel?: string; 
+  viewLabel?: string;
+  deleteLabel?: string;
 }
 
 export default function UploadModal({
@@ -33,9 +33,9 @@ export default function UploadModal({
   onTakePhoto,
   onDeletePhoto,
   hasExistingImage = true,
-  title = "Photo Options", 
-  viewLabel = "View Photo", 
-  deleteLabel = "Remove Photo", 
+  title = "Photo Options",
+  viewLabel = "View Photo",
+  deleteLabel = "Remove Photo",
 }: UploadModalProps) {
   const handleDeletePhoto = () => {
     const modalTitle =
@@ -150,6 +150,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 17,
     fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
     color: "#111827",
   },
 
@@ -172,6 +173,7 @@ const styles = StyleSheet.create({
   optionText: {
     fontSize: 16,
     color: "#374151",
+    fontFamily: "SofiaSans-Regular",
     marginLeft: 14,
   },
 
@@ -181,6 +183,5 @@ const styles = StyleSheet.create({
 
   deleteText: {
     color: "#ef4444",
-    fontWeight: "500",
   },
 });

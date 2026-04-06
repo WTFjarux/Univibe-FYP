@@ -24,12 +24,14 @@ const styles = StyleSheet.create({
   },
   endMessageText: {
     color: "#9ca3af",
+    fontFamily: "SofiaSans-Regular",
     fontSize: 14,
   },
   // New styles added below
   errorText: {
     fontSize: 16,
     color: "#ef4444",
+    fontFamily: "SofiaSans-Regular",
     marginBottom: 16,
     textAlign: "center",
   },
@@ -41,6 +43,7 @@ const styles = StyleSheet.create({
   },
   loginButtonText: {
     color: "#ffffff",
+    fontFamily: "SofiaSans-Regular",
     fontSize: 16,
     fontWeight: "600",
   },
@@ -60,7 +63,9 @@ const styles = StyleSheet.create({
   },
   retryButtonText: {
     color: "#ffffff",
+    fontFamily: "SofiaSans-Regular",
     fontSize: 14,
+
     fontWeight: "600",
   },
   emptyState: {
@@ -69,13 +74,14 @@ const styles = StyleSheet.create({
   },
   emptyStateText: {
     fontSize: 18,
-    fontWeight: "600",
+    fontFamily: "SofiaSans-Regular",
     color: "#374151",
     marginTop: 16,
   },
   emptyStateSubtext: {
     fontSize: 14,
     color: "#6b7280",
+    fontFamily: "SofiaSans-Regular",
     marginTop: 8,
     textAlign: "center",
     marginHorizontal: 32,
@@ -90,7 +96,49 @@ const styles = StyleSheet.create({
   createFirstPostText: {
     color: "#ffffff",
     fontSize: 16,
+    fontFamily: "SofiaSans-Regular",
     fontWeight: "600",
+  },
+  infoBar: {
+    position: "absolute" as "absolute",
+    bottom: 30,
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    gap: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+    zIndex: 1000,
+    minHeight: 56,
+  },
+  infoBarText: {
+    color: "#fff",
+    fontSize: 14,
+    fontFamily: "SofiaSans-Regular",
+    fontWeight: "500" as "500",
+    flex: 1,
+    textAlign: "left" as "left",
+    lineHeight: 20,
+  },
+  undoButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    borderRadius: 6,
+  },
+  undoButtonText: {
+    color: "#fff",
+    fontSize: 12,
+    fontFamily: "SofiaSans-Bold",
+    fontWeight: "600" as "600",
+    letterSpacing: 0.5,
   },
 });
 

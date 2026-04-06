@@ -626,7 +626,7 @@ export default function FeedScreen() {
     return (
       <Animated.View
         style={[
-          localStyles.infoBar,
+          styles.infoBar,
           {
             backgroundColor,
             transform: [{ translateY: slideAnim }],
@@ -634,10 +634,10 @@ export default function FeedScreen() {
         ]}
       >
         <Ionicons name={iconName} size={20} color="#fff" />
-        <Text style={localStyles.infoBarText}>{infoMessage}</Text>
+        <Text style={styles.infoBarText}>{infoMessage}</Text>
         {undoAction && (
-          <TouchableOpacity onPress={handleUndo} style={localStyles.undoButton}>
-            <Text style={localStyles.undoButtonText}>UNDO</Text>
+          <TouchableOpacity onPress={handleUndo} style={styles.undoButton}>
+            <Text style={styles.undoButtonText}>UNDO</Text>
           </TouchableOpacity>
         )}
       </Animated.View>
@@ -790,47 +790,3 @@ export default function FeedScreen() {
     </SafeAreaView>
   );
 }
-
-const localStyles = StyleSheet.create({
-  infoBar: {
-    position: "absolute" as "absolute",
-    bottom: 30,
-    left: 16,
-    right: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    gap: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 5,
-    zIndex: 1000,
-    minHeight: 56,
-  },
-  infoBarText: {
-    color: "#fff",
-    fontSize: 14,
-    fontFamily: "SofiaSans-Regular",
-    fontWeight: "500" as "500",
-    flex: 1,
-    textAlign: "left" as "left",
-    lineHeight: 20,
-  },
-  undoButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    borderRadius: 6,
-  },
-  undoButtonText: {
-    color: "#fff",
-    fontSize: 12,
-    fontFamily: "SofiaSans-Bold",
-    fontWeight: "600" as "600",
-    letterSpacing: 0.5,
-  },
-});
