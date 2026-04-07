@@ -1,4 +1,3 @@
-// Backend/models/Event.js
 const mongoose = require("mongoose");
 
 const eventSchema = new mongoose.Schema(
@@ -52,20 +51,50 @@ const eventSchema = new mongoose.Schema(
       required: [true, "End date is required"],
     },
 
-    // Event images
+    // ============================================
+    // UPDATED: Event images section
+    // Now supporting multiple images (up to 5)
+    // ============================================
+
+    // DEPRECATED: Kept for backward compatibility, but will be removed in future
+    // New events should use the 'images' array instead
     coverImage: {
       type: String,
       default: "",
+      description: "DEPRECATED: Use images array instead",
     },
-    images: [
-      {
-        filename: String,
-        url: String,
-        path: String,
-        mimetype: String,
-        size: Number,
+
+    // NEW: Array to store multiple event images
+    // Each image object contains metadata for better management
+    images: {
+      type: [
+        {
+          filename: String, // Original filename
+          url: String, // Accessible URL path
+          path: String, // Server file path
+          mimetype: String, // File type (e.g., image/jpeg)
+          size: Number, // File size in bytes
+          isCover: {
+            // NEW: Flag to indicate which image is the cover
+            type: Boolean,
+            default: false,
+          },
+          uploadedAt: {
+            // When the image was uploaded
+            type: Date,
+            default: Date.now,
+          },
+        },
+      ],
+      validate: {
+        // Ensure maximum 5 images per event
+        validator: function (images) {
+          return images.length <= 5;
+        },
+        message: "An event can have maximum 5 images",
       },
-    ],
+      default: [],
+    },
 
     // Organizer information
     organizer: {
@@ -146,6 +175,33 @@ eventSchema.index({ category: 1 });
 eventSchema.index({ status: 1 });
 eventSchema.index({ visibility: 1 });
 
+// ============================================
+// NEW: Helper virtuals for images
+// ============================================
+
+// Virtual to get only cover image (first image marked as cover, or first image overall)
+eventSchema.virtual("coverImageUrl").get(function () {
+  if (!this.images || this.images.length === 0) return "";
+
+  // Find image marked as cover
+  const coverImg = this.images.find((img) => img.isCover === true);
+  if (coverImg) return coverImg.url;
+
+  // If no cover marked, return first image URL
+  return this.images[0].url;
+});
+
+// Virtual to get all image URLs (simplified array for frontend)
+eventSchema.virtual("imageUrls").get(function () {
+  if (!this.images || this.images.length === 0) return [];
+  return this.images.map((img) => img.url);
+});
+
+// Virtual to get count of images
+eventSchema.virtual("imageCount").get(function () {
+  return this.images ? this.images.length : 0;
+});
+
 // Virtual for checking if event is full
 eventSchema.virtual("isFull").get(function () {
   if (!this.maxAttendees) return false;
@@ -160,6 +216,29 @@ eventSchema.methods.isUserInterested = function (userId) {
 // Virtual for checking if user has RSVP'd
 eventSchema.methods.isUserRsvpd = function (userId) {
   return this.rsvp.some((id) => id.toString() === userId.toString());
+};
+
+// ============================================
+// NEW: Method to set a specific image as cover
+// ============================================
+eventSchema.methods.setCoverImage = async function (imageIndexOrId) {
+  // Reset all images' isCover flag to false
+  this.images.forEach((img) => {
+    img.isCover = false;
+  });
+
+  // Set the specified image as cover
+  if (typeof imageIndexOrId === "number" && this.images[imageIndexOrId]) {
+    this.images[imageIndexOrId].isCover = true;
+  } else if (typeof imageIndexOrId === "string") {
+    const img = this.images.find(
+      (img) => img._id.toString() === imageIndexOrId,
+    );
+    if (img) img.isCover = true;
+  }
+
+  await this.save();
+  return this;
 };
 
 // Method to add interested user

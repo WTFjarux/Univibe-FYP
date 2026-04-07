@@ -6,6 +6,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#f8fafc",
   },
+   scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 60, 
+  },
+  bottomPadding: {
+    height: 0, 
+  },
   centered: {
     flex: 1,
     justifyContent: "center",

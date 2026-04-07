@@ -25,6 +25,7 @@ import { useAuth } from "../../lib/AuthContext";
 import UploadModal from "../components/Profile/UploadModal";
 import ImageViewModal from "../components/Profile/ImageViewModal";
 import { API_BASE_URL } from "../../constants/ipConstants";
+import DiscardChangesModal from "../components/DiscardChangesModal";
 
 // Import shared components and constants
 import {
@@ -63,6 +64,7 @@ export default function EditProfileScreen() {
   const { loadProfile: refreshGlobalProfile } = useAuth();
   const pickerActiveRef = useRef(false);
   const [avatarError, setAvatarError] = useState(false);
+  const [showDiscardModal, setShowDiscardModal] = useState(false);
 
   // State management
   const [loading, setLoading] = useState(false);
@@ -241,45 +243,43 @@ export default function EditProfileScreen() {
   }, [pendingChanges, selectedImageUri]);
 
   /**
-   * Handle discard/back button press - FIXED: Navigate to tabs profile
+   * Handle back button press - shows discard modal if changes exist
+   */
+  const handleBackPress = useCallback(() => {
+    if (hasUnsavedChanges()) {
+      setShowDiscardModal(true);
+    } else {
+      navigateToProfile();
+    }
+  }, [hasUnsavedChanges]);
+
+  /**
+   * Navigate to profile screen
+   */
+  const navigateToProfile = useCallback(() => {
+    const parent = navigation.getParent();
+    if (parent) {
+      parent.setOptions({
+        tabBarStyle: { display: "flex" },
+      });
+    }
+    router.replace("/(tabs)/profile");
+  }, [navigation]);
+
+  /**
+   * Handle discard changes confirmation
+   */
+  const handleDiscardChanges = useCallback(() => {
+    setShowDiscardModal(false);
+    navigateToProfile();
+  }, [navigateToProfile]);
+
+  /**
+   * Handle discard/back button press - OLD function kept for compatibility
    */
   const handleDiscard = useCallback(() => {
-    if (hasUnsavedChanges()) {
-      Alert.alert(
-        "Discard Changes?",
-        "You have unsaved changes. Are you sure you want to discard them?",
-        [
-          {
-            text: "Keep Editing",
-            style: "cancel",
-          },
-          {
-            text: "Discard",
-            style: "destructive",
-            onPress: () => {
-              const parent = navigation.getParent();
-              if (parent) {
-                parent.setOptions({
-                  tabBarStyle: { display: "flex" },
-                });
-              }
-              // ✅ FIX: Navigate to tabs profile
-              router.replace("/(tabs)/profile");
-            },
-          },
-        ],
-      );
-    } else {
-      const parent = navigation.getParent();
-      if (parent) {
-        parent.setOptions({
-          tabBarStyle: { display: "flex" },
-        });
-      }
-      // ✅ FIX: Navigate to tabs profile
-      router.replace("/(tabs)/profile");
-    }
-  }, [hasUnsavedChanges, navigation]);
+    handleBackPress();
+  }, [handleBackPress]);
 
   /**
    * Handle profile picture upload
@@ -424,7 +424,7 @@ export default function EditProfileScreen() {
   );
 
   /**
-   * Handle save button press - validate and save profile data - FIXED navigation
+   * Handle save button press - validate and save profile data
    */
   const handleSave = useCallback(async () => {
     // Validation
@@ -483,14 +483,7 @@ export default function EditProfileScreen() {
           {
             text: "OK",
             onPress: () => {
-              const parent = navigation.getParent();
-              if (parent) {
-                parent.setOptions({
-                  tabBarStyle: { display: "flex" },
-                });
-              }
-              // ✅ FIX: Navigate to tabs profile instead of using replace with params
-              router.replace("/(tabs)/profile");
+              navigateToProfile();
             },
           },
         ]);
@@ -511,12 +504,12 @@ export default function EditProfileScreen() {
     originalUser,
     pendingChanges,
     selectedImageUri,
-    navigation,
     handleProfilePictureUpload,
     handleProfilePictureDeletion,
     buildUpdatePayload,
     updateLocalStorage,
     refreshGlobalProfile,
+    navigateToProfile,
   ]);
 
   // Image Upload Functions
@@ -685,7 +678,10 @@ export default function EditProfileScreen() {
           bounces={false}
         >
           <View style={styles.header}>
-            <TouchableOpacity onPress={handleDiscard} style={styles.backButton}>
+            <TouchableOpacity
+              onPress={handleBackPress}
+              style={styles.backButton}
+            >
               <Ionicons name="close" size={24} color="#111827" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Edit Profile</Text>
@@ -826,6 +822,17 @@ export default function EditProfileScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Discard Changes Modal - Using Reusable Component */}
+      <DiscardChangesModal
+        visible={showDiscardModal}
+        onClose={() => setShowDiscardModal(false)}
+        onDiscard={handleDiscardChanges}
+        title="Discard Changes?"
+        message="You have unsaved changes. Are you sure you want to leave?"
+        keepEditingText="Keep Editing"
+        discardText="Discard"
+      />
 
       <UploadModal
         visible={uploadModal}

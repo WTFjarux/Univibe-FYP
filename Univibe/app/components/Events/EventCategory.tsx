@@ -8,7 +8,7 @@ interface EventCategoryProps {
   icon: string;
   count: number;
   isSelected: boolean;
-  onPress: (categoryName: string) => void;
+  onPress: (categoryId: string) => void; 
 }
 
 export default function EventCategory({
@@ -22,7 +22,7 @@ export default function EventCategory({
   return (
     <TouchableOpacity
       style={styles.categoryCard}
-      onPress={() => onPress(name)}
+      onPress={() => onPress(id as string)} 
       activeOpacity={0.7}
     >
       <View
@@ -51,6 +51,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginRight: 12,
     width: 120,
+    height: 130,
     alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },

@@ -44,6 +44,7 @@ export default function EventsScreen() {
       setHasMore(true);
     }
 
+    
     try {
       const params: any = { page: refresh ? 1 : page, limit: 10 };
       if (selectedCategory !== "all") params.category = selectedCategory;
@@ -140,7 +141,7 @@ export default function EventsScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -156,6 +157,7 @@ export default function EventsScreen() {
           }
         }}
         scrollEventThrottle={400}
+        contentContainerStyle={styles.scrollContent}
       >
         {/* Header with Search Icon */}
         <View style={styles.header}>
@@ -237,6 +239,16 @@ export default function EventsScreen() {
         {loading && events.length > 0 && (
           <ActivityIndicator style={styles.loader} color="#8b5cf6" />
         )}
+
+        {/* End of Events Message */}
+        {!hasMore && events.length > 0 && (
+          <View style={styles.endMessage}>
+            <Text style={styles.endMessageText}>No more events to load</Text>
+          </View>
+        )}
+
+        {/* Add extra padding at bottom to prevent content from being hidden behind tab bar */}
+        <View style={styles.bottomPadding} />
       </ScrollView>
 
       {/* Floating Action Button for Create */}
@@ -260,6 +272,9 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+  },
+  scrollContent: {
+    flexGrow: 1,
   },
   header: {
     flexDirection: "row",
@@ -307,7 +322,6 @@ const styles = StyleSheet.create({
   },
   eventsContainer: {
     paddingHorizontal: 20,
-    paddingBottom: 80,
   },
   emptyState: {
     alignItems: "center",
@@ -328,6 +342,17 @@ const styles = StyleSheet.create({
   },
   loader: {
     paddingVertical: 20,
+  },
+  endMessage: {
+    alignItems: "center",
+    paddingVertical: 20,
+  },
+  endMessageText: {
+    fontSize: 14,
+    color: "#9ca3af",
+  },
+  bottomPadding: {
+    height: 80, // Adjust based on your tab bar height
   },
   // Floating Action Button
   fab: {

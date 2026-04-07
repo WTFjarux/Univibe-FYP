@@ -1,5 +1,5 @@
 // app/components/Events/EventCard.tsx
-import React from "react";
+import React, { useState, useRef } from "react";
 import {
   View,
   Text,
@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
+  FlatList,
+  ViewToken,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -27,6 +29,9 @@ export default function EventCard({
   onRsvpPress,
   showActions = true,
 }: EventCardProps) {
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const flatListRef = useRef<FlatList>(null);
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString("en-US", {
@@ -93,20 +98,140 @@ export default function EventCard({
     }
   };
 
+  // Get images array from event
+  const getEventImages = () => {
+    // If event has imageUrls array (new format), use it
+    if (event.imageUrls && event.imageUrls.length > 0) {
+      return event.imageUrls;
+    }
+    // Fallback to coverImage for backward compatibility
+    if (event.coverImage) {
+      return [event.coverImage];
+    }
+    return [];
+  };
+
+  const images = getEventImages();
+  const hasMultipleImages = images.length > 1;
+
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      if (viewableItems.length > 0 && viewableItems[0].index !== null) {
+        setCurrentImageIndex(viewableItems[0].index);
+      }
+    },
+  ).current;
+
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 50,
+  }).current;
+
+  const renderImageItem = ({
+    item: imageUrl,
+    index,
+  }: {
+    item: string;
+    index: number;
+  }) => <Image source={{ uri: imageUrl }} style={styles.coverImage} />;
+
+  const renderDot = () => {
+    if (!hasMultipleImages) return null;
+
+    return (
+      <View style={styles.dotsContainer}>
+        {images.map((_, index) => (
+          <View
+            key={index}
+            style={[
+              styles.dot,
+              currentImageIndex === index && styles.dotActive,
+            ]}
+          />
+        ))}
+      </View>
+    );
+  };
+
+  const renderNavigationButtons = () => {
+    if (!hasMultipleImages) return null;
+
+    return (
+      <>
+        {currentImageIndex > 0 && (
+          <TouchableOpacity
+            style={[styles.navButton, styles.navButtonLeft]}
+            onPress={() => {
+              flatListRef.current?.scrollToIndex({
+                index: currentImageIndex - 1,
+                animated: true,
+              });
+            }}
+          >
+            <Ionicons name="chevron-back" size={20} color="#fff" />
+          </TouchableOpacity>
+        )}
+        {currentImageIndex < images.length - 1 && (
+          <TouchableOpacity
+            style={[styles.navButton, styles.navButtonRight]}
+            onPress={() => {
+              flatListRef.current?.scrollToIndex({
+                index: currentImageIndex + 1,
+                animated: true,
+              });
+            }}
+          >
+            <Ionicons name="chevron-forward" size={20} color="#fff" />
+          </TouchableOpacity>
+        )}
+      </>
+    );
+  };
+
+  const renderImageCounter = () => {
+    if (!hasMultipleImages) return null;
+
+    return (
+      <View style={styles.imageCounter}>
+        <Ionicons name="images-outline" size={12} color="#fff" />
+        <Text style={styles.imageCounterText}>
+          {currentImageIndex + 1}/{images.length}
+        </Text>
+      </View>
+    );
+  };
+
   return (
     <TouchableOpacity
       style={styles.card}
       onPress={() => router.push(`/events/${event._id}`)}
       activeOpacity={0.7}
     >
-      {/* Cover Image */}
-      {event.coverImage ? (
-        <Image source={{ uri: event.coverImage }} style={styles.coverImage} />
-      ) : (
-        <View style={[styles.coverImage, styles.coverPlaceholder]}>
-          <Ionicons name="calendar" size={48} color="#cbd5e1" />
-        </View>
-      )}
+      {/* Image Carousel */}
+      <View style={styles.imageContainer}>
+        {images.length > 0 ? (
+          <>
+            <FlatList
+              ref={flatListRef}
+              data={images}
+              renderItem={renderImageItem}
+              keyExtractor={(item, index) => `${event._id}_image_${index}`}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onViewableItemsChanged={onViewableItemsChanged}
+              viewabilityConfig={viewabilityConfig}
+              style={styles.carousel}
+            />
+            {renderImageCounter()}
+            {renderNavigationButtons()}
+            {renderDot()}
+          </>
+        ) : (
+          <View style={[styles.coverImage, styles.coverPlaceholder]}>
+            <Ionicons name="calendar" size={48} color="#cbd5e1" />
+          </View>
+        )}
+      </View>
 
       {/* Status Badge */}
       <View
@@ -158,6 +283,14 @@ export default function EventCard({
             </Text>
           </View>
         </View>
+
+        {/* Image Count Indicator */}
+        {hasMultipleImages && (
+          <View style={styles.imageInfo}>
+            <Ionicons name="images-outline" size={14} color="#9ca3af" />
+            <Text style={styles.imageInfoText}>{images.length} photos</Text>
+          </View>
+        )}
 
         {showActions && (
           <View style={styles.actions}>
@@ -220,9 +353,17 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  imageContainer: {
+    position: "relative",
+    width: width - 40,
+    height: 200,
+  },
+  carousel: {
+    flex: 1,
+  },
   coverImage: {
     width: width - 40,
-    height: 160,
+    height: 200,
     backgroundColor: "#f3f4f6",
   },
   coverPlaceholder: {
@@ -236,11 +377,71 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
+    zIndex: 10,
   },
   statusText: {
     color: "white",
     fontSize: 11,
     fontWeight: "600",
+    fontFamily: "SofiaSans-Regular",
+  },
+  // Navigation Buttons
+  navButton: {
+    position: "absolute",
+    top: "50%",
+    transform: [{ translateY: -20 }],
+    backgroundColor: "rgba(0,0,0,0.5)",
+    borderRadius: 20,
+    padding: 8,
+    zIndex: 10,
+  },
+  navButtonLeft: {
+    left: 12,
+  },
+  navButtonRight: {
+    right: 12,
+  },
+  // Dots Indicator
+  dotsContainer: {
+    position: "absolute",
+    bottom: 12,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 6,
+    zIndex: 10,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "rgba(255,255,255,0.5)",
+  },
+  dotActive: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#fff",
+  },
+  // Image Counter
+  imageCounter: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    zIndex: 10,
+  },
+  imageCounterText: {
+    color: "#fff",
+    fontSize: 11,
     fontFamily: "SofiaSans-Regular",
   },
   content: {
@@ -281,7 +482,7 @@ const styles = StyleSheet.create({
   },
   details: {
     gap: 8,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   detail: {
     flexDirection: "row",
@@ -293,6 +494,18 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
     color: "#6b7280",
     flex: 1,
+  },
+  imageInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 16,
+    paddingVertical: 4,
+  },
+  imageInfoText: {
+    fontSize: 12,
+    color: "#9ca3af",
+    fontFamily: "SofiaSans-Regular",
   },
   actions: {
     flexDirection: "row",

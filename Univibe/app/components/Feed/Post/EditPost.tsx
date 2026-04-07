@@ -1,4 +1,4 @@
-// app/components/Feed/Post/EditPost.tsx - Fixed version
+// app/components/Feed/Post/EditPost.tsx
 
 import React, { useState, useEffect } from "react";
 import {
@@ -22,6 +22,7 @@ import * as ImagePicker from "expo-image-picker";
 import { useAuth } from "../../../../lib/AuthContext";
 import { getPostById, Post } from "../../../../lib/postService";
 import { API_BASE_URL } from "../../../../constants/ipConstants";
+import DiscardChangesModal from "../../DiscardChangesModal";
 
 const { width } = Dimensions.get("window");
 
@@ -39,6 +40,7 @@ export default function EditPostScreen() {
   const [imagesToRemove, setImagesToRemove] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [showDiscardModal, setShowDiscardModal] = useState(false);
 
   // Track original values to detect changes
   const [originalContent, setOriginalContent] = useState("");
@@ -134,6 +136,25 @@ export default function EditPostScreen() {
     if (originalImageKeys !== currentImageKeys) return true;
 
     return false;
+  };
+
+  /**
+   * Handle back button press
+   */
+  const handleBackPress = () => {
+    if (hasChanges()) {
+      setShowDiscardModal(true);
+    } else {
+      router.back();
+    }
+  };
+
+  /**
+   * Handle discard changes confirmation
+   */
+  const handleDiscardChanges = () => {
+    setShowDiscardModal(false);
+    router.back();
   };
 
   /**
@@ -300,7 +321,7 @@ export default function EditPostScreen() {
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={handleBackPress}
             style={styles.backButton}
             disabled={submitting}
           >
@@ -309,8 +330,8 @@ export default function EditPostScreen() {
           <Text style={styles.headerTitle}>Edit Post</Text>
           <TouchableOpacity
             style={[
-              styles.postButton,
-              (!hasChanges() || submitting) && styles.postButtonDisabled,
+              styles.saveButton,
+              (!hasChanges() || submitting) && styles.saveButtonDisabled,
             ]}
             onPress={handleSubmit}
             disabled={!hasChanges() || submitting}
@@ -318,7 +339,7 @@ export default function EditPostScreen() {
             {submitting ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <Text style={styles.postButtonText}>Update</Text>
+              <Text style={styles.saveButtonText}>Save</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -504,6 +525,17 @@ export default function EditPostScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Discard Changes Modal */}
+      <DiscardChangesModal
+        visible={showDiscardModal}
+        onClose={() => setShowDiscardModal(false)}
+        onDiscard={handleDiscardChanges}
+        title="Discard Changes?"
+        message="You have unsaved changes. Are you sure you want to leave?"
+        keepEditingText="Keep Editing"
+        discardText="Discard"
+      />
     </SafeAreaView>
   );
 }
@@ -552,7 +584,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontFamily: "SofiaSans-Bold",
   },
-  postButton: {
+  saveButton: {
     backgroundColor: "#8b5cf6",
     paddingHorizontal: 20,
     paddingVertical: 8,
@@ -560,10 +592,10 @@ const styles = StyleSheet.create({
     minWidth: 50,
     alignItems: "center",
   },
-  postButtonDisabled: {
+  saveButtonDisabled: {
     backgroundColor: "#d1d5db",
   },
-  postButtonText: {
+  saveButtonText: {
     color: "#fff",
     fontWeight: "600",
     fontSize: 14,

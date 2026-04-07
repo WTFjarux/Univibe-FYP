@@ -1,4 +1,4 @@
-// app/events/[id].tsx
+// app/events/[id].tsx - Fixed version without duplicate counts
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -7,8 +7,8 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Image,
   Alert,
+  FlatList,
   Share,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -16,20 +16,59 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { eventService, Event } from "@/lib/eventService";
 import { useAuth } from "@/lib/AuthContext";
+import { EventImageCarousel } from "@/app/components/Events/EventImageCarousel";
+import { UserItem } from "@/app/components/Events/UserItem";
+import { EmptyState } from "@/app/components/Events/EmptyState";
+import { EventDetailsTab } from "@/app/components/Events/EventDetailsTab";
+import { EventActionBar } from "@/app/components/Events/EventActionBar";
+import EventOptionsModal from "@/app/components/Events/EventOptionsModal";
+import { EventTabs, TabType } from "@/app/components/Events/EventTabs";
+
+interface User {
+  _id: string;
+  name: string;
+  username: string;
+  email?: string;
+}
+
+// Extended Event type to include optional UI-only properties
+interface ExtendedEvent extends Event {
+  isSaved?: boolean;
+  isReported?: boolean;
+}
 
 export default function EventDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { user } = useAuth();
-  const [event, setEvent] = useState<Event | null>(null);
+  const [event, setEvent] = useState<ExtendedEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
+  const [showEventOptions, setShowEventOptions] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabType>("details");
+  const [attendees, setAttendees] = useState<User[]>([]);
+  const [interestedUsers, setInterestedUsers] = useState<User[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+
+  // Calculate isOrganizer early based on current event and user
+  const isOrganizer = event?.organizer._id === user?.id;
 
   useEffect(() => {
     if (id) {
       fetchEvent();
     }
   }, [id]);
+
+  useEffect(() => {
+    // Only fetch attendees/interested if user is organizer
+    if (event && isOrganizer) {
+      if (activeTab === "attendees") {
+        fetchAttendees();
+      } else if (activeTab === "interested") {
+        fetchInterestedUsers();
+      }
+    }
+  }, [event, activeTab, isOrganizer]);
 
   const fetchEvent = async () => {
     try {
@@ -49,6 +88,36 @@ export default function EventDetailScreen() {
     }
   };
 
+  const fetchAttendees = async () => {
+    if (!event) return;
+    setLoadingUsers(true);
+    try {
+      const response = await eventService.getEventById(id);
+      if (response.success && response.event) {
+        setAttendees(response.event.rsvp || []);
+      }
+    } catch (error) {
+      console.error("Error fetching attendees:", error);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  const fetchInterestedUsers = async () => {
+    if (!event) return;
+    setLoadingUsers(true);
+    try {
+      const response = await eventService.getEventById(id);
+      if (response.success && response.event) {
+        setInterestedUsers(response.event.interested || []);
+      }
+    } catch (error) {
+      console.error("Error fetching interested users:", error);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
   const handleInterest = async () => {
     if (!event) return;
     setProcessing(true);
@@ -60,6 +129,9 @@ export default function EventDetailScreen() {
           isInterested: response.isInterested,
           interestedCount: response.interestedCount || 0,
         });
+        if (activeTab === "interested") {
+          fetchInterestedUsers();
+        }
       }
     } catch (error) {
       Alert.alert("Error", "Failed to update interest");
@@ -89,6 +161,9 @@ export default function EventDetailScreen() {
           rsvpCount: response.rsvpCount || 0,
           isFull: response.isFull,
         });
+        if (activeTab === "attendees") {
+          fetchAttendees();
+        }
       }
     } catch (error) {
       Alert.alert("Error", "Failed to update RSVP");
@@ -98,31 +173,217 @@ export default function EventDetailScreen() {
   };
 
   const handleShare = async () => {
+    if (!event) return;
     try {
       await Share.share({
-        message: `Check out "${event?.title}" on Univibe!\n\n${event?.description}\n\n📍 ${event?.location}\n📅 ${new Date(event?.startDate || "").toLocaleString()}`,
+        message: `Check out "${event.title}" on Univibe!\n\n${event.description}\n\n📍 ${event.location}\n📅 ${new Date(event.startDate).toLocaleString()}`,
       });
     } catch (error) {
       console.error("Error sharing:", error);
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return {
-      date: date.toLocaleDateString("en-US", {
-        weekday: "long",
-        month: "long",
-        day: "numeric",
-      }),
-      time: date.toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-      }),
-    };
+  const handleEditEvent = () => {
+    setShowEventOptions(false);
+    if (event?._id) {
+      router.push(`/events/EditEvent?id=${event._id}`);
+    } else {
+      Alert.alert("Error", "Event ID not found");
+    }
   };
 
-  const isOrganizer = event?.organizer._id === user?.id;
+  const handleDeleteEvent = () => {
+    setShowEventOptions(false);
+    Alert.alert(
+      "Delete Event",
+      "Are you sure you want to delete this event? This action cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            if (!event) return;
+            try {
+              const response = await eventService.deleteEvent(event._id);
+              if (response.success) {
+                Alert.alert("Success", "Event deleted successfully", [
+                  { text: "OK", onPress: () => router.back() },
+                ]);
+              } else {
+                Alert.alert(
+                  "Error",
+                  response.message || "Failed to delete event",
+                );
+              }
+            } catch (error) {
+              Alert.alert("Error", "Failed to delete event");
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  // Handlers for EventOptionsModal with proper error handling
+  const handleSaveEvent = async (eventId: string) => {
+    try {
+      // TODO: Implement when backend is ready
+      Alert.alert("Coming Soon", "Save feature will be available soon!");
+      // Update local state optimistically
+      setEvent((prev) => (prev ? { ...prev, isSaved: !prev.isSaved } : null));
+    } catch (error) {
+      console.error("Error saving event:", error);
+      Alert.alert("Error", "Failed to save event");
+    }
+  };
+
+  const handleReportEvent = async (eventId: string) => {
+    try {
+      // TODO: Implement when backend is ready
+      Alert.alert("Thank You", "Event has been reported. We'll review it.");
+      // Update local state optimistically
+      setEvent((prev) => (prev ? { ...prev, isReported: true } : null));
+    } catch (error) {
+      console.error("Error reporting event:", error);
+      Alert.alert("Error", "Failed to report event");
+    }
+  };
+
+  const handleShareEvent = async (eventId: string) => {
+    await handleShare();
+  };
+
+  const handleAddToCalendar = async (eventId: string) => {
+    Alert.alert("Coming Soon", "Calendar integration will be available soon!");
+  };
+
+  const handleMuteOrganizer = async (organizerId: string) => {
+    try {
+      // TODO: Implement when backend is ready
+      Alert.alert("Success", "Organizer muted. You won't see their events.");
+    } catch (error) {
+      console.error("Error muting organizer:", error);
+      Alert.alert("Error", "Failed to mute organizer");
+    }
+  };
+
+  const handleBlockOrganizer = async (organizerId: string) => {
+    Alert.alert(
+      "Block Organizer",
+      "Are you sure you want to block this organizer?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Block",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              // TODO: Implement when backend is ready
+              Alert.alert("Success", "Organizer blocked.");
+            } catch (error) {
+              console.error("Error blocking organizer:", error);
+              Alert.alert("Error", "Failed to block organizer");
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const getImages = () => {
+    if (event?.imageUrls && event.imageUrls.length > 0) {
+      return event.imageUrls;
+    }
+    if (event?.coverImage) {
+      return [event.coverImage];
+    }
+    return [];
+  };
+
+  const renderUserList = (users: User[], showOrganizerBadge = false) => (
+    <FlatList
+      data={users}
+      renderItem={({ item }) => (
+        <UserItem
+          user={item}
+          showOrganizerBadge={
+            showOrganizerBadge && event?.organizer._id === item._id
+          }
+        />
+      )}
+      keyExtractor={(item) => item._id}
+      contentContainerStyle={styles.usersList}
+      showsVerticalScrollIndicator={false}
+      scrollEnabled={false}
+    />
+  );
+
+  const renderTabContent = () => {
+    if (!event) return null;
+
+    // For non-organizers, only show details tab content
+    if (!isOrganizer) {
+      return (
+        <EventDetailsTab
+          event={event}
+          onOrganizerPress={handleOrganizerProfilePress}
+        />
+      );
+    }
+
+    // For organizers, show content based on active tab
+    switch (activeTab) {
+      case "details":
+        return (
+          <EventDetailsTab
+            event={event}
+            onOrganizerPress={handleOrganizerProfilePress}
+          />
+        );
+      case "attendees":
+        if (loadingUsers) {
+          return (
+            <View style={styles.tabLoadingContainer}>
+              <ActivityIndicator size="large" color="#8b5cf6" />
+              <Text style={styles.tabLoadingText}>Loading attendees...</Text>
+            </View>
+          );
+        }
+        if (attendees.length === 0) {
+          return <EmptyState type="attendees" />;
+        }
+        return renderUserList(attendees, true);
+      case "interested":
+        if (loadingUsers) {
+          return (
+            <View style={styles.tabLoadingContainer}>
+              <ActivityIndicator size="large" color="#8b5cf6" />
+              <Text style={styles.tabLoadingText}>
+                Loading interested users...
+              </Text>
+            </View>
+          );
+        }
+        if (interestedUsers.length === 0) {
+          return <EmptyState type="interested" />;
+        }
+        return renderUserList(interestedUsers, false);
+      default:
+        return null;
+    }
+  };
+
+  // Add the handler function
+  const handleOrganizerProfilePress = (organizerId: string) => {
+    if (organizerId === user?.id) {
+      router.push("/(tabs)/profile");
+    } else {
+      router.push(`/profile/${organizerId}`);
+    }
+  };
+
+  const images = getImages();
 
   if (loading) {
     return (
@@ -134,22 +395,14 @@ export default function EventDetailScreen() {
 
   if (!event) return null;
 
-  const startDate = formatDate(event.startDate);
-  const endDate = formatDate(event.endDate);
-
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header Image */}
-        {event.coverImage ? (
-          <Image source={{ uri: event.coverImage }} style={styles.coverImage} />
-        ) : (
-          <View style={[styles.coverImage, styles.coverPlaceholder]}>
-            <Ionicons name="calendar" size={80} color="#cbd5e1" />
-          </View>
-        )}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        <EventImageCarousel images={images} />
 
-        {/* Back Button */}
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => router.back()}
@@ -157,144 +410,74 @@ export default function EventDetailScreen() {
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
 
-        {/* Content */}
+        {/* Menu button for all users */}
+        <TouchableOpacity
+          style={styles.menuButton}
+          onPress={() => setShowEventOptions(true)}
+        >
+          <Ionicons name="ellipsis-vertical" size={16} color="#fff" />
+        </TouchableOpacity>
+
         <View style={styles.content}>
           <View style={styles.header}>
             <View style={styles.categoryContainer}>
               <Text style={styles.category}>{event.category}</Text>
             </View>
-            <TouchableOpacity onPress={handleShare}>
-              <Ionicons name="share-outline" size={24} color="#6b7280" />
+            <TouchableOpacity onPress={handleShare} style={styles.shareButton}>
+              <Ionicons name="share-outline" size={22} color="#6b7280" />
             </TouchableOpacity>
           </View>
 
           <Text style={styles.title}>{event.title}</Text>
 
-          <View style={styles.statsContainer}>
-            <View style={styles.stat}>
-              <Ionicons name="people-outline" size={20} color="#8b5cf6" />
-              <Text style={styles.statText}>{event.rsvpCount} attending</Text>
-            </View>
-            <View style={styles.stat}>
-              <Ionicons name="heart-outline" size={20} color="#8b5cf6" />
-              <Text style={styles.statText}>
-                {event.interestedCount} interested
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Date & Time</Text>
-            <View style={styles.detailItem}>
-              <Ionicons name="calendar-outline" size={20} color="#6b7280" />
-              <View>
-                <Text style={styles.detailText}>{startDate.date}</Text>
-                <Text style={styles.detailSubtext}>
-                  {startDate.time} - {endDate.time}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Location</Text>
-            <View style={styles.detailItem}>
-              <Ionicons name="location-outline" size={20} color="#6b7280" />
-              <Text style={styles.detailText}>{event.location}</Text>
-            </View>
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Organizer</Text>
-            <View style={styles.detailItem}>
-              <Ionicons name="person-outline" size={20} color="#6b7280" />
-              <Text style={styles.detailText}>{event.organizerName}</Text>
-            </View>
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Description</Text>
-            <Text style={styles.description}>{event.description}</Text>
-          </View>
-
-          {event.tags && event.tags.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Tags</Text>
-              <View style={styles.tagsContainer}>
-                {event.tags.map((tag, index) => (
-                  <View key={index} style={styles.tag}>
-                    <Text style={styles.tagText}>#{tag}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
+          {/* Only show tabs for organizers */}
+          {isOrganizer && (
+            <EventTabs
+              activeTab={activeTab}
+              onTabChange={setActiveTab}
+              rsvpCount={event.rsvpCount}
+              interestedCount={event.interestedCount}
+            />
           )}
 
-          {event.isOnline && event.meetingLink && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Meeting Link</Text>
-              <TouchableOpacity
-                style={styles.linkButton}
-                onPress={() => Alert.alert("Meeting Link", event.meetingLink)}
-              >
-                <Ionicons name="link-outline" size={20} color="#8b5cf6" />
-                <Text style={styles.linkText}>Join Meeting</Text>
-              </TouchableOpacity>
-            </View>
-          )}
+          <View style={styles.tabContent}>{renderTabContent()}</View>
         </View>
       </ScrollView>
 
-      {/* Action Buttons */}
+      {/* Only show action buttons for non-organizers */}
       {!isOrganizer && (
-        <View style={styles.actionBar}>
-          <TouchableOpacity
-            style={[
-              styles.actionButton,
-              event.isInterested && styles.actionButtonActive,
-            ]}
-            onPress={handleInterest}
-            disabled={processing}
-          >
-            <Ionicons
-              name={event.isInterested ? "heart" : "heart-outline"}
-              size={22}
-              color={event.isInterested ? "#ef4444" : "#6b7280"}
-            />
-            <Text
-              style={[
-                styles.actionButtonText,
-                event.isInterested && styles.actionButtonTextActive,
-              ]}
-            >
-              {event.isInterested ? "Interested" : "Mark Interest"}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.rsvpButton,
-              event.isRsvpd && styles.rsvpButtonActive,
-              event.isFull && !event.isRsvpd && styles.rsvpButtonDisabled,
-            ]}
-            onPress={handleRsvp}
-            disabled={processing || (event.isFull && !event.isRsvpd)}
-          >
-            <Text
-              style={[
-                styles.rsvpButtonText,
-                event.isRsvpd && styles.rsvpButtonTextActive,
-              ]}
-            >
-              {event.isRsvpd
-                ? "Going ✓"
-                : event.isFull
-                  ? "Event Full"
-                  : "RSVP Now"}
-            </Text>
-          </TouchableOpacity>
-        </View>
+        <EventActionBar
+          isInterested={event.isInterested || false}
+          isRsvpd={event.isRsvpd || false}
+          isFull={event.isFull || false}
+          processing={processing}
+          onInterest={handleInterest}
+          onRsvp={handleRsvp}
+        />
       )}
+
+      <EventOptionsModal
+        visible={showEventOptions}
+        onClose={() => setShowEventOptions(false)}
+        eventId={event._id}
+        isOrganizer={isOrganizer}
+        isSaved={event.isSaved || false}
+        isReported={event.isReported || false}
+        isInterested={event.isInterested || false}
+        isRsvpd={event.isRsvpd || false}
+        onEdit={handleEditEvent}
+        onDelete={handleDeleteEvent}
+        onSave={handleSaveEvent}
+        onReport={handleReportEvent}
+        onShare={handleShareEvent}
+        onAddToCalendar={handleAddToCalendar}
+        onMuteOrganizer={handleMuteOrganizer}
+        onBlockOrganizer={handleBlockOrganizer}
+        organizerId={event.organizer._id}
+        eventTitle={event.title}
+        eventDate={event.startDate}
+        eventLocation={event.location}
+      />
     </SafeAreaView>
   );
 }
@@ -310,28 +493,37 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#fff",
   },
-  coverImage: {
-    width: "100%",
-    height: 250,
-  },
-  coverPlaceholder: {
-    backgroundColor: "#f3f4f6",
-    justifyContent: "center",
-    alignItems: "center",
+  scrollContent: {
+    paddingBottom: 20,
   },
   backButton: {
     position: "absolute",
-    top: 50,
-    left: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    top: 30,
+    left: 16,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: "rgba(0,0,0,0.5)",
     justifyContent: "center",
     alignItems: "center",
+    zIndex: 10,
+  },
+  menuButton: {
+    position: "absolute",
+    top: 30,
+    right: 16,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 10,
   },
   content: {
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 16,
   },
   header: {
     flexDirection: "row",
@@ -341,7 +533,7 @@ const styles = StyleSheet.create({
   },
   categoryContainer: {
     backgroundColor: "#f3e8ff",
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 20,
   },
@@ -349,139 +541,35 @@ const styles = StyleSheet.create({
     color: "#8b5cf6",
     fontSize: 14,
     fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
+  },
+  shareButton: {
+    padding: 8,
   },
   title: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: "bold",
     color: "#111827",
-    marginBottom: 16,
+    marginBottom: 20,
+    fontFamily: "SofiaSans-Bold",
+    lineHeight: 34,
   },
-  statsContainer: {
-    flexDirection: "row",
-    gap: 24,
-    marginBottom: 24,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
+  tabContent: {
+    minHeight: 300,
   },
-  stat: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  statText: {
-    fontSize: 14,
-    color: "#6b7280",
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#111827",
-    marginBottom: 12,
-  },
-  detailItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  detailText: {
-    fontSize: 16,
-    color: "#374151",
-  },
-  detailSubtext: {
-    fontSize: 14,
-    color: "#6b7280",
-    marginTop: 2,
-  },
-  description: {
-    fontSize: 16,
-    color: "#374151",
-    lineHeight: 24,
-  },
-  tagsContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  tag: {
-    backgroundColor: "#f3f4f6",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  tagText: {
-    fontSize: 14,
-    color: "#6b7280",
-  },
-  linkButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "#f3e8ff",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    alignSelf: "flex-start",
-  },
-  linkText: {
-    fontSize: 16,
-    color: "#8b5cf6",
-    fontWeight: "500",
-  },
-  actionBar: {
-    flexDirection: "row",
-    padding: 16,
-    backgroundColor: "white",
-    borderTopWidth: 1,
-    borderTopColor: "#f3f4f6",
-    gap: 12,
-  },
-  actionButton: {
+  tabLoadingContainer: {
     flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    backgroundColor: "white",
-  },
-  actionButtonActive: {
-    backgroundColor: "#fee2e2",
-    borderColor: "#ef4444",
-  },
-  actionButtonText: {
-    fontSize: 16,
-    color: "#6b7280",
-    fontWeight: "500",
-  },
-  actionButtonTextActive: {
-    color: "#ef4444",
-  },
-  rsvpButton: {
-    flex: 2,
-    backgroundColor: "#8b5cf6",
-    paddingVertical: 12,
-    borderRadius: 12,
     alignItems: "center",
+    paddingVertical: 60,
   },
-  rsvpButtonActive: {
-    backgroundColor: "#10b981",
+  tabLoadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: "#6b7280",
+    fontFamily: "SofiaSans-Regular",
   },
-  rsvpButtonDisabled: {
-    backgroundColor: "#d1d5db",
-  },
-  rsvpButtonText: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  rsvpButtonTextActive: {
-    color: "white",
+  usersList: {
+    paddingVertical: 8,
   },
 });

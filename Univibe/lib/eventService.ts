@@ -2,6 +2,30 @@
 import { API_BASE_URL } from '@/constants/ipConstants';
 import * as SecureStore from 'expo-secure-store';
 
+// ============================================
+// INTERFACES
+// ============================================
+
+export interface User {
+  _id: string;
+  name: string;
+  username: string;
+  email?: string;
+  profilePicture?: string;
+  fullName?: string;
+}
+
+export interface EventImage {
+  filename: string;
+  url: string;
+  path: string;
+  mimetype: string;
+  size: number;
+  isCover: boolean;
+  uploadedAt: string;
+  _id?: string;
+}
+
 export interface Event {
   _id: string;
   title: string;
@@ -12,11 +36,17 @@ export interface Event {
   startDate: string;
   endDate: string;
   coverImage: string;
+  images: EventImage[];
+  coverImageUrl: string;
+  imageUrls: string[];
+  imageCount: number;
   organizer: {
     _id: string;
     name: string;
     username: string;
     email: string;
+    profilePicture?: string;
+    fullName?: string;
   };
   organizerName: string;
   interestedCount: number;
@@ -32,6 +62,9 @@ export interface Event {
   isFull?: boolean;
   createdAt: string;
   updatedAt: string;
+  
+  rsvp?: User[];
+  interested?: User[];
 }
 
 export interface EventsResponse {
@@ -63,6 +96,46 @@ export const getFullImageUrl = (url: string): string => {
   return `${API_BASE_URL}/${url}`;
 };
 
+/**
+ * Helper to process image URLs in an event object
+ */
+const processEventImages = (event: Event): Event => {
+  // Process cover image URL
+  if (event.coverImage) {
+    event.coverImage = getFullImageUrl(event.coverImage);
+  }
+  
+  // Process coverImageUrl virtual field
+  if (event.coverImageUrl) {
+    event.coverImageUrl = getFullImageUrl(event.coverImageUrl);
+  }
+  
+  // Process all images in the images array
+  if (event.images && event.images.length > 0) {
+    event.images = event.images.map(img => ({
+      ...img,
+      url: getFullImageUrl(img.url),
+    }));
+  }
+  
+  // Process imageUrls array
+  if (event.imageUrls && event.imageUrls.length > 0) {
+    event.imageUrls = event.imageUrls.map(url => getFullImageUrl(url));
+  }
+  
+  return event;
+};
+
+/**
+ * Helper to process organizer profile picture URL
+ */
+const processOrganizerProfilePicture = (event: Event): Event => {
+  if (event.organizer && event.organizer.profilePicture) {
+    event.organizer.profilePicture = getFullImageUrl(event.organizer.profilePicture);
+  }
+  return event;
+};
+
 export const eventService = {
   // Create a new event
   createEvent: async (formData: FormData): Promise<{ success: boolean; message?: string; event?: Event }> => {
@@ -81,6 +154,12 @@ export const eventService = {
       });
 
       const data = await response.json();
+      
+      if (data.success && data.event) {
+        data.event = processEventImages(data.event);
+        data.event = processOrganizerProfilePicture(data.event);
+      }
+      
       return data;
     } catch (error) {
       console.error('Error creating event:', error);
@@ -120,12 +199,12 @@ export const eventService = {
 
       const data = await response.json();
       
-      // Process cover image URLs
       if (data.success && data.data) {
-        data.data = data.data.map((event: Event) => ({
-          ...event,
-          coverImage: getFullImageUrl(event.coverImage),
-        }));
+        data.data = data.data.map((event: Event) => {
+          event = processEventImages(event);
+          event = processOrganizerProfilePicture(event);
+          return event;
+        });
       }
       
       return data;
@@ -153,7 +232,8 @@ export const eventService = {
       const data = await response.json();
       
       if (data.success && data.event) {
-        data.event.coverImage = getFullImageUrl(data.event.coverImage);
+        data.event = processEventImages(data.event);
+        data.event = processOrganizerProfilePicture(data.event);
       }
       
       return data;
@@ -181,10 +261,11 @@ export const eventService = {
       const data = await response.json();
       
       if (data.success && data.data) {
-        data.data = data.data.map((event: Event) => ({
-          ...event,
-          coverImage: getFullImageUrl(event.coverImage),
-        }));
+        data.data = data.data.map((event: Event) => {
+          event = processEventImages(event);
+          event = processOrganizerProfilePicture(event);
+          return event;
+        });
       }
       
       return data;
@@ -212,16 +293,112 @@ export const eventService = {
       const data = await response.json();
       
       if (data.success && data.data) {
-        data.data = data.data.map((event: Event) => ({
-          ...event,
-          coverImage: getFullImageUrl(event.coverImage),
-        }));
+        data.data = data.data.map((event: Event) => {
+          event = processEventImages(event);
+          event = processOrganizerProfilePicture(event);
+          return event;
+        });
       }
       
       return data;
     } catch (error) {
       console.error('Error fetching attending events:', error);
       return { success: false, data: [], pagination: { page: 1, limit: 20, total: 0, pages: 0 } };
+    }
+  },
+
+  // Add more images to an existing event
+  addEventImages: async (eventId: string, formData: FormData): Promise<{ success: boolean; message?: string; imageCount?: number; images?: EventImage[] }> => {
+    try {
+      const token = await getAuthToken();
+      if (!token) {
+        return { success: false, message: "No authentication token" };
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/events/${eventId}/images`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      const data = await response.json();
+      
+      if (data.success && data.images) {
+        data.images = data.images.map((img: EventImage) => ({
+          ...img,
+          url: getFullImageUrl(img.url),
+        }));
+      }
+      
+      return data;
+    } catch (error) {
+      console.error('Error adding event images:', error);
+      return { success: false, message: 'Failed to add images' };
+    }
+  },
+
+  // Remove a specific image from an event
+  removeEventImage: async (eventId: string, imageIndex: number): Promise<{ success: boolean; message?: string; imageCount?: number; images?: EventImage[] }> => {
+    try {
+      const token = await getAuthToken();
+      if (!token) {
+        return { success: false, message: "No authentication token" };
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/events/${eventId}/images/${imageIndex}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const data = await response.json();
+      
+      if (data.success && data.images) {
+        data.images = data.images.map((img: EventImage) => ({
+          ...img,
+          url: getFullImageUrl(img.url),
+        }));
+      }
+      
+      return data;
+    } catch (error) {
+      console.error('Error removing event image:', error);
+      return { success: false, message: 'Failed to remove image' };
+    }
+  },
+
+  // Set a specific image as the cover image
+  setCoverImage: async (eventId: string, imageIndex: number): Promise<{ success: boolean; message?: string; event?: Event }> => {
+    try {
+      const token = await getAuthToken();
+      if (!token) {
+        return { success: false, message: "No authentication token" };
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/events/${eventId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ setCoverImageIndex: imageIndex }),
+      });
+
+      const data = await response.json();
+      
+      if (data.success && data.event) {
+        data.event = processEventImages(data.event);
+        data.event = processOrganizerProfilePicture(data.event);
+      }
+      
+      return data;
+    } catch (error) {
+      console.error('Error setting cover image:', error);
+      return { success: false, message: 'Failed to set cover image' };
     }
   },
 
@@ -294,6 +471,36 @@ export const eventService = {
     } catch (error) {
       console.error('Error deleting event:', error);
       return { success: false, message: 'Failed to delete event' };
+    }
+  },
+
+  // Update an event
+  updateEvent: async (eventId: string, formData: FormData): Promise<{ success: boolean; message?: string; event?: Event }> => {
+    try {
+      const token = await getAuthToken();
+      if (!token) {
+        return { success: false, message: "No authentication token" };
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/events/${eventId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      const data = await response.json();
+      
+      if (data.success && data.event) {
+        data.event = processEventImages(data.event);
+        data.event = processOrganizerProfilePicture(data.event);
+      }
+      
+      return data;
+    } catch (error) {
+      console.error('Error updating event:', error);
+      return { success: false, message: 'Failed to update event' };
     }
   },
 };

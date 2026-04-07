@@ -700,7 +700,7 @@ export default function FeedScreen() {
   if (loading && posts.length === 0) return renderLoading();
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -717,6 +717,7 @@ export default function FeedScreen() {
           }
         }}
         scrollEventThrottle={400}
+        contentContainerStyle={styles.scrollContent}
       >
         {/* Header */}
         <FeedHeader
@@ -783,6 +784,9 @@ export default function FeedScreen() {
             <Text style={styles.endMessageText}>No more posts to load</Text>
           </View>
         )}
+
+        {/* Add extra padding at bottom to prevent content from being hidden behind tab bar */}
+        <View style={styles.bottomPadding} />
       </ScrollView>
 
       {/* Info bar rendered at the bottom */}

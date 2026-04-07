@@ -1,4 +1,4 @@
-// app/profile/[id].tsx - With accept and cancel buttons for pending requests
+// app/profile/[id].tsx - With accept and cancel buttons for pending requests and confirmation for remove connection
 
 import React, { useState, useCallback, useEffect } from "react";
 import {
@@ -10,6 +10,7 @@ import {
   FlatList,
   RefreshControl,
   Animated,
+  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -87,7 +88,7 @@ export default function PublicProfileScreen() {
   const [infoType, setInfoType] = useState<"success" | "error" | "info">(
     "info",
   );
-  const slideAnim = useState(new Animated.Value(100))[0]; // Start below screen
+  const slideAnim = useState(new Animated.Value(100))[0];
 
   // Posts state
   const [posts, setPosts] = useState<Post[]>([]);
@@ -451,9 +452,74 @@ export default function PublicProfileScreen() {
     }
   };
 
-  // Handle connection action
+  // Handle connection action with confirmation for remove connection
   const handleConnectionAction = async () => {
     if (!profile) return;
+
+    // Show confirmation alert for removing connection
+    if (connectionStatus === "connected") {
+      Alert.alert(
+        "Remove Connection",
+        `Are you sure you want to remove your connection with ${profile.fullName}?`,
+        [
+          {
+            text: "Cancel",
+            style: "cancel",
+          },
+          {
+            text: "Remove",
+            style: "destructive",
+            onPress: async () => {
+              setConnectionLoading(true);
+              try {
+                const removeResponse = await connectionService.removeConnection(
+                  profile.user._id,
+                );
+                if (removeResponse.success) {
+                  setConnectionStatus("not_connected");
+                  setProfile((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          stats: {
+                            ...prev.stats,
+                            connections: Math.max(
+                              (prev.stats.connections || 0) - 1,
+                              0,
+                            ),
+                          },
+                        }
+                      : null,
+                  );
+                  await refreshCurrentUserProfile();
+                  await loadProfilePosts(1, false);
+                  showInfoBar(
+                    `Removed connection with ${profile.fullName}`,
+                    "info",
+                  );
+                } else {
+                  showInfoBar(
+                    removeResponse.message || "Failed to remove connection",
+                    "error",
+                  );
+                }
+              } catch (error: any) {
+                console.error("Remove connection error:", error);
+                showInfoBar(
+                  error.message || "Failed to remove connection",
+                  "error",
+                );
+              } finally {
+                setConnectionLoading(false);
+              }
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    // For other actions (send request, cancel request, accept request)
     setConnectionLoading(true);
 
     try {
@@ -533,37 +599,6 @@ export default function PublicProfileScreen() {
           } else {
             showInfoBar(
               acceptResponse.message || "Failed to accept request",
-              "error",
-            );
-          }
-          break;
-
-        case "connected":
-          const removeResponse = await connectionService.removeConnection(
-            profile.user._id,
-          );
-          if (removeResponse.success) {
-            setConnectionStatus("not_connected");
-            setProfile((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    stats: {
-                      ...prev.stats,
-                      connections: Math.max(
-                        (prev.stats.connections || 0) - 1,
-                        0,
-                      ),
-                    },
-                  }
-                : null,
-            );
-            await refreshCurrentUserProfile();
-            await loadProfilePosts(1, false);
-            showInfoBar(`Removed connection with ${profile.fullName}`, "info");
-          } else {
-            showInfoBar(
-              removeResponse.message || "Failed to remove connection",
               "error",
             );
           }
