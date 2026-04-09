@@ -3,41 +3,37 @@ const router = express.Router();
 const eventController = require("../controllers/eventController");
 const { protect } = require("../middleware/authmiddleware");
 const {
-  uploadEventImage,
-  uploadEventImages,
-} = require("../middleware/uploadEventMiddleware");
-const { validateEventImages } = require("../middleware/validateEventImages");
+  uploadAndOptimizeEventImages,
+} = require("../middleware/uploadMiddleware");
 
 // Apply authentication to all routes
 router.use(protect);
 
 // ============================================
-// EVENT CRUD OPERATIONS
+// EVENT QUERIES 
 // ============================================
 
-// Create event - supports multiple images including iPhone HEIC
-router.post(
-  "/",
-  uploadEventImages, // This now handles HEIC conversion automatically
-  validateEventImages, // Additional validation
-  eventController.createEvent,
-);
+// Get user's events - SPECIFIC routes first
+router.get("/my-events", eventController.getMyEvents);
+router.get("/attending", eventController.getAttendingEvents);
 
 // Get events with filters
 router.get("/", eventController.getEvents);
 
-// Get user's events
-router.get("/my-events", eventController.getMyEvents);
-router.get("/attending", eventController.getAttendingEvents);
+// ============================================
+// EVENT CRUD OPERATIONS
+// ============================================
 
-// Get single event
+// Create event with images
+router.post("/", uploadAndOptimizeEventImages, eventController.createEvent);
+
+// Get single event (dynamic route)
 router.get("/:eventId", eventController.getEventById);
 
-// Update event - supports image management
+// Update event with images
 router.put(
   "/:eventId",
-  uploadEventImages, // Handles new image uploads with HEIC support
-  validateEventImages,
+  uploadAndOptimizeEventImages,
   eventController.updateEvent,
 );
 
@@ -45,25 +41,34 @@ router.put(
 router.delete("/:eventId", eventController.deleteEvent);
 
 // ============================================
-// IMAGE MANAGEMENT ROUTES
+// IMAGE MANAGEMENT
 // ============================================
 
-// Add more images to an existing event
+// Add more images to existing event
 router.post(
   "/:eventId/images",
-  uploadEventImages,
-  validateEventImages,
+  uploadAndOptimizeEventImages,
   eventController.addEventImages,
 );
 
-// Remove a specific image from an event (by index)
+// Remove specific image
 router.delete("/:eventId/images/:imageIndex", eventController.removeEventImage);
 
 // ============================================
 // EVENT INTERACTIONS
 // ============================================
 
+// Toggle interest
 router.post("/:eventId/interested", eventController.markInterested);
+
+// Toggle RSVP
 router.post("/:eventId/rsvp", eventController.rsvpEvent);
+
+// ============================================
+// OPTIONAL: Batch operations (if needed)
+// ============================================
+
+// Bulk delete events (admin only)
+// router.delete("/bulk/delete", protect, adminOnly, eventController.bulkDeleteEvents);
 
 module.exports = router;

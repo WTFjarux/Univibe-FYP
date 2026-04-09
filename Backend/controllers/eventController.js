@@ -6,7 +6,7 @@ const fs = require("fs").promises;
 const path = require("path");
 
 // ============================================
-// NOTIFICATION HELPER
+// HELPER FUNCTIONS
 // ============================================
 
 const createEventNotification = async (
@@ -36,16 +36,13 @@ const createEventNotification = async (
   }
 };
 
-// ============================================
-// HELPER FUNCTION: Format image objects for database
-// ============================================
-
+// Format image objects for database storage
 const formatImageObjects = (files) => {
   if (!files || files.length === 0) return [];
 
   return files.map((file, index) => ({
-    filename: file.filename || file.originalname,
-    url: file.url,
+    filename: file.originalname || file.filename,
+    url: file.url || `/uploads/events/${file.filename}`,
     path: file.path,
     mimetype: file.mimetype,
     size: file.size,
@@ -54,6 +51,7 @@ const formatImageObjects = (files) => {
   }));
 };
 
+// Clean up uploaded files if something goes wrong
 const cleanupUploadedFiles = async (files) => {
   if (!files || files.length === 0) return;
 
@@ -61,6 +59,7 @@ const cleanupUploadedFiles = async (files) => {
     if (file.path) {
       try {
         await fs.unlink(file.path);
+        console.log(`🗑️ Cleaned up file: ${file.path}`);
       } catch (err) {
         console.error("Error cleaning up file:", file.path, err);
       }
@@ -68,55 +67,73 @@ const cleanupUploadedFiles = async (files) => {
   }
 };
 
-// ============================================
-// HELPER: Get user with profile picture (for single user)
-// ============================================
-
+// Get user with profile picture
 const getUserWithProfile = async (user) => {
-  if (!user) return user;
+  if (!user) return null;
 
-  // If user is already populated with _id
-  const userId = user._id || user;
-  const profile = await Profile.findOne({ user: userId }).lean();
-  const userData = user._id ? user : await User.findById(userId).lean();
+  try {
+    const userId = user._id || user;
+    const [profile, userData] = await Promise.all([
+      Profile.findOne({ user: userId }).lean(),
+      user._id ? user : User.findById(userId).lean(),
+    ]);
 
-  if (!userData) return user;
+    if (!userData) return user;
 
-  return {
-    _id: userData._id,
-    name: userData.name,
-    username: userData.username,
-    email: userData.email,
-    profilePicture: profile?.profilePicture || null,
-    fullName: profile?.fullName || userData.name,
-  };
+    return {
+      _id: userData._id,
+      name: userData.name,
+      username: userData.username,
+      email: userData.email,
+      profilePicture: profile?.profilePicture || null,
+      fullName: profile?.fullName || userData.name,
+    };
+  } catch (error) {
+    console.error("Get user with profile error:", error);
+    return user;
+  }
 };
 
-// ============================================
-// HELPER: Get multiple users with profile pictures
-// ============================================
-
+// Get multiple users with profile pictures
 const getUsersWithProfiles = async (users) => {
   if (!users || users.length === 0) return [];
+  return await Promise.all(users.map((user) => getUserWithProfile(user)));
+};
 
-  return await Promise.all(
-    users.map(async (user) => {
-      const userId = user._id || user;
-      const profile = await Profile.findOne({ user: userId }).lean();
-      const userData = user._id ? user : await User.findById(userId).lean();
+// Build full image URL (for responses)
+const getFullImageUrl = (req, relativeUrl) => {
+  if (!relativeUrl) return "";
+  if (relativeUrl.startsWith("http")) return relativeUrl;
+  const baseUrl = `${req.protocol}://${req.get("host")}`;
+  return `${baseUrl}${relativeUrl}`;
+};
 
-      if (!userData) return user;
+// Process event images for response
+const processEventImagesForResponse = (req, event) => {
+  if (!event.images || event.images.length === 0) {
+    return {
+      ...event,
+      coverImageUrl: "",
+      imageUrls: [],
+      imageCount: 0,
+    };
+  }
 
-      return {
-        _id: userData._id,
-        name: userData.name,
-        username: userData.username,
-        email: userData.email,
-        profilePicture: profile?.profilePicture || null,
-        fullName: profile?.fullName || userData.name,
-      };
-    }),
-  );
+  const processedImages = event.images.map((img) => ({
+    ...img,
+    url: getFullImageUrl(req, img.url),
+  }));
+
+  return {
+    ...event,
+    images: processedImages,
+    coverImageUrl:
+      processedImages.find((img) => img.isCover)?.url ||
+      processedImages[0]?.url ||
+      "",
+    imageUrls: processedImages.map((img) => img.url),
+    imageCount: processedImages.length,
+  };
 };
 
 // ============================================
@@ -143,17 +160,44 @@ exports.createEvent = async (req, res) => {
 
     const userId = req.user._id;
 
+    // Validate required fields
+    if (
+      !title ||
+      !description ||
+      !category ||
+      !location ||
+      !startDate ||
+      !endDate
+    ) {
+      await cleanupUploadedFiles(uploadedFiles);
+      return res.status(400).json({
+        success: false,
+        message:
+          "Missing required fields: title, description, category, location, startDate, endDate",
+      });
+    }
+
+    // Get user profile
     const profile = await Profile.findOne({ user: userId });
     if (!profile) {
       await cleanupUploadedFiles(uploadedFiles);
       return res.status(404).json({
         success: false,
-        message: "Profile not found",
+        message: "Profile not found. Please complete your profile first.",
       });
     }
 
+    // Validate dates
     const start = new Date(startDate);
     const end = new Date(endDate);
+
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      await cleanupUploadedFiles(uploadedFiles);
+      return res.status(400).json({
+        success: false,
+        message: "Invalid date format",
+      });
+    }
 
     if (start >= end) {
       await cleanupUploadedFiles(uploadedFiles);
@@ -163,6 +207,7 @@ exports.createEvent = async (req, res) => {
       });
     }
 
+    // Validate image count
     if (uploadedFiles.length > 5) {
       await cleanupUploadedFiles(uploadedFiles);
       return res.status(400).json({
@@ -171,36 +216,46 @@ exports.createEvent = async (req, res) => {
       });
     }
 
+    // Get user for organizer name
     const user = await User.findById(userId);
-    const organizerName = profile.fullName || user.name;
+    if (!user) {
+      await cleanupUploadedFiles(uploadedFiles);
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
 
+    const organizerName = profile.fullName || user.name;
     const formattedImages = formatImageObjects(uploadedFiles);
 
+    // Create event
     const event = new Event({
-      title,
-      description,
+      title: title.trim(),
+      description: description.trim(),
       category,
-      location,
+      location: location.trim(),
       campus: profile.campus,
       startDate: start,
       endDate: end,
       organizer: userId,
       organizerName,
       visibility: visibility || "campus",
-      maxAttendees: maxAttendees || null,
-      isOnline: isOnline || false,
+      maxAttendees: maxAttendees ? parseInt(maxAttendees) : null,
+      isOnline: isOnline === true || isOnline === "true",
       meetingLink: meetingLink || "",
-      tags: tags || [],
+      tags: tags ? (Array.isArray(tags) ? tags : tags.split(",")) : [],
       images: formattedImages,
     });
 
+    // Set cover image if there are images
     if (formattedImages.length > 0) {
       event.coverImage = formattedImages[0].url;
     }
 
     await event.save();
 
-    // Get created event with populated organizer
+    // Fetch created event with populated data
     const populatedEvent = await Event.findById(event._id)
       .populate("organizer", "name username email")
       .lean();
@@ -212,14 +267,13 @@ exports.createEvent = async (req, res) => {
     populatedEvent.organizerName =
       organizerWithProfile?.fullName || organizerWithProfile?.name;
 
-    populatedEvent.coverImageUrl = event.coverImageUrl;
-    populatedEvent.imageUrls = event.imageUrls;
-    populatedEvent.imageCount = event.imageCount;
+    // Process images for response
+    const finalEvent = processEventImagesForResponse(req, populatedEvent);
 
     res.status(201).json({
       success: true,
       message: "Event created successfully",
-      event: populatedEvent,
+      event: finalEvent,
     });
   } catch (error) {
     console.error("Create event error:", error);
@@ -248,65 +302,79 @@ exports.getEvents = async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const userId = req.user._id;
 
-    const userProfile = await Profile.findOne({ user: userId });
-    const userCampus = userProfile?.campus;
+    // Get user profile and connections
+    const [userProfile, currentUser] = await Promise.all([
+      Profile.findOne({ user: userId }),
+      User.findById(userId),
+    ]);
 
-    const currentUser = await User.findById(userId);
+    const userCampus = userProfile?.campus;
     const connectionIds = currentUser?.connections || [];
 
     let query = {};
 
+    // Campus filter
     if (campus) {
       query.campus = campus;
     } else if (userCampus) {
       query.campus = userCampus;
     }
 
+    // Category filter
     if (category && category !== "All" && category !== "all") {
       query.category = category;
     }
 
+    // Status filter
     if (status && status !== "all") {
       query.status = status;
     } else {
       query.status = { $in: ["upcoming", "ongoing"] };
     }
 
+    // Search filter
+    if (search && search.trim()) {
+      const searchRegex = new RegExp(search.trim(), "i");
+      query.$or = [
+        { title: searchRegex },
+        { description: searchRegex },
+        { location: searchRegex },
+        { tags: { $in: [searchRegex] } },
+      ];
+    }
+
+    // Visibility filter
     query.$or = [
       { visibility: "campus" },
       { visibility: "public" },
       { visibility: "connections", organizer: userId },
-      {
-        visibility: "connections",
-        organizer: { $in: connectionIds },
-      },
+      { visibility: "connections", organizer: { $in: connectionIds } },
     ];
 
-    const events = await Event.find(query)
-      .populate("organizer", "name username email")
-      .sort({ startDate: 1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .lean();
+    // Execute query
+    const [events, total] = await Promise.all([
+      Event.find(query)
+        .populate("organizer", "name username email")
+        .sort({ startDate: 1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      Event.countDocuments(query),
+    ]);
 
-    // Add profile pictures to each event's organizer
+    // Process events with profile pictures and image URLs
     const eventsWithProfiles = await Promise.all(
       events.map(async (event) => {
         const organizerWithProfile = await getUserWithProfile(event.organizer);
+        const processedEvent = processEventImagesForResponse(req, event);
+
         return {
-          ...event,
+          ...processedEvent,
           organizer: organizerWithProfile,
           organizerName:
             organizerWithProfile?.fullName ||
             organizerWithProfile?.name ||
             event.organizerName,
-          coverImageUrl:
-            event.images?.length > 0
-              ? event.images.find((img) => img.isCover)?.url ||
-                event.images[0]?.url
-              : "",
-          imageUrls: event.images?.map((img) => img.url) || [],
-          imageCount: event.images?.length || 0,
           isInterested: event.interested?.some(
             (id) => id.toString() === userId.toString(),
           ),
@@ -316,8 +384,6 @@ exports.getEvents = async (req, res) => {
         };
       }),
     );
-
-    const total = await Event.countDocuments(query);
 
     res.status(200).json({
       success: true,
@@ -346,6 +412,14 @@ exports.getEventById = async (req, res) => {
     const { eventId } = req.params;
     const userId = req.user._id;
 
+    // Validate eventId
+    if (!eventId || eventId === "undefined" || eventId === "null") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid event ID",
+      });
+    }
+
     const event = await Event.findById(eventId)
       .populate("organizer", "name username email")
       .populate("interested", "name username email")
@@ -359,35 +433,34 @@ exports.getEventById = async (req, res) => {
       });
     }
 
-    // Get organizer with profile picture
-    event.organizer = await getUserWithProfile(event.organizer);
-    event.organizerName = event.organizer.fullName || event.organizer.name;
+    // Get profiles for all users
+    const [organizerWithProfile, interestedWithProfiles, rsvpWithProfiles] =
+      await Promise.all([
+        getUserWithProfile(event.organizer),
+        getUsersWithProfiles(event.interested || []),
+        getUsersWithProfiles(event.rsvp || []),
+      ]);
 
-    // Get interested users with profile pictures
-    event.interested = await getUsersWithProfiles(event.interested || []);
+    event.organizer = organizerWithProfile;
+    event.organizerName =
+      organizerWithProfile?.fullName || organizerWithProfile?.name;
+    event.interested = interestedWithProfiles;
+    event.rsvp = rsvpWithProfiles;
 
-    // Get RSVP users with profile pictures
-    event.rsvp = await getUsersWithProfiles(event.rsvp || []);
-
-    // Add image helper fields
-    event.coverImageUrl =
-      event.images?.length > 0
-        ? event.images.find((img) => img.isCover)?.url || event.images[0]?.url
-        : "";
-    event.imageUrls = event.images?.map((img) => img.url) || [];
-    event.imageCount = event.images?.length || 0;
+    // Process images for response
+    const processedEvent = processEventImagesForResponse(req, event);
 
     // Add user interaction status
-    event.isInterested = event.interested?.some(
-      (user) => user._id.toString() === userId.toString(),
+    processedEvent.isInterested = event.interested?.some(
+      (user) => user._id?.toString() === userId.toString(),
     );
-    event.isRsvpd = event.rsvp?.some(
-      (user) => user._id.toString() === userId.toString(),
+    processedEvent.isRsvpd = event.rsvp?.some(
+      (user) => user._id?.toString() === userId.toString(),
     );
 
     res.status(200).json({
       success: true,
-      event,
+      event: processedEvent,
     });
   } catch (error) {
     console.error("Get event by ID error:", error);
@@ -409,7 +482,14 @@ exports.updateEvent = async (req, res) => {
     const userId = req.user._id;
     const updates = req.body;
 
-    const { imagesToDelete, setCoverImageIndex } = updates;
+    // Validate eventId
+    if (!eventId || eventId === "undefined" || eventId === "null") {
+      await cleanupUploadedFiles(newUploadedFiles);
+      return res.status(400).json({
+        success: false,
+        message: "Invalid event ID",
+      });
+    }
 
     const event = await Event.findById(eventId);
     if (!event) {
@@ -420,6 +500,7 @@ exports.updateEvent = async (req, res) => {
       });
     }
 
+    // Check authorization
     if (event.organizer.toString() !== userId.toString()) {
       await cleanupUploadedFiles(newUploadedFiles);
       return res.status(403).json({
@@ -428,13 +509,17 @@ exports.updateEvent = async (req, res) => {
       });
     }
 
-    if (imagesToDelete) {
-      const deleteIndices = imagesToDelete.split(",").map((i) => parseInt(i));
+    // Handle image deletion by indices
+    if (updates.imagesToDelete) {
+      const deleteIndices = updates.imagesToDelete
+        .split(",")
+        .map((i) => parseInt(i));
 
       for (const index of deleteIndices.sort((a, b) => b - a)) {
         if (event.images[index]) {
           try {
             await fs.unlink(event.images[index].path);
+            console.log(`🗑️ Deleted image: ${event.images[index].path}`);
           } catch (err) {
             console.error("Error deleting image file:", err);
           }
@@ -443,6 +528,7 @@ exports.updateEvent = async (req, res) => {
       }
     }
 
+    // Handle new image uploads
     if (newUploadedFiles.length > 0) {
       if (event.images.length + newUploadedFiles.length > 5) {
         await cleanupUploadedFiles(newUploadedFiles);
@@ -456,16 +542,17 @@ exports.updateEvent = async (req, res) => {
       event.images.push(...newImages);
     }
 
-    if (setCoverImageIndex !== undefined) {
-      const index = parseInt(setCoverImageIndex);
+    // Handle cover image setting
+    if (updates.setCoverImageIndex !== undefined) {
+      const index = parseInt(updates.setCoverImageIndex);
       if (event.images[index]) {
-        event.images.forEach((img) => {
-          img.isCover = false;
+        event.images.forEach((img, i) => {
+          img.isCover = i === index;
         });
-        event.images[index].isCover = true;
       }
     }
 
+    // Update text fields
     const allowedUpdates = [
       "title",
       "description",
@@ -480,12 +567,23 @@ exports.updateEvent = async (req, res) => {
       "tags",
     ];
 
-    allowedUpdates.forEach((field) => {
+    for (const field of allowedUpdates) {
       if (updates[field] !== undefined) {
-        event[field] = updates[field];
+        if (field === "tags" && typeof updates[field] === "string") {
+          event[field] = updates[field].split(",").map((t) => t.trim());
+        } else if (field === "maxAttendees") {
+          event[field] = updates[field] ? parseInt(updates[field]) : null;
+        } else if (field === "isOnline") {
+          event[field] = updates[field] === true || updates[field] === "true";
+        } else if (field === "startDate" || field === "endDate") {
+          event[field] = new Date(updates[field]);
+        } else {
+          event[field] = updates[field];
+        }
       }
-    });
+    }
 
+    // Update coverImage field
     if (event.images.length > 0) {
       const coverImg =
         event.images.find((img) => img.isCover) || event.images[0];
@@ -496,6 +594,7 @@ exports.updateEvent = async (req, res) => {
 
     await event.save();
 
+    // Fetch updated event
     const updatedEvent = await Event.findById(eventId)
       .populate("organizer", "name username email")
       .lean();
@@ -507,14 +606,13 @@ exports.updateEvent = async (req, res) => {
     updatedEvent.organizerName =
       organizerWithProfile?.fullName || organizerWithProfile?.name;
 
-    updatedEvent.coverImageUrl = event.coverImageUrl;
-    updatedEvent.imageUrls = event.imageUrls;
-    updatedEvent.imageCount = event.imageCount;
+    // Process images for response
+    const finalEvent = processEventImagesForResponse(req, updatedEvent);
 
     res.status(200).json({
       success: true,
       message: "Event updated successfully",
-      event: updatedEvent,
+      event: finalEvent,
     });
   } catch (error) {
     console.error("Update event error:", error);
@@ -534,6 +632,14 @@ exports.deleteEvent = async (req, res) => {
     const { eventId } = req.params;
     const userId = req.user._id;
 
+    // Validate eventId
+    if (!eventId || eventId === "undefined" || eventId === "null") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid event ID",
+      });
+    }
+
     const event = await Event.findById(eventId);
     if (!event) {
       return res.status(404).json({
@@ -542,6 +648,7 @@ exports.deleteEvent = async (req, res) => {
       });
     }
 
+    // Check authorization
     if (
       event.organizer.toString() !== userId.toString() &&
       req.user.role !== "admin"
@@ -552,9 +659,11 @@ exports.deleteEvent = async (req, res) => {
       });
     }
 
+    // Delete all associated images
     for (const image of event.images) {
       try {
         await fs.unlink(image.path);
+        console.log(`🗑️ Deleted image: ${image.path}`);
       } catch (err) {
         console.error("Error deleting image file:", image.path, err);
       }
@@ -585,6 +694,15 @@ exports.addEventImages = async (req, res) => {
     const { eventId } = req.params;
     const userId = req.user._id;
 
+    // Validate eventId
+    if (!eventId || eventId === "undefined" || eventId === "null") {
+      await cleanupUploadedFiles(uploadedFiles);
+      return res.status(400).json({
+        success: false,
+        message: "Invalid event ID",
+      });
+    }
+
     const event = await Event.findById(eventId);
     if (!event) {
       await cleanupUploadedFiles(uploadedFiles);
@@ -594,6 +712,7 @@ exports.addEventImages = async (req, res) => {
       });
     }
 
+    // Check authorization
     if (event.organizer.toString() !== userId.toString()) {
       await cleanupUploadedFiles(uploadedFiles);
       return res.status(403).json({
@@ -602,6 +721,7 @@ exports.addEventImages = async (req, res) => {
       });
     }
 
+    // Check image limit
     if (event.images.length + uploadedFiles.length > 5) {
       await cleanupUploadedFiles(uploadedFiles);
       return res.status(400).json({
@@ -610,20 +730,29 @@ exports.addEventImages = async (req, res) => {
       });
     }
 
+    // Add new images
     const newImages = formatImageObjects(uploadedFiles);
     event.images.push(...newImages);
 
+    // Set cover image if this was the first image
     if (event.images.length === newImages.length && newImages.length > 0) {
+      event.images[0].isCover = true;
       event.coverImage = newImages[0].url;
     }
 
     await event.save();
 
+    // Process images for response
+    const processedImages = event.images.map((img) => ({
+      ...img,
+      url: getFullImageUrl(req, img.url),
+    }));
+
     res.status(200).json({
       success: true,
       message: `${uploadedFiles.length} image(s) added successfully`,
       imageCount: event.images.length,
-      images: event.images,
+      images: processedImages,
     });
   } catch (error) {
     console.error("Add event images error:", error);
@@ -643,6 +772,14 @@ exports.removeEventImage = async (req, res) => {
     const { eventId, imageIndex } = req.params;
     const userId = req.user._id;
 
+    // Validate parameters
+    if (!eventId || eventId === "undefined" || eventId === "null") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid event ID",
+      });
+    }
+
     const event = await Event.findById(eventId);
     if (!event) {
       return res.status(404).json({
@@ -651,6 +788,7 @@ exports.removeEventImage = async (req, res) => {
       });
     }
 
+    // Check authorization
     if (event.organizer.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
@@ -666,8 +804,10 @@ exports.removeEventImage = async (req, res) => {
       });
     }
 
+    // Delete the image file
     try {
       await fs.unlink(event.images[index].path);
+      console.log(`🗑️ Deleted image: ${event.images[index].path}`);
     } catch (err) {
       console.error("Error deleting image file:", err);
     }
@@ -675,10 +815,12 @@ exports.removeEventImage = async (req, res) => {
     const wasCover = event.images[index].isCover;
     event.images.splice(index, 1);
 
+    // If we removed the cover image and there are other images, set the first as cover
     if (wasCover && event.images.length > 0) {
       event.images[0].isCover = true;
     }
 
+    // Update coverImage field
     if (event.images.length > 0) {
       const coverImg =
         event.images.find((img) => img.isCover) || event.images[0];
@@ -689,11 +831,17 @@ exports.removeEventImage = async (req, res) => {
 
     await event.save();
 
+    // Process images for response
+    const processedImages = event.images.map((img) => ({
+      ...img,
+      url: getFullImageUrl(req, img.url),
+    }));
+
     res.status(200).json({
       success: true,
       message: "Image removed successfully",
       imageCount: event.images.length,
-      images: event.images,
+      images: processedImages,
     });
   } catch (error) {
     console.error("Remove event image error:", error);
@@ -727,15 +875,19 @@ exports.markInterested = async (req, res) => {
     } else {
       await event.addInterested(userId);
 
+      // Send notification to event organizer
       if (event.organizer.toString() !== userId.toString()) {
-        const user = await User.findById(userId);
-        const profile = await Profile.findOne({ user: userId });
+        const [user, profile] = await Promise.all([
+          User.findById(userId),
+          Profile.findOne({ user: userId }),
+        ]);
+
         await createEventNotification(
           event.organizer,
           userId,
           "event_interest",
           "New Interest",
-          `${profile?.fullName || user.name} is interested in your event: ${event.title}`,
+          `${profile?.fullName || user?.name || "Someone"} is interested in your event: ${event.title}`,
           event._id,
           "Event",
         );
@@ -773,6 +925,7 @@ exports.rsvpEvent = async (req, res) => {
       });
     }
 
+    // Check if event is full
     if (event.isFull && !event.isUserRsvpd(userId)) {
       return res.status(400).json({
         success: false,
@@ -787,15 +940,19 @@ exports.rsvpEvent = async (req, res) => {
     } else {
       await event.addRsvp(userId);
 
+      // Send notification to event organizer
       if (event.organizer.toString() !== userId.toString()) {
-        const user = await User.findById(userId);
-        const profile = await Profile.findOne({ user: userId });
+        const [user, profile] = await Promise.all([
+          User.findById(userId),
+          Profile.findOne({ user: userId }),
+        ]);
+
         await createEventNotification(
           event.organizer,
           userId,
           "event_rsvp",
           "New RSVP",
-          `${profile?.fullName || user.name} has RSVP'd for your event: ${event.title}`,
+          `${profile?.fullName || user?.name || "Someone"} has RSVP'd for your event: ${event.title}`,
           event._id,
           "Event",
         );
@@ -813,7 +970,7 @@ exports.rsvpEvent = async (req, res) => {
     console.error("RSVP error:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to update RSVP",
+      message: error.message || "Failed to update RSVP",
     });
   }
 };
@@ -828,36 +985,33 @@ exports.getMyEvents = async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     let query = { organizer: userId };
-
     if (status && status !== "all") {
       query.status = status;
     }
 
-    const events = await Event.find(query)
-      .populate("organizer", "name username email")
-      .sort({ startDate: 1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .lean();
+    const [events, total] = await Promise.all([
+      Event.find(query)
+        .populate("organizer", "name username email")
+        .sort({ startDate: 1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      Event.countDocuments(query),
+    ]);
 
     const organizerWithProfile = await getUserWithProfile({ _id: userId });
 
-    const eventsWithProfiles = events.map((event) => ({
-      ...event,
-      organizer: organizerWithProfile,
-      organizerName:
-        organizerWithProfile?.fullName || organizerWithProfile?.name,
-      coverImageUrl:
-        event.images?.length > 0
-          ? event.images.find((img) => img.isCover)?.url || event.images[0]?.url
-          : "",
-      imageUrls: event.images?.map((img) => img.url) || [],
-      imageCount: event.images?.length || 0,
-      isInterested: true,
-      isRsvpd: event.rsvp?.some((id) => id.toString() === userId.toString()),
-    }));
-
-    const total = await Event.countDocuments(query);
+    const eventsWithProfiles = events.map((event) => {
+      const processedEvent = processEventImagesForResponse(req, event);
+      return {
+        ...processedEvent,
+        organizer: organizerWithProfile,
+        organizerName:
+          organizerWithProfile?.fullName || organizerWithProfile?.name,
+        isInterested: true,
+        isRsvpd: event.rsvp?.some((id) => id.toString() === userId.toString()),
+      };
+    });
 
     res.status(200).json({
       success: true,
@@ -887,28 +1041,26 @@ exports.getAttendingEvents = async (req, res) => {
     const { page = 1, limit = 20 } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const events = await Event.find({ rsvp: userId })
-      .populate("organizer", "name username email")
-      .sort({ startDate: 1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .lean();
+    const [events, total] = await Promise.all([
+      Event.find({ rsvp: userId })
+        .populate("organizer", "name username email")
+        .sort({ startDate: 1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      Event.countDocuments({ rsvp: userId }),
+    ]);
 
     const eventsWithProfiles = await Promise.all(
       events.map(async (event) => {
         const organizerWithProfile = await getUserWithProfile(event.organizer);
+        const processedEvent = processEventImagesForResponse(req, event);
+
         return {
-          ...event,
+          ...processedEvent,
           organizer: organizerWithProfile,
           organizerName:
             organizerWithProfile?.fullName || organizerWithProfile?.name,
-          coverImageUrl:
-            event.images?.length > 0
-              ? event.images.find((img) => img.isCover)?.url ||
-                event.images[0]?.url
-              : "",
-          imageUrls: event.images?.map((img) => img.url) || [],
-          imageCount: event.images?.length || 0,
           isInterested: event.interested?.some(
             (id) => id.toString() === userId.toString(),
           ),
@@ -916,8 +1068,6 @@ exports.getAttendingEvents = async (req, res) => {
         };
       }),
     );
-
-    const total = await Event.countDocuments({ rsvp: userId });
 
     res.status(200).json({
       success: true,

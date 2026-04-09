@@ -4,9 +4,9 @@ const emailService = require("./emailService");
 const BASE_URL =
   process.env.NODE_ENV === "production"
     ? process.env.PRODUCTION_URL
-    : process.env.BASE_URL || "http://192.168.1.4:5001";
+    : process.env.BASE_URL || "http://192.168.1.2:5001";
 
-const EXPO_GO_URL = "exp://192.168.1.4:8081";
+const EXPO_GO_URL = "exp://192.168.1.2:8081";
 
 /**
  * Send verification email to user

@@ -310,6 +310,15 @@ exports.updatePost = async (req, res) => {
     const postId = req.params.id;
     const userId = req.user._id;
 
+    console.log("Update post request:", {
+      postId,
+      contentLength: content?.length,
+      removeImages,
+      visibility,
+      isAnonymous,
+      filesCount: req.files?.length || 0,
+    });
+
     const post = await Post.findById(postId);
 
     if (!post) {
@@ -334,21 +343,54 @@ exports.updatePost = async (req, res) => {
       });
     }
 
+    // Parse removeImages - it could come as string, array, or undefined
+    let imagesToRemove = [];
+    if (removeImages) {
+      if (Array.isArray(removeImages)) {
+        imagesToRemove = removeImages;
+      } else if (typeof removeImages === "string") {
+        try {
+          // Try to parse as JSON first
+          imagesToRemove = JSON.parse(removeImages);
+        } catch {
+          // If not JSON, split by comma
+          imagesToRemove = removeImages.split(",").filter((id) => id.trim());
+        }
+      }
+    }
+
+    console.log("Images to remove:", imagesToRemove);
+
     // Remove specified images
-    if (removeImages && Array.isArray(removeImages)) {
-      const imagesToRemove = post.images.filter(
-        (img) =>
-          removeImages.includes(img.filename) || removeImages.includes(img.url),
-      );
+    if (imagesToRemove.length > 0) {
+      const imagesToKeep = [];
+      const imagesToDelete = [];
 
-      const filenames = imagesToRemove.map((img) => img.filename);
-      deletePostImages(userId.toString(), filenames);
+      for (const img of post.images) {
+        // Check if this image should be removed
+        const shouldRemove = imagesToRemove.some(
+          (removeId) =>
+            removeId === img.filename ||
+            removeId === img._id?.toString() ||
+            removeId === img.url ||
+            removeId === img.id,
+        );
 
-      post.images = post.images.filter(
-        (img) =>
-          !removeImages.includes(img.filename) &&
-          !removeImages.includes(img.url),
-      );
+        if (shouldRemove) {
+          imagesToDelete.push(img);
+        } else {
+          imagesToKeep.push(img);
+        }
+      }
+
+      // Delete the image files
+      if (imagesToDelete.length > 0) {
+        const filenames = imagesToDelete.map((img) => img.filename);
+        deletePostImages(userId.toString(), filenames);
+        console.log("Deleted image files:", filenames);
+      }
+
+      post.images = imagesToKeep;
     }
 
     // Add new images
@@ -362,6 +404,7 @@ exports.updatePost = async (req, res) => {
       }));
 
       if (post.images.length + newImages.length > 4) {
+        // Clean up newly uploaded files
         const filenames = req.files.map((file) => file.filename);
         deletePostImages(userId.toString(), filenames);
         return res.status(400).json({
@@ -371,15 +414,16 @@ exports.updatePost = async (req, res) => {
       }
 
       post.images.push(...newImages);
+      console.log(`Added ${newImages.length} new images`);
     }
 
     // Update fields
-    if (content !== undefined) {
+    if (content !== undefined && content !== null) {
       post.content = content;
       post.tags = extractHashtags(content);
     }
 
-    if (visibility !== undefined) {
+    if (visibility !== undefined && visibility !== null) {
       if (!["campus", "connections"].includes(visibility)) {
         return res.status(400).json({
           success: false,
@@ -389,13 +433,16 @@ exports.updatePost = async (req, res) => {
       post.visibility = visibility;
     }
 
-    if (isAnonymous !== undefined) {
+    if (isAnonymous !== undefined && isAnonymous !== null) {
       post.isAnonymous = isAnonymous === "true" || isAnonymous === true;
     }
 
+    // Set edited flag
     post.isEdited = true;
     post.editedAt = new Date();
     await post.save();
+
+    console.log("Post updated successfully:", postId);
 
     const updatedPost = await Post.findById(postId)
       .populate("user", "name username email verified")
