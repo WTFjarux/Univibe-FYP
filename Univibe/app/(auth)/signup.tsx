@@ -226,10 +226,7 @@ export default function SignUpScreen() {
   ]);
 
   return (
-    <LinearGradient
-      colors={["#9f95b6ff", "#17151aff"]}
-      style={styles.container}
-    >
+    <LinearGradient colors={["#faf9f6", "#e8e6e1"]} style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -254,13 +251,13 @@ export default function SignUpScreen() {
                 <Ionicons
                   name="person-outline"
                   size={20}
-                  color="white"
+                  color="#6b7280"
                   style={styles.inputIcon}
                 />
                 <TextInput
                   style={styles.input}
                   placeholder="Full Name"
-                  placeholderTextColor="rgba(255,255,255,0.7)"
+                  placeholderTextColor="#9ca3af"
                   value={fullName}
                   onChangeText={setFullName}
                   autoCapitalize="words"
@@ -272,13 +269,13 @@ export default function SignUpScreen() {
                 <Ionicons
                   name="mail-outline"
                   size={20}
-                  color="white"
+                  color="#6b7280"
                   style={styles.inputIcon}
                 />
                 <TextInput
                   style={styles.input}
                   placeholder="Email"
-                  placeholderTextColor="rgba(255,255,255,0.7)"
+                  placeholderTextColor="#9ca3af"
                   value={email}
                   onChangeText={setEmail}
                   autoCapitalize="none"
@@ -291,13 +288,13 @@ export default function SignUpScreen() {
                 <Ionicons
                   name="lock-closed-outline"
                   size={20}
-                  color="white"
+                  color="#6b7280"
                   style={styles.inputIcon}
                 />
                 <TextInput
                   style={styles.input}
                   placeholder="Password"
-                  placeholderTextColor="rgba(255,255,255,0.7)"
+                  placeholderTextColor="#9ca3af"
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry={!showPassword}
@@ -310,7 +307,7 @@ export default function SignUpScreen() {
                   <Ionicons
                     name={showPassword ? "eye-outline" : "eye-off-outline"}
                     size={22}
-                    color="rgba(255,255,255,0.7)"
+                    color="#6b7280"
                   />
                 </TouchableOpacity>
               </View>
@@ -319,13 +316,13 @@ export default function SignUpScreen() {
                 <Ionicons
                   name="lock-closed-outline"
                   size={20}
-                  color="white"
+                  color="#6b7280"
                   style={styles.inputIcon}
                 />
                 <TextInput
                   style={styles.input}
                   placeholder="Confirm Password"
-                  placeholderTextColor="rgba(255,255,255,0.7)"
+                  placeholderTextColor="#9ca3af"
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
                   secureTextEntry={!showConfirmPassword}
@@ -340,7 +337,7 @@ export default function SignUpScreen() {
                       showConfirmPassword ? "eye-outline" : "eye-off-outline"
                     }
                     size={22}
-                    color="rgba(255,255,255,0.7)"
+                    color="#6b7280"
                   />
                 </TouchableOpacity>
               </View>
@@ -352,7 +349,7 @@ export default function SignUpScreen() {
                       password.length >= 6 ? "checkmark-circle" : "close-circle"
                     }
                     size={16}
-                    color={password.length >= 6 ? "#4CAF50" : "#FF5252"}
+                    color={password.length >= 6 ? "#10b981" : "#ef4444"}
                   />
                   <Text
                     style={[
@@ -372,7 +369,7 @@ export default function SignUpScreen() {
                         : "close-circle"
                     }
                     size={16}
-                    color={/[A-Z]/.test(password) ? "#4CAF50" : "#FF5252"}
+                    color={/[A-Z]/.test(password) ? "#10b981" : "#ef4444"}
                   />
                   <Text
                     style={[
@@ -390,7 +387,7 @@ export default function SignUpScreen() {
                       /\d/.test(password) ? "checkmark-circle" : "close-circle"
                     }
                     size={16}
-                    color={/\d/.test(password) ? "#4CAF50" : "#FF5252"}
+                    color={/\d/.test(password) ? "#10b981" : "#ef4444"}
                   />
                   <Text
                     style={[
@@ -416,8 +413,8 @@ export default function SignUpScreen() {
                       password &&
                       confirmPassword &&
                       password === confirmPassword
-                        ? "#4CAF50"
-                        : "#FF5252"
+                        ? "#10b981"
+                        : "#ef4444"
                     }
                   />
                   <Text
@@ -470,13 +467,13 @@ export default function SignUpScreen() {
                   style={styles.socialButton}
                   disabled={isLoading}
                 >
-                  <Ionicons name="logo-google" size={35} color="white" />
+                  <Ionicons name="logo-google" size={35} color="#4b5563" />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.socialButton}
                   disabled={isLoading}
                 >
-                  <Ionicons name="logo-apple" size={35} color="white" />
+                  <Ionicons name="logo-apple" size={35} color="#4b5563" />
                 </TouchableOpacity>
               </View>
 
@@ -525,19 +522,19 @@ const styles = StyleSheet.create({
   logoContainer: { alignItems: "center", marginTop: 10 },
   logoText: {
     fontSize: 48,
-    color: "white",
+    color: "#1f2937",
     fontFamily: "Sofia-Regular",
     letterSpacing: 2,
   },
   sloganTitle: {
     marginTop: 10,
-    color: "white",
+    color: "#4b5563",
     fontSize: 18,
     textAlign: "center",
     fontFamily: "SofiaSans-Bold",
   },
   sloganSubtitle: {
-    color: "white",
+    color: "#4b5563",
     fontSize: 18,
     textAlign: "center",
     marginBottom: 30,
@@ -545,11 +542,12 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
   signUpTitle: {
-    color: "white",
+    color: "#1f2937",
     fontSize: 24,
     textAlign: "center",
     marginBottom: 30,
     fontFamily: "SofiaSans-Bold",
+    fontWeight: "bold",
   },
   formContainer: {
     width: "100%",
@@ -560,16 +558,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     width: "100%",
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    backgroundColor: "white",
     borderRadius: 30,
     marginBottom: 15,
     paddingHorizontal: 20,
     height: 56,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.3)",
+    borderColor: "#e5e7eb",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
   },
   inputIcon: { marginRight: 12 },
-  input: { flex: 1, fontSize: 16, color: "white" },
+  input: { flex: 1, fontSize: 16, color: "#1f2937" },
   eyeButton: { padding: 5 },
   passwordRequirements: { width: "100%", padding: 15, marginBottom: 15 },
   requirementRow: {
@@ -578,29 +581,36 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   requirementText: {
-    color: "rgba(255, 255, 255, 0.7)",
+    color: "#6b7280",
     fontSize: 13,
     marginLeft: 8,
   },
-  requirementMet: { color: "#4CAF50" },
+  requirementMet: { color: "#10b981" },
   termsContainer: { marginBottom: 20, paddingHorizontal: 10 },
   termsText: {
-    color: "white",
+    color: "#6b7280",
     fontSize: 12,
     textAlign: "center",
     lineHeight: 16,
   },
-  termsLink: { fontWeight: "600", textDecorationLine: "underline" },
+  termsLink: {
+    fontWeight: "600",
+    textDecorationLine: "underline",
+    color: "#8b5cf6",
+  },
   signUpButton: {
     width: "90%",
     padding: 16,
     borderRadius: 30,
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    borderColor: "rgba(255, 255, 255, 0.3)",
-    borderWidth: 1,
+    backgroundColor: "#8b5cf6",
     marginBottom: 30,
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#8b5cf6",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   disabledButton: { opacity: 0.6 },
   signUpButtonText: {
@@ -615,20 +625,20 @@ const styles = StyleSheet.create({
     width: "100%",
     marginBottom: 15,
   },
-  orLine: { flex: 1, height: 1, backgroundColor: "rgba(255, 255, 255, 0.3)" },
+  orLine: { flex: 1, height: 1, backgroundColor: "#d1d5db" },
   orText: {
-    color: "white",
+    color: "#6b7280",
     fontSize: 16,
     marginHorizontal: 15,
     fontFamily: "Sofia-Regular",
   },
-  continueWith: { color: "white", fontSize: 15, marginBottom: 20 },
+  continueWith: { color: "#6b7280", fontSize: 15, marginBottom: 20 },
   socialRow: { flexDirection: "row", marginBottom: 30, gap: 25 },
   socialButton: { padding: 10 },
   signInContainer: { flexDirection: "row", justifyContent: "center" },
-  signInText: { color: "white", fontSize: 14 },
+  signInText: { color: "#6b7280", fontSize: 14 },
   signInLink: {
-    color: "white",
+    color: "#8b5cf6",
     fontSize: 14,
     fontWeight: "600",
     textDecorationLine: "underline",

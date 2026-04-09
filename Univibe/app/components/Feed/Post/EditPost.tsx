@@ -20,7 +20,11 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useAuth } from "../../../../lib/AuthContext";
-import { getPostById, Post } from "../../../../lib/postService";
+import {
+  getPostById,
+  Post,
+  getFullImageUrl,
+} from "../../../../lib/postService";
 import { API_BASE_URL } from "../../../../constants/ipConstants";
 import DiscardChangesModal from "../../DiscardChangesModal";
 
@@ -46,24 +50,20 @@ export default function EditPostScreen() {
   const [originalContent, setOriginalContent] = useState("");
   const [originalVisibility, setOriginalVisibility] = useState("");
   const [originalIsAnonymous, setOriginalIsAnonymous] = useState(false);
-  const [originalImages, setOriginalImages] = useState<any[]>([]);
+  const [originalImageIds, setOriginalImageIds] = useState<string[]>([]);
 
-  // Visibility options - Only campus and connections
+  // Visibility options
   const visibilityOptions = [
     { id: "campus", label: "Campus", icon: "school-outline" },
     { id: "connections", label: "Connections", icon: "people-outline" },
   ];
 
-  // Fetch post data on mount
   useEffect(() => {
     if (postId && token) {
       fetchPost();
     }
   }, [postId, token]);
 
-  /**
-   * Fetch post details to edit
-   */
   const fetchPost = async () => {
     try {
       const response = await getPostById(postId);
@@ -73,13 +73,28 @@ export default function EditPostScreen() {
       setContent(postData.content);
       setVisibility(postData.visibility);
       setIsAnonymous(postData.isAnonymous || false);
-      setImages(postData.images || []);
 
-      // Store original values for change detection
+      // Process existing images with full URLs
+      const processedImages = (postData.images || []).map(
+        (img: any, index: number) => ({
+          ...img,
+          url: getFullImageUrl(img.url),
+          isExisting: true,
+          id: img._id || img.filename || img.url || `img_${index}`,
+          index: index,
+        }),
+      );
+
+      setImages(processedImages);
+
+      // Store original image IDs for comparison
+      const imageIds = processedImages.map((img) => img.id);
+      setOriginalImageIds(imageIds);
+
+      // Store original values
       setOriginalContent(postData.content);
       setOriginalVisibility(postData.visibility);
       setOriginalIsAnonymous(postData.isAnonymous || false);
-      setOriginalImages(postData.images || []);
     } catch (error: any) {
       console.error("Error fetching post:", error);
       Alert.alert("Error", "Failed to load post");
@@ -89,58 +104,35 @@ export default function EditPostScreen() {
     }
   };
 
-  /**
-   * Handle anonymous toggle - Force visibility to campus when anonymous is ON
-   */
   const handleAnonymousToggle = (value: boolean) => {
     setIsAnonymous(value);
-
-    // If turning ON anonymous, force visibility to "campus"
     if (value) {
       setVisibility("campus");
     }
-    // If turning OFF anonymous, keep current visibility (don't change)
   };
 
-  /**
-   * Check if any changes have been made to the post
-   */
   const hasChanges = () => {
-    // Check content change (trim both to ignore whitespace)
     if (content.trim() !== originalContent.trim()) return true;
-
-    // Check visibility change
     if (visibility !== originalVisibility) return true;
-
-    // Check anonymous status change
     if (isAnonymous !== originalIsAnonymous) return true;
 
     // Check if images were removed
-    if (imagesToRemove.length > 0) return true;
+    const currentImageIds = images
+      .filter((img) => img.isExisting)
+      .map((img) => img.id);
+    if (currentImageIds.length !== originalImageIds.length) return true;
+
+    // Check if image order or content changed
+    for (let i = 0; i < currentImageIds.length; i++) {
+      if (currentImageIds[i] !== originalImageIds[i]) return true;
+    }
 
     // Check if new images were added
-    const originalImageCount = originalImages.length;
-    const currentImageCount = images.length;
-    if (currentImageCount !== originalImageCount) return true;
-
-    // Check if image order changed or images were replaced
-    // Compare image URLs/filenames
-    const originalImageKeys = originalImages
-      .map((img) => img.filename || img.url || img)
-      .sort()
-      .join(",");
-    const currentImageKeys = images
-      .map((img) => img.filename || img.url || img)
-      .sort()
-      .join(",");
-    if (originalImageKeys !== currentImageKeys) return true;
+    if (images.filter((img) => !img.isExisting).length > 0) return true;
 
     return false;
   };
 
-  /**
-   * Handle back button press
-   */
   const handleBackPress = () => {
     if (hasChanges()) {
       setShowDiscardModal(true);
@@ -149,17 +141,11 @@ export default function EditPostScreen() {
     }
   };
 
-  /**
-   * Handle discard changes confirmation
-   */
   const handleDiscardChanges = () => {
     setShowDiscardModal(false);
     router.back();
   };
 
-  /**
-   * Pick images from gallery
-   */
   const pickImages = async () => {
     try {
       const { status } =
@@ -173,46 +159,56 @@ export default function EditPostScreen() {
         return;
       }
 
+      const remainingSlots = 4 - images.length;
+      if (remainingSlots <= 0) {
+        Alert.alert(
+          "Limit Reached",
+          "You can only add up to 4 images per post",
+        );
+        return;
+      }
+
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
-        aspect: [4, 3],
         quality: 0.8,
-        selectionLimit: 4 - images.length,
+        selectionLimit: remainingSlots,
       });
 
       if (!result.canceled && result.assets) {
-        const newImages = [
-          ...images,
-          ...result.assets
-            .map((asset) => asset.uri)
-            .slice(0, 4 - images.length),
-        ];
-        setImages(newImages);
+        const newImages = result.assets.map((asset, idx) => ({
+          uri: asset.uri,
+          isExisting: false,
+          id: `new_${Date.now()}_${idx}_${Math.random()}`,
+          tempFile: true,
+        }));
+
+        setImages((prev) => [...prev, ...newImages]);
       }
     } catch (error) {
+      console.error("Error picking images:", error);
       Alert.alert("Error", "Failed to pick images");
     }
   };
 
-  /**
-   * Remove image from post
-   */
   const removeImage = (index: number) => {
     const imageToRemove = images[index];
 
-    // If it's an existing image (has filename), mark for removal
-    if (imageToRemove.filename) {
-      setImagesToRemove((prev) => [...prev, imageToRemove.filename]);
+    // If it's an existing image, mark for removal from server
+    if (imageToRemove.isExisting) {
+      // Use _id or filename to identify the image to remove
+      const imageId =
+        imageToRemove._id || imageToRemove.filename || imageToRemove.id;
+      if (imageId && !imagesToRemove.includes(imageId)) {
+        setImagesToRemove((prev) => [...prev, imageId]);
+        console.log("Marked for removal:", imageId);
+      }
     }
 
-    // Remove from current images array
+    // Remove from local state
     setImages((prev) => prev.filter((_, i) => i !== index));
   };
 
-  /**
-   * Handle form submission
-   */
   const handleSubmit = async () => {
     if (!content.trim()) {
       Alert.alert("Error", "Post content cannot be empty");
@@ -229,32 +225,44 @@ export default function EditPostScreen() {
       formData.append("visibility", visibility);
       formData.append("isAnonymous", isAnonymous.toString());
 
-      // Append images to remove
+      // Append images to remove - send as array
       if (imagesToRemove.length > 0) {
-        formData.append("removeImages", JSON.stringify(imagesToRemove));
+        // Send each image ID separately or as JSON string
+        imagesToRemove.forEach((imageId) => {
+          formData.append("removeImages[]", imageId);
+        });
+        console.log("Removing images:", imagesToRemove);
       }
 
       // Append new images
-      const newImages = images.filter((img) => !img.filename);
+      const newImages = images.filter((img) => !img.isExisting);
       for (let i = 0; i < newImages.length; i++) {
         const image = newImages[i];
-        const filename = image.split("/").pop() || `image_${i}.jpg`;
+        const uri = image.uri;
+        const filename = uri.split("/").pop() || `image_${i}.jpg`;
         const ext = filename.split(".").pop()?.toLowerCase() || "jpg";
 
         let mimeType = "image/jpeg";
         if (ext === "png") mimeType = "image/png";
         else if (ext === "gif") mimeType = "image/gif";
         else if (ext === "webp") mimeType = "image/webp";
+        else if (ext === "heic") mimeType = "image/heic";
 
         const fileObject = {
-          uri: image,
+          uri: uri,
           name: `post_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${ext}`,
           type: mimeType,
         };
         formData.append("images", fileObject as any);
       }
 
-      // Make API call to update post
+      console.log("Updating post with:", {
+        postId,
+        contentLength: content.length,
+        imagesToRemove: imagesToRemove.length,
+        newImagesCount: newImages.length,
+      });
+
       const response = await fetch(`${API_BASE_URL}/api/posts/${postId}`, {
         method: "PUT",
         headers: {
@@ -266,7 +274,7 @@ export default function EditPostScreen() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to update post");
+        throw new Error(data.error || data.message || "Failed to update post");
       }
 
       Alert.alert("Success", "Post updated successfully", [
@@ -361,68 +369,50 @@ export default function EditPostScreen() {
           {/* Character Count */}
           <Text style={styles.charCount}>{content.length}/500</Text>
 
-          {/* Images Section - Similar to Create Post */}
-          {images.length > 0 && (
-            <View style={styles.imagesContainer}>
-              <Text style={styles.imagesTitle}>Photos ({images.length}/4)</Text>
-              <View style={styles.imagesGrid}>
-                {images.map((image, index) => (
-                  <View key={index} style={styles.imageWrapper}>
-                    <Image
-                      source={{
-                        uri: image.filename
-                          ? getFullImageUrl(image.url)
-                          : image,
-                      }}
-                      style={styles.previewImage}
-                    />
-                    <TouchableOpacity
-                      style={styles.removeButton}
-                      onPress={() => removeImage(index)}
-                      disabled={submitting}
-                    >
-                      <Ionicons name="close-circle" size={24} color="#fff" />
-                    </TouchableOpacity>
-                    {images.length > 1 && (
-                      <View style={styles.imageNumber}>
-                        <Text style={styles.imageNumberText}>{index + 1}</Text>
-                      </View>
-                    )}
-                    {image.filename && (
-                      <View style={styles.existingBadge}>
-                        <Text style={styles.existingBadgeText}>Existing</Text>
-                      </View>
-                    )}
-                  </View>
-                ))}
-                {images.length < 4 && (
+          {/* Images Section */}
+          <View style={styles.imagesContainer}>
+            <Text style={styles.imagesTitle}>Photos ({images.length}/4)</Text>
+            <View style={styles.imagesGrid}>
+              {images.map((image, index) => (
+                <View key={image.id || index} style={styles.imageWrapper}>
+                  <Image
+                    source={{ uri: image.isExisting ? image.url : image.uri }}
+                    style={styles.previewImage}
+                  />
                   <TouchableOpacity
-                    style={styles.addMoreButton}
-                    onPress={pickImages}
+                    style={styles.removeButton}
+                    onPress={() => removeImage(index)}
                     disabled={submitting}
                   >
-                    <Ionicons
-                      name="add-circle-outline"
-                      size={32}
-                      color="#8b5cf6"
-                    />
+                    <Ionicons name="close-circle" size={24} color="#fff" />
                   </TouchableOpacity>
-                )}
-              </View>
+                  {images.length > 1 && (
+                    <View style={styles.imageNumber}>
+                      <Text style={styles.imageNumberText}>{index + 1}</Text>
+                    </View>
+                  )}
+                  {image.isExisting && (
+                    <View style={styles.existingBadge}>
+                      <Text style={styles.existingBadgeText}>Existing</Text>
+                    </View>
+                  )}
+                </View>
+              ))}
+              {images.length < 4 && (
+                <TouchableOpacity
+                  style={styles.addMoreButton}
+                  onPress={pickImages}
+                  disabled={submitting}
+                >
+                  <Ionicons
+                    name="add-circle-outline"
+                    size={32}
+                    color="#8b5cf6"
+                  />
+                </TouchableOpacity>
+              )}
             </View>
-          )}
-
-          {/* Add Image Button - When no images exist (similar to create post) */}
-          {images.length === 0 && (
-            <TouchableOpacity
-              style={styles.addImageButtonSimple}
-              onPress={pickImages}
-              disabled={submitting}
-            >
-              <Ionicons name="image-outline" size={24} color="#8b5cf6" />
-              <Text style={styles.addImageTextSimple}>Add Photo</Text>
-            </TouchableOpacity>
-          )}
+          </View>
 
           {/* Visibility Options */}
           <View style={styles.section}>
@@ -437,7 +427,6 @@ export default function EditPostScreen() {
             </Text>
             <View style={styles.visibilityOptions}>
               {visibilityOptions.map((option) => {
-                // Check if option is disabled (connections is disabled when anonymous)
                 const isDisabled = isAnonymous && option.id === "connections";
 
                 return (
@@ -449,7 +438,6 @@ export default function EditPostScreen() {
                       isDisabled && styles.visibilityOptionDisabled,
                     ]}
                     onPress={() => {
-                      // Don't allow changing to connections if anonymous
                       if (!isDisabled && !submitting) {
                         setVisibility(option.id);
                       }
@@ -539,20 +527,6 @@ export default function EditPostScreen() {
     </SafeAreaView>
   );
 }
-
-/**
- * Helper to get full image URL
- */
-const getFullImageUrl = (url: string): string => {
-  if (!url) return "";
-  if (url.startsWith("http://") || url.startsWith("https://")) return url;
-
-  const baseUrl = API_BASE_URL.endsWith("/")
-    ? API_BASE_URL.slice(0, -1)
-    : API_BASE_URL;
-  const cleanUrl = url.startsWith("/") ? url : `/${url}`;
-  return `${baseUrl}${cleanUrl}`;
-};
 
 const styles = StyleSheet.create({
   container: {

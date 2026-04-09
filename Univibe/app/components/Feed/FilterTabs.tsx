@@ -51,19 +51,24 @@ const FilterTabs: React.FC<FilterTabsProps> = ({
 const styles = StyleSheet.create({
   filtersContainer: {
     marginHorizontal: 20,
-    marginBottom: 24,
+    marginBottom: 12,
+    flexGrow: 0,
   },
   filtersContent: {
     paddingRight: 20,
+    paddingVertical: 4,
+    alignItems: "center",
   },
   filterButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
     borderRadius: 20,
     backgroundColor: "white",
     marginRight: 12,
     borderWidth: 1,
     borderColor: "#e5e7eb",
+    minHeight: 34,
+    justifyContent: "center",
   },
   filterButtonActive: {
     backgroundColor: "#8b5cf6",
@@ -73,7 +78,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#6b7280",
     fontWeight: "500",
-    fontFamily:"SofiaSans-Bold",
+    fontFamily: "SofiaSans-Bold",
+    lineHeight: 20,
   },
   filterTextActive: {
     color: "white",

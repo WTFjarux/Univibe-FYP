@@ -373,6 +373,31 @@ const PostCard: React.FC<PostCardProps> = ({
   const visibilityIconName = getVisibilityIconName();
   const visibilityBadgeColor = getVisibilityBadgeColor();
 
+  // Render edited indicator based on who is viewing
+  const renderEditedIndicator = () => {
+    if (!post.isEdited) return null;
+
+    if (ownPost) {
+      // For the post owner: show "Edited X time ago"
+      return (
+        <View style={styles.editedIndicator}>
+          <Ionicons name="create-outline" size={12} color="#9ca3af" />
+          <Text style={styles.editedText}>
+            Edited {post.editedAt ? formatTimeAgo(post.editedAt) : ""}
+          </Text>
+        </View>
+      );
+    } else {
+      // For other users: just show "Edited" tag without time
+      return (
+        <View style={styles.editedIndicator}>
+          <Ionicons name="create-outline" size={12} color="#9ca3af" />
+          <Text style={styles.editedText}>Edited</Text>
+        </View>
+      );
+    }
+  };
+
   return (
     <View
       style={styles.postCard}
@@ -454,6 +479,9 @@ const PostCard: React.FC<PostCardProps> = ({
       </View>
 
       <Text style={styles.postContent}>{post.content}</Text>
+
+      {/* Edited indicator - shows differently for owner vs others */}
+      {renderEditedIndicator()}
 
       {postImages.length > 0 && containerWidth > 0 && (
         <View style={styles.imagesContainer}>
@@ -610,8 +638,20 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: "#374151",
     marginBottom: 12,
-    padding: 16,
     paddingHorizontal: 20,
+    fontFamily: "SofiaSans-Regular",
+  },
+  editedIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: -8,
+    marginBottom: 12,
+    paddingHorizontal: 20,
+  },
+  editedText: {
+    fontSize: 11,
+    color: "#9ca3af",
     fontFamily: "SofiaSans-Regular",
   },
   imagesContainer: {
@@ -691,7 +731,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "SofiaSans-Regular",
     color: "#6b7280",
-    
     minWidth: 24,
   },
   likedText: {

@@ -7,10 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function LandingScreen() {
   return (
-    <LinearGradient
-      colors={["#9f95b6ff", "#17151aff"]}
-      style={styles.container}
-    >
+    <LinearGradient colors={["#faf9f6", "#e8e6e1"]} style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.content}>
           {/* LOGO */}
@@ -50,10 +47,10 @@ export default function LandingScreen() {
             {/* SOCIAL LOGINS */}
             <View style={styles.socialRow}>
               <TouchableOpacity style={styles.socialButton}>
-                <Ionicons name="logo-google" size={35} color="white" />
+                <Ionicons name="logo-google" size={35} color="#4b5563" />
               </TouchableOpacity>
               <TouchableOpacity style={styles.socialButton}>
-                <Ionicons name="logo-apple" size={35} color="white" />
+                <Ionicons name="logo-apple" size={35} color="#4b5563" />
               </TouchableOpacity>
             </View>
           </View>
@@ -76,50 +73,49 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  // Logo
   logoContainer: {
     alignItems: "center",
     marginTop: 100,
   },
   logoText: {
     fontSize: 52,
-    color: "white",
+    color: "#1f2937",
     fontFamily: "Sofia-Regular",
     letterSpacing: 3,
   },
-  // Slogan
   sloganContainer: {
     alignItems: "center",
   },
   sloganTitle: {
-    color: "white",
+    color: "#4b5563",
     fontSize: 20,
     textAlign: "center",
     fontFamily: "SofiaSans-Bold",
     marginBottom: 5,
   },
   sloganSubtitle: {
-    color: "white",
+    color: "#4b5563",
     fontSize: 20,
     textAlign: "center",
     fontFamily: "SofiaSans-Bold",
     fontWeight: "bold",
   },
-  // Buttons Container
   buttonsContainer: {
     width: "100%",
     alignItems: "center",
     marginBottom: 60,
   },
-  // Login Button
   loginButton: {
     width: "100%",
     padding: 18,
     borderRadius: 30,
-    backgroundColor: "transparent",
-    borderWidth: 2,
-    borderColor: "white",
+    backgroundColor: "#8b5cf6",
     marginBottom: 20,
+    shadowColor: "#8b5cf6",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   loginButtonText: {
     color: "white",
@@ -127,23 +123,21 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "600",
   },
-  // Sign Up Button
   signupButton: {
     width: "100%",
     padding: 18,
     borderRadius: 30,
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.3)",
+    backgroundColor: "transparent",
+    borderWidth: 2,
+    borderColor: "#8b5cf6",
     marginBottom: 30,
   },
   signupButtonText: {
-    color: "white",
+    color: "#8b5cf6",
     textAlign: "center",
     fontSize: 18,
     fontWeight: "600",
   },
-  // OR Section
   orContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -153,20 +147,19 @@ const styles = StyleSheet.create({
   orLine: {
     flex: 1,
     height: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.3)",
+    backgroundColor: "#d1d5db",
   },
   orText: {
-    color: "white",
+    color: "#6b7280",
     fontSize: 16,
     marginHorizontal: 15,
     fontFamily: "Sofia-Regular",
   },
   continueWith: {
-    color: "white",
+    color: "#6b7280",
     fontSize: 15,
     marginBottom: 20,
   },
-  // Social login icons
   socialRow: {
     flexDirection: "row",
     gap: 25,

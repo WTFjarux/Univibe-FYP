@@ -1,6 +1,172 @@
-// lib/eventService.ts
 import { API_BASE_URL } from '@/constants/ipConstants';
 import * as SecureStore from 'expo-secure-store';
+
+// ============================================
+// CONFIGURATION - MUST BE DEFINED FIRST
+// ============================================
+
+const CONFIG = {
+  TIMEOUT: 60000,
+  MAX_RETRIES: 2,
+  CACHE_DURATION: 5 * 60 * 1000, // 5 minutes
+};
+
+// Base URL
+const BASE_URL: string = API_BASE_URL;
+
+// ============================================
+// CACHE IMPLEMENTATION
+// ============================================
+
+class EventCache {
+  private cache = new Map<string, { data: any; timestamp: number }>();
+  private maxSize = 50;
+
+  set(key: string, data: any) {
+    if (this.cache.size >= this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey) {
+        this.cache.delete(firstKey);
+        console.log(`🗑️ Cache size limit reached, removed oldest item: ${firstKey}`);
+      }
+    }
+    
+    this.cache.set(key, { data, timestamp: Date.now() });
+    
+    setTimeout(() => {
+      if (this.cache.has(key)) {
+        this.cache.delete(key);
+        console.log(`⏰ Cache expired for key: ${key}`);
+      }
+    }, CONFIG.CACHE_DURATION);
+  }
+
+  get(key: string) {
+    const cached = this.cache.get(key);
+    if (!cached) return null;
+    
+    const isExpired = Date.now() - cached.timestamp > CONFIG.CACHE_DURATION;
+    if (isExpired) {
+      this.cache.delete(key);
+      console.log(`⏰ Cache expired (checked on get): ${key}`);
+      return null;
+    }
+    
+    console.log(`✅ Cache hit for key: ${key}`);
+    return cached.data;
+  }
+  
+  clear() {
+    this.cache.clear();
+    console.log(`🗑️ Cache cleared completely`);
+  }
+  
+  remove(key: string) {
+    this.cache.delete(key);
+    console.log(`🗑️ Cache removed for key: ${key}`);
+  }
+  
+  getSize() {
+    return this.cache.size;
+  }
+}
+
+const eventCache = new EventCache();
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+const getAuthToken = async (): Promise<string | null> => {
+  try {
+    const token = await SecureStore.getItemAsync('authToken');
+    return token || null;
+  } catch (error) {
+    console.error('Error getting auth token:', error);
+    return null;
+  }
+};
+
+const enhancedFetch = async (url: string, options: RequestInit, retries = CONFIG.MAX_RETRIES): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), CONFIG.TIMEOUT);
+  
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timeoutId);
+      
+      if (!response.ok && response.status >= 400 && response.status < 500) {
+        return response;
+      }
+      
+      if (!response.ok && response.status >= 500 && i < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i)));
+        continue;
+      }
+      
+      return response;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (i === retries - 1) throw error;
+      await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i)));
+    }
+  }
+  
+  throw new Error('Max retries reached');
+};
+
+const generateCacheKey = (url: string, params?: any): string => {
+  if (params) {
+    return `${url}?${JSON.stringify(params)}`;
+  }
+  return url;
+};
+
+export const getFullImageUrl = (url: string): string => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (url.startsWith('/')) return `${BASE_URL}${url}`;
+  return `${BASE_URL}/${url}`;
+};
+
+const processEventImages = (event: Event): Event => {
+  if (!event) return event;
+  
+  if (event.coverImage) {
+    event.coverImage = getFullImageUrl(event.coverImage);
+  }
+  
+  if (event.coverImageUrl) {
+    event.coverImageUrl = getFullImageUrl(event.coverImageUrl);
+  }
+  
+  if (event.images && event.images.length > 0) {
+    event.images = event.images.map(img => ({
+      ...img,
+      url: getFullImageUrl(img.url),
+    }));
+  }
+  
+  if (event.imageUrls && event.imageUrls.length > 0) {
+    event.imageUrls = event.imageUrls.map(url => getFullImageUrl(url));
+  }
+  
+  return event;
+};
+
+const processOrganizerProfilePicture = (event: Event): Event => {
+  if (!event) return event;
+  
+  if (event.organizer && event.organizer.profilePicture) {
+    event.organizer.profilePicture = getFullImageUrl(event.organizer.profilePicture);
+  }
+  return event;
+};
+
+const invalidateEventCache = () => {
+  eventCache.clear();
+};
 
 // ============================================
 // INTERFACES
@@ -62,7 +228,6 @@ export interface Event {
   isFull?: boolean;
   createdAt: string;
   updatedAt: string;
-  
   rsvp?: User[];
   interested?: User[];
 }
@@ -79,65 +244,11 @@ export interface EventsResponse {
   message?: string;
 }
 
-const getAuthToken = async (): Promise<string | null> => {
-  try {
-    const token = await SecureStore.getItemAsync('authToken');
-    return token || null;
-  } catch (error) {
-    console.error('Error getting auth token:', error);
-    return null;
-  }
-};
-
-export const getFullImageUrl = (url: string): string => {
-  if (!url) return '';
-  if (url.startsWith('http://') || url.startsWith('https://')) return url;
-  if (url.startsWith('/')) return `${API_BASE_URL}${url}`;
-  return `${API_BASE_URL}/${url}`;
-};
-
-/**
- * Helper to process image URLs in an event object
- */
-const processEventImages = (event: Event): Event => {
-  // Process cover image URL
-  if (event.coverImage) {
-    event.coverImage = getFullImageUrl(event.coverImage);
-  }
-  
-  // Process coverImageUrl virtual field
-  if (event.coverImageUrl) {
-    event.coverImageUrl = getFullImageUrl(event.coverImageUrl);
-  }
-  
-  // Process all images in the images array
-  if (event.images && event.images.length > 0) {
-    event.images = event.images.map(img => ({
-      ...img,
-      url: getFullImageUrl(img.url),
-    }));
-  }
-  
-  // Process imageUrls array
-  if (event.imageUrls && event.imageUrls.length > 0) {
-    event.imageUrls = event.imageUrls.map(url => getFullImageUrl(url));
-  }
-  
-  return event;
-};
-
-/**
- * Helper to process organizer profile picture URL
- */
-const processOrganizerProfilePicture = (event: Event): Event => {
-  if (event.organizer && event.organizer.profilePicture) {
-    event.organizer.profilePicture = getFullImageUrl(event.organizer.profilePicture);
-  }
-  return event;
-};
+// ============================================
+// EVENT SERVICE
+// ============================================
 
 export const eventService = {
-  // Create a new event
   createEvent: async (formData: FormData): Promise<{ success: boolean; message?: string; event?: Event }> => {
     try {
       const token = await getAuthToken();
@@ -145,7 +256,7 @@ export const eventService = {
         return { success: false, message: "No authentication token" };
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/events`, {
+      const response = await enhancedFetch(`${BASE_URL}/api/events`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -158,6 +269,7 @@ export const eventService = {
       if (data.success && data.event) {
         data.event = processEventImages(data.event);
         data.event = processOrganizerProfilePicture(data.event);
+        invalidateEventCache();
       }
       
       return data;
@@ -167,7 +279,6 @@ export const eventService = {
     }
   },
 
-  // Get all events with filters
   getEvents: async (params?: {
     category?: string;
     status?: string;
@@ -188,9 +299,15 @@ export const eventService = {
       if (params?.limit) queryParams.append('limit', params.limit.toString());
       if (params?.search) queryParams.append('search', params.search);
 
-      const url = `${API_BASE_URL}/api/events${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
+      const url = `${BASE_URL}/api/events${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
+      const cacheKey = generateCacheKey(url, params);
       
-      const response = await fetch(url, {
+      const cachedData = eventCache.get(cacheKey);
+      if (cachedData) {
+        return cachedData;
+      }
+      
+      const response = await enhancedFetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -205,6 +322,8 @@ export const eventService = {
           event = processOrganizerProfilePicture(event);
           return event;
         });
+        
+        eventCache.set(cacheKey, data);
       }
       
       return data;
@@ -214,7 +333,6 @@ export const eventService = {
     }
   },
 
-  // Get single event by ID
   getEventById: async (eventId: string): Promise<{ success: boolean; event?: Event; message?: string }> => {
     try {
       const token = await getAuthToken();
@@ -222,7 +340,15 @@ export const eventService = {
         return { success: false, message: "No authentication token" };
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/events/${eventId}`, {
+      const url = `${BASE_URL}/api/events/${eventId}`;
+      const cacheKey = generateCacheKey(url, { eventId });
+      
+      const cachedData = eventCache.get(cacheKey);
+      if (cachedData) {
+        return cachedData;
+      }
+      
+      const response = await enhancedFetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -234,6 +360,7 @@ export const eventService = {
       if (data.success && data.event) {
         data.event = processEventImages(data.event);
         data.event = processOrganizerProfilePicture(data.event);
+        eventCache.set(cacheKey, data);
       }
       
       return data;
@@ -243,7 +370,6 @@ export const eventService = {
     }
   },
 
-  // Get events created by user
   getMyEvents: async (page = 1, limit = 20): Promise<EventsResponse> => {
     try {
       const token = await getAuthToken();
@@ -251,7 +377,15 @@ export const eventService = {
         return { success: false, data: [], pagination: { page: 1, limit: 20, total: 0, pages: 0 } };
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/events/my-events?page=${page}&limit=${limit}`, {
+      const url = `${BASE_URL}/api/events/my-events?page=${page}&limit=${limit}`;
+      const cacheKey = generateCacheKey(url, { page, limit });
+      
+      const cachedData = eventCache.get(cacheKey);
+      if (cachedData) {
+        return cachedData;
+      }
+      
+      const response = await enhancedFetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -266,6 +400,8 @@ export const eventService = {
           event = processOrganizerProfilePicture(event);
           return event;
         });
+        
+        eventCache.set(cacheKey, data);
       }
       
       return data;
@@ -275,7 +411,6 @@ export const eventService = {
     }
   },
 
-  // Get events user is attending (RSVP'd)
   getAttendingEvents: async (page = 1, limit = 20): Promise<EventsResponse> => {
     try {
       const token = await getAuthToken();
@@ -283,7 +418,15 @@ export const eventService = {
         return { success: false, data: [], pagination: { page: 1, limit: 20, total: 0, pages: 0 } };
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/events/attending?page=${page}&limit=${limit}`, {
+      const url = `${BASE_URL}/api/events/attending?page=${page}&limit=${limit}`;
+      const cacheKey = generateCacheKey(url, { page, limit });
+      
+      const cachedData = eventCache.get(cacheKey);
+      if (cachedData) {
+        return cachedData;
+      }
+      
+      const response = await enhancedFetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -298,6 +441,8 @@ export const eventService = {
           event = processOrganizerProfilePicture(event);
           return event;
         });
+        
+        eventCache.set(cacheKey, data);
       }
       
       return data;
@@ -307,7 +452,6 @@ export const eventService = {
     }
   },
 
-  // Add more images to an existing event
   addEventImages: async (eventId: string, formData: FormData): Promise<{ success: boolean; message?: string; imageCount?: number; images?: EventImage[] }> => {
     try {
       const token = await getAuthToken();
@@ -315,7 +459,7 @@ export const eventService = {
         return { success: false, message: "No authentication token" };
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/events/${eventId}/images`, {
+      const response = await enhancedFetch(`${BASE_URL}/api/events/${eventId}/images`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -330,6 +474,7 @@ export const eventService = {
           ...img,
           url: getFullImageUrl(img.url),
         }));
+        invalidateEventCache();
       }
       
       return data;
@@ -339,7 +484,6 @@ export const eventService = {
     }
   },
 
-  // Remove a specific image from an event
   removeEventImage: async (eventId: string, imageIndex: number): Promise<{ success: boolean; message?: string; imageCount?: number; images?: EventImage[] }> => {
     try {
       const token = await getAuthToken();
@@ -347,7 +491,7 @@ export const eventService = {
         return { success: false, message: "No authentication token" };
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/events/${eventId}/images/${imageIndex}`, {
+      const response = await enhancedFetch(`${BASE_URL}/api/events/${eventId}/images/${imageIndex}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -362,6 +506,7 @@ export const eventService = {
           ...img,
           url: getFullImageUrl(img.url),
         }));
+        invalidateEventCache();
       }
       
       return data;
@@ -371,7 +516,6 @@ export const eventService = {
     }
   },
 
-  // Set a specific image as the cover image
   setCoverImage: async (eventId: string, imageIndex: number): Promise<{ success: boolean; message?: string; event?: Event }> => {
     try {
       const token = await getAuthToken();
@@ -379,7 +523,7 @@ export const eventService = {
         return { success: false, message: "No authentication token" };
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/events/${eventId}`, {
+      const response = await enhancedFetch(`${BASE_URL}/api/events/${eventId}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -393,6 +537,7 @@ export const eventService = {
       if (data.success && data.event) {
         data.event = processEventImages(data.event);
         data.event = processOrganizerProfilePicture(data.event);
+        invalidateEventCache();
       }
       
       return data;
@@ -402,7 +547,6 @@ export const eventService = {
     }
   },
 
-  // Toggle interest in an event
   toggleInterest: async (eventId: string): Promise<{ success: boolean; message?: string; isInterested?: boolean; interestedCount?: number }> => {
     try {
       const token = await getAuthToken();
@@ -410,7 +554,7 @@ export const eventService = {
         return { success: false, message: "No authentication token" };
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/events/${eventId}/interested`, {
+      const response = await enhancedFetch(`${BASE_URL}/api/events/${eventId}/interested`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -419,6 +563,11 @@ export const eventService = {
       });
 
       const data = await response.json();
+      
+      if (data.success) {
+        invalidateEventCache();
+      }
+      
       return data;
     } catch (error) {
       console.error('Error toggling interest:', error);
@@ -426,7 +575,6 @@ export const eventService = {
     }
   },
 
-  // Toggle RSVP for an event
   toggleRsvp: async (eventId: string): Promise<{ success: boolean; message?: string; isRsvpd?: boolean; rsvpCount?: number; isFull?: boolean }> => {
     try {
       const token = await getAuthToken();
@@ -434,7 +582,7 @@ export const eventService = {
         return { success: false, message: "No authentication token" };
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/events/${eventId}/rsvp`, {
+      const response = await enhancedFetch(`${BASE_URL}/api/events/${eventId}/rsvp`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -443,6 +591,11 @@ export const eventService = {
       });
 
       const data = await response.json();
+      
+      if (data.success) {
+        invalidateEventCache();
+      }
+      
       return data;
     } catch (error) {
       console.error('Error toggling RSVP:', error);
@@ -450,7 +603,6 @@ export const eventService = {
     }
   },
 
-  // Delete an event
   deleteEvent: async (eventId: string): Promise<{ success: boolean; message?: string }> => {
     try {
       const token = await getAuthToken();
@@ -458,7 +610,7 @@ export const eventService = {
         return { success: false, message: "No authentication token" };
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/events/${eventId}`, {
+      const response = await enhancedFetch(`${BASE_URL}/api/events/${eventId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -467,6 +619,11 @@ export const eventService = {
       });
 
       const data = await response.json();
+      
+      if (data.success) {
+        invalidateEventCache();
+      }
+      
       return data;
     } catch (error) {
       console.error('Error deleting event:', error);
@@ -474,7 +631,6 @@ export const eventService = {
     }
   },
 
-  // Update an event
   updateEvent: async (eventId: string, formData: FormData): Promise<{ success: boolean; message?: string; event?: Event }> => {
     try {
       const token = await getAuthToken();
@@ -482,7 +638,7 @@ export const eventService = {
         return { success: false, message: "No authentication token" };
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/events/${eventId}`, {
+      const response = await enhancedFetch(`${BASE_URL}/api/events/${eventId}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -495,6 +651,7 @@ export const eventService = {
       if (data.success && data.event) {
         data.event = processEventImages(data.event);
         data.event = processOrganizerProfilePicture(data.event);
+        invalidateEventCache();
       }
       
       return data;
@@ -502,5 +659,13 @@ export const eventService = {
       console.error('Error updating event:', error);
       return { success: false, message: 'Failed to update event' };
     }
+  },
+
+  clearCache: () => {
+    invalidateEventCache();
+  },
+  
+  getCacheSize: () => {
+    return eventCache.getSize();
   },
 };

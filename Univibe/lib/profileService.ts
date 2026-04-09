@@ -1,11 +1,25 @@
-// app/lib/profileService.ts
 /**
  * Profile Service - Handles all profile-related API operations
- * Note: Connection-related operations are handled by connectionService.ts
  */
 
 import * as SecureStore from 'expo-secure-store'; 
-import { API_BASE_URL } from '../constants/ipConstants'; 
+import { API_BASE_URL } from '../constants/ipConstants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { profileCache } from './profileCache';
+
+// ============================================
+// ENSURE API_BASE_URL IS DEFINED
+// ============================================
+
+const getBaseUrl = (): string => {
+  if (!API_BASE_URL) {
+    console.warn('API_BASE_URL is not defined, using fallback');
+    return 'http://localhost:5001';
+  }
+  return API_BASE_URL;
+};
+
+const BASE_URL = getBaseUrl();
 
 // ============================================
 // HELPER FUNCTIONS
@@ -26,30 +40,22 @@ const getToken = async (): Promise<string | null> => {
 
 /**
  * Get JSON request headers with authentication
- * Returns undefined if no token (fetch will use default headers)
  */
-const getHeaders = async (): Promise<HeadersInit | undefined> => {
+const getHeaders = async (): Promise<HeadersInit> => {
   const token = await getToken();
-  if (!token) {
-    return undefined;
-  }
   return {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    ...(token && { 'Authorization': `Bearer ${token}` })
   };
 };
 
 /**
  * Get FormData headers for file uploads
- * Returns undefined if no token
  */
-const getFormDataHeaders = async (): Promise<HeadersInit | undefined> => {
+const getFormDataHeaders = async (): Promise<HeadersInit> => {
   const token = await getToken();
-  if (!token) {
-    return undefined;
-  }
   return {
-    'Authorization': `Bearer ${token}`
+    ...(token && { 'Authorization': `Bearer ${token}` })
   };
 };
 
@@ -61,6 +67,8 @@ const getMimeType = (filename: string): string => {
   if (extension.endsWith('.png')) return 'image/png';
   if (extension.endsWith('.gif')) return 'image/gif';
   if (extension.endsWith('.webp')) return 'image/webp';
+  if (extension.endsWith('.heic')) return 'image/heic';
+  if (extension.endsWith('.heif')) return 'image/heif';
   return 'image/jpeg';
 };
 
@@ -82,14 +90,43 @@ const createImageFormData = (imageUri: string, fieldName: string): FormData => {
 };
 
 /**
- * Helper to make authenticated fetch requests
+ * Helper to make authenticated fetch requests with error handling
  */
 const authFetch = async (url: string, options: RequestInit = {}): Promise<Response> => {
   const headers = await getHeaders();
-  return fetch(url, {
+  const response = await fetch(url, {
     ...options,
-    headers: headers || options.headers,
+    headers: { ...headers, ...options.headers },
   });
+  
+  // Handle unauthorized errors
+  if (response.status === 401) {
+    await SecureStore.deleteItemAsync('authToken');
+    await profileCache.clearAll();
+    throw new Error('Session expired. Please login again.');
+  }
+  
+  return response;
+};
+
+/**
+ * Handle API response with consistent error formatting
+ */
+const handleResponse = async (response: Response): Promise<any> => {
+  const data = await response.json();
+  
+  if (!response.ok) {
+    throw new Error(data.message || data.error || `Request failed with status ${response.status}`);
+  }
+  
+  return data;
+};
+
+/**
+ * Generate cache key
+ */
+const getCacheKey = (prefix: string, identifier?: string): string => {
+  return identifier ? `${prefix}_${identifier}` : prefix;
 };
 
 // ============================================
@@ -106,12 +143,19 @@ export const profileService = {
    */
   setupProfile: async (profileData: any) => {
     try {
-      const response = await authFetch(`${API_BASE_URL}/api/profile/setup`, {
+      const response = await authFetch(`${BASE_URL}/api/profile/setup`, {
         method: 'POST',
         body: JSON.stringify(profileData)
       });
-      return await response.json();
+      const result = await handleResponse(response);
+      
+      if (result.success) {
+        await profileCache.invalidateUserProfile();
+      }
+      
+      return result;
     } catch (error) {
+      console.error('Setup profile error:', error);
       throw error;
     }
   },
@@ -121,11 +165,12 @@ export const profileService = {
    */
   checkProfileStatus: async () => {
     try {
-      const response = await authFetch(`${API_BASE_URL}/api/profile/status`, {
+      const response = await authFetch(`${BASE_URL}/api/profile/status`, {
         method: 'GET',
       });
-      return await response.json();
+      return await handleResponse(response);
     } catch (error) {
+      console.error('Check profile status error:', error);
       throw error;
     }
   },
@@ -135,37 +180,58 @@ export const profileService = {
    */
   getProfileDetails: async () => {
     try {
-      const response = await authFetch(`${API_BASE_URL}/api/profile/details`, {
+      const response = await authFetch(`${BASE_URL}/api/profile/details`, {
         method: 'GET',
       });
-      return await response.json();
+      return await handleResponse(response);
     } catch (error) {
+      console.error('Get profile details error:', error);
       throw error;
     }
   },
 
   /**
-   * Get authenticated user's full profile with timestamps
+   * Get authenticated user's full profile with timestamps (WITH CACHING)
    */
-  getMyProfile: async () => {
+  getMyProfile: async (forceRefresh: boolean = false) => {
     try {
       const token = await getToken();
       if (!token) {
         return { success: false, message: "No authentication token" };
       }
       
-      const response = await fetch(`${API_BASE_URL}/api/profile/my-profile`, {
+      const cacheKey = 'my_profile';
+      
+      if (!forceRefresh) {
+        const cached = profileCache.getFromMemory(cacheKey);
+        if (cached) {
+          return { ...cached, _cached: true };
+        }
+        
+        const stored = await profileCache.getFromStorage(cacheKey);
+        if (stored) {
+          return { ...stored, _cached: true };
+        }
+      }
+      
+      const response = await fetch(`${BASE_URL}/api/profile/my-profile`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       });
-      const data = await response.json();
-      return data;
+      
+      const result = await handleResponse(response);
+      
+      if (result.success) {
+        await profileCache.saveToStorage(cacheKey, result);
+      }
+      
+      return result;
     } catch (error) {
       console.error('Error getting my profile:', error);
-      return { success: false, message: "Network error" };
+      return { success: false, message: error instanceof Error ? error.message : "Network error" };
     }
   },
 
@@ -174,12 +240,19 @@ export const profileService = {
    */
   updateProfile: async (profileData: any) => {
     try {
-      const response = await authFetch(`${API_BASE_URL}/api/profile/update`, {
+      const response = await authFetch(`${BASE_URL}/api/profile/update`, {
         method: 'PUT',
         body: JSON.stringify(profileData)
       });
-      return await response.json();
+      const result = await handleResponse(response);
+      
+      if (result.success) {
+        await profileCache.invalidateUserProfile();
+      }
+      
+      return result;
     } catch (error) {
+      console.error('Update profile error:', error);
       throw error;
     }
   },
@@ -199,15 +272,20 @@ export const profileService = {
       }
       
       const formData = createImageFormData(imageUri, 'profilePicture');
-      const response = await fetch(`${API_BASE_URL}/api/profile/upload-picture`, {
+      const response = await fetch(`${BASE_URL}/api/profile/upload-picture`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: await getFormDataHeaders(),
         body: formData,
       });
-      return await response.json();
+      const result = await handleResponse(response);
+      
+      if (result.success) {
+        await profileCache.invalidateUserProfile();
+      }
+      
+      return result;
     } catch (error) {
+      console.error('Upload profile picture error:', error);
       throw error;
     }
   },
@@ -217,11 +295,18 @@ export const profileService = {
    */
   deleteProfilePicture: async () => {
     try {
-      const response = await authFetch(`${API_BASE_URL}/api/profile/picture`, {
+      const response = await authFetch(`${BASE_URL}/api/profile/picture`, {
         method: 'DELETE',
       });
-      return await response.json();
+      const result = await handleResponse(response);
+      
+      if (result.success) {
+        await profileCache.invalidateUserProfile();
+      }
+      
+      return result;
     } catch (error) {
+      console.error('Delete profile picture error:', error);
       throw error;
     }
   },
@@ -241,15 +326,20 @@ export const profileService = {
       }
       
       const formData = createImageFormData(imageUri, 'coverPhoto');
-      const response = await fetch(`${API_BASE_URL}/api/profile/upload-cover-photo`, {
+      const response = await fetch(`${BASE_URL}/api/profile/upload-cover-photo`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: await getFormDataHeaders(),
         body: formData,
       });
-      return await response.json();
+      const result = await handleResponse(response);
+      
+      if (result.success) {
+        await profileCache.invalidateUserProfile();
+      }
+      
+      return result;
     } catch (error) {
+      console.error('Upload cover photo error:', error);
       throw error;
     }
   },
@@ -259,36 +349,63 @@ export const profileService = {
    */
   deleteCoverPhoto: async () => {
     try {
-      const response = await authFetch(`${API_BASE_URL}/api/profile/cover-photo`, {
+      const response = await authFetch(`${BASE_URL}/api/profile/cover-photo`, {
         method: 'DELETE',
       });
-      return await response.json();
+      const result = await handleResponse(response);
+      
+      if (result.success) {
+        await profileCache.invalidateUserProfile();
+      }
+      
+      return result;
     } catch (error) {
+      console.error('Delete cover photo error:', error);
       throw error;
     }
   },
 
   // ============================================
-  // PUBLIC PROFILE OPERATIONS
+  // PUBLIC PROFILE OPERATIONS (WITH CACHING)
   // ============================================
 
   /**
-   * Get public profile by user ID
+   * Get public profile by user ID (WITH CACHING)
    */
-  getPublicProfile: async (userId: string) => {
+  getPublicProfile: async (userId: string, forceRefresh: boolean = false) => {
     try {
-      const token = await getToken();
-      const response = await fetch(`${API_BASE_URL}/api/profile/public/${userId}`, {
-        method: 'GET',
-        headers: token ? {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        } : {
-          'Content-Type': 'application/json'
+      const cacheKey = getCacheKey('public_profile', userId);
+      
+      if (!forceRefresh) {
+        const cached = profileCache.getFromMemory(cacheKey);
+        if (cached) {
+          return { ...cached, _cached: true };
         }
+        
+        const stored = await profileCache.getFromStorage(cacheKey);
+        if (stored) {
+          return { ...stored, _cached: true };
+        }
+      }
+      
+      const token = await getToken();
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch(`${BASE_URL}/api/profile/public/${userId}`, {
+        method: 'GET',
+        headers
       });
-      const data = await response.json();
-      return data;
+      
+      const result = await handleResponse(response);
+      
+      if (result.success) {
+        await profileCache.saveToStorage(cacheKey, result);
+      }
+      
+      return result;
     } catch (error) {
       console.error('Error fetching public profile:', error);
       throw error;
@@ -296,16 +413,33 @@ export const profileService = {
   },
 
   /**
-   * Get public profile by username
+   * Get public profile by username (WITH CACHING)
    */
-  getProfileByUsername: async (username: string) => {
+  getProfileByUsername: async (username: string, forceRefresh: boolean = false) => {
     try {
+      const cacheKey = getCacheKey('profile_username', username);
+      
+      if (!forceRefresh) {
+        const cached = profileCache.getFromMemory(cacheKey);
+        if (cached) return { ...cached, _cached: true };
+        
+        const stored = await profileCache.getFromStorage(cacheKey);
+        if (stored) return { ...stored, _cached: true };
+      }
+      
       const response = await authFetch(
-        `${API_BASE_URL}/api/profile/username/${encodeURIComponent(username)}`,
+        `${BASE_URL}/api/profile/username/${encodeURIComponent(username)}`,
         { method: 'GET' }
       );
-      return await response.json();
+      const result = await handleResponse(response);
+      
+      if (result.success) {
+        await profileCache.saveToStorage(cacheKey, result);
+      }
+      
+      return result;
     } catch (error) {
+      console.error('Get profile by username error:', error);
       throw error;
     }
   },
@@ -320,11 +454,12 @@ export const profileService = {
   getAllProfiles: async (page: number = 1, limit: number = 20) => {
     try {
       const response = await authFetch(
-        `${API_BASE_URL}/api/profile/all?page=${page}&limit=${limit}`,
+        `${BASE_URL}/api/profile/all?page=${page}&limit=${limit}`,
         { method: 'GET' }
       );
-      return await response.json();
+      return await handleResponse(response);
     } catch (error) {
+      console.error('Get all profiles error:', error);
       throw error;
     }
   },
@@ -334,12 +469,17 @@ export const profileService = {
    */
   searchProfiles: async (query: string, page: number = 1, limit: number = 20) => {
     try {
+      if (!query.trim()) {
+        return { success: false, profiles: [], pagination: { page: 1, limit, total: 0, pages: 0 } };
+      }
+      
       const response = await authFetch(
-        `${API_BASE_URL}/api/profile/search?query=${encodeURIComponent(query)}&page=${page}&limit=${limit}`,
+        `${BASE_URL}/api/profile/search?query=${encodeURIComponent(query.trim())}&page=${page}&limit=${limit}`,
         { method: 'GET' }
       );
-      return await response.json();
+      return await handleResponse(response);
     } catch (error) {
+      console.error('Search profiles error:', error);
       throw error;
     }
   },
@@ -354,25 +494,43 @@ export const profileService = {
   getUserPosts: async (userId: string, page: number = 1, limit: number = 10) => {
     try {
       const response = await authFetch(
-        `${API_BASE_URL}/api/profile/${userId}/posts?page=${page}&limit=${limit}`,
+        `${BASE_URL}/api/profile/${userId}/posts?page=${page}&limit=${limit}`,
         { method: 'GET' }
       );
-      return await response.json();
+      return await handleResponse(response);
     } catch (error) {
+      console.error('Get user posts error:', error);
       throw error;
     }
   },
 
   /**
-   * Get user activity statistics
+   * Get user activity statistics (WITH CACHING)
    */
-  getUserStats: async (userId: string) => {
+  getUserStats: async (userId: string, forceRefresh: boolean = false) => {
     try {
-      const response = await authFetch(`${API_BASE_URL}/api/profile/${userId}/stats`, {
+      const cacheKey = getCacheKey('user_stats', userId);
+      
+      if (!forceRefresh) {
+        const cached = profileCache.getFromMemory(cacheKey);
+        if (cached) return { ...cached, _cached: true };
+        
+        const stored = await profileCache.getFromStorage(cacheKey);
+        if (stored) return { ...stored, _cached: true };
+      }
+      
+      const response = await authFetch(`${BASE_URL}/api/profile/${userId}/stats`, {
         method: 'GET',
       });
-      return await response.json();
+      const result = await handleResponse(response);
+      
+      if (result.success) {
+        await profileCache.saveToStorage(cacheKey, result);
+      }
+      
+      return result;
     } catch (error) {
+      console.error('Get user stats error:', error);
       throw error;
     }
   },
@@ -387,11 +545,12 @@ export const profileService = {
   getRecommendedProfiles: async (limit: number = 10) => {
     try {
       const response = await authFetch(
-        `${API_BASE_URL}/api/profile/recommendations?limit=${limit}`,
+        `${BASE_URL}/api/profile/recommendations?limit=${limit}`,
         { method: 'GET' }
       );
-      return await response.json();
+      return await handleResponse(response);
     } catch (error) {
+      console.error('Get recommended profiles error:', error);
       throw error;
     }
   },
@@ -405,11 +564,18 @@ export const profileService = {
    */
   blockUser: async (userId: string) => {
     try {
-      const response = await authFetch(`${API_BASE_URL}/api/profile/block/${userId}`, {
+      const response = await authFetch(`${BASE_URL}/api/profile/block/${userId}`, {
         method: 'POST',
       });
-      return await response.json();
+      const result = await handleResponse(response);
+      
+      if (result.success) {
+        await profileCache.clear(`public_profile_${userId}`);
+      }
+      
+      return result;
     } catch (error) {
+      console.error('Block user error:', error);
       throw error;
     }
   },
@@ -419,11 +585,18 @@ export const profileService = {
    */
   unblockUser: async (userId: string) => {
     try {
-      const response = await authFetch(`${API_BASE_URL}/api/profile/unblock/${userId}`, {
+      const response = await authFetch(`${BASE_URL}/api/profile/unblock/${userId}`, {
         method: 'POST',
       });
-      return await response.json();
+      const result = await handleResponse(response);
+      
+      if (result.success) {
+        await profileCache.clear(`public_profile_${userId}`);
+      }
+      
+      return result;
     } catch (error) {
+      console.error('Unblock user error:', error);
       throw error;
     }
   },
@@ -434,11 +607,12 @@ export const profileService = {
   getBlockedUsers: async (page: number = 1, limit: number = 20) => {
     try {
       const response = await authFetch(
-        `${API_BASE_URL}/api/profile/blocked?page=${page}&limit=${limit}`,
+        `${BASE_URL}/api/profile/blocked?page=${page}&limit=${limit}`,
         { method: 'GET' }
       );
-      return await response.json();
+      return await handleResponse(response);
     } catch (error) {
+      console.error('Get blocked users error:', error);
       throw error;
     }
   },
@@ -448,13 +622,209 @@ export const profileService = {
    */
   reportUser: async (userId: string, reason: string, details?: string) => {
     try {
-      const response = await authFetch(`${API_BASE_URL}/api/profile/report/${userId}`, {
+      const response = await authFetch(`${BASE_URL}/api/profile/report/${userId}`, {
         method: 'POST',
-        body: JSON.stringify({ reason, details })
+        body: JSON.stringify({ reason, details: details || '' })
       });
-      return await response.json();
+      return await handleResponse(response);
     } catch (error) {
+      console.error('Report user error:', error);
       throw error;
+    }
+  },
+
+  // ============================================
+  // BATCH OPERATIONS (FOR FASTER LOADING)
+  // ============================================
+
+  /**
+   * Get complete profile data in one batch request
+   */
+  getProfileBatch: async (userId: string, forceRefresh: boolean = false) => {
+    try {
+      const cacheKey = getCacheKey('profile_batch', userId);
+      
+      if (!forceRefresh) {
+        const cached = profileCache.getFromMemory(cacheKey);
+        if (cached) return { ...cached, _cached: true };
+        
+        const stored = await profileCache.getFromStorage(cacheKey);
+        if (stored) return { ...stored, _cached: true };
+      }
+      
+      const token = await getToken();
+      if (!token) {
+        return { success: false, message: "No authentication token" };
+      }
+      
+      const [profile, posts, stats] = await Promise.all([
+        profileService.getPublicProfile(userId, forceRefresh),
+        profileService.getUserPosts(userId, 1, 5),
+        profileService.getUserStats(userId, forceRefresh)
+      ]);
+      
+      const result = {
+        success: true,
+        profile: profile.profile,
+        user: profile.user,
+        connectionStatus: profile.connectionStatus,
+        recentPosts: posts.posts || [],
+        stats: stats,
+        isOwnProfile: profile.isOwnProfile || false
+      };
+      
+      await profileCache.saveToStorage(cacheKey, result);
+      
+      return result;
+    } catch (error) {
+      console.error('Batch profile fetch error:', error);
+      throw error;
+    }
+  },
+
+  // ============================================
+  // ADDITIONAL UTILITIES
+  // ============================================
+
+  /**
+   * Get full image URL for profile pictures
+   */
+  getFullImageUrl: (url: string | null | undefined): string => {
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    
+    const baseUrl = BASE_URL.endsWith('/') 
+      ? BASE_URL.slice(0, -1) 
+      : BASE_URL;
+    const cleanUrl = url.startsWith('/') ? url : `/${url}`;
+    return `${baseUrl}${cleanUrl}`;
+  },
+
+  /**
+   * Clear all profile-related cache (for logout)
+   */
+  clearCache: async () => {
+    await profileCache.clearAll();
+  },
+
+  /**
+   * Prefetch profile data for faster navigation
+   */
+  prefetchProfile: async (userId: string): Promise<void> => {
+    try {
+      await profileService.getProfileBatch(userId, false);
+    } catch (error) {
+      console.error('Prefetch error:', error);
     }
   }
 };
+
+// ============================================
+// TYPE DEFINITIONS
+// ============================================
+
+export interface Profile {
+  _id: string;
+  user: string | User;
+  fullName: string;
+  bio?: string;
+  major?: string;
+  year?: string;
+  campus: string;
+  profilePicture?: string;
+  coverPhoto?: string;
+  location?: string;
+  website?: string;
+  interests?: string[];
+  skills?: string[];
+  isProfileComplete: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface User {
+  _id: string;
+  name: string;
+  username: string;
+  email: string;
+  verified: boolean;
+  connections?: string[];
+}
+
+export interface PublicProfileResponse {
+  success: boolean;
+  profile?: Profile;
+  user?: User;
+  isOwnProfile?: boolean;
+  connectionStatus?: {
+    isConnected: boolean;
+    isPending?: boolean;
+    isBlocked?: boolean;
+  };
+  stats?: {
+    postCount: number;
+    connectionCount: number;
+  };
+  message?: string;
+}
+
+export interface SearchProfilesResponse {
+  success: boolean;
+  profiles: Array<{
+    user: User;
+    profile: Profile;
+    connectionStatus: 'connected' | 'pending' | 'not_connected';
+  }>;
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+}
+
+export interface BatchProfileResponse {
+  success: boolean;
+  profile?: Profile;
+  user?: User;
+  connectionStatus?: {
+    isConnected: boolean;
+    isPending?: boolean;
+    isBlocked?: boolean;
+  };
+  recentPosts?: any[];
+  stats?: any;
+  isOwnProfile?: boolean;
+  _cached?: boolean;
+  message?: string;
+}
+
+// Export individual functions for easier imports
+export const {
+  setupProfile,
+  checkProfileStatus,
+  getProfileDetails,
+  getMyProfile,
+  updateProfile,
+  uploadProfilePicture,
+  deleteProfilePicture,
+  uploadCoverPhoto,
+  deleteCoverPhoto,
+  getPublicProfile,
+  getProfileByUsername,
+  getAllProfiles,
+  searchProfiles,
+  getUserPosts,
+  getUserStats,
+  getRecommendedProfiles,
+  blockUser,
+  unblockUser,
+  getBlockedUsers,
+  reportUser,
+  getFullImageUrl,
+  clearCache,
+  getProfileBatch,
+  prefetchProfile
+} = profileService;
+
+export { profileCache };

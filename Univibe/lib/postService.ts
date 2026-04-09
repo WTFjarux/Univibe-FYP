@@ -1,7 +1,7 @@
-// lib/postService.ts - UPDATED WITH RESTORE FUNCTIONALITY
+// lib/postService.ts - Clean version without unnecessary logs
 import * as SecureStore from 'expo-secure-store';
-import { Platform } from 'react-native';
-import { API_BASE_URL } from '../constants/ipConstants'; 
+import { API_BASE_URL } from '../constants/ipConstants';
+import { postCache } from './postCache';
 
 // Default avatar constant
 export const DEFAULT_AVATAR = "default-avatar";
@@ -51,8 +51,8 @@ export interface Post {
   isAnonymous?: boolean;
   commentCount?: number;
   recentComments?: Comment[];
-  isDeleted?: boolean; // Soft delete flag
-  deletedAt?: string; // When post was deleted
+  isDeleted?: boolean;
+  deletedAt?: string;
 }
 
 export interface Comment {
@@ -229,18 +229,29 @@ export const getFullImageUrl = (url: string): string => {
 };
 
 // ============================================
-// POST FUNCTIONS
+// POST FUNCTIONS WITH CACHING
 // ============================================
 
 export const getProfilePosts = async (
   userId: string, 
   page: number = 1, 
-  limit: number = 10
+  limit: number = 10,
+  forceRefresh: boolean = false
 ): Promise<ProfilePostsResponse> => {
   try {
     const token = await getAuthToken();
     if (!token) {
       return { success: false, message: "No authentication token" };
+    }
+
+    const cacheKey = `profile_posts_${userId}_page_${page}_limit_${limit}`;
+    
+    if (!forceRefresh) {
+      const cached = postCache.getFromMemory(cacheKey);
+      if (cached) return { ...cached, _cached: true };
+      
+      const stored = await postCache.getFromStorage(cacheKey);
+      if (stored) return { ...stored, _cached: true };
     }
 
     const response = await fetch(
@@ -253,7 +264,14 @@ export const getProfilePosts = async (
         },
       }
     );
-    return await response.json();
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.saveToStorage(cacheKey, result);
+    }
+    
+    return result;
   } catch (error) {
     console.error("Error fetching profile posts:", error);
     return { success: false, message: "Failed to fetch posts" };
@@ -264,9 +282,20 @@ export const getPosts = async (
   filter: string = 'all',
   page: number = 1,
   limit: number = 10,
+  forceRefresh: boolean = false
 ): Promise<PostsResponse> => {
   try {
     const token = await getAuthToken();
+    
+    const cacheKey = `posts_filter_${filter}_page_${page}_limit_${limit}`;
+    
+    if (!forceRefresh) {
+      const cached = postCache.getFromMemory(cacheKey);
+      if (cached) return cached;
+      
+      const stored = await postCache.getFromStorage(cacheKey);
+      if (stored) return stored;
+    }
     
     const params = new URLSearchParams({
       filter,
@@ -291,7 +320,13 @@ export const getPosts = async (
       throw new Error(`Failed to fetch posts: ${response.status}`);
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.saveToStorage(cacheKey, result);
+    }
+    
+    return result;
   } catch (error) {
     console.error('Error fetching posts:', error);
     throw error;
@@ -315,7 +350,13 @@ export const toggleLike = async (postId: string): Promise<LikeResponse> => {
       throw new Error(`Failed to toggle like: ${response.status}`);
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.invalidatePostsCache();
+    }
+    
+    return result;
   } catch (error) {
     console.error('Error toggling like:', error);
     throw error;
@@ -357,13 +398,6 @@ export const createPost = async (
       }
     }
     
-    console.log('Creating post with:', {
-      contentLength: content.length,
-      imageCount: images.length,
-      visibility,
-      isAnonymous,
-    });
-    
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -384,16 +418,36 @@ export const createPost = async (
       throw new Error(`Failed to create post: ${response.status} - ${errorDetail}`);
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.invalidatePostsCache();
+    }
+    
+    return result;
   } catch (error: any) {
     console.error('Error creating post:', error.message || error);
     throw error;
   }
 };
 
-export const getPostById = async (postId: string): Promise<{success: boolean; post: Post}> => {
+export const getPostById = async (
+  postId: string, 
+  forceRefresh: boolean = false
+): Promise<{success: boolean; post: Post}> => {
   try {
     const token = await getAuthToken();
+    
+    const cacheKey = `post_${postId}`;
+    
+    if (!forceRefresh) {
+      const cached = postCache.getFromMemory(cacheKey);
+      if (cached) return cached;
+      
+      const stored = await postCache.getFromStorage(cacheKey);
+      if (stored) return stored;
+    }
+    
     const url = buildApiUrl(`posts/${postId}`);
     
     const response = await fetch(url, {
@@ -407,16 +461,19 @@ export const getPostById = async (postId: string): Promise<{success: boolean; po
       throw new Error(`Failed to fetch post: ${response.status}`);
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.saveToStorage(cacheKey, result);
+    }
+    
+    return result;
   } catch (error) {
     console.error('Error fetching post:', error);
     throw error;
   }
 };
 
-/**
- * Soft delete a post (marks as deleted, can be restored)
- */
 export const deletePost = async (postId: string): Promise<DeletePostResponse> => {
   try {
     const token = await getAuthToken();
@@ -434,23 +491,24 @@ export const deletePost = async (postId: string): Promise<DeletePostResponse> =>
       throw new Error(`Failed to delete post: ${response.status}`);
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.invalidatePostsCache();
+      await postCache.clear(`post_${postId}`);
+    }
+    
+    return result;
   } catch (error) {
     console.error('Error deleting post:', error);
     throw error;
   }
 };
 
-/**
- * Restore a soft-deleted post
- */
 export const restorePost = async (postId: string): Promise<RestorePostResponse> => {
   try {
     const token = await getAuthToken();
     const url = buildApiUrl(`posts/${postId}/restore`);
-    
-    console.log('Restore post URL:', url); // Debug log
-    console.log('Post ID:', postId); // Debug log
     
     const response = await fetch(url, {
       method: 'POST',
@@ -459,8 +517,6 @@ export const restorePost = async (postId: string): Promise<RestorePostResponse> 
         'Content-Type': 'application/json',
       },
     });
-    
-    console.log('Restore response status:', response.status); // Debug log
     
     if (!response.ok) {
       let errorMessage = `Failed to restore post: ${response.status}`;
@@ -474,16 +530,19 @@ export const restorePost = async (postId: string): Promise<RestorePostResponse> 
       throw new Error(errorMessage);
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.invalidatePostsCache();
+    }
+    
+    return result;
   } catch (error) {
     console.error('Error restoring post:', error);
     throw error;
   }
 };
 
-/**
- * Permanently delete a post (cannot be restored)
- */
 export const permanentlyDeletePost = async (postId: string): Promise<{success: boolean; message: string}> => {
   try {
     const token = await getAuthToken();
@@ -501,7 +560,14 @@ export const permanentlyDeletePost = async (postId: string): Promise<{success: b
       throw new Error(`Failed to permanently delete post: ${response.status}`);
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.invalidatePostsCache();
+      await postCache.clear(`post_${postId}`);
+    }
+    
+    return result;
   } catch (error) {
     console.error('Error permanently deleting post:', error);
     throw error;
@@ -529,7 +595,14 @@ export const updatePost = async (
       throw new Error(error.error || 'Failed to update post');
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.invalidatePostsCache();
+      await postCache.clear(`post_${postId}`);
+    }
+    
+    return result;
   } catch (error) {
     console.error('Error updating post:', error);
     throw error;
@@ -539,10 +612,22 @@ export const updatePost = async (
 export const searchPosts = async (
   query: string,
   page: number = 1,
-  limit: number = 10
+  limit: number = 10,
+  forceRefresh: boolean = false
 ): Promise<PostsResponse> => {
   try {
     const token = await getAuthToken();
+    
+    const cacheKey = `search_posts_${query}_page_${page}_limit_${limit}`;
+    
+    if (!forceRefresh) {
+      const cached = postCache.getFromMemory(cacheKey);
+      if (cached) return cached;
+      
+      const stored = await postCache.getFromStorage(cacheKey);
+      if (stored) return stored;
+    }
+    
     const params = new URLSearchParams({
       q: query,
       page: page.toString(),
@@ -562,7 +647,13 @@ export const searchPosts = async (
       throw new Error(`Failed to search posts: ${response.status}`);
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.saveToStorage(cacheKey, result);
+    }
+    
+    return result;
   } catch (error) {
     console.error('Error searching posts:', error);
     throw error;
@@ -591,7 +682,13 @@ export const repostPost = async (postId: string): Promise<{ success: boolean; me
       throw new Error(error.message || 'Failed to repost');
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.invalidatePostsCache();
+    }
+    
+    return result;
   } catch (error) {
     console.error('Error reposting:', error);
     throw error;
@@ -599,13 +696,14 @@ export const repostPost = async (postId: string): Promise<{ success: boolean; me
 };
 
 // ============================================
-// FEED FUNCTIONS
+// FEED FUNCTIONS WITH CACHING
 // ============================================
 
 export const getFeed = async (
   filter: 'campus' | 'connections' = 'campus',
   page: number = 1,
-  limit: number = 10
+  limit: number = 10,
+  forceRefresh: boolean = false
 ): Promise<{
   success: boolean;
   data: Post[];
@@ -618,6 +716,17 @@ export const getFeed = async (
 }> => {
   try {
     const token = await getAuthToken();
+    
+    const cacheKey = `feed_${filter}_page_${page}_limit_${limit}`;
+    
+    if (!forceRefresh) {
+      const cached = postCache.getFromMemory(cacheKey);
+      if (cached) return cached;
+      
+      const stored = await postCache.getFromStorage(cacheKey);
+      if (stored) return stored;
+    }
+    
     const params = new URLSearchParams({
       filter,
       page: page.toString(),
@@ -641,7 +750,13 @@ export const getFeed = async (
       throw new Error(`Failed to fetch feed: ${response.status}`);
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.saveToStorage(cacheKey, result);
+    }
+    
+    return result;
   } catch (error) {
     console.error('Error fetching feed:', error);
     throw error;
@@ -649,16 +764,28 @@ export const getFeed = async (
 };
 
 // ============================================
-// COMMENT FUNCTIONS
+// COMMENT FUNCTIONS WITH CACHING
 // ============================================
 
 export const getPostComments = async (
   postId: string,
   page: number = 1,
-  limit: number = 20
+  limit: number = 20,
+  forceRefresh: boolean = false
 ): Promise<CommentsResponse> => {
   try {
     const token = await getAuthToken();
+    
+    const cacheKey = `post_comments_${postId}_page_${page}_limit_${limit}`;
+    
+    if (!forceRefresh) {
+      const cached = postCache.getFromMemory(cacheKey);
+      if (cached) return cached;
+      
+      const stored = await postCache.getFromStorage(cacheKey);
+      if (stored) return stored;
+    }
+    
     const params = new URLSearchParams({
       page: page.toString(),
       limit: limit.toString(),
@@ -678,7 +805,13 @@ export const getPostComments = async (
       throw new Error(error.error || 'Failed to fetch comments');
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.saveToStorage(cacheKey, result);
+    }
+    
+    return result;
   } catch (error) {
     console.error('Error fetching comments:', error);
     throw error;
@@ -708,7 +841,13 @@ export const addComment = async (
       throw new Error(error.error || 'Failed to add comment');
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.invalidateCommentsCache(postId);
+    }
+    
+    return result;
   } catch (error) {
     console.error('Error adding comment:', error);
     throw error;
@@ -739,7 +878,13 @@ export const addReply = async (
       throw new Error(error.error || 'Failed to add reply');
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.invalidateCommentsCache(postId);
+    }
+    
+    return result;
   } catch (error) {
     console.error('Error adding reply:', error);
     throw error;
@@ -748,10 +893,22 @@ export const addReply = async (
 
 export const getCommentThread = async (
   postId: string,
-  commentId: string
+  commentId: string,
+  forceRefresh: boolean = false
 ): Promise<CommentThreadResponse> => {
   try {
     const token = await getAuthToken();
+    
+    const cacheKey = `comment_thread_${postId}_${commentId}`;
+    
+    if (!forceRefresh) {
+      const cached = postCache.getFromMemory(cacheKey);
+      if (cached) return cached;
+      
+      const stored = await postCache.getFromStorage(cacheKey);
+      if (stored) return stored;
+    }
+    
     const url = buildApiUrl(`posts/${postId}/comments/${commentId}`);
     
     const response = await fetch(url, {
@@ -766,7 +923,13 @@ export const getCommentThread = async (
       throw new Error(error.error || 'Failed to fetch comment thread');
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.saveToStorage(cacheKey, result);
+    }
+    
+    return result;
   } catch (error) {
     console.error('Error fetching comment thread:', error);
     throw error;
@@ -794,7 +957,13 @@ export const toggleCommentLike = async (
       throw new Error(error.error || 'Failed to toggle comment like');
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.invalidateCommentsCache(postId);
+    }
+    
+    return result;
   } catch (error) {
     console.error('Error toggling comment like:', error);
     throw error;
@@ -824,7 +993,13 @@ export const updateComment = async (
       throw new Error(error.error || 'Failed to update comment');
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.invalidateCommentsCache(postId);
+    }
+    
+    return result;
   } catch (error) {
     console.error('Error updating comment:', error);
     throw error;
@@ -852,11 +1027,30 @@ export const deleteComment = async (
       throw new Error(error.error || 'Failed to delete comment');
     }
     
-    return await response.json();
+    const result = await response.json();
+    
+    if (result.success) {
+      await postCache.invalidateCommentsCache(postId);
+    }
+    
+    return result;
   } catch (error) {
     console.error('Error deleting comment:', error);
     throw error;
   }
+};
+
+// ============================================
+// CACHE MANAGEMENT
+// ============================================
+
+export const clearPostCache = async (): Promise<void> => {
+  await postCache.clearAll();
+};
+
+export const invalidatePostCache = async (postId: string): Promise<void> => {
+  await postCache.clear(`post_${postId}`);
+  await postCache.invalidatePostsCache();
 };
 
 // ============================================

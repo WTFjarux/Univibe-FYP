@@ -423,7 +423,12 @@ export default function FeedScreen() {
     });
   };
 
-  const handleDeletePost = async (postId: string, post: Post) => {
+  // FIXED: handleDeletePost now correctly accepts postId and post
+  const handleDeletePost = async (postId: string) => {
+    // Find the post to delete
+    const postToDelete = posts.find((p) => p._id === postId);
+    if (!postToDelete) return;
+
     try {
       // Store the deleted post for potential undo
       setPosts((prev) => prev.filter((p) => p._id !== postId));
@@ -433,7 +438,7 @@ export default function FeedScreen() {
         {
           type: "delete",
           postId,
-          deletedPost: post,
+          deletedPost: postToDelete,
         },
         true,
       );
@@ -445,7 +450,7 @@ export default function FeedScreen() {
       // Restore the post if deletion failed
       setPosts((prev) => {
         if (prev.some((p) => p._id === postId)) return prev;
-        const newPosts = [...prev, post];
+        const newPosts = [...prev, postToDelete];
         return newPosts.sort(
           (a, b) =>
             new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
@@ -500,14 +505,23 @@ export default function FeedScreen() {
     );
   };
 
-  const handleHidePost = (postId: string, post: Post) => {
+  const handleHidePost = (postId: string) => {
+    // Find the post to hide
+    const postToHide = posts.find((p) => p._id === postId);
+    if (!postToHide) return;
+
     setHiddenPosts((prev) => {
       const newSet = new Set(prev);
       newSet.add(postId);
       return newSet;
     });
     setPosts((prev) => prev.filter((p) => p._id !== postId));
-    showInfoBar("Post hidden", "info", { type: "hide", postId, post }, true);
+    showInfoBar(
+      "Post hidden",
+      "info",
+      { type: "hide", postId, post: postToHide },
+      true,
+    );
   };
 
   const handleCopyLink = (postId: string) => {
@@ -751,10 +765,10 @@ export default function FeedScreen() {
                   onRepostPress={handleRepost}
                   onSharePress={handleShare}
                   onEdit={handleEditPost}
-                  onDelete={() => handleDeletePost(post._id, post)}
+                  onDelete={handleDeletePost}
                   onSave={handleSavePost}
                   onReport={handleReportPost}
-                  onHide={() => handleHidePost(post._id, post)}
+                  onHide={handleHidePost}
                   onCopyLink={handleCopyLink}
                   onMuteUser={(userId) =>
                     handleMuteUser(
@@ -785,7 +799,7 @@ export default function FeedScreen() {
           </View>
         )}
 
-        {/* Add extra padding at bottom to prevent content from being hidden behind tab bar */}
+        {/* Add extra padding at bottom */}
         <View style={styles.bottomPadding} />
       </ScrollView>
 

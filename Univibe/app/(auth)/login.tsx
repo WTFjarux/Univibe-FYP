@@ -35,20 +35,16 @@ export default function LoginScreen() {
 
     try {
       await login(email, password);
-      // Navigate to main app after successful login
       router.replace("../(tabs)");
     } catch (error: any) {
-      // Debug logging
       console.log("🔍 Login error:", error.message);
 
-      // Check for email verification error - using case insensitive check
       const errorMsg = error.message || "";
       if (
         errorMsg.toLowerCase().includes("verify your email") ||
         errorMsg.toLowerCase().includes("email not verified") ||
         errorMsg.toLowerCase().includes("verification")
       ) {
-        // Show verification modal instead of alert
         setShowVerificationModal(true);
       } else if (
         errorMsg.toLowerCase().includes("invalid email") ||
@@ -93,7 +89,6 @@ export default function LoginScreen() {
       }
 
       setResendSuccess(true);
-      // Hide success message after 3 seconds
       setTimeout(() => setResendSuccess(false), 3000);
     } catch (error) {
       Alert.alert("Error", "Failed to resend verification email");
@@ -112,7 +107,7 @@ export default function LoginScreen() {
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
-            <Ionicons name="mail-outline" size={60} color="#6C63FF" />
+            <Ionicons name="mail-outline" size={60} color="#8b5cf6" />
             <Text style={styles.modalTitle}>Email Verification Required</Text>
           </View>
 
@@ -125,7 +120,7 @@ export default function LoginScreen() {
             <Ionicons
               name="mail"
               size={20}
-              color="#6C63FF"
+              color="#8b5cf6"
               style={styles.emailIcon}
             />
             <Text style={styles.emailText}>{email}</Text>
@@ -154,7 +149,7 @@ export default function LoginScreen() {
 
           {resendSuccess && (
             <View style={styles.successContainer}>
-              <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
+              <Ionicons name="checkmark-circle" size={20} color="#10b981" />
               <Text style={styles.successText}>
                 Verification email sent! Please check your inbox.
               </Text>
@@ -173,17 +168,14 @@ export default function LoginScreen() {
   );
 
   return (
-    <LinearGradient
-      colors={["#9f95b6ff", "#17151aff"]}
-      style={styles.container}
-    >
+    <LinearGradient colors={["#faf9f6", "#e8e6e1"]} style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={styles.keyboardAvoidingView}
         >
           <View style={styles.content}>
-            {/* LOGO - Using Sofia-Regular */}
+            {/* LOGO */}
             <View style={styles.logoContainer}>
               <Text style={styles.logoText}>UNIVIBE</Text>
             </View>
@@ -202,13 +194,13 @@ export default function LoginScreen() {
                 <Ionicons
                   name="mail-outline"
                   size={20}
-                  color="white"
+                  color="#6b7280"
                   style={styles.inputIcon}
                 />
                 <TextInput
                   style={styles.input}
                   placeholder="Email"
-                  placeholderTextColor="rgba(255,255,255,0.7)"
+                  placeholderTextColor="#9ca3af"
                   value={email}
                   onChangeText={setEmail}
                   autoCapitalize="none"
@@ -222,13 +214,13 @@ export default function LoginScreen() {
                 <Ionicons
                   name="lock-closed-outline"
                   size={20}
-                  color="white"
+                  color="#6b7280"
                   style={styles.inputIcon}
                 />
                 <TextInput
                   style={styles.input}
                   placeholder="Password"
-                  placeholderTextColor="rgba(255,255,255,0.7)"
+                  placeholderTextColor="#9ca3af"
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry={!showPassword}
@@ -241,7 +233,7 @@ export default function LoginScreen() {
                   <Ionicons
                     name={showPassword ? "eye-off-outline" : "eye-outline"}
                     size={22}
-                    color="rgba(255,255,255,0.7)"
+                    color="#6b7280"
                   />
                 </TouchableOpacity>
               </View>
@@ -276,10 +268,10 @@ export default function LoginScreen() {
               {/* SOCIAL LOGINS */}
               <View style={styles.socialRow}>
                 <TouchableOpacity style={styles.socialButton}>
-                  <Ionicons name="logo-google" size={35} color="white" />
+                  <Ionicons name="logo-google" size={35} color="#4b5563" />
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.socialButton}>
-                  <Ionicons name="logo-apple" size={35} color="white" />
+                  <Ionicons name="logo-apple" size={35} color="#4b5563" />
                 </TouchableOpacity>
               </View>
 
@@ -320,58 +312,58 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     justifyContent: "flex-start",
   },
-  // Logo
   logoContainer: {
     alignItems: "center",
     marginTop: 20,
   },
   logoText: {
     fontSize: 48,
-    color: "white",
+    color: "#1f2937",
     fontFamily: "Sofia-Regular",
     letterSpacing: 2,
   },
-  // Slogan
   sloganTitle: {
     marginTop: 10,
-    color: "white",
+    color: "#4b5563",
     fontSize: 18,
     textAlign: "center",
     fontFamily: "SofiaSans-Bold",
   },
   sloganSubtitle: {
-    color: "white",
+    color: "#4b5563",
     fontSize: 18,
     textAlign: "center",
     marginBottom: 30,
     fontFamily: "SofiaSans-Bold",
     fontWeight: "bold",
   },
-  // Sign In Title
   signInTitle: {
-    color: "white",
+    color: "#1f2937",
     fontSize: 24,
     textAlign: "center",
     marginBottom: 30,
     fontWeight: "bold",
   },
-  // Form Container
   formContainer: {
     width: "100%",
     alignItems: "center",
   },
-  // Input Fields
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
     width: "100%",
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    backgroundColor: "white",
     borderRadius: 30,
     marginBottom: 20,
     paddingHorizontal: 20,
     height: 56,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.3)",
+    borderColor: "#e5e7eb",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
   },
   inputIcon: {
     marginRight: 12,
@@ -379,31 +371,34 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 16,
-    color: "white",
+    color: "#1f2937",
   },
   eyeButton: {
     padding: 5,
   },
-  // Forgot Password
   forgotPassword: {
     alignSelf: "flex-end",
     marginBottom: 25,
   },
   forgotPasswordText: {
-    color: "white",
+    color: "#8b5cf6",
     fontSize: 14,
     fontWeight: "500",
   },
-  // Login Button
   loginButton: {
     width: "90%",
     padding: 16,
     borderRadius: 30,
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    backgroundColor: "#8b5cf6",
     marginBottom: 30,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
+    shadowColor: "#8b5cf6",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   disabledButton: {
     opacity: 0.6,
@@ -414,7 +409,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
-  // OR Section
   orContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -424,20 +418,19 @@ const styles = StyleSheet.create({
   orLine: {
     flex: 1,
     height: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.3)",
+    backgroundColor: "#d1d5db",
   },
   orText: {
-    color: "white",
+    color: "#6b7280",
     fontSize: 16,
     marginHorizontal: 15,
     fontWeight: "500",
   },
   continueWith: {
-    color: "white",
+    color: "#6b7280",
     fontSize: 15,
     marginBottom: 20,
   },
-  // Social login icons
   socialRow: {
     flexDirection: "row",
     marginBottom: 30,
@@ -446,44 +439,37 @@ const styles = StyleSheet.create({
   socialButton: {
     padding: 10,
   },
-  // Sign Up Link
   signUpContainer: {
     flexDirection: "row",
     justifyContent: "center",
   },
   signUpText: {
-    color: "white",
+    color: "#6b7280",
     fontSize: 14,
   },
   signUpLink: {
-    color: "white",
+    color: "#8b5cf6",
     fontSize: 14,
     fontWeight: "600",
     textDecorationLine: "underline",
   },
-  // Verification Modal Styles
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
     justifyContent: "center",
     alignItems: "center",
     padding: 20,
   },
   modalContent: {
-    backgroundColor: "#2A2840",
+    backgroundColor: "white",
     borderRadius: 20,
     padding: 25,
     width: "100%",
     maxWidth: 400,
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.1)",
     shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 10,
-    },
-    shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.1,
     shadowRadius: 20,
     elevation: 10,
   },
@@ -494,20 +480,20 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 22,
     fontWeight: "bold",
-    color: "white",
+    color: "#1f2937",
     marginTop: 10,
     textAlign: "center",
   },
   modalText: {
     fontSize: 15,
-    color: "rgba(255, 255, 255, 0.9)",
+    color: "#4b5563",
     textAlign: "center",
     lineHeight: 22,
     marginBottom: 15,
   },
   modalSubtext: {
     fontSize: 13,
-    color: "rgba(255, 255, 255, 0.7)",
+    color: "#6b7280",
     textAlign: "center",
     lineHeight: 18,
     marginBottom: 20,
@@ -516,20 +502,20 @@ const styles = StyleSheet.create({
   emailContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(108, 99, 255, 0.1)",
+    backgroundColor: "#f3f4f6",
     paddingHorizontal: 15,
     paddingVertical: 12,
     borderRadius: 12,
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: "rgba(108, 99, 255, 0.3)",
+    borderColor: "#e5e7eb",
     width: "100%",
   },
   emailIcon: {
     marginRight: 10,
   },
   emailText: {
-    color: "white",
+    color: "#1f2937",
     fontSize: 14,
     fontWeight: "500",
     flex: 1,
@@ -538,7 +524,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#6C63FF",
+    backgroundColor: "#8b5cf6",
     paddingVertical: 14,
     paddingHorizontal: 20,
     borderRadius: 12,
@@ -554,17 +540,17 @@ const styles = StyleSheet.create({
   successContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(76, 175, 80, 0.1)",
+    backgroundColor: "#ecfdf5",
     paddingHorizontal: 15,
     paddingVertical: 10,
     borderRadius: 8,
     marginBottom: 15,
     width: "100%",
     borderWidth: 1,
-    borderColor: "rgba(76, 175, 80, 0.3)",
+    borderColor: "#d1fae5",
   },
   successText: {
-    color: "#4CAF50",
+    color: "#10b981",
     fontSize: 13,
     marginLeft: 8,
     flex: 1,
@@ -574,11 +560,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 30,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.3)",
+    borderColor: "#e5e7eb",
     width: "100%",
   },
   closeButtonText: {
-    color: "white",
+    color: "#6b7280",
     fontSize: 15,
     fontWeight: "500",
     textAlign: "center",

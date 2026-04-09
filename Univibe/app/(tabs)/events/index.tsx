@@ -16,6 +16,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { eventService, Event } from "@/lib/eventService";
 import EventCard from "@/app/components/Events/EventCard";
 import EventCategory from "@/app/components/Events/EventCategory";
+import { useAuth } from "@/lib/AuthContext";
 
 const categories = [
   { id: "all", name: "All", icon: "grid", count: 0 },
@@ -29,6 +30,9 @@ const categories = [
 
 export default function EventsScreen() {
   const router = useRouter();
+  const { user } = useAuth();
+  const currentUserId = user?.id;
+
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -38,13 +42,24 @@ export default function EventsScreen() {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
 
+  // Helper function to deduplicate events by _id
+  const deduplicateEvents = (eventsArray: Event[]): Event[] => {
+    const seen = new Map();
+    return eventsArray.filter((event) => {
+      if (seen.has(event._id)) {
+        return false;
+      }
+      seen.set(event._id, true);
+      return true;
+    });
+  };
+
   const fetchEvents = async (refresh = false) => {
     if (refresh) {
       setPage(1);
       setHasMore(true);
     }
 
-    
     try {
       const params: any = { page: refresh ? 1 : page, limit: 10 };
       if (selectedCategory !== "all") params.category = selectedCategory;
@@ -54,11 +69,18 @@ export default function EventsScreen() {
 
       if (response.success) {
         const newEvents = response.data;
+
         if (refresh) {
+          // On refresh, just set the new events (already unique from API)
           setEvents(newEvents);
         } else {
-          setEvents((prev) => [...prev, ...newEvents]);
+          // On load more, combine and deduplicate
+          setEvents((prev) => {
+            const combined = [...prev, ...newEvents];
+            return deduplicateEvents(combined);
+          });
         }
+
         setHasMore(response.pagination.pages > (refresh ? 1 : page));
         if (!refresh) setPage((prev) => prev + 1);
       }
@@ -76,7 +98,7 @@ export default function EventsScreen() {
   };
 
   const loadMore = () => {
-    if (!loading && hasMore) {
+    if (!loading && hasMore && !refreshing) {
       fetchEvents(false);
     }
   };
@@ -152,7 +174,7 @@ export default function EventsScreen() {
           const isCloseToBottom =
             layoutMeasurement.height + contentOffset.y >=
             contentSize.height - 100;
-          if (isCloseToBottom && hasMore && !loading) {
+          if (isCloseToBottom && hasMore && !loading && !refreshing) {
             loadMore();
           }
         }}
@@ -227,8 +249,9 @@ export default function EventsScreen() {
           ) : (
             events.map((event) => (
               <EventCard
-                key={event._id}
+                key={event._id} // This ensures unique keys
                 event={event}
+                currentUserId={currentUserId}
                 onInterestPress={handleInterest}
                 onRsvpPress={handleRsvp}
               />
@@ -247,7 +270,7 @@ export default function EventsScreen() {
           </View>
         )}
 
-        {/* Add extra padding at bottom to prevent content from being hidden behind tab bar */}
+        {/* Add extra padding at bottom */}
         <View style={styles.bottomPadding} />
       </ScrollView>
 
@@ -352,9 +375,8 @@ const styles = StyleSheet.create({
     color: "#9ca3af",
   },
   bottomPadding: {
-    height: 80, // Adjust based on your tab bar height
+    height: 80,
   },
-  // Floating Action Button
   fab: {
     position: "absolute",
     bottom: 20,

@@ -1,4 +1,4 @@
-// app/(tabs)/profile/index.tsx - Fixed scrolling version
+// app/(tabs)/profile/index.tsx - Fixed infinite loading
 
 import React, {
   useRef,
@@ -19,7 +19,6 @@ import {
   LayoutAnimation,
   UIManager,
   Platform,
-  Dimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -38,6 +37,8 @@ import {
   Post,
 } from "../../../lib/postService";
 import { API_BASE_URL } from "../../../constants/ipConstants";
+import { profileService } from "../../../lib/profileService";
+import { profileCache } from "../../../lib/profileCache";
 
 import ProfileHeader from "@/app/components/Profile/ProfileHeader";
 import ProfileInfo from "@/app/components/Profile/ProfileInfo";
@@ -72,7 +73,7 @@ export default function ProfileScreen() {
   const {
     user,
     profile,
-    isLoading,
+    isLoading: authLoading,
     logout,
     loadProfile,
     refreshUserProfile,
@@ -91,8 +92,13 @@ export default function ProfileScreen() {
   const [postsRefreshing, setPostsRefreshing] = useState(false);
   const [postsLoaded, setPostsLoaded] = useState(false);
 
+  // Cache state
+  const [isCached, setIsCached] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+
   const isMounted = useRef(true);
   const refreshInProgress = useRef(false);
+  const initialLoadDone = useRef(false);
   const mainScrollViewRef = useRef<ScrollView>(null);
   const flatListRef = useRef<any>(null);
 
@@ -142,20 +148,27 @@ export default function ProfileScreen() {
       setActiveTab(tab);
 
       // Load posts when switching to posts tab if not loaded
-      if (tab === "posts" && !postsLoaded && user?.id) {
+      if (tab === "posts" && !postsLoaded && user?.id && !postsLoading) {
         fetchUserPosts(1, false);
       }
     },
-    [activeTab, postsLoaded, user?.id],
+    [activeTab, postsLoaded, user?.id, postsLoading],
   );
 
   /**
-   * Fetch user's post count
+   * Fetch user's post count (with caching)
    */
   const fetchPostCount = useCallback(async () => {
     if (!user?.id) return;
 
     try {
+      const cacheKey = `post_count_${user.id}`;
+      const cached = profileCache.getFromMemory(cacheKey);
+
+      if (cached && isMounted.current) {
+        setPostCount(cached);
+      }
+
       const token = await getAuthToken();
       const response = await fetch(
         `${API_BASE_URL}/api/posts/user/${user.id}/count`,
@@ -166,22 +179,31 @@ export default function ProfileScreen() {
       const data = await response.json();
       if (data.success && isMounted.current) {
         setPostCount(data.count);
+        profileCache.saveToMemory(cacheKey, data.count);
       }
     } catch (error) {
-      // Silent fail
+      // Silent fail - cached value remains
     }
   }, [user?.id]);
 
   /**
-   * Fetch user's connection count
+   * Fetch user's connection count (with caching)
    */
   const fetchConnectionCount = useCallback(async () => {
     if (!user?.id) return;
 
     try {
+      const cacheKey = `connection_count_${user.id}`;
+      const cached = profileCache.getFromMemory(cacheKey);
+
+      if (cached && isMounted.current) {
+        setConnectionCount(cached);
+      }
+
       const response = await connectionService.getConnectionCount(user.id);
       if (response.success && response.data && isMounted.current) {
         setConnectionCount(response.data.connectionCount);
+        profileCache.saveToMemory(cacheKey, response.data.connectionCount);
       }
     } catch (error) {
       // Silent fail
@@ -189,48 +211,90 @@ export default function ProfileScreen() {
   }, [user?.id]);
 
   /**
-   * Fetch user's posts
+   * Fetch user's posts (with caching)
    */
   const fetchUserPosts = useCallback(
-    async (page = 1, shouldAppend = false) => {
-      if (!user?.id || postsLoading) return;
+    async (page = 1, shouldAppend = false, forceRefresh = false) => {
+      if (!user?.id) return;
+      if (postsLoading && !forceRefresh) return;
+
+      const cacheKey = `user_posts_${user.id}_page_${page}`;
+
+      // Try cache first (for first page only)
+      if (
+        !forceRefresh &&
+        page === 1 &&
+        !shouldAppend &&
+        posts.length === 0 &&
+        !postsLoading
+      ) {
+        const cached = profileCache.getFromMemory(cacheKey);
+        if (
+          cached &&
+          cached.posts &&
+          cached.posts.length > 0 &&
+          isMounted.current
+        ) {
+          setPosts(cached.posts);
+          setHasMorePosts(cached.hasMore);
+          setPostsPage(page);
+          setPostsLoaded(true);
+          setIsCached(true);
+          return;
+        }
+      }
 
       setPostsLoading(true);
       try {
         const response = await getProfilePosts(user.id, page, 10);
 
-        if (response.success && response.data) {
+        if (response.success && response.data && isMounted.current) {
           const newPosts = response.data.posts;
 
           if (shouldAppend) {
             setPosts((prev) => [...prev, ...newPosts]);
           } else {
             setPosts(newPosts);
+            // Cache first page results
+            if (page === 1) {
+              profileCache.saveToMemory(cacheKey, {
+                posts: newPosts,
+                hasMore: response.data.pagination.pages > page,
+              });
+            }
           }
 
           setHasMorePosts(response.data.pagination.pages > page);
           setPostsPage(page);
           setPostsLoaded(true);
+          setIsCached(false);
         }
       } catch (error) {
         console.error("Error fetching user posts:", error);
       } finally {
-        setPostsLoading(false);
-        setPostsRefreshing(false);
+        if (isMounted.current) {
+          setPostsLoading(false);
+          setPostsRefreshing(false);
+        }
       }
     },
-    [user?.id, postsLoading],
+    [user?.id, postsLoading, posts.length],
   );
 
   const loadMorePosts = () => {
-    if (!postsLoading && hasMorePosts && postsLoaded) {
+    if (!postsLoading && hasMorePosts && postsLoaded && !postsRefreshing) {
       fetchUserPosts(postsPage + 1, true);
     }
   };
 
   const refreshPosts = () => {
+    if (postsRefreshing) return;
     setPostsRefreshing(true);
-    fetchUserPosts(1, false);
+    // Clear cache for first page
+    if (user?.id) {
+      profileCache.clear(`user_posts_${user.id}_page_1`);
+    }
+    fetchUserPosts(1, false, true);
   };
 
   // Handle like action
@@ -255,6 +319,10 @@ export default function ProfileScreen() {
             : post,
         ),
       );
+      // Invalidate posts cache after like
+      if (user?.id) {
+        profileCache.clear(`user_posts_${user.id}_page_1`);
+      }
     } catch (error: any) {
       console.error("Error liking post:", error);
       Alert.alert("Error", error.message || "Failed to like post");
@@ -288,6 +356,10 @@ export default function ProfileScreen() {
       await deletePost(postId);
       setPosts((prev) => prev.filter((post) => post._id !== postId));
       setPostCount((prev) => Math.max(0, prev - 1));
+      // Invalidate cache
+      if (user?.id) {
+        profileCache.clear(`user_posts_${user.id}_page_1`);
+      }
       Alert.alert("Success", "Post deleted successfully");
     } catch (error: any) {
       console.error("Error deleting post:", error);
@@ -321,17 +393,29 @@ export default function ProfileScreen() {
   };
 
   /**
-   * Load initial data
+   * Load initial data with caching
    */
   const loadInitialData = useCallback(async () => {
-    if (refreshInProgress.current) return;
+    if (refreshInProgress.current || initialLoadDone.current) return;
     refreshInProgress.current = true;
+    setInitialLoading(true);
 
-    await loadProfile();
-    await fetchPostCount();
-    await fetchConnectionCount();
+    try {
+      // Load profile
+      await loadProfile();
 
-    refreshInProgress.current = false;
+      // Load counts in parallel
+      await Promise.all([fetchPostCount(), fetchConnectionCount()]);
+
+      initialLoadDone.current = true;
+    } catch (error) {
+      console.error("Error loading initial data:", error);
+    } finally {
+      if (isMounted.current) {
+        setInitialLoading(false);
+        refreshInProgress.current = false;
+      }
+    }
   }, [loadProfile, fetchPostCount, fetchConnectionCount]);
 
   /**
@@ -341,24 +425,43 @@ export default function ProfileScreen() {
     if (refreshing || refreshInProgress.current) return;
 
     setRefreshing(true);
-    await loadProfile();
-    await refreshUserProfile();
-    await fetchPostCount();
-    await fetchConnectionCount();
-    if (activeTab === "posts") {
-      await fetchUserPosts(1, false);
+    setIsCached(false);
+
+    try {
+      // Clear caches
+      await profileCache.clear("my_profile");
+      if (user?.id) {
+        await profileCache.clear(`post_count_${user.id}`);
+        await profileCache.clear(`connection_count_${user.id}`);
+        await profileCache.clear(`user_posts_${user.id}_page_1`);
+      }
+
+      await loadProfile();
+      await refreshUserProfile();
+      await Promise.all([fetchPostCount(), fetchConnectionCount()]);
+
+      if (activeTab === "posts") {
+        await fetchUserPosts(1, false, true);
+      }
+    } catch (error) {
+      console.error("Error refreshing:", error);
+    } finally {
+      if (isMounted.current) {
+        setRefreshing(false);
+      }
     }
-    setRefreshing(false);
   };
 
   // Load profile on mount only once
   useEffect(() => {
-    loadInitialData();
-  }, [loadInitialData]);
+    if (user?.id && !initialLoadDone.current && !authLoading) {
+      loadInitialData();
+    }
+  }, [user?.id, authLoading, loadInitialData]);
 
   // Reload counts when profile changes
   useEffect(() => {
-    if (profile) {
+    if (profile && initialLoadDone.current) {
       fetchPostCount();
       fetchConnectionCount();
     }
@@ -366,27 +469,37 @@ export default function ProfileScreen() {
 
   // Load posts only when switching to posts tab and posts haven't been loaded yet
   useEffect(() => {
-    if (activeTab === "posts" && !postsLoaded && user?.id) {
+    if (
+      activeTab === "posts" &&
+      !postsLoaded &&
+      user?.id &&
+      !postsLoading &&
+      initialLoadDone.current
+    ) {
       fetchUserPosts(1, false);
     }
-  }, [activeTab, postsLoaded, user?.id, fetchUserPosts]);
+  }, [
+    activeTab,
+    postsLoaded,
+    user?.id,
+    postsLoading,
+    initialLoadDone.current,
+    fetchUserPosts,
+  ]);
 
-  // Refresh on screen focus
+  // Refresh on screen focus (but don't reload everything)
   useFocusEffect(
     useCallback(() => {
-      if (user?.id && !refreshInProgress.current) {
+      if (user?.id && initialLoadDone.current && !refreshInProgress.current) {
+        // Refresh counts in background (don't show loading)
         fetchPostCount();
         fetchConnectionCount();
-        if (activeTab === "posts") {
-          fetchUserPosts(1, false);
-        }
       }
     }, [
       user?.id,
       fetchPostCount,
       fetchConnectionCount,
-      fetchUserPosts,
-      activeTab,
+      initialLoadDone.current,
     ]),
   );
 
@@ -397,6 +510,7 @@ export default function ProfileScreen() {
         text: "Logout",
         style: "destructive",
         onPress: async () => {
+          await profileCache.clearAll();
           await logout();
           router.push("/(auth)/login");
         },
@@ -436,6 +550,8 @@ export default function ProfileScreen() {
       if (!result.canceled && result.assets?.[0]?.uri) {
         const success = await uploadProfileImage(result.assets[0].uri);
         if (success) {
+          // Invalidate profile cache
+          await profileCache.clear("my_profile");
           await loadProfile();
           await refreshUserProfile();
           await fetchPostCount();
@@ -480,6 +596,7 @@ export default function ProfileScreen() {
       if (!result.canceled && result.assets?.[0]?.uri) {
         const success = await uploadProfileImage(result.assets[0].uri);
         if (success) {
+          await profileCache.clear("my_profile");
           await loadProfile();
           await refreshUserProfile();
           await fetchPostCount();
@@ -498,6 +615,7 @@ export default function ProfileScreen() {
     const success = await deleteProfileImage();
     if (success) {
       closeUploadModal();
+      await profileCache.clear("my_profile");
       await loadProfile();
       await refreshUserProfile();
       await fetchPostCount();
@@ -541,6 +659,7 @@ export default function ProfileScreen() {
       if (!result.canceled && result.assets?.[0]?.uri) {
         const success = await uploadCoverPhoto(result.assets[0].uri);
         if (success) {
+          await profileCache.clear("my_profile");
           await loadProfile();
           await refreshUserProfile();
           await fetchPostCount();
@@ -585,6 +704,7 @@ export default function ProfileScreen() {
       if (!result.canceled && result.assets?.[0]?.uri) {
         const success = await uploadCoverPhoto(result.assets[0].uri);
         if (success) {
+          await profileCache.clear("my_profile");
           await loadProfile();
           await refreshUserProfile();
           await fetchPostCount();
@@ -603,6 +723,7 @@ export default function ProfileScreen() {
     const success = await deleteCoverPhoto();
     if (success) {
       closeCoverModal();
+      await profileCache.clear("my_profile");
       await loadProfile();
       await refreshUserProfile();
       await fetchPostCount();
@@ -655,7 +776,7 @@ export default function ProfileScreen() {
     [activeTab, postCount],
   );
 
-  // Memoize posts props - WITHOUT header as listHeaderComponent
+  // Memoize posts props
   const postsProps = useMemo(
     () => ({
       posts,
@@ -680,10 +801,18 @@ export default function ProfileScreen() {
     [posts, postsLoading, postsLoaded, postsRefreshing, hasMorePosts],
   );
 
-  // Memoize about content (without header and tabs)
+  // Memoize about content
   const aboutContentOnly = useMemo(
     () => (
       <View style={styles.aboutContent}>
+        {/* Cache indicator */}
+        {isCached && (
+          <View style={cacheStyles.cacheIndicator}>
+            <Ionicons name="cloud-outline" size={12} color="#9ca3af" />
+            <Text style={cacheStyles.cacheText}>Loaded from cache</Text>
+          </View>
+        )}
+
         <ProfileInfo profile={profile} user={user} />
         <ProfileStats
           stats={{
@@ -755,11 +884,11 @@ export default function ProfileScreen() {
         </View>
       </View>
     ),
-    [profile, user, postCount, connectionCount],
+    [profile, user, postCount, connectionCount, isCached],
   );
 
   // Loading state
-  if (isLoading && !profile) {
+  if ((authLoading || initialLoading) && !profile) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#8b5cf6" />
@@ -769,7 +898,7 @@ export default function ProfileScreen() {
   }
 
   // No profile state
-  if (!profile) {
+  if (!profile && !authLoading && !initialLoading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.noProfileContainer}>
@@ -790,10 +919,7 @@ export default function ProfileScreen() {
     );
   }
 
-  // FIX: Use a single ScrollView/FlatList for the entire screen
-  // For About tab: Everything scrolls together in a ScrollView
-  // For Posts tab: FlatList handles scrolling naturally
-
+  // About tab
   if (activeTab === "about") {
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
@@ -863,9 +989,17 @@ export default function ProfileScreen() {
     );
   }
 
-  // Posts tab - FlatList handles everything including header
+  // Posts tab
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
+      {/* Cache indicator for posts tab */}
+      {isCached && (
+        <View style={cacheStyles.cacheHeader}>
+          <Ionicons name="cloud-outline" size={12} color="#9ca3af" />
+          <Text style={cacheStyles.cacheHeaderText}>Loaded from cache</Text>
+        </View>
+      )}
+
       <MemoizedProfilePosts
         {...postsProps}
         listHeaderComponent={
@@ -966,5 +1100,36 @@ const menuStyles = StyleSheet.create({
 const scrollStyles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 20,
+  },
+});
+
+const cacheStyles = StyleSheet.create({
+  cacheIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingVertical: 4,
+    marginBottom: 8,
+  },
+  cacheText: {
+    fontSize: 10,
+    color: "#9ca3af",
+    fontFamily: "SofiaSans-Regular",
+  },
+  cacheHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingVertical: 4,
+    backgroundColor: "#f8fafc",
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+  },
+  cacheHeaderText: {
+    fontSize: 10,
+    color: "#9ca3af",
+    fontFamily: "SofiaSans-Regular",
   },
 });

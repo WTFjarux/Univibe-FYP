@@ -21,6 +21,7 @@ interface EventCardProps {
   onInterestPress?: (eventId: string) => void;
   onRsvpPress?: (eventId: string) => void;
   showActions?: boolean;
+  currentUserId?: string;
 }
 
 export default function EventCard({
@@ -28,9 +29,27 @@ export default function EventCard({
   onInterestPress,
   onRsvpPress,
   showActions = true,
+  currentUserId,
 }: EventCardProps) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const flatListRef = useRef<FlatList>(null);
+
+  // Check if current user is the organizer
+  const isOrganizer = (() => {
+    if (!currentUserId) return false;
+
+    // Case 1: organizer is a string ID
+    if (typeof event.organizer === "string") {
+      return event.organizer === currentUserId;
+    }
+
+    // Case 2: organizer is an object with _id property
+    if (event.organizer && typeof event.organizer === "object") {
+      return event.organizer._id === currentUserId;
+    }
+
+    return false;
+  })();
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -100,11 +119,9 @@ export default function EventCard({
 
   // Get images array from event
   const getEventImages = () => {
-    // If event has imageUrls array (new format), use it
     if (event.imageUrls && event.imageUrls.length > 0) {
       return event.imageUrls;
     }
-    // Fallback to coverImage for backward compatibility
     if (event.coverImage) {
       return [event.coverImage];
     }
@@ -128,7 +145,6 @@ export default function EventCard({
 
   const renderImageItem = ({
     item: imageUrl,
-    index,
   }: {
     item: string;
     index: number;
@@ -195,6 +211,38 @@ export default function EventCard({
         <Ionicons name="images-outline" size={12} color="#fff" />
         <Text style={styles.imageCounterText}>
           {currentImageIndex + 1}/{images.length}
+        </Text>
+      </View>
+    );
+  };
+
+  // Render organizer badge for your own events
+  const renderOrganizerBadge = () => {
+    if (!isOrganizer) return null;
+
+    return (
+      <View style={styles.organizerBadge}>
+        <Ionicons name="star" size={12} color="#f59e0b" />
+        <Text style={styles.organizerBadgeText}>You're the organizer</Text>
+      </View>
+    );
+  };
+
+  // Render organizer name for other events
+  const renderOrganizerName = () => {
+    if (isOrganizer) return null;
+
+    const organizerDisplayName =
+      event.organizerName ||
+      (typeof event.organizer === "object"
+        ? event.organizer?.name
+        : "Organizer");
+
+    return (
+      <View style={styles.organizerInfo}>
+        <Ionicons name="person-outline" size={14} color="#6b7280" />
+        <Text style={styles.organizerText}>
+          Organized by {organizerDisplayName}
         </Text>
       </View>
     );
@@ -284,6 +332,10 @@ export default function EventCard({
           </View>
         </View>
 
+        {/* Show organizer badge for own events OR organizer name for other events */}
+        {renderOrganizerBadge()}
+        {renderOrganizerName()}
+
         {/* Image Count Indicator */}
         {hasMultipleImages && (
           <View style={styles.imageInfo}>
@@ -292,7 +344,8 @@ export default function EventCard({
           </View>
         )}
 
-        {showActions && (
+        {/* Actions - Only show if showActions is true AND user is NOT the organizer */}
+        {showActions && !isOrganizer && (
           <View style={styles.actions}>
             {/* Interested Button */}
             <TouchableOpacity
@@ -385,7 +438,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontFamily: "SofiaSans-Regular",
   },
-  // Navigation Buttons
   navButton: {
     position: "absolute",
     top: "50%",
@@ -401,7 +453,6 @@ const styles = StyleSheet.create({
   navButtonRight: {
     right: 12,
   },
-  // Dots Indicator
   dotsContainer: {
     position: "absolute",
     bottom: 12,
@@ -425,7 +476,6 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: "#fff",
   },
-  // Image Counter
   imageCounter: {
     position: "absolute",
     top: 12,
@@ -494,6 +544,34 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
     color: "#6b7280",
     flex: 1,
+  },
+  organizerBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#fef3c7",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: "flex-start",
+    marginBottom: 12,
+  },
+  organizerBadgeText: {
+    fontSize: 11,
+    color: "#92400e",
+    fontFamily: "SofiaSans-Regular",
+    fontWeight: "500",
+  },
+  organizerInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 12,
+  },
+  organizerText: {
+    fontSize: 12,
+    color: "#6b7280",
+    fontFamily: "SofiaSans-Regular",
   },
   imageInfo: {
     flexDirection: "row",
