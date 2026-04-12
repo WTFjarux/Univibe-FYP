@@ -6,17 +6,18 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { Link, useFocusEffect } from "expo-router";
+import { Link, useFocusEffect, useRouter } from "expo-router";
 import { useAuth } from "../../lib/contexts/AuthContext";
 import { notificationService } from "../../lib/services/notificationService";
 
 export default function HomeScreen() {
   const { token } = useAuth();
+  const router = useRouter();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
 
   // Fetch unread notification count
   const fetchUnreadCount = async () => {
@@ -32,21 +33,30 @@ export default function HomeScreen() {
     }
   };
 
-  // Refresh unread count when screen is focused
+  // Fetch unread chat count (you can implement this later)
+  const fetchUnreadChatCount = async () => {
+    // This will be implemented when you add unread message tracking
+    // For now, set to 0
+    setUnreadChatCount(0);
+  };
+
+  // Refresh counts when screen is focused
   useFocusEffect(
     useCallback(() => {
       fetchUnreadCount();
+      fetchUnreadChatCount();
     }, [token]),
   );
 
   // Also fetch on mount
   useEffect(() => {
     fetchUnreadCount();
+    fetchUnreadChatCount();
   }, [token]);
 
-  // Handle chat press - coming soon
+  // Handle chat press - navigate to ChatListScreen
   const handleChatPress = () => {
-    Alert.alert("Coming Soon", "Messaging feature will be available soon!");
+    router.push("/screens/ChatListScreen");
   };
 
   // Mock data for campus moments (stories)
@@ -118,9 +128,16 @@ export default function HomeScreen() {
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Header with Chat left, Univibe center, Notifications right */}
         <View style={styles.header}>
-          {/* Chat Icon - Left (Coming Soon) */}
+          {/* Chat Icon - Left (Navigate to ChatListScreen) */}
           <TouchableOpacity style={styles.iconButton} onPress={handleChatPress}>
             <Ionicons name="chatbubble-outline" size={28} color="#374151" />
+            {unreadChatCount > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>
+                  {unreadChatCount > 99 ? "99+" : unreadChatCount}
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
 
           {/* Univibe Logo - Center */}

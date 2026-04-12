@@ -7,6 +7,7 @@ import { ProfileProvider } from "../lib/contexts/ProfileContext";
 import { ChatProvider } from "../lib/contexts/ChatContext";
 import { View, ActivityIndicator } from "react-native";
 import { useEffect } from "react";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -32,46 +33,46 @@ export default function RootLayout() {
   }
 
   return (
-    <AuthProvider>
-      <ProfileProvider>
-        <ChatProvider>
-          <Stack screenOptions={{ headerShown: false }}>
-            {/* Public routes - don't require auth */}
-            <Stack.Screen name="index" />
-            <Stack.Screen name="(auth)" />
+    <SafeAreaProvider>
+      <AuthProvider>
+        <ProfileProvider>
+          <ChatProvider>
+            <Stack screenOptions={{ headerShown: false }}>
+              {/* Public routes - don't require auth */}
+              <Stack.Screen name="index" />
+              <Stack.Screen name="(auth)" />
 
-            {/* Verification route - modal presentation */}
-            <Stack.Screen
-              name="verify"
-              options={{
-                presentation: "modal",
-                animation: "slide_from_bottom",
-              }}
-            />
+              {/* Verification route - modal presentation */}
+              <Stack.Screen
+                name="verify"
+                options={{
+                  presentation: "modal",
+                  animation: "slide_from_bottom",
+                }}
+              />
 
-            {/* Profile routes - includes both index and dynamic [id] */}
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="profile" />
+              {/* Profile routes - includes both index and dynamic [id] */}
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="profile" />
 
-            {/* Chat screens */}
-            <Stack.Screen
-              name="screens/ChatScreen"
-              options={{
-                headerShown: true,
-                title: "Chat",
-                headerBackTitle: "Back",
-              }}
-            />
-            <Stack.Screen
-              name="screens/ChatListScreen"
-              options={{
-                headerShown: true,
-                title: "Messages",
-              }}
-            />
-          </Stack>
-        </ChatProvider>
-      </ProfileProvider>
-    </AuthProvider>
+              {/* Chat screens */}
+              <Stack.Screen
+                name="screens/ChatScreen"
+                options={{
+                  headerShown: false,
+                  presentation: "card",
+                }}
+              />
+              <Stack.Screen
+                name="screens/ChatListScreen"
+                options={{
+                  headerShown: false,
+                }}
+              />
+            </Stack>
+          </ChatProvider>
+        </ProfileProvider>
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }

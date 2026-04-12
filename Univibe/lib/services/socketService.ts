@@ -1,9 +1,27 @@
 // services/socketService.ts
+/**
+ * Socket.IO Service
+ * 
+ * Manages real-time WebSocket connections for chat, typing indicators,
+ * user presence, and WebRTC signaling.
+ * 
+ * Features:
+ * - Automatic reconnection with retry logic
+ * - Authentication via JWT token
+ * - Room-based message isolation
+ * - Real-time typing indicators
+ * - User online/offline presence
+ * - WebRTC signaling for future calls
+ */
+
 import io, { Socket } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
-// Types
+// ============================================
+// TYPE DEFINITIONS
+// ============================================
+
 interface Message {
   _id?: string;
   messageId?: string;
@@ -47,15 +65,16 @@ interface CallData {
 
 type EventCallback = (data: any) => void;
 
-// Socket URL based on platform
-// For physical device, use your computer's IP address
+// Socket URL based on platform (use computer's IP for physical devices)
 const SOCKET_URL = Platform.select({
-  ios: 'http://192.168.1.14:5001',  // Use your computer's IP for iOS too
-  android: 'http://192.168.1.14:5001', // Your computer's IP
+  ios: 'http://192.168.1.14:5001',
+  android: 'http://192.168.1.14:5001',
   default: 'http://192.168.1.14:5001'
 });
 
-console.log('🔌 Socket Service initialized with URL:', SOCKET_URL);
+// ============================================
+// SOCKET SERVICE CLASS
+// ============================================
 
 class SocketService {
   private socket: Socket | null = null;
@@ -64,44 +83,40 @@ class SocketService {
   private maxReconnectAttempts: number = 5;
   private eventListeners: Map<string, EventCallback[]> = new Map();
   private pendingRooms: Array<{ roomId: string; otherUserId: string | null; type: string }> = [];
-private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null;
+  private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
-    console.log('SocketService created');
+    // Initialization happens when connect() is called
   }
 
+  /**
+   * Establish socket connection with authentication
+   * @returns Socket instance or null if connection fails
+   */
   async connect(): Promise<Socket | null> {
     try {
-      // Get token from SecureStore (where AuthContext stores it)
       const token = await SecureStore.getItemAsync('authToken');
       
-      console.log('🔑 Socket connect - Token found:', !!token);
-      
       if (!token) {
-        console.log('❌ No authToken found in SecureStore');
-        // Schedule a retry after 2 seconds
+        // Schedule retry if token not available yet
         if (this.connectionRetryTimeout) {
           clearTimeout(this.connectionRetryTimeout);
         }
         this.connectionRetryTimeout = setTimeout(() => {
-          console.log('🔄 Retrying socket connection...');
           this.connect();
         }, 2000);
         return null;
       }
 
       if (this.socket && this.isConnected) {
-        console.log('✅ Socket already connected');
         return this.socket;
       }
 
-      // Close existing socket if any
+      // Clean up existing connection
       if (this.socket) {
         this.socket.disconnect();
         this.socket = null;
       }
-
-      console.log('🔄 Connecting to Socket.IO at:', SOCKET_URL);
       
       this.socket = io(SOCKET_URL, {
         auth: { token },
@@ -116,23 +131,25 @@ private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null;
       this.setupEventListeners();
       return this.socket;
     } catch (error) {
-      console.error('❌ Socket connection error:', error);
+      console.error('Socket connection error:', error);
       return null;
     }
   }
 
+  /**
+   * Set up all socket event listeners
+   */
   private setupEventListeners(): void {
     if (!this.socket) return;
 
+    // Connection events
     this.socket.on('connect', () => {
-      console.log('✅ Socket connected successfully! ID:', this.socket?.id);
       this.isConnected = true;
       this.reconnectAttempts = 0;
       this.emitEvent('socket_connected', {});
       
-      // Join any pending rooms
+      // Join any rooms that were queued while disconnected
       if (this.pendingRooms.length > 0) {
-        console.log('📦 Joining pending rooms:', this.pendingRooms.length);
         this.pendingRooms.forEach(room => {
           this.socket?.emit('join_room', { 
             roomId: room.roomId, 
@@ -145,49 +162,40 @@ private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null;
     });
 
     this.socket.on('disconnect', (reason: string) => {
-      console.log('❌ Socket disconnected. Reason:', reason);
       this.isConnected = false;
       this.emitEvent('socket_disconnected', { reason });
       
-      // Attempt to reconnect if disconnected unexpectedly
+      // Auto-reconnect for unexpected disconnections
       if (reason === 'io server disconnect' || reason === 'transport close') {
-        console.log('🔄 Attempting to reconnect...');
         setTimeout(() => this.connect(), 1000);
       }
     });
 
     this.socket.on('connect_error', (error: Error) => {
-      console.error('❌ Socket connection error:', error.message);
       this.reconnectAttempts++;
-      console.log(`🔄 Reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
       this.emitEvent('socket_error', error);
     });
 
     this.socket.on('reconnect', (attemptNumber: number) => {
-      console.log('🔄 Socket reconnected after', attemptNumber, 'attempts');
       this.isConnected = true;
       this.emitEvent('socket_reconnected', {});
     });
 
     this.socket.on('reconnect_failed', () => {
-      console.error('❌ Socket reconnection failed after maximum attempts');
       this.emitEvent('socket_reconnect_failed', {});
     });
 
     // Chat events
     this.socket.on('receive_message', (message: Message) => {
-      console.log('📨 Received message:', message.message?.substring(0, 50));
       this.emitEvent('receive_message', message);
       this.emitEvent('new_message', message);
     });
 
     this.socket.on('message_delivered', (message: Message) => {
-      console.log('✅ Message delivered:', message._id);
       this.emitEvent('message_delivered', message);
     });
 
     this.socket.on('room_joined', (data: RoomData) => {
-      console.log('🏠 Room joined:', data.roomId);
       this.emitEvent('room_joined', data);
     });
 
@@ -202,30 +210,25 @@ private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null;
       this.emitEvent('user_stop_typing', data);
     });
 
-    // User status events
+    // User presence events
     this.socket.on('user_online', (data: UserStatus) => {
-      console.log('👤 User online:', data.userId);
       this.emitEvent('user_online', data);
     });
 
     this.socket.on('user_offline', (data: UserStatus) => {
-      console.log('👤 User offline:', data.userId);
       this.emitEvent('user_offline', data);
     });
 
-    // Call events (for future implementation)
+    // WebRTC signaling events (future implementation)
     this.socket.on('call_user', (data: CallData) => {
-      console.log('📞 Incoming call from:', data.fromUserId);
       this.emitEvent('incoming_call', data);
     });
 
     this.socket.on('call_accepted', (data: CallData) => {
-      console.log('✅ Call accepted from:', data.fromUserId);
       this.emitEvent('call_accepted', data);
     });
 
     this.socket.on('call_rejected', (data: CallData) => {
-      console.log('❌ Call rejected from:', data.fromUserId);
       this.emitEvent('call_rejected', data);
     });
 
@@ -242,18 +245,25 @@ private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null;
     });
 
     this.socket.on('end_call', (data: CallData) => {
-      console.log('📞 Call ended with:', data.fromUserId);
       this.emitEvent('call_ended', data);
     });
 
     // Error handling
     this.socket.on('error', (error: Error) => {
-      console.error('❌ Socket error:', error);
+      console.error('Socket error:', error);
       this.emitEvent('socket_error', error);
     });
   }
 
-  // Event emitter for React components
+  // ============================================
+  // EVENT MANAGEMENT
+  // ============================================
+
+  /**
+   * Register event listener
+   * @param event - Event name
+   * @param callback - Callback function
+   */
   on(event: string, callback: EventCallback): void {
     if (!this.eventListeners.has(event)) {
       this.eventListeners.set(event, []);
@@ -261,6 +271,11 @@ private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null;
     this.eventListeners.get(event)?.push(callback);
   }
 
+  /**
+   * Remove event listener
+   * @param event - Event name
+   * @param callback - Callback function to remove
+   */
   off(event: string, callback: EventCallback): void {
     const listeners = this.eventListeners.get(event);
     if (listeners) {
@@ -269,6 +284,10 @@ private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null;
     }
   }
 
+  /**
+   * Remove all listeners for an event or all events
+   * @param event - Optional event name
+   */
   removeAllListeners(event?: string): void {
     if (event) {
       this.eventListeners.delete(event);
@@ -277,6 +296,11 @@ private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null;
     }
   }
 
+  /**
+   * Emit event to all registered listeners
+   * @param event - Event name
+   * @param data - Event data
+   */
   private emitEvent(event: string, data: any): void {
     const listeners = this.eventListeners.get(event);
     if (listeners) {
@@ -290,100 +314,171 @@ private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null;
     }
   }
 
-  // Chat actions
+  // ============================================
+  // CHAT ACTIONS
+  // ============================================
+
+  /**
+   * Join a chat room
+   * @param roomId - Room identifier
+   * @param otherUserId - Other participant's user ID (for direct chats)
+   * @param type - Room type ('direct' or 'group')
+   */
   joinRoom(roomId: string, otherUserId: string | null = null, type: string = 'direct'): void {
     if (this.socket && this.isConnected) {
-      console.log(`🏠 Joining room: ${roomId}`);
       this.socket.emit('join_room', { roomId, type, otherUserId });
     } else {
-      console.log(`⏳ Socket not connected, queueing room join: ${roomId}`);
+      // Queue room join for when connection is established
       this.pendingRooms.push({ roomId, otherUserId, type });
-      // Attempt to reconnect
       this.connect();
     }
   }
 
+  /**
+   * Send a message to a room
+   * @param roomId - Room identifier
+   * @param message - Message content
+   * @param type - Message type ('text', 'image', etc.)
+   */
   sendMessage(roomId: string, message: string, type: string = 'text'): void {
     if (this.socket && this.isConnected) {
-      console.log(`📤 Sending message to room ${roomId}:`, message.substring(0, 50));
       this.socket.emit('send_message', { roomId, message, type });
     } else {
-      console.error('❌ Cannot send message - socket not connected');
+      console.error('Cannot send message - socket not connected');
       this.emitEvent('socket_error', { message: 'Socket not connected' });
-      // Try to reconnect
       this.connect();
     }
   }
 
+  /**
+   * Send typing indicator to a room
+   * @param roomId - Room identifier
+   */
   sendTyping(roomId: string): void {
     if (this.socket && this.isConnected) {
       this.socket.emit('typing', { roomId });
     }
   }
 
+  /**
+   * Stop typing indicator in a room
+   * @param roomId - Room identifier
+   */
   stopTyping(roomId: string): void {
     if (this.socket && this.isConnected) {
       this.socket.emit('stop_typing', { roomId });
     }
   }
 
+  /**
+   * Mark messages as read
+   * @param roomId - Room identifier
+   * @param messageIds - Array of message IDs
+   */
   markMessagesAsRead(roomId: string, messageIds: string[]): void {
     if (this.socket && this.isConnected) {
       this.socket.emit('message_read', { roomId, messageIds });
     }
   }
 
+  /**
+   * Request message history for a room
+   * @param roomId - Room identifier
+   * @param limit - Number of messages to fetch
+   * @param before - Timestamp for pagination
+   */
   getMessageHistory(roomId: string, limit: number = 50, before: string | null = null): void {
     if (this.socket && this.isConnected) {
       this.socket.emit('get_messages', { roomId, limit, before });
     }
   }
 
-  // Call actions (for future implementation)
+  // ============================================
+  // WEBRTC SIGNALING (FUTURE IMPLEMENTATION)
+  // ============================================
+
+  /**
+   * Initiate a call to another user
+   * @param targetUserId - Target user ID
+   * @param callType - 'audio' or 'video'
+   * @param offer - WebRTC offer
+   */
   callUser(targetUserId: string, callType: string = 'video', offer: any = null): void {
     if (this.socket && this.isConnected) {
-      console.log(`📞 Calling user: ${targetUserId}`);
       this.socket.emit('call_user', { targetUserId, callType, offer });
     }
   }
 
+  /**
+   * Accept an incoming call
+   * @param targetUserId - Caller user ID
+   */
   acceptCall(targetUserId: string): void {
     if (this.socket && this.isConnected) {
       this.socket.emit('call_accepted', { targetUserId });
     }
   }
 
+  /**
+   * Reject an incoming call
+   * @param targetUserId - Caller user ID
+   */
   rejectCall(targetUserId: string): void {
     if (this.socket && this.isConnected) {
       this.socket.emit('call_rejected', { targetUserId });
     }
   }
 
+  /**
+   * Send WebRTC offer
+   * @param targetUserId - Target user ID
+   * @param offer - WebRTC offer
+   */
   sendOffer(targetUserId: string, offer: any): void {
     if (this.socket && this.isConnected) {
       this.socket.emit('offer', { targetUserId, offer });
     }
   }
 
+  /**
+   * Send WebRTC answer
+   * @param targetUserId - Target user ID
+   * @param answer - WebRTC answer
+   */
   sendAnswer(targetUserId: string, answer: any): void {
     if (this.socket && this.isConnected) {
       this.socket.emit('answer', { targetUserId, answer });
     }
   }
 
+  /**
+   * Send ICE candidate
+   * @param targetUserId - Target user ID
+   * @param candidate - ICE candidate
+   */
   sendICECandidate(targetUserId: string, candidate: any): void {
     if (this.socket && this.isConnected) {
       this.socket.emit('ice_candidate', { targetUserId, candidate });
     }
   }
 
+  /**
+   * End an active call
+   * @param targetUserId - Other participant's user ID
+   */
   endCall(targetUserId: string): void {
     if (this.socket && this.isConnected) {
-      console.log(`📞 Ending call with: ${targetUserId}`);
       this.socket.emit('end_call', { targetUserId });
     }
   }
 
+  // ============================================
+  // CONNECTION MANAGEMENT
+  // ============================================
+
+  /**
+   * Disconnect the socket connection
+   */
   disconnect(): void {
     if (this.connectionRetryTimeout) {
       clearTimeout(this.connectionRetryTimeout);
@@ -391,7 +486,6 @@ private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null;
     }
     
     if (this.socket) {
-      console.log('🔌 Disconnecting socket...');
       this.socket.disconnect();
       this.socket = null;
       this.isConnected = false;
@@ -399,16 +493,26 @@ private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null;
     }
   }
 
+  /**
+   * Manually reconnect the socket
+   */
   reconnect(): void {
-    console.log('🔄 Manual reconnect requested');
     this.disconnect();
     this.connect();
   }
 
+  /**
+   * Get current connection status
+   * @returns True if connected, false otherwise
+   */
   getConnectionStatus(): boolean {
     return this.isConnected;
   }
 
+  /**
+   * Get current socket ID
+   * @returns Socket ID or null
+   */
   getSocketId(): string | null {
     return this.socket?.id || null;
   }

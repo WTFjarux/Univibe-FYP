@@ -6,6 +6,7 @@
 
 const Message = require("../models/Message");
 const User = require("../models/User");
+const Profile = require("../models/Profile");
 const ChatRoom = require("../models/ChatRoom");
 
 /**
@@ -97,7 +98,7 @@ const getMessageHistory = async (req, res) => {
 };
 
 /**
- * Get user's chat rooms
+ * Get user's chat rooms with profile pictures
  */
 const getUserChatRooms = async (req, res) => {
   try {
@@ -109,31 +110,49 @@ const getUserChatRooms = async (req, res) => {
       .populate("participants.userId", "name email")
       .sort({ updatedAt: -1 });
 
-    // Format response
-    const formattedRooms = chatRooms.map((room) => {
-      if (room.type === "direct") {
-        // Get other participant info
-        const otherParticipant = room.participants.find(
-          (p) => p.userId._id.toString() !== currentUserId,
-        );
+    // Format response with profile pictures
+    const formattedRooms = await Promise.all(
+      chatRooms.map(async (room) => {
+        if (room.type === "direct") {
+          // Get other participant info
+          const otherParticipant = room.participants.find(
+            (p) => p.userId._id.toString() !== currentUserId,
+          );
+
+          const otherUserId = otherParticipant?.userId?._id;
+
+          // Fetch profile picture for the other user
+          let profilePicture = null;
+          if (otherUserId) {
+            const profile = await Profile.findOne({ user: otherUserId }).lean();
+            if (profile && profile.profilePicture) {
+              profilePicture = profile.profilePicture;
+            }
+          }
+
+          return {
+            roomId: room.roomId,
+            type: room.type,
+            name: otherParticipant?.userId?.name || "Unknown",
+            otherUserId: otherUserId || null,
+            otherUserAvatar: profilePicture || null,
+            lastMessage: room.lastMessage,
+            updatedAt: room.updatedAt,
+          };
+        }
+
         return {
           roomId: room.roomId,
           type: room.type,
-          name: otherParticipant?.userId?.name || "Unknown",
+          name: room.name,
+          avatar: room.avatar,
+          otherUserId: null,
+          otherUserAvatar: null,
           lastMessage: room.lastMessage,
           updatedAt: room.updatedAt,
         };
-      }
-
-      return {
-        roomId: room.roomId,
-        type: room.type,
-        name: room.name,
-        avatar: room.avatar,
-        lastMessage: room.lastMessage,
-        updatedAt: room.updatedAt,
-      };
-    });
+      }),
+    );
 
     res.status(200).json({
       success: true,
@@ -156,15 +175,17 @@ const deleteMessage = async (req, res) => {
     const message = await Message.findById(messageId);
 
     if (!message) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Message not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Message not found",
+      });
     }
 
     if (message.sender.toString() !== currentUserId) {
-      return res
-        .status(403)
-        .json({ success: false, message: "Not authorized" });
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized",
+      });
     }
 
     message.isDeleted = true;
@@ -181,9 +202,48 @@ const deleteMessage = async (req, res) => {
   }
 };
 
+/**
+ * Get other user's profile info for chat
+ */
+const getOtherUserProfile = async (req, res) => {
+  try {
+    const { otherUserId } = req.params;
+
+    const profile = await Profile.findOne({ user: otherUserId }).lean();
+    const user = await User.findById(otherUserId)
+      .select("name email username")
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        userId: user._id,
+        name: user.name,
+        username: user.username,
+        email: user.email,
+        profilePicture: profile?.profilePicture || null,
+        fullName: profile?.fullName || user.name,
+        bio: profile?.bio || "",
+        campus: profile?.campus || "",
+      },
+    });
+  } catch (error) {
+    console.error("Error getting other user profile:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 module.exports = {
   getOrCreateDirectRoom,
   getMessageHistory,
   getUserChatRooms,
   deleteMessage,
+  getOtherUserProfile,
 };

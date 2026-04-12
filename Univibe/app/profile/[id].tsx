@@ -151,6 +151,7 @@ export default function PublicProfileScreen() {
   const goBack = () => router.back();
 
   // Start chat with user
+
   const startChat = async () => {
     if (!profile) return;
 
@@ -167,13 +168,16 @@ export default function PublicProfileScreen() {
       const data = await response.json();
 
       if (data.success) {
-        // Use router.push with the correct path
+        // Get the full profile picture URL
+        const avatarUrl = profile.profilePicture || "";
+
         router.push({
           pathname: "/screens/ChatScreen",
           params: {
             roomId: data.data.roomId,
             otherUserName: profile.fullName,
             otherUserId: profile.user._id,
+            otherUserAvatar: avatarUrl,
           },
         });
       } else {

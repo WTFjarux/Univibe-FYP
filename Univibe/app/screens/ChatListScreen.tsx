@@ -1,4 +1,16 @@
-import React, { useState, useEffect, useCallback } from "react";
+// app/screens/ChatListScreen.tsx
+/**
+ * Chat List Screen
+ *
+ * Displays all user conversations with search functionality and ability to start new chats.
+ * Features:
+ * - List of existing chat rooms
+ * - Search conversations by name
+ * - Create new chat by searching users
+ * - Real-time updates when new messages arrive
+ */
+
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -7,45 +19,69 @@ import {
   StyleSheet,
   RefreshControl,
   ActivityIndicator,
+  Image,
+  TextInput,
+  Modal,
+  StatusBar,
 } from "react-native";
-import { useFocusEffect } from "@react-navigation/native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useAuth } from "../../lib/contexts/AuthContext";
 import { API_BASE_URL } from "../../constants/ipConstants";
+import { Ionicons } from "@expo/vector-icons";
+import { profileService } from "../../lib/services/profileService";
 
+/** Chat room data structure from API */
 interface ChatRoom {
   roomId: string;
-  type: "direct" | "group";
+  type: string;
   name: string;
+  otherUserId?: string;
+  otherUserAvatar?: string;
   lastMessage?: {
     message: string;
-    sender: string;
     sentAt: string;
   };
   updatedAt: string;
 }
 
-export default function ChatListScreen({ navigation }: any) {
+/** User data structure for search results */
+interface User {
+  _id: string;
+  name: string;
+  username: string;
+  profilePicture?: string;
+}
+
+export default function ChatListScreen() {
+  const router = useRouter();
   const { token } = useAuth();
+
+  // State declarations
   const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
+  const [filteredRooms, setFilteredRooms] = useState<ChatRoom[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const [users, setUsers] = useState<User[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [searchUserQuery, setSearchUserQuery] = useState("");
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchChatRooms();
-    }, []),
-  );
-
+  /**
+   * Fetch all chat rooms for current user
+   * Runs when screen is focused
+   */
   const fetchChatRooms = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/chat/rooms`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await response.json();
+
       if (data.success) {
         setChatRooms(data.data);
+        setFilteredRooms(data.data);
       }
     } catch (error) {
       console.error("Error fetching chat rooms:", error);
@@ -55,18 +91,120 @@ export default function ChatListScreen({ navigation }: any) {
     }
   };
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    fetchChatRooms();
+  /**
+   * Search for users by name or username
+   * @param query - Search query string
+   */
+  const fetchUsers = async (query: string) => {
+    if (!query.trim()) {
+      setUsers([]);
+      return;
+    }
+
+    setLoadingUsers(true);
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/profile/search?query=${encodeURIComponent(query)}&limit=20`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+      const data = await response.json();
+
+      if (data.success && data.profiles) {
+        setUsers(data.profiles);
+      }
+    } catch (error) {
+      console.error("Error fetching users:", error);
+    } finally {
+      setLoadingUsers(false);
+    }
   };
 
-  const navigateToChat = (roomId: string, name: string) => {
-    navigation.navigate("Chat", {
-      roomId,
-      otherUserName: name,
+  /**
+   * Filter chat rooms based on search query
+   * @param text - Search input text
+   */
+  const handleSearch = (text: string) => {
+    setSearchQuery(text);
+    if (text.trim()) {
+      const filtered = chatRooms.filter((room) =>
+        room.name.toLowerCase().includes(text.toLowerCase()),
+      );
+      setFilteredRooms(filtered);
+    } else {
+      setFilteredRooms(chatRooms);
+    }
+  };
+
+  /**
+   * Handle user search input for new chat modal
+   * @param text - Search input text
+   */
+  const handleSearchUsers = (text: string) => {
+    setSearchUserQuery(text);
+    fetchUsers(text);
+  };
+
+  /**
+   * Start a new chat with selected user
+   * Creates or retrieves existing chat room
+   * @param userId - Target user ID
+   * @param userName - Target user name
+   */
+  const startNewChat = async (userId: string, userName: string) => {
+    setShowNewChatModal(false);
+    setSearchUserQuery("");
+    setUsers([]);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/chat/room/${userId}`, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        router.push({
+          pathname: "/screens/ChatScreen",
+          params: {
+            roomId: data.data.roomId,
+            otherUserName: userName,
+            otherUserId: userId,
+          },
+        });
+      }
+    } catch (error) {
+      console.error("Error starting chat:", error);
+    }
+  };
+
+  /**
+   * Navigate to existing chat screen
+   * @param roomId - Chat room ID
+   * @param name - Other user's name
+   * @param otherUserId - Other user's ID
+   */
+  const navigateToChat = (
+    roomId: string,
+    name: string,
+    otherUserId?: string,
+  ) => {
+    router.push({
+      pathname: "/screens/ChatScreen",
+      params: {
+        roomId,
+        otherUserName: name,
+        otherUserId: otherUserId || "",
+      },
     });
   };
 
+  /**
+   * Format timestamp for display
+   * @param dateString - ISO date string
+   * @returns Formatted time string
+   */
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
@@ -85,33 +223,102 @@ export default function ChatListScreen({ navigation }: any) {
     }
   };
 
-  const renderChatItem = ({ item }: { item: ChatRoom }) => (
-    <TouchableOpacity
-      style={styles.chatItem}
-      onPress={() => navigateToChat(item.roomId, item.name)}
-    >
-      <View style={styles.avatar}>
-        <Text style={styles.avatarText}>
-          {item.name.charAt(0).toUpperCase()}
-        </Text>
-      </View>
+  /**
+   * Get user initials for avatar fallback
+   * @param name - User's full name
+   * @returns First letter of name
+   */
+  const getInitials = (name: string) => {
+    return name?.charAt(0)?.toUpperCase() || "?";
+  };
 
-      <View style={styles.chatInfo}>
-        <View style={styles.chatHeader}>
-          <Text style={styles.chatName}>{item.name}</Text>
-          {item.lastMessage && (
-            <Text style={styles.chatTime}>
-              {formatTime(item.lastMessage.sentAt)}
-            </Text>
+  /**
+   * Get full image URL for avatar
+   * @param avatar - Relative avatar path
+   * @returns Complete image URL
+   */
+  const getAvatarUrl = (avatar: string | undefined): string => {
+    if (!avatar) return "";
+    return profileService.getFullImageUrl(avatar);
+  };
+
+  /**
+   * Render individual chat room item
+   */
+  const renderChatItem = ({ item }: { item: ChatRoom }) => {
+    const avatarUrl = getAvatarUrl(item.otherUserAvatar);
+
+    return (
+      <TouchableOpacity
+        style={styles.chatItem}
+        onPress={() => navigateToChat(item.roomId, item.name, item.otherUserId)}
+      >
+        <View style={styles.avatarContainer}>
+          {avatarUrl ? (
+            <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+          ) : (
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{getInitials(item.name)}</Text>
+            </View>
           )}
         </View>
 
-        <Text style={styles.lastMessage} numberOfLines={1}>
-          {item.lastMessage?.message || "No messages yet"}
-        </Text>
+        <View style={styles.chatInfo}>
+          <View style={styles.chatHeader}>
+            <Text style={styles.chatName}>{item.name}</Text>
+            {item.lastMessage && (
+              <Text style={styles.chatTime}>
+                {formatTime(item.lastMessage.sentAt)}
+              </Text>
+            )}
+          </View>
+
+          <Text style={styles.lastMessage} numberOfLines={1}>
+            {item.lastMessage?.message || "No messages yet"}
+          </Text>
+        </View>
+
+        <Ionicons name="chevron-forward" size={20} color="#C7C7CC" />
+      </TouchableOpacity>
+    );
+  };
+
+  /**
+   * Render user item in new chat search results
+   */
+  const renderUserItem = ({ item }: { item: User }) => (
+    <TouchableOpacity
+      style={styles.userItem}
+      onPress={() => startNewChat(item._id, item.name)}
+    >
+      {item.profilePicture ? (
+        <Image
+          source={{ uri: getAvatarUrl(item.profilePicture) }}
+          style={styles.userAvatar}
+        />
+      ) : (
+        <View style={styles.userAvatarPlaceholder}>
+          <Text style={styles.userAvatarText}>{getInitials(item.name)}</Text>
+        </View>
+      )}
+      <View style={styles.userInfo}>
+        <Text style={styles.userName}>{item.name}</Text>
+        <Text style={styles.userUsername}>@{item.username}</Text>
       </View>
     </TouchableOpacity>
   );
+
+  // Refresh chat rooms when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      fetchChatRooms();
+    }, []),
+  );
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchChatRooms();
+  };
 
   if (loading) {
     return (
@@ -122,28 +329,119 @@ export default function ChatListScreen({ navigation }: any) {
   }
 
   return (
-    <View style={styles.container}>
-      <FlatList
-        data={chatRooms}
-        keyExtractor={(item) => item.roomId}
-        renderItem={renderChatItem}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No conversations yet</Text>
-            <Text style={styles.emptySubtext}>
-              Start a chat by connecting with other users
-            </Text>
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+
+      <View style={styles.container}>
+        {/* Header with title and create icon */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Messages</Text>
+          <TouchableOpacity
+            style={styles.createButton}
+            onPress={() => setShowNewChatModal(true)}
+          >
+            <Ionicons name="create-outline" size={24} color="#007AFF" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Search Bar */}
+        <View style={styles.searchContainer}>
+          <Ionicons name="search-outline" size={20} color="#999" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search conversations..."
+            value={searchQuery}
+            onChangeText={handleSearch}
+            placeholderTextColor="#999"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => handleSearch("")}>
+              <Ionicons name="close-circle" size={20} color="#999" />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Chat Rooms List */}
+        <FlatList
+          data={filteredRooms}
+          keyExtractor={(item) => item.roomId}
+          renderItem={renderChatItem}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="chatbubbles-outline" size={60} color="#C7C7CC" />
+              <Text style={styles.emptyText}>No conversations yet</Text>
+              <Text style={styles.emptySubtext}>
+                Tap the + icon to start a new chat
+              </Text>
+            </View>
+          }
+        />
+
+        {/* New Chat Modal */}
+        <Modal
+          visible={showNewChatModal}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setShowNewChatModal(false)}
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={() => setShowNewChatModal(false)}>
+                <Ionicons name="close" size={28} color="#007AFF" />
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>New Chat</Text>
+              <View style={{ width: 28 }} />
+            </View>
+
+            <View style={styles.modalSearchContainer}>
+              <Ionicons name="search-outline" size={20} color="#999" />
+              <TextInput
+                style={styles.modalSearchInput}
+                placeholder="Search by name or username..."
+                value={searchUserQuery}
+                onChangeText={handleSearchUsers}
+                autoFocus
+                placeholderTextColor="#999"
+              />
+            </View>
+
+            {loadingUsers ? (
+              <ActivityIndicator style={styles.loader} color="#007AFF" />
+            ) : (
+              <FlatList
+                data={users}
+                keyExtractor={(item) => item._id}
+                renderItem={renderUserItem}
+                ListEmptyComponent={
+                  searchUserQuery.length > 0 ? (
+                    <View style={styles.emptyUsersContainer}>
+                      <Text style={styles.emptyUsersText}>No users found</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.emptyUsersContainer}>
+                      <Text style={styles.emptyUsersText}>
+                        Search for users to start a chat
+                      </Text>
+                    </View>
+                  )
+                }
+              />
+            )}
           </View>
-        }
-      />
-    </View>
+        </Modal>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#fff",
+  },
   container: {
     flex: 1,
     backgroundColor: "#fff",
@@ -153,11 +451,49 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 12,
+    backgroundColor: "#fff",
+  },
+  headerTitle: {
+    fontSize: 34,
+    fontWeight: "700",
+    color: "#000",
+    fontFamily: "SofiaSans-Bold",
+  },
+  createButton: {
+    padding: 8,
+  },
+  searchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f0f0f0",
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    height: 40,
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 16,
+    fontFamily: "SofiaSans-Regular",
+  },
   chatItem: {
     flexDirection: "row",
-    padding: 15,
+    padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: "#f0f0f0",
+    alignItems: "center",
+  },
+  avatarContainer: {
+    marginRight: 15,
   },
   avatar: {
     width: 50,
@@ -166,12 +502,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#007AFF",
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 15,
   },
   avatarText: {
     color: "#fff",
     fontSize: 20,
-    fontWeight: "bold",
+    fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
   },
   chatInfo: {
     flex: 1,
@@ -179,19 +515,24 @@ const styles = StyleSheet.create({
   chatHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 5,
+    alignItems: "center",
+    marginBottom: 4,
   },
   chatName: {
     fontSize: 16,
     fontWeight: "600",
+    color: "#000",
+    fontFamily: "SofiaSans-Bold",
   },
   chatTime: {
     fontSize: 12,
-    color: "#999",
+    color: "#8E8E93",
+    fontFamily: "SofiaSans-Regular",
   },
   lastMessage: {
     fontSize: 14,
-    color: "#666",
+    color: "#8E8E93",
+    fontFamily: "SofiaSans-Regular",
   },
   emptyContainer: {
     flex: 1,
@@ -204,10 +545,106 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#333",
     marginBottom: 10,
+    fontFamily: "SofiaSans-Bold",
   },
   emptySubtext: {
     fontSize: 14,
     color: "#999",
     textAlign: "center",
+    fontFamily: "SofiaSans-Regular",
+  },
+  // Modal styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: "#fff",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e5ea",
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#000",
+    fontFamily: "SofiaSans-Bold",
+  },
+  modalSearchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f0f0f0",
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    height: 40,
+  },
+  modalSearchInput: {
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 16,
+    fontFamily: "SofiaSans-Regular",
+  },
+  userItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+  },
+  userAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 15,
+  },
+  userAvatarPlaceholder: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "#007AFF",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 15,
+  },
+  userAvatarText: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
+  },
+  userInfo: {
+    flex: 1,
+  },
+  userName: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#000",
+    fontFamily: "SofiaSans-Bold",
+  },
+  userUsername: {
+    fontSize: 14,
+    color: "#8E8E93",
+    marginTop: 2,
+    fontFamily: "SofiaSans-Regular",
+  },
+  loader: {
+    marginTop: 20,
+  },
+  emptyUsersContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 60,
+  },
+  emptyUsersText: {
+    fontSize: 16,
+    color: "#999",
+    fontFamily: "SofiaSans-Regular",
   },
 });
