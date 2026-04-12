@@ -1,7 +1,7 @@
 // app/lib/ProfileContext.tsx
 import React, { createContext, useState, useContext, useEffect } from "react";
 import { useAuth } from "./AuthContext";
-import { profileService } from "./profileService";
+import { profileService } from "../services/profileService";
 
 interface ProfileContextType {
   profile: any | null;

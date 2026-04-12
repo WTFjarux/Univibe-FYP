@@ -19,8 +19,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
-import { createPost } from "@/lib/postService";
-import { useAuth } from "@/lib/AuthContext";
+import { createPost } from "@/lib/services/postService";
+import { useAuth } from "@/lib/contexts/AuthContext";
 import { API_BASE_URL } from "@/constants/ipConstants";
 
 // Local default avatar

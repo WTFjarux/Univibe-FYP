@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { Event } from "@/lib/eventService";
+import { Event } from "@/lib/services/eventService";
 
 const { width } = Dimensions.get("window");
 

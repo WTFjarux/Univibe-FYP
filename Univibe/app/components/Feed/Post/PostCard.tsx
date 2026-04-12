@@ -16,10 +16,10 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { Post, getFullImageUrl } from "@/lib/postService";
-import { formatTimeAgo } from "@/lib/formatTime";
+import { Post, getFullImageUrl } from "@/lib/services/postService";
+import { formatTimeAgo } from "@/lib/utils/formatTime";
 import PostOptionsModal from "./PostOptionsModal";
-import { useAuth } from "@/lib/AuthContext";
+import { useAuth } from "@/lib/contexts/AuthContext";
 
 const DEFAULT_AVATAR: ImageSourcePropType = require("../../../../assets/images/default-avatar.png");
 

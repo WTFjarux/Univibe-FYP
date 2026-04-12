@@ -13,10 +13,10 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
-import { eventService, Event } from "@/lib/eventService";
+import { eventService, Event } from "@/lib/services/eventService";
 import EventCard from "@/app/components/Events/EventCard";
 import EventCategory from "@/app/components/Events/EventCategory";
-import { useAuth } from "@/lib/AuthContext";
+import { useAuth } from "@/lib/contexts/AuthContext";
 
 const categories = [
   { id: "all", name: "All", icon: "grid", count: 0 },

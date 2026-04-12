@@ -17,12 +17,15 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { eventService } from "@/lib/eventService";
+import { eventService } from "@/lib/services/eventService";
 import {
   DatePickerModal,
   TimePickerModal,
 } from "@/app/components/Events/DateTimePickerModal";
-import { ImagePickerComponent, ImageItem } from "@/app/components/Events/ImagePicker";
+import {
+  ImagePickerComponent,
+  ImageItem,
+} from "@/app/components/Events/ImagePicker";
 
 const categories = [
   "Academic",

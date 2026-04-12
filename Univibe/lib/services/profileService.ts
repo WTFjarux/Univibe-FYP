@@ -3,9 +3,8 @@
  */
 
 import * as SecureStore from 'expo-secure-store'; 
-import { API_BASE_URL } from '../constants/ipConstants';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { profileCache } from './profileCache';
+import { API_BASE_URL } from '../../constants/ipConstants';
+import { profileCache } from '../cache/profileCache';
 
 // ============================================
 // ENSURE API_BASE_URL IS DEFINED

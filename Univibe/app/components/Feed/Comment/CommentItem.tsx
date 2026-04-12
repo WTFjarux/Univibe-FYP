@@ -21,17 +21,17 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { Comment, areRepliesPopulated } from "@/lib/postService";
+import { Comment, areRepliesPopulated } from "@/lib/services/postService";
 import {
   formatCommentUserDisplay,
   // REMOVED: getCommentUserProfileImage,
   getCommentDepthColor,
   isCommentFromPostAuthor,
   formatCommentTimestamp,
-} from "@/lib/postService";
+} from "@/lib/services/postService";
 import CommentOptionsModal from "./CommentOptionsModal";
 import { API_BASE_URL } from "@/constants/ipConstants";
-import { useAuth } from "@/lib/AuthContext";
+import { useAuth } from "@/lib/contexts/AuthContext";
 
 // ✅ Local default avatar
 const DEFAULT_AVATAR: ImageSourcePropType = require("../../../../assets/images/default-avatar.png");

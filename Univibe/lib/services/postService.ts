@@ -1,7 +1,7 @@
 // lib/postService.ts - Clean version without unnecessary logs
 import * as SecureStore from 'expo-secure-store';
-import { API_BASE_URL } from '../constants/ipConstants';
-import { postCache } from './postCache';
+import { API_BASE_URL } from '../../constants/ipConstants';
+import { postCache } from '../cache/postCache';
 
 // Default avatar constant
 export const DEFAULT_AVATAR = "default-avatar";

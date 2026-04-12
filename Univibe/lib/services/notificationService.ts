@@ -1,6 +1,6 @@
 // lib/notificationService.ts
 import * as SecureStore from 'expo-secure-store';
-import { API_BASE_URL } from '../constants/ipConstants';
+import { API_BASE_URL } from '../../constants/ipConstants';
 
 export interface Notification {
   _id: string;

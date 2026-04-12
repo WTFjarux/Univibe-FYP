@@ -1,6 +1,6 @@
 // app/_auth-guard.tsx
 import { Redirect } from "expo-router";
-import { useAuth } from "../lib/AuthContext";
+import { useAuth } from "../lib/contexts/AuthContext";
 import { View, ActivityIndicator } from "react-native";
 
 interface AuthGuardProps {

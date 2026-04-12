@@ -109,6 +109,23 @@ const userSchema = new mongoose.Schema(
       type: Date,
       select: false,
     },
+
+    // ============================================
+    // ONLINE STATUS SYSTEM (ADDED FOR SOCKET.IO)
+    // ============================================
+
+    isOnline: {
+      type: Boolean,
+      default: false,
+    },
+    lastSeen: {
+      type: Date,
+      default: Date.now,
+    },
+    socketId: {
+      type: String,
+      default: "",
+    },
   },
   {
     timestamps: true,
@@ -123,6 +140,7 @@ userSchema.index({ connectionRequestsSent: 1 });
 userSchema.index({ connectionRequestsReceived: 1 });
 userSchema.index({ username: 1 });
 userSchema.index({ email: 1 });
+userSchema.index({ isOnline: 1 }); // Added for faster online status queries
 
 // ============================================
 // PASSWORD HASHING MIDDLEWARE
@@ -366,6 +384,35 @@ userSchema.methods.canResendVerification = function () {
 };
 
 // ============================================
+// ONLINE STATUS METHODS (ADDED FOR SOCKET.IO)
+// ============================================
+
+/**
+ * Update user's online status
+ */
+userSchema.methods.updateOnlineStatus = async function (
+  isOnline,
+  socketId = null,
+) {
+  this.isOnline = isOnline;
+  this.lastSeen = new Date();
+  if (socketId) this.socketId = socketId;
+  if (!isOnline) this.socketId = "";
+  await this.save();
+  return this;
+};
+
+/**
+ * Get user's online status
+ */
+userSchema.methods.getOnlineStatus = function () {
+  return {
+    isOnline: this.isOnline,
+    lastSeen: this.lastSeen,
+  };
+};
+
+// ============================================
 // STATIC METHODS
 // ============================================
 
@@ -429,6 +476,21 @@ userSchema.statics.getConnectionSuggestions = async function (
   ]);
 
   return suggestions;
+};
+
+/**
+ * Get all online users (friends/connections)
+ */
+userSchema.statics.getOnlineFriends = async function (userId) {
+  const user = await this.findById(userId);
+  if (!user) return [];
+
+  const onlineFriends = await this.find({
+    _id: { $in: user.connections },
+    isOnline: true,
+  }).select("name email username profilePicture isOnline lastSeen");
+
+  return onlineFriends;
 };
 
 // ============================================

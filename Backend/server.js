@@ -1,20 +1,40 @@
+/**
+ * server.js — Main Application Entry Point
+ *
+ * Integrates Express REST API with Socket.IO real-time features
+ */
+
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+const http = require("http");
 require("dotenv").config();
 
 const { connectDB } = require("./config/database");
+const { setupSocketIO } = require("./config/socket");
+const { initializeSocketIO } = require("./socket");
+
+// Routes
 const authRoutes = require("./routes/authRoutes");
 const profileRoutes = require("./routes/profileRoutes");
 const postRoutes = require("./routes/postRoutes");
 const connectionRoutes = require("./routes/connectionRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
-const eventRoutes = require("./routes/eventRoutes"); // NEW: Import event routes
+const eventRoutes = require("./routes/eventRoutes");
+const chatRoutes = require("./routes/chatRoutes"); // NEW: Chat routes
 
 // Connect to database
 connectDB();
 
 const app = express();
+const server = http.createServer(app);
+
+// Setup Socket.IO
+const io = setupSocketIO(server);
+initializeSocketIO(io);
+
+// Make io accessible to routes (optional)
+app.set("io", io);
 
 // Middleware
 app.use(cors());
@@ -37,7 +57,7 @@ app.use(
 app.use(
   "/uploads/events",
   express.static(path.join(__dirname, "uploads/events")),
-); // NEW: Serve event images
+);
 
 // Routes
 app.use("/api/auth", authRoutes);
@@ -45,7 +65,8 @@ app.use("/api/profile", profileRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/connections", connectionRoutes);
 app.use("/api/notifications", notificationRoutes);
-app.use("/api/events", eventRoutes); // NEW: Mount event routes
+app.use("/api/events", eventRoutes);
+app.use("/api/chat", chatRoutes); // NEW: Mount chat routes
 
 // Redirect for old verification links
 app.get("/verify-email/:token", (req, res) => {
@@ -57,14 +78,19 @@ app.get("/verify-email/:token", (req, res) => {
 app.get("/", (req, res) => {
   res.json({
     message: "Univibe API is running!",
-    version: "1.4.0", // Updated version
+    version: "1.5.0", // Updated version
     endpoints: {
       auth: "/api/auth",
       profile: "/api/profile",
       posts: "/api/posts",
       connections: "/api/connections",
       notifications: "/api/notifications",
-      events: "/api/events", // NEW: Added events endpoint
+      events: "/api/events",
+      chat: "/api/chat", // NEW: Chat endpoint
+    },
+    websocket: {
+      status: "active",
+      port: process.env.PORT || 5001,
     },
   });
 });
@@ -86,28 +112,28 @@ app.use((error, req, res, next) => {
   });
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
-app.listen(PORT, "0.0.0.0", () => {
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`✅ Server running on port ${PORT}`);
+  console.log(`📡 Socket.IO running on same port`);
   console.log(`\n📁 Upload directories:`);
   console.log(`   Profile Pictures: /uploads/profile-pictures`);
   console.log(`   Cover Photos: /uploads/cover-photos`);
   console.log(`   Post Images: /uploads/posts`);
-  console.log(`   Event Images: /uploads/events`); // NEW
+  console.log(`   Event Images: /uploads/events`);
   console.log(`\n📱 API Endpoints:`);
   console.log(`   Auth: /api/auth`);
   console.log(`   Profile: /api/profile`);
   console.log(`   Posts: /api/posts`);
   console.log(`   Connections: /api/connections`);
   console.log(`   Notifications: /api/notifications`);
-  console.log(`   Events: /api/events`); // NEW
-  console.log(`\n🎉 Event Endpoints:`);
-  console.log(`   Create: POST /api/events`);
-  console.log(`   Get All: GET /api/events`);
-  console.log(`   Get One: GET /api/events/:eventId`);
-  console.log(`   My Events: GET /api/events/my-events`);
-  console.log(`   Attending: GET /api/events/attending`);
-  console.log(`   Interested: POST /api/events/:eventId/interested`);
-  console.log(`   RSVP: POST /api/events/:eventId/rsvp`);
+  console.log(`   Events: /api/events`);
+  console.log(`   Chat: /api/chat`); // NEW
+  console.log(`\n💬 Real-time Events Available:`);
+  console.log(`   join_room, leave_room`);
+  console.log(`   send_message, receive_message`);
+  console.log(`   typing, stop_typing`);
+  console.log(`   user_online, user_offline`);
+  console.log(`   call_user, offer, answer, ice_candidate, end_call`);
 });

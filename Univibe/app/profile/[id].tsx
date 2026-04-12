@@ -1,4 +1,4 @@
-// app/profile/[id].tsx - With accept and cancel buttons for pending requests and confirmation for remove connection
+// app/profile/[id].tsx - With chat integration and connection management
 
 import React, { useState, useCallback, useEffect } from "react";
 import {
@@ -17,15 +17,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { useNavigation } from "@react-navigation/native";
 
-import { useAuth } from "../../lib/AuthContext";
-import { profileService } from "../../lib/profileService";
-import { connectionService } from "../../lib/connectionService";
+import { useAuth } from "../../lib/contexts/AuthContext";
+import { profileService } from "../../lib/services/profileService";
+import { connectionService } from "../../lib/services/connectionService";
 import {
   getProfilePosts,
   toggleLike,
   deletePost,
   Post,
-} from "../../lib/postService";
+} from "../../lib/services/postService";
+import { API_BASE_URL } from "../../constants/ipConstants";
 
 import ProfileHeader from "../components/Profile/ProfileHeader";
 import ProfileInfo from "../components/Profile/ProfileInfo";
@@ -148,6 +149,41 @@ export default function PublicProfileScreen() {
   }, [navigation]);
 
   const goBack = () => router.back();
+
+  // Start chat with user
+  const startChat = async () => {
+    if (!profile) return;
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/chat/room/${profile.user._id}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+      const data = await response.json();
+
+      if (data.success) {
+        // Use router.push with the correct path
+        router.push({
+          pathname: "/screens/ChatScreen",
+          params: {
+            roomId: data.data.roomId,
+            otherUserName: profile.fullName,
+            otherUserId: profile.user._id,
+          },
+        });
+      } else {
+        showInfoBar(data.message || "Failed to start chat", "error");
+      }
+    } catch (error) {
+      console.error("Error starting chat:", error);
+      showInfoBar("Failed to start chat", "error");
+    }
+  };
 
   // Load profile posts based on connection status
   const loadProfilePosts = async (page = 1, shouldAppend = false) => {
@@ -861,37 +897,62 @@ export default function PublicProfileScreen() {
                       </TouchableOpacity>
                     </View>
                   ) : (
-                    // Show normal connection button for other statuses
-                    <TouchableOpacity
-                      style={[publicStyles.connectionButton, getButtonStyle()]}
-                      onPress={handleConnectionAction}
-                      disabled={connectionLoading}
-                    >
-                      {connectionLoading ? (
-                        <ActivityIndicator size="small" color="#fff" />
-                      ) : (
-                        <>
-                          <Ionicons
-                            name={buttonConfig.icon as any}
-                            size={20}
-                            color={
-                              buttonConfig.style === "connected"
-                                ? "#10b981"
-                                : "#fff"
-                            }
-                          />
-                          <Text
-                            style={[
-                              publicStyles.connectionButtonText,
-                              buttonConfig.style === "connected" &&
-                                publicStyles.connectedButtonText,
-                            ]}
-                          >
-                            {buttonConfig.text}
-                          </Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
+                    // Show connection and message buttons side by side
+                    <View style={publicStyles.buttonsRow}>
+                      <TouchableOpacity
+                        style={[
+                          publicStyles.connectionButton,
+                          getButtonStyle(),
+                          publicStyles.flexButton,
+                        ]}
+                        onPress={handleConnectionAction}
+                        disabled={connectionLoading}
+                      >
+                        {connectionLoading ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <>
+                            <Ionicons
+                              name={buttonConfig.icon as any}
+                              size={20}
+                              color={
+                                buttonConfig.style === "connected"
+                                  ? "#10b981"
+                                  : "#fff"
+                              }
+                            />
+                            <Text
+                              style={[
+                                publicStyles.connectionButtonText,
+                                buttonConfig.style === "connected" &&
+                                  publicStyles.connectedButtonText,
+                              ]}
+                            >
+                              {buttonConfig.text}
+                            </Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+
+                      {/* Message Button - Always show for non-own profiles */}
+                      <TouchableOpacity
+                        style={[
+                          publicStyles.connectionButton,
+                          publicStyles.messageButton,
+                          publicStyles.flexButton,
+                        ]}
+                        onPress={startChat}
+                      >
+                        <Ionicons
+                          name="chatbubble-outline"
+                          size={20}
+                          color="#fff"
+                        />
+                        <Text style={publicStyles.connectionButtonText}>
+                          Message
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
                   )}
                 </View>
               )}
@@ -975,6 +1036,13 @@ const publicStyles = StyleSheet.create({
     paddingHorizontal: 20,
     marginBottom: 16,
   },
+  buttonsRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  flexButton: {
+    flex: 1,
+  },
   connectionButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -998,6 +1066,9 @@ const publicStyles = StyleSheet.create({
     fontWeight: "600",
   },
   connectedButtonText: { color: "#10b981" },
+  messageButton: {
+    backgroundColor: "#3b82f6",
+  },
   acceptCancelContainer: {
     flexDirection: "row",
     alignItems: "center",

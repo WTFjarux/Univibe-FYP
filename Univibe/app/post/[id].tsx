@@ -15,7 +15,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { useAuth } from "../../lib/AuthContext";
+import { useAuth } from "../../lib/contexts/AuthContext";
 import {
   getPostById,
   getPostComments,
@@ -28,7 +28,7 @@ import {
   deletePost,
   Post,
   Comment,
-} from "../../lib/postService";
+} from "../../lib/services/postService";
 import PostCard from "../components/Feed/Post/PostCard";
 import CommentItem from "../components/Feed/Comment/CommentItem";
 import CommentInput from "../components/Feed/Comment/CommentInput";
@@ -433,7 +433,8 @@ export default function PostDetailScreen() {
           <Text style={styles.errorTitle}>Post Not Found</Text>
           <Text style={styles.errorMessage}>{error}</Text>
           <Text style={styles.errorSubtext}>
-            This post may have been deleted by the author or removed for violating our guidelines.
+            This post may have been deleted by the author or removed for
+            violating our guidelines.
           </Text>
           <TouchableOpacity
             style={styles.goBackButton}
@@ -675,7 +676,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontFamily: "SofiaSans-Bold",
     color: "#111827",
-
   },
   footerLoader: {
     paddingVertical: 20,

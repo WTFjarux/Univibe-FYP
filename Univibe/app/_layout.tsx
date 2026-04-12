@@ -2,8 +2,9 @@
 import { Stack } from "expo-router";
 import { useFonts } from "expo-font";
 import { SplashScreen } from "expo-router";
-import { AuthProvider } from "../lib/AuthContext";
-import { ProfileProvider } from "../lib/ProfileContext";
+import { AuthProvider } from "../lib/contexts/AuthContext";
+import { ProfileProvider } from "../lib/contexts/ProfileContext";
+import { ChatProvider } from "../lib/contexts/ChatContext";
 import { View, ActivityIndicator } from "react-native";
 import { useEffect } from "react";
 
@@ -33,26 +34,43 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <ProfileProvider>
-        <Stack screenOptions={{ headerShown: false }}>
-          {/* Public routes - don't require auth */}
-          <Stack.Screen name="index" />
-          <Stack.Screen name="(auth)" />
+        <ChatProvider>
+          <Stack screenOptions={{ headerShown: false }}>
+            {/* Public routes - don't require auth */}
+            <Stack.Screen name="index" />
+            <Stack.Screen name="(auth)" />
 
-          {/* ✅ Verification route - modal presentation */}
-          <Stack.Screen
-            name="verify"
-            options={{
-              presentation: "modal",
-              animation: "slide_from_bottom",
-            }}
-          />
+            {/* Verification route - modal presentation */}
+            <Stack.Screen
+              name="verify"
+              options={{
+                presentation: "modal",
+                animation: "slide_from_bottom",
+              }}
+            />
 
-          {/* ✅ Profile routes - includes both index and dynamic [id] */}
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="profile" />
+            {/* Profile routes - includes both index and dynamic [id] */}
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="profile" />
 
-          {/* Add other protected screens here */}
-        </Stack>
+            {/* Chat screens */}
+            <Stack.Screen
+              name="screens/ChatScreen"
+              options={{
+                headerShown: true,
+                title: "Chat",
+                headerBackTitle: "Back",
+              }}
+            />
+            <Stack.Screen
+              name="screens/ChatListScreen"
+              options={{
+                headerShown: true,
+                title: "Messages",
+              }}
+            />
+          </Stack>
+        </ChatProvider>
       </ProfileProvider>
     </AuthProvider>
   );

@@ -9,7 +9,7 @@ import {
   ImageSourcePropType,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useAuth } from "../../../../lib/AuthContext";
+import { useAuth } from "../../../../lib/contexts/AuthContext";
 import { API_BASE_URL } from "../../../../constants/ipConstants";
 
 const DEFAULT_AVATAR: ImageSourcePropType = require("../../../../assets/images/default-avatar.png");

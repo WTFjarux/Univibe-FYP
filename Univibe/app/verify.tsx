@@ -5,7 +5,7 @@ import { WebView } from "react-native-webview";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { jwtDecode } from "jwt-decode";
-import { useAuth } from "../lib/AuthContext";
+import { useAuth } from "../lib/contexts/AuthContext";
 import { API_BASE_URL } from "../constants/ipConstants";
 
 interface CustomJwtPayload {

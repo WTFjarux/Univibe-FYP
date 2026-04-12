@@ -19,12 +19,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import { useAuth } from "../../../../lib/AuthContext";
+import { useAuth } from "../../../../lib/contexts/AuthContext";
 import {
   getPostById,
   Post,
   getFullImageUrl,
-} from "../../../../lib/postService";
+} from "../../../../lib/services/postService";
 import { API_BASE_URL } from "../../../../constants/ipConstants";
 import DiscardChangesModal from "../../DiscardChangesModal";
 

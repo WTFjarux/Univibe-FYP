@@ -1,7 +1,7 @@
 // hooks/useCoverPhotoUpload.ts
 import { useState, useCallback } from 'react';
 import { Alert } from 'react-native';
-import { profileService } from '../lib/profileService';
+import { profileService } from '../lib/services/profileService';
 
 export const useCoverPhotoUpload = () => {
   const [coverModal, setCoverModal] = useState(false);

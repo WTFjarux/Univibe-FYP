@@ -23,6 +23,10 @@ const notificationSchema = new mongoose.Schema(
         "like",
         "repost",
         "mention",
+        "event_rsvp", // For RSVP notifications
+        "event_interest", // For interest notifications
+        "event_invite", // For event invitations
+        "event_reminder", // For event reminders
       ],
       required: true,
     },
@@ -40,7 +44,7 @@ const notificationSchema = new mongoose.Schema(
     },
     targetModel: {
       type: String,
-      enum: ["Post", "Comment"],
+      enum: ["Post", "Comment", "Event", "User"], // Add "Event" here
     },
     read: {
       type: Boolean,

@@ -13,12 +13,15 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
-import { useAuth } from "../lib/AuthContext";
-import { connectionService } from "../lib/connectionService";
-import { notificationService, Notification } from "../lib/notificationService";
-import NotificationItem from "./components/Notifications/notificationItem";
-import PendingRequestItem from "./components/Notifications/pendingRequestItem";
-import DateSectionHeader from "./components/Notifications/dateSectionHeader";
+import { useAuth } from "../../lib/contexts/AuthContext";
+import { connectionService } from "../../lib/services/connectionService";
+import {
+  notificationService,
+  Notification,
+} from "../../lib/services/notificationService";
+import NotificationItem from "../components/Notifications/notificationItem";
+import PendingRequestItem from "../components/Notifications/pendingRequestItem";
+import DateSectionHeader from "../components/Notifications/dateSectionHeader";
 
 interface SectionData {
   title: string;

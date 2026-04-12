@@ -10,9 +10,9 @@ import {
   ImageSourcePropType,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Post } from "@/lib/postService";
-import { formatTimeAgo } from "@/lib/formatTime";
-import { getFullImageUrl, formatUserDisplay } from "@/lib/postService";
+import { Post } from "@/lib/services/postService";
+import { formatTimeAgo } from "@/lib/utils/formatTime";
+import { getFullImageUrl, formatUserDisplay } from "@/lib/services/postService";
 import { API_BASE_URL } from "@/constants/ipConstants";
 
 const { width: screenWidth } = Dimensions.get("window");
@@ -336,7 +336,7 @@ const styles = StyleSheet.create({
   },
   statText: {
     fontSize: 14,
-    fontFamily: "SofiaSans-Regular",  
+    fontFamily: "SofiaSans-Regular",
     color: "#6b7280",
   },
   statTextActive: {
@@ -349,7 +349,7 @@ const styles = StyleSheet.create({
   commentsTitle: {
     fontSize: 16,
     fontWeight: "600",
-    fontFamily: "SofiaSans-Bold", 
+    fontFamily: "SofiaSans-Bold",
     color: "#111827",
   },
 });

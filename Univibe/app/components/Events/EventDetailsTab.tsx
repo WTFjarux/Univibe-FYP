@@ -11,7 +11,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Event } from "@/lib/eventService";
+import { Event } from "@/lib/services/eventService";
 import { useRouter } from "expo-router";
 import { API_BASE_URL } from "../../../constants/ipConstants";
 

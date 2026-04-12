@@ -11,8 +11,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Link, useFocusEffect } from "expo-router";
-import { useAuth } from "../../lib/AuthContext";
-import { notificationService } from "../../lib/notificationService";
+import { useAuth } from "../../lib/contexts/AuthContext";
+import { notificationService } from "../../lib/services/notificationService";
 
 export default function HomeScreen() {
   const { token } = useAuth();
@@ -127,7 +127,7 @@ export default function HomeScreen() {
           <Text style={styles.logoText}>UNIVIBE</Text>
 
           {/* Notification Icon - Right with badge */}
-          <Link href="/notifications" asChild>
+          <Link href="/screens/notifications" asChild>
             <TouchableOpacity style={styles.iconButton}>
               <Ionicons
                 name="notifications-outline"

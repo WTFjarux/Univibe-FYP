@@ -26,19 +26,19 @@ import * as ImagePicker from "expo-image-picker";
 import { useRouter, useFocusEffect } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 
-import { useAuth } from "../../../lib/AuthContext";
+import { useAuth } from "../../../lib/contexts/AuthContext";
 import { useImageUpload } from "../../../hooks/useImageUpload";
 import { useCoverPhotoUpload } from "../../../hooks/useCoverPhotoUpload";
-import { connectionService } from "../../../lib/connectionService";
+import { connectionService } from "../../../lib/services/connectionService";
 import {
   getProfilePosts,
   toggleLike,
   deletePost,
   Post,
-} from "../../../lib/postService";
+} from "../../../lib/services/postService";
 import { API_BASE_URL } from "../../../constants/ipConstants";
-import { profileService } from "../../../lib/profileService";
-import { profileCache } from "../../../lib/profileCache";
+import { profileService } from "../../../lib/services/profileService";
+import { profileCache } from "../../../lib/cache/profileCache";
 
 import ProfileHeader from "@/app/components/Profile/ProfileHeader";
 import ProfileInfo from "@/app/components/Profile/ProfileInfo";

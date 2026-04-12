@@ -14,8 +14,8 @@ import React, {
 import { jwtDecode } from "jwt-decode";
 import { AppState, AppStateStatus } from "react-native";
 import * as SecureStore from "expo-secure-store";
-import { profileService } from "./profileService";
-import { API_BASE_URL } from "../constants/ipConstants";
+import { profileService } from "../services/profileService";
+import { API_BASE_URL } from "../../constants/ipConstants";
 
 // ============================================
 // TYPES

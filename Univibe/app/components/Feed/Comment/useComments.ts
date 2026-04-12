@@ -7,7 +7,7 @@ import {
   updateComment,
   deleteComment,
   Comment,
-} from "@/lib/postService";
+} from "@/lib/services/postService";
 
 export const useComments = (
   postId: string,

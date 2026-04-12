@@ -2,7 +2,7 @@
 
 import { Tabs, Redirect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { useAuth } from "../../lib/AuthContext";
+import { useAuth } from "../../lib/contexts/AuthContext";
 import { View, ActivityIndicator, Text } from "react-native";
 
 export default function TabLayout() {
@@ -28,7 +28,7 @@ export default function TabLayout() {
   // If no token, redirect to landing page
   if (!token) {
     console.log("🚫 No token in tabs layout, redirecting to landing page");
-    return <Redirect href="/landingPage" />;
+    return <Redirect href="/screens/landingPage" />;
   }
 
   // User is authenticated, show tabs

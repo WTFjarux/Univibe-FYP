@@ -14,8 +14,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { eventService, Event } from "@/lib/eventService";
-import { useAuth } from "@/lib/AuthContext";
+import { eventService, Event } from "@/lib/services/eventService";
+import { useAuth } from "@/lib/contexts/AuthContext";
 import { EventImageCarousel } from "@/app/components/Events/EventImageCarousel";
 import { UserItem } from "@/app/components/Events/UserItem";
 import { EmptyState } from "@/app/components/Events/EmptyState";

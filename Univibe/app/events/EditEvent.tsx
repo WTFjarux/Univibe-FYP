@@ -17,8 +17,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { eventService } from "@/lib/eventService";
-import { useAuth } from "@/lib/AuthContext";
+import { eventService } from "@/lib/services/eventService";
+import { useAuth } from "@/lib/contexts/AuthContext";
 import {
   ImagePickerComponent,
   ImageItem,

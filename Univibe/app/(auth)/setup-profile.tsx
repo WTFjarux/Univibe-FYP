@@ -17,7 +17,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { Ionicons } from "@expo/vector-icons";
-import { profileService } from "../../lib/profileService";
+import { profileService } from "../../lib/services/profileService";
 import { API_BASE_URL } from "../../constants/ipConstants";
 
 // Import shared components and constants

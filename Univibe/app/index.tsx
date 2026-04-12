@@ -37,10 +37,10 @@ export default function Index() {
 
       // No token or token expired - go to login
       console.log("ℹ️ No valid token, redirecting to landingPage");
-      router.replace("/landingPage");
+      router.replace("/screens/landingPage");
     } catch (error) {
       console.error("Auth check error:", error);
-      router.replace("/landingPage");
+      router.replace("/screens/landingPage");
     } finally {
       setIsLoading(false);
     }

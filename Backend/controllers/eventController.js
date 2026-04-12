@@ -19,6 +19,12 @@ const createEventNotification = async (
   targetModel = "Event",
 ) => {
   try {
+    // Validate required fields
+    if (!recipientId || !senderId || !type || !title || !message) {
+      console.error("Missing required notification fields");
+      return null;
+    }
+
     const notification = new Notification({
       recipient: recipientId,
       sender: senderId,
@@ -29,6 +35,7 @@ const createEventNotification = async (
       targetModel,
     });
     await notification.save();
+    console.log(`📧 Notification created: ${type} for user ${recipientId}`);
     return notification;
   } catch (error) {
     console.error("Create notification error:", error);
@@ -110,7 +117,7 @@ const getFullImageUrl = (req, relativeUrl) => {
 
 // Process event images for response
 const processEventImagesForResponse = (req, event) => {
-  if (!event.images || event.images.length === 0) {
+  if (!event || !event.images || event.images.length === 0) {
     return {
       ...event,
       coverImageUrl: "",
@@ -872,8 +879,10 @@ exports.markInterested = async (req, res) => {
 
     if (isInterested) {
       await event.removeInterested(userId);
+      console.log(`User ${userId} removed interest from event ${eventId}`);
     } else {
       await event.addInterested(userId);
+      console.log(`User ${userId} added interest to event ${eventId}`);
 
       // Send notification to event organizer
       if (event.organizer.toString() !== userId.toString()) {
@@ -894,11 +903,14 @@ exports.markInterested = async (req, res) => {
       }
     }
 
+    // Get updated counts
+    const updatedEvent = await Event.findById(eventId);
+
     res.status(200).json({
       success: true,
       message: isInterested ? "Interest removed" : "Interest added",
       isInterested: !isInterested,
-      interestedCount: event.interestedCount,
+      interestedCount: updatedEvent.interestedCount,
     });
   } catch (error) {
     console.error("Mark interested error:", error);
@@ -937,8 +949,10 @@ exports.rsvpEvent = async (req, res) => {
 
     if (isRsvpd) {
       await event.removeRsvp(userId);
+      console.log(`User ${userId} cancelled RSVP for event ${eventId}`);
     } else {
       await event.addRsvp(userId);
+      console.log(`User ${userId} RSVP'd for event ${eventId}`);
 
       // Send notification to event organizer
       if (event.organizer.toString() !== userId.toString()) {
@@ -959,12 +973,15 @@ exports.rsvpEvent = async (req, res) => {
       }
     }
 
+    // Get updated counts
+    const updatedEvent = await Event.findById(eventId);
+
     res.status(200).json({
       success: true,
       message: isRsvpd ? "RSVP cancelled" : "RSVP confirmed",
       isRsvpd: !isRsvpd,
-      rsvpCount: event.rsvpCount,
-      isFull: event.isFull,
+      rsvpCount: updatedEvent.rsvpCount,
+      isFull: updatedEvent.isFull,
     });
   } catch (error) {
     console.error("RSVP error:", error);

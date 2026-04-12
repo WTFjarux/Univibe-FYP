@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
-import { useAuth } from "../../../lib/AuthContext";
+import { useAuth } from "../../../lib/contexts/AuthContext";
 import Ionicons from "@expo/vector-icons/Ionicons";
 
 // Components
@@ -29,7 +29,7 @@ import {
   deletePost,
   restorePost,
   Post,
-} from "../../../lib/postService";
+} from "../../../lib/services/postService";
 
 // Styles
 import styles from "@/app/components/Feed/styles";
@@ -611,7 +611,7 @@ export default function FeedScreen() {
       showInfoBar("Please login to view notifications", "info");
       return;
     }
-    router.push("/notifications");
+    router.push("/screens/notifications");
   };
 
   const handleProfilePress = () => {
