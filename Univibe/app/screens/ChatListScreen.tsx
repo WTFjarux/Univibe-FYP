@@ -10,7 +10,7 @@
  * - Real-time updates when new messages arrive
  */
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -30,6 +30,7 @@ import { useAuth } from "../../lib/contexts/AuthContext";
 import { API_BASE_URL } from "../../constants/ipConstants";
 import { Ionicons } from "@expo/vector-icons";
 import { profileService } from "../../lib/services/profileService";
+import { socketService } from "../../lib/services";
 
 /** Chat room data structure from API */
 interface ChatRoom {
@@ -55,7 +56,7 @@ interface User {
 
 export default function ChatListScreen() {
   const router = useRouter();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
 
   // State declarations
   const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
@@ -67,6 +68,169 @@ export default function ChatListScreen() {
   const [users, setUsers] = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [searchUserQuery, setSearchUserQuery] = useState("");
+  const [socketConnected, setSocketConnected] = useState(false);
+
+  // Monitor socket connection
+  useEffect(() => {
+    const checkConnection = () =>
+      setSocketConnected(socketService.getConnectionStatus());
+    checkConnection();
+    const interval = setInterval(checkConnection, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Setup socket listeners for real-time updates
+  useEffect(() => {
+    if (!socketConnected) return;
+
+    // Listen for new messages
+    const handleReceiveMessage = (message: any) => {
+      if (message.roomId) {
+        updateChatRoomLastMessage(
+          message.roomId,
+          message.message,
+          new Date().toISOString(),
+        );
+      }
+    };
+
+    // Listen for message deletion
+    const handleMessageDeleted = (data: {
+      roomId: string;
+      messageId: string;
+    }) => {
+      if (data.roomId) {
+        // Force refresh the entire chat list to get accurate data
+        fetchChatRooms();
+      }
+    };
+
+    // Listen for message updates (reactions, etc.)
+    const handleMessageUpdated = (data: { roomId: string }) => {
+      if (data.roomId) {
+        refreshChatRoom(data.roomId);
+      }
+    };
+
+    socketService.on("receive_message", handleReceiveMessage);
+    socketService.on("message_deleted", handleMessageDeleted);
+    socketService.on("message_updated", handleMessageUpdated);
+
+    return () => {
+      socketService.off("receive_message", handleReceiveMessage);
+      socketService.off("message_deleted", handleMessageDeleted);
+      socketService.off("message_updated", handleMessageUpdated);
+    };
+  }, [socketConnected]);
+
+  /**
+   * Update a specific chat room's last message
+   */
+  const updateChatRoomLastMessage = (
+    roomId: string,
+    message: string,
+    sentAt: string,
+  ) => {
+    setChatRooms((prev) => {
+      const updated = prev.map((room) => {
+        if (room.roomId === roomId) {
+          return {
+            ...room,
+            lastMessage: { message, sentAt },
+            updatedAt: sentAt,
+          };
+        }
+        return room;
+      });
+      // Sort by updatedAt (most recent first)
+      updated.sort(
+        (a, b) =>
+          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      );
+      return updated;
+    });
+    setFilteredRooms((prev) => {
+      const updated = prev.map((room) => {
+        if (room.roomId === roomId) {
+          return {
+            ...room,
+            lastMessage: { message, sentAt },
+            updatedAt: sentAt,
+          };
+        }
+        return room;
+      });
+      updated.sort(
+        (a, b) =>
+          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      );
+      return updated;
+    });
+  };
+
+  /**
+   * Refresh a specific chat room to get latest data
+   */
+  const refreshChatRoom = async (roomId: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/chat/room/${roomId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (data.success && data.data) {
+        const updatedRoom = {
+          roomId: data.data.roomId,
+          type: data.data.type,
+          name: data.data.name,
+          otherUserId: data.data.otherUserId,
+          otherUserAvatar: data.data.otherUserAvatar,
+          lastMessage: data.data.lastMessage,
+          updatedAt: data.data.updatedAt,
+        };
+
+        setChatRooms((prev) => {
+          const exists = prev.some((room) => room.roomId === roomId);
+          let newRooms;
+          if (exists) {
+            newRooms = prev.map((room) =>
+              room.roomId === roomId ? updatedRoom : room,
+            );
+          } else {
+            newRooms = [...prev, updatedRoom];
+          }
+          // Sort by updatedAt
+          newRooms.sort(
+            (a, b) =>
+              new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+          );
+          return newRooms;
+        });
+
+        // Update filteredRooms if not in search mode
+        if (!searchQuery.trim()) {
+          setFilteredRooms((prev) => {
+            const exists = prev.some((room) => room.roomId === roomId);
+            let newRooms;
+            if (exists) {
+              newRooms = prev.map((room) =>
+                room.roomId === roomId ? updatedRoom : room,
+              );
+            } else {
+              newRooms = [...prev, updatedRoom];
+            }
+            newRooms.sort(
+              (a, b) =>
+                new Date(b.updatedAt).getTime() -
+                new Date(a.updatedAt).getTime(),
+            );
+            return newRooms;
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Error refreshing chat room:", error);
+    }
+  };
 
   /**
    * Fetch all chat rooms for current user
@@ -80,8 +244,23 @@ export default function ChatListScreen() {
       const data = await response.json();
 
       if (data.success) {
-        setChatRooms(data.data);
-        setFilteredRooms(data.data);
+        // Sort by updatedAt (most recent first)
+        const sortedRooms = data.data.sort(
+          (a: ChatRoom, b: ChatRoom) =>
+            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+        );
+        setChatRooms(sortedRooms);
+
+        // Only update filteredRooms if not searching
+        if (!searchQuery.trim()) {
+          setFilteredRooms(sortedRooms);
+        } else {
+          // Re-apply search filter
+          const filtered = sortedRooms.filter((room: ChatRoom) =>
+            room.name.toLowerCase().includes(searchQuery.toLowerCase()),
+          );
+          setFilteredRooms(filtered);
+        }
       }
     } catch (error) {
       console.error("Error fetching chat rooms:", error);
@@ -112,7 +291,11 @@ export default function ChatListScreen() {
       const data = await response.json();
 
       if (data.success && data.profiles) {
-        setUsers(data.profiles);
+        // Filter out current user
+        const filteredUsers = data.profiles.filter(
+          (profile: any) => profile.user?._id !== user?.id,
+        );
+        setUsers(filteredUsers);
       }
     } catch (error) {
       console.error("Error fetching users:", error);
@@ -176,7 +359,7 @@ export default function ChatListScreen() {
             roomId: data.data.roomId,
             otherUserName: userName,
             otherUserId: userId,
-            otherUserAvatar: userAvatar || "", // Add this
+            otherUserAvatar: userAvatar || "",
           },
         });
       }
@@ -204,7 +387,7 @@ export default function ChatListScreen() {
         roomId,
         otherUserName: name,
         otherUserId: otherUserId || "",
-        otherUserAvatar: otherUserAvatar || "", // Add this
+        otherUserAvatar: otherUserAvatar || "",
       },
     });
   };
@@ -265,11 +448,10 @@ export default function ChatListScreen() {
             item.roomId,
             item.name,
             item.otherUserId,
-            item.otherUserAvatar, // Pass the avatar
+            item.otherUserAvatar,
           )
         }
       >
-        {/* Rest of the component remains the same */}
         <View style={styles.avatarContainer}>
           {avatarUrl ? (
             <Image source={{ uri: avatarUrl }} style={styles.avatar} />
@@ -306,7 +488,7 @@ export default function ChatListScreen() {
   const renderUserItem = ({ item }: { item: User }) => (
     <TouchableOpacity
       style={styles.userItem}
-      onPress={() => startNewChat(item._id, item.name, item.profilePicture)} // Pass avatar
+      onPress={() => startNewChat(item._id, item.name, item.profilePicture)}
     >
       {item.profilePicture ? (
         <Image

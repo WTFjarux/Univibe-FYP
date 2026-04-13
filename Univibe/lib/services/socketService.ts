@@ -17,6 +17,7 @@
 import io, { Socket } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { API_BASE_URL } from '../../constants/ipConstants';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -65,12 +66,22 @@ interface CallData {
 
 type EventCallback = (data: any) => void;
 
-// Socket URL based on platform (use computer's IP for physical devices)
-const SOCKET_URL = Platform.select({
-  ios: 'http://192.168.1.14:5001',
-  android: 'http://192.168.1.14:5001',
-  default: 'http://192.168.1.14:5001'
-});
+// Socket URL - Use the same base URL as API
+// Remove '/api' if present and ensure it's just the base URL
+const getSocketUrl = (): string => {
+  // Remove any trailing slashes and '/api' from the base URL
+  let baseUrl = API_BASE_URL.replace(/\/api$/, '').replace(/\/$/, '');
+  
+  // Platform-specific adjustments if needed
+  if (Platform.OS === 'android' && baseUrl.includes('localhost')) {
+    baseUrl = baseUrl.replace('localhost', '10.0.2.2');
+  }
+  
+  console.log('🔌 Socket URL:', baseUrl);
+  return baseUrl;
+};
+
+const SOCKET_URL = getSocketUrl();
 
 // ============================================
 // SOCKET SERVICE CLASS
@@ -118,6 +129,8 @@ class SocketService {
         this.socket = null;
       }
       
+      console.log('🔌 Connecting to Socket.IO at:', SOCKET_URL);
+      
       this.socket = io(SOCKET_URL, {
         auth: { token },
         transports: ['websocket'],
@@ -144,12 +157,14 @@ class SocketService {
 
     // Connection events
     this.socket.on('connect', () => {
+      console.log('✅ Socket connected successfully! ID:', this.socket?.id);
       this.isConnected = true;
       this.reconnectAttempts = 0;
       this.emitEvent('socket_connected', {});
       
       // Join any rooms that were queued while disconnected
       if (this.pendingRooms.length > 0) {
+        console.log(`📦 Joining ${this.pendingRooms.length} pending rooms`);
         this.pendingRooms.forEach(room => {
           this.socket?.emit('join_room', { 
             roomId: room.roomId, 
@@ -162,40 +177,49 @@ class SocketService {
     });
 
     this.socket.on('disconnect', (reason: string) => {
+      console.log('❌ Socket disconnected. Reason:', reason);
       this.isConnected = false;
       this.emitEvent('socket_disconnected', { reason });
       
       // Auto-reconnect for unexpected disconnections
       if (reason === 'io server disconnect' || reason === 'transport close') {
+        console.log('🔄 Attempting to reconnect...');
         setTimeout(() => this.connect(), 1000);
       }
     });
 
     this.socket.on('connect_error', (error: Error) => {
+      console.error('❌ Socket connection error:', error.message);
       this.reconnectAttempts++;
+      console.log(`🔄 Reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
       this.emitEvent('socket_error', error);
     });
 
     this.socket.on('reconnect', (attemptNumber: number) => {
+      console.log('🔄 Socket reconnected after', attemptNumber, 'attempts');
       this.isConnected = true;
       this.emitEvent('socket_reconnected', {});
     });
 
     this.socket.on('reconnect_failed', () => {
+      console.error('❌ Socket reconnection failed after maximum attempts');
       this.emitEvent('socket_reconnect_failed', {});
     });
 
     // Chat events
     this.socket.on('receive_message', (message: Message) => {
+      console.log('📨 Received message:', message.message?.substring(0, 50));
       this.emitEvent('receive_message', message);
       this.emitEvent('new_message', message);
     });
 
     this.socket.on('message_delivered', (message: Message) => {
+      console.log('✅ Message delivered:', message._id);
       this.emitEvent('message_delivered', message);
     });
 
     this.socket.on('room_joined', (data: RoomData) => {
+      console.log('🏠 Room joined:', data.roomId);
       this.emitEvent('room_joined', data);
     });
 
@@ -212,23 +236,28 @@ class SocketService {
 
     // User presence events
     this.socket.on('user_online', (data: UserStatus) => {
+      console.log('👤 User online:', data.userId);
       this.emitEvent('user_online', data);
     });
 
     this.socket.on('user_offline', (data: UserStatus) => {
+      console.log('👤 User offline:', data.userId);
       this.emitEvent('user_offline', data);
     });
 
     // WebRTC signaling events (future implementation)
     this.socket.on('call_user', (data: CallData) => {
+      console.log('📞 Incoming call from:', data.fromUserId);
       this.emitEvent('incoming_call', data);
     });
 
     this.socket.on('call_accepted', (data: CallData) => {
+      console.log('✅ Call accepted from:', data.fromUserId);
       this.emitEvent('call_accepted', data);
     });
 
     this.socket.on('call_rejected', (data: CallData) => {
+      console.log('❌ Call rejected from:', data.fromUserId);
       this.emitEvent('call_rejected', data);
     });
 
@@ -245,15 +274,18 @@ class SocketService {
     });
 
     this.socket.on('end_call', (data: CallData) => {
+      console.log('📞 Call ended with:', data.fromUserId);
       this.emitEvent('call_ended', data);
     });
 
     // Error handling
     this.socket.on('error', (error: Error) => {
-      console.error('Socket error:', error);
+      console.error('❌ Socket error:', error);
       this.emitEvent('socket_error', error);
     });
   }
+
+  
 
   // ============================================
   // EVENT MANAGEMENT
@@ -326,9 +358,10 @@ class SocketService {
    */
   joinRoom(roomId: string, otherUserId: string | null = null, type: string = 'direct'): void {
     if (this.socket && this.isConnected) {
+      console.log(`🏠 Joining room: ${roomId}`);
       this.socket.emit('join_room', { roomId, type, otherUserId });
     } else {
-      // Queue room join for when connection is established
+      console.log(`⏳ Socket not connected, queueing room join: ${roomId}`);
       this.pendingRooms.push({ roomId, otherUserId, type });
       this.connect();
     }
@@ -342,9 +375,10 @@ class SocketService {
    */
   sendMessage(roomId: string, message: string, type: string = 'text'): void {
     if (this.socket && this.isConnected) {
+      console.log(`📤 Sending ${type} message to room ${roomId}`);
       this.socket.emit('send_message', { roomId, message, type });
     } else {
-      console.error('Cannot send message - socket not connected');
+      console.error('❌ Cannot send message - socket not connected');
       this.emitEvent('socket_error', { message: 'Socket not connected' });
       this.connect();
     }
@@ -405,6 +439,7 @@ class SocketService {
    */
   callUser(targetUserId: string, callType: string = 'video', offer: any = null): void {
     if (this.socket && this.isConnected) {
+      console.log(`📞 Calling user: ${targetUserId}`);
       this.socket.emit('call_user', { targetUserId, callType, offer });
     }
   }
@@ -468,6 +503,7 @@ class SocketService {
    */
   endCall(targetUserId: string): void {
     if (this.socket && this.isConnected) {
+      console.log(`📞 Ending call with: ${targetUserId}`);
       this.socket.emit('end_call', { targetUserId });
     }
   }
@@ -475,6 +511,21 @@ class SocketService {
   // ============================================
   // CONNECTION MANAGEMENT
   // ============================================
+
+   /**
+   * Emit a custom event to the server
+   * @param event - Event name
+   * @param data - Event data
+   */
+  emit(event: string, data: any): void {
+    if (this.socket && this.isConnected) {
+      console.log(`📡 Emitting event: ${event}`);
+      this.socket.emit(event, data);
+    } else {
+      console.error(`❌ Cannot emit ${event} - socket not connected`);
+      this.emitEvent('socket_error', { message: 'Socket not connected' });
+    }
+  }
 
   /**
    * Disconnect the socket connection
@@ -486,6 +537,7 @@ class SocketService {
     }
     
     if (this.socket) {
+      console.log('🔌 Disconnecting socket...');
       this.socket.disconnect();
       this.socket = null;
       this.isConnected = false;
@@ -497,6 +549,7 @@ class SocketService {
    * Manually reconnect the socket
    */
   reconnect(): void {
+    console.log('🔄 Manual reconnect requested');
     this.disconnect();
     this.connect();
   }

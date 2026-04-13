@@ -26,6 +26,7 @@ const EVENTS = {
   GET_MESSAGES: "get_messages",
   MESSAGES_HISTORY: "messages_history",
   AUDIO_PLAYED: "audio_played",
+  DELETE_MESSAGE: "delete_message",
   ERROR: "error",
 };
 
@@ -195,6 +196,75 @@ const setupChatHandlers = (io, socket) => {
       }
     },
   );
+
+  /**
+   * Delete a message (soft delete) and broadcast to room
+   */
+  socket.on(EVENTS.DELETE_MESSAGE, async ({ messageId, roomId }) => {
+    try {
+      // Verify the message exists
+      const message = await Message.findById(messageId);
+
+      if (!message) {
+        socket.emit(EVENTS.ERROR, { message: "Message not found" });
+        return;
+      }
+
+      // Check if user is authorized to delete (must be sender)
+      if (message.sender.toString() !== userId) {
+        socket.emit(EVENTS.ERROR, {
+          message: "Not authorized to delete this message",
+        });
+        return;
+      }
+
+      // Perform soft delete
+      message.isDeleted = true;
+      message.deletedFor.push(userId);
+      await message.save();
+
+      // Update chat room's last message to the most recent non-deleted message
+      const lastMessage = await Message.findOne({
+        roomId: message.roomId,
+        isDeleted: false,
+        deletedFor: { $ne: userId },
+      })
+        .sort({ createdAt: -1 })
+        .lean();
+
+      await ChatRoom.findOneAndUpdate(
+        { roomId: message.roomId },
+        {
+          lastMessage: lastMessage
+            ? {
+                message:
+                  lastMessage.type === "audio"
+                    ? "🎤 Voice message"
+                    : lastMessage.message,
+                sender: lastMessage.sender,
+                sentAt: lastMessage.createdAt,
+              }
+            : null,
+          updatedAt: lastMessage?.createdAt || new Date(),
+        },
+      );
+
+      // Broadcast to everyone in the room that a message was deleted
+      io.to(roomId).emit("message_deleted", {
+        roomId,
+        messageId,
+        deletedBy: userId,
+        timestamp: new Date(),
+      });
+
+      console.log(
+        `🗑️ Message ${messageId} deleted by ${user.name} in room ${roomId}`,
+      );
+    } catch (error) {
+      console.error("Error deleting message:", error);
+      socket.emit(EVENTS.ERROR, { message: "Failed to delete message" });
+    }
+  });
 
   /**
    * Handle typing indicator

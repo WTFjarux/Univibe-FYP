@@ -109,6 +109,9 @@ const getMessageHistory = async (req, res) => {
 /**
  * Get user's chat rooms with profile pictures
  */
+/**
+ * Get user's chat rooms with profile pictures
+ */
 const getUserChatRooms = async (req, res) => {
   try {
     const currentUserId = req.user.id;
@@ -122,6 +125,15 @@ const getUserChatRooms = async (req, res) => {
     // Format response with profile pictures
     const formattedRooms = await Promise.all(
       chatRooms.map(async (room) => {
+        // Get the last message that is NOT deleted for the current user
+        const lastMessage = await Message.findOne({
+          roomId: room.roomId,
+          isDeleted: false,
+          deletedFor: { $ne: currentUserId }, // Exclude messages deleted by current user
+        })
+          .sort({ createdAt: -1 })
+          .lean();
+
         if (room.type === "direct") {
           // Get other participant info
           const otherParticipant = room.participants.find(
@@ -145,8 +157,16 @@ const getUserChatRooms = async (req, res) => {
             name: otherParticipant?.userId?.name || "Unknown",
             otherUserId: otherUserId || null,
             otherUserAvatar: profilePicture || null,
-            lastMessage: room.lastMessage,
-            updatedAt: room.updatedAt,
+            lastMessage: lastMessage
+              ? {
+                  message:
+                    lastMessage.type === "audio"
+                      ? "🎤 Voice message"
+                      : lastMessage.message,
+                  sentAt: lastMessage.createdAt,
+                }
+              : null,
+            updatedAt: lastMessage?.createdAt || room.updatedAt,
           };
         }
 
@@ -157,10 +177,24 @@ const getUserChatRooms = async (req, res) => {
           avatar: room.avatar,
           otherUserId: null,
           otherUserAvatar: null,
-          lastMessage: room.lastMessage,
-          updatedAt: room.updatedAt,
+          lastMessage: lastMessage
+            ? {
+                message:
+                  lastMessage.type === "audio"
+                    ? "🎤 Voice message"
+                    : lastMessage.message,
+                sentAt: lastMessage.createdAt,
+              }
+            : null,
+          updatedAt: lastMessage?.createdAt || room.updatedAt,
         };
       }),
+    );
+
+    // Sort by most recent message
+    formattedRooms.sort(
+      (a, b) =>
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
     );
 
     res.status(200).json({

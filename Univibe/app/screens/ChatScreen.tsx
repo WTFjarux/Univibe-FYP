@@ -557,23 +557,44 @@ export default function ChatScreen() {
   };
 
   const handleDelete = async (messageId: string) => {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/chat/message/${messageId}`,
+    Alert.alert(
+      "Delete Message",
+      "Are you sure you want to delete this message?",
+      [
+        { text: "Cancel", style: "cancel" },
         {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
-        },
-      );
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const response = await fetch(
+                `${API_BASE_URL}/api/chat/message/${messageId}`,
+                {
+                  method: "DELETE",
+                  headers: { Authorization: `Bearer ${token}` },
+                },
+              );
 
-      const data = await response.json();
-      if (data.success) {
-        setMessages((prev) => prev.filter((msg) => msg._id !== messageId));
-        processedMessageIds.current.delete(messageId);
-      }
-    } catch (error) {
-      Alert.alert("Error", "Failed to delete message");
-    }
+              const data = await response.json();
+              if (data.success) {
+                // Update local messages
+                setMessages((prev) =>
+                  prev.filter((msg) => msg._id !== messageId),
+                );
+
+                // Emit socket event for message deletion using the new emit method
+                socketService.emit("delete_message", {
+                  messageId,
+                  roomId,
+                });
+              }
+            } catch (error) {
+              Alert.alert("Error", "Failed to delete message");
+            }
+          },
+        },
+      ],
+    );
   };
 
   const handleForward = (message: Message) => {
