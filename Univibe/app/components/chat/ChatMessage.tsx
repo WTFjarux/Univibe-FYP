@@ -1,4 +1,4 @@
-// app/components/chat/ChatMessage.tsx
+// app/components/chat/ChatMessage.tsx (FIXED - check for undefined)
 import React, { useState } from "react";
 import {
   View,
@@ -9,6 +9,7 @@ import {
   Alert,
   Share,
   Pressable,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
@@ -23,7 +24,7 @@ interface Message {
   message: string;
   roomId: string;
   createdAt: string;
-  status?: "sent" | "delivered" | "read";
+  status?: "sent" | "delivered" | "read" | "sending";
   type?: "text" | "image" | "audio" | "file";
   mediaUrl?: string;
   duration?: number;
@@ -143,10 +144,47 @@ export default function ChatMessage({
         />
       );
     } else if (message.type === "audio") {
+      // Show loading state for sending audio (when mediaUrl is undefined or status is sending)
+      if (message.status === "sending" || !message.mediaUrl) {
+        return (
+          <View style={styles.audioLoadingContainer}>
+            <View style={styles.audioLoadingIconWrap}>
+              <ActivityIndicator
+                size="small"
+                color={isOwnMessage ? "#fff" : "#007AFF"}
+              />
+            </View>
+            <View style={styles.waveformContainer}>
+              {[10, 18, 14, 22, 10, 16, 12].map((h, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.waveBar,
+                    {
+                      height: h,
+                      opacity: 0.3,
+                      backgroundColor: isOwnMessage
+                        ? "rgba(255,255,255,0.5)"
+                        : "#007AFF",
+                    },
+                  ]}
+                />
+              ))}
+            </View>
+            <Text
+              style={[styles.audioLabel, isOwnMessage && styles.ownAudioLabel]}
+            >
+              Sending...
+            </Text>
+          </View>
+        );
+      }
+
+      // Normal audio player for loaded messages
       return (
         <View style={styles.audioMessageContainer}>
           <AudioPlayer
-            audioUrl={message.mediaUrl || ""}
+            audioUrl={message.mediaUrl}
             duration={message.duration || 0}
             isOwnMessage={isOwnMessage}
             messageId={message._id}
@@ -171,6 +209,8 @@ export default function ChatMessage({
   const getMessageStatusIcon = () => {
     if (!isOwnMessage) return null;
     switch (message.status) {
+      case "sending":
+        return <ActivityIndicator size={10} color="#8E8E93" />;
       case "sent":
         return <Ionicons name="checkmark" size={14} color="#8E8E93" />;
       case "delivered":
@@ -352,6 +392,38 @@ const styles = StyleSheet.create({
   audioMessageContainer: {
     minWidth: 200,
     maxWidth: 250,
+  },
+  audioLoadingContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    minWidth: 150,
+  },
+  audioLoadingIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "rgba(0,0,0,0.1)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  waveformContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  waveBar: {
+    width: 3,
+    borderRadius: 2,
+  },
+  audioLabel: {
+    fontSize: 12,
+    color: "#000",
+    opacity: 0.7,
+    fontFamily: "SofiaSans-Regular",
+  },
+  ownAudioLabel: {
+    color: "#fff",
   },
   replyPreview: {
     flexDirection: "row",

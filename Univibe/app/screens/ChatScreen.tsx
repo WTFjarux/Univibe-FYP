@@ -1,5 +1,5 @@
-// app/screens/ChatScreen.tsx - UPDATED to receive and pass avatar
-import React, { useState, useEffect, useRef } from "react";
+// app/screens/ChatScreen.tsx - COMPLETELY FIXED with robust message filtering
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   FlatList,
@@ -15,7 +15,7 @@ import {
   TouchableOpacity,
   StyleSheet,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../lib/contexts/AuthContext";
 import { socketService } from "../../lib/services";
@@ -40,7 +40,7 @@ interface Message {
   message: string;
   roomId: string;
   createdAt: string;
-  status?: "sent" | "delivered" | "read";
+  status?: "sent" | "delivered" | "read" | "sending";
   type?: "text" | "image" | "audio" | "file";
   mediaUrl?: string;
   mediaSize?: number;
@@ -62,7 +62,7 @@ export default function ChatScreen() {
   const roomId = params.roomId as string;
   const otherUserName = params.otherUserName as string;
   let otherUserId = params.otherUserId as string;
-  const otherUserAvatar = params.otherUserAvatar as string; // ← Receive avatar from params
+  const otherUserAvatar = params.otherUserAvatar as string;
 
   // Helper functions
   const extractOtherUserIdFromRoomId = (
@@ -100,6 +100,9 @@ export default function ChatScreen() {
   const [recordingDuration, setRecordingDuration] = useState(0);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isStoppingRef = useRef(false);
+  const isMountedRef = useRef(true);
+  const tempMessagesRef = useRef<Set<string>>(new Set());
+  const processedMessageIds = useRef<Set<string>>(new Set());
 
   const flatListRef = useRef<FlatList>(null);
   const slideAnim = useRef(new Animated.Value(-SCREEN_WIDTH)).current;
@@ -155,9 +158,36 @@ export default function ChatScreen() {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
+  // CRITICAL: Validate if a message is valid (not a ghost message)
+  const isValidMessage = useCallback((msg: Message): boolean => {
+    // Never allow temp messages
+    if (msg._id?.startsWith("temp_")) return false;
+
+    // Never allow sending status messages
+    if (msg.status === "sending") return false;
+
+    // For audio messages, must have valid mediaUrl
+    if (msg.type === "audio" && !msg.mediaUrl) return false;
+
+    // Must have valid ID
+    if (!msg._id) return false;
+
+    return true;
+  }, []);
+
+  // Filter out ALL invalid messages
+  const filterInvalidMessages = useCallback(
+    (msgs: Message[]): Message[] => {
+      return msgs.filter(isValidMessage);
+    },
+    [isValidMessage],
+  );
+
   // Cleanup on unmount
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       if (recording) {
         recording.stopAndUnloadAsync().catch(console.error);
       }
@@ -166,6 +196,21 @@ export default function ChatScreen() {
       }
     };
   }, []);
+
+  // Clear invalid messages when screen loses focus
+  useFocusEffect(
+    useCallback(() => {
+      // When screen comes into focus, load fresh messages
+      loadMessages(true);
+
+      return () => {
+        // CRITICAL: Clear ALL invalid messages when leaving the screen
+        setMessages((prev) => filterInvalidMessages(prev));
+        tempMessagesRef.current.clear();
+        processedMessageIds.current.clear();
+      };
+    }, []),
+  );
 
   // Monitor socket connection
   useEffect(() => {
@@ -180,14 +225,22 @@ export default function ChatScreen() {
   useEffect(() => {
     if (!roomId) return;
     socketService.joinRoom(roomId, otherUserId);
-    loadMessages();
+    loadMessages(true);
 
     socketService.on("receive_message", (message: Message) => {
-      if (message.roomId === roomId) {
+      if (message.roomId === roomId && isMountedRef.current) {
+        // Skip invalid messages
+        if (!isValidMessage(message)) return;
+
+        // Prevent duplicate processing
+        if (processedMessageIds.current.has(message._id)) return;
+        processedMessageIds.current.add(message._id);
+
         setMessages((prev) => {
           const exists = prev.some((msg) => msg._id === message._id);
-          if (exists)
+          if (exists) {
             return prev.map((msg) => (msg._id === message._id ? message : msg));
+          }
           return [...prev, message];
         });
         setTimeout(() => flatListRef.current?.scrollToEnd(), 100);
@@ -201,10 +254,11 @@ export default function ChatScreen() {
       socketService.off("receive_message", () => {});
       socketService.off("user_online", () => {});
       socketService.off("user_offline", () => {});
+      processedMessageIds.current.clear();
     };
   }, [roomId]);
 
-  const loadMessages = async () => {
+  const loadMessages = async (forceRefresh: boolean = false) => {
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/chat/messages/${roomId}?limit=50`,
@@ -213,14 +267,26 @@ export default function ChatScreen() {
         },
       );
       const data = await response.json();
-      if (data.success) {
-        setMessages(data.data.messages || []);
+      if (data.success && isMountedRef.current) {
+        const serverMessages = data.data.messages || [];
+
+        // CRITICAL: Filter out ALL invalid messages from server
+        const cleanMessages = filterInvalidMessages(serverMessages);
+
+        // Update processed IDs set
+        cleanMessages.forEach((msg) => {
+          processedMessageIds.current.add(msg._id);
+        });
+
+        setMessages(cleanMessages);
       }
     } catch (error) {
       console.error("Error loading messages:", error);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   };
 
@@ -249,10 +315,21 @@ export default function ChatScreen() {
         : undefined,
     };
 
+    tempMessagesRef.current.add(tempMessage._id);
     setMessages((prev) => [...prev, tempMessage]);
     flatListRef.current?.scrollToEnd();
     socketService.sendMessage(roomId, text);
     setReplyToMessage(null);
+
+    // Remove temp message after 5 seconds (fallback cleanup)
+    setTimeout(() => {
+      if (tempMessagesRef.current.has(tempMessage._id)) {
+        setMessages((prev) =>
+          prev.filter((msg) => msg._id !== tempMessage._id),
+        );
+        tempMessagesRef.current.delete(tempMessage._id);
+      }
+    }, 5000);
   };
 
   // Audio recording functions
@@ -350,7 +427,27 @@ export default function ChatScreen() {
   };
 
   const uploadAndSendAudio = async (uri: string, duration: number) => {
+    // Create a temporary loading message immediately
+    const tempMessageId = `temp_audio_${Date.now()}`;
+    const tempMessage: Message = {
+      _id: tempMessageId,
+      sender: user?.id || "",
+      senderName: user?.name || "You",
+      message: "🎤 Voice message",
+      roomId: roomId,
+      createdAt: new Date().toISOString(),
+      status: "sending",
+      type: "audio",
+      mediaUrl: undefined,
+      duration: duration,
+    };
+
+    tempMessagesRef.current.add(tempMessageId);
+    setMessages((prev) => [...prev, tempMessage]);
+    flatListRef.current?.scrollToEnd();
+
     setUploading(true);
+
     try {
       const formData = new FormData();
       const filename = `voice_${Date.now()}.m4a`;
@@ -373,8 +470,8 @@ export default function ChatScreen() {
 
       const data = await response.json();
 
-      if (data.success) {
-        const tempMessage: Message = {
+      if (data.success && isMountedRef.current) {
+        const finalMessage: Message = {
           _id: data.data._id,
           sender: user?.id || "",
           senderName: user?.name || "You",
@@ -386,17 +483,33 @@ export default function ChatScreen() {
           mediaUrl: data.url,
           duration: duration,
         };
-        setMessages((prev) => [...prev, tempMessage]);
-        flatListRef.current?.scrollToEnd();
-        socketService.sendMessage(roomId, tempMessage.message, "audio");
-      } else {
+
+        // Replace loading message with actual message
+        setMessages((prev) =>
+          prev.map((msg) => (msg._id === tempMessageId ? finalMessage : msg)),
+        );
+        tempMessagesRef.current.delete(tempMessageId);
+        processedMessageIds.current.add(finalMessage._id);
+
+        // Send via socket
+        socketService.sendMessage(roomId, "🎤 Voice message", "audio");
+      } else if (isMountedRef.current) {
+        // Remove loading message and show error
+        setMessages((prev) => prev.filter((msg) => msg._id !== tempMessageId));
+        tempMessagesRef.current.delete(tempMessageId);
         Alert.alert("Error", data.message || "Failed to send voice message");
       }
     } catch (error) {
       console.error("Upload error:", error);
-      Alert.alert("Error", "Failed to send voice message");
+      if (isMountedRef.current) {
+        setMessages((prev) => prev.filter((msg) => msg._id !== tempMessageId));
+        tempMessagesRef.current.delete(tempMessageId);
+        Alert.alert("Error", "Failed to send voice message");
+      }
     } finally {
-      setUploading(false);
+      if (isMountedRef.current) {
+        setUploading(false);
+      }
     }
   };
 
@@ -456,6 +569,7 @@ export default function ChatScreen() {
       const data = await response.json();
       if (data.success) {
         setMessages((prev) => prev.filter((msg) => msg._id !== messageId));
+        processedMessageIds.current.delete(messageId);
       }
     } catch (error) {
       Alert.alert("Error", "Failed to delete message");
@@ -510,7 +624,7 @@ export default function ChatScreen() {
 
   const onRefresh = () => {
     setRefreshing(true);
-    loadMessages();
+    loadMessages(true);
   };
 
   const getSenderId = (message: Message): string =>
@@ -575,10 +689,10 @@ export default function ChatScreen() {
       <ChatHeader
         otherUserName={otherUserName}
         otherUserId={otherUserId}
-        otherUserAvatar={otherUserAvatar} // ← Pass the avatar to ChatHeader
+        otherUserAvatar={otherUserAvatar}
         isOnline={isOnline}
         DEFAULT_AVATAR={DEFAULT_AVATAR}
-        getFullImageUrl={getFullImageUrl} // ← Pass the URL helper
+        getFullImageUrl={getFullImageUrl}
       />
 
       {/* Reply Indicator */}
