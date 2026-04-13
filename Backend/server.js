@@ -21,7 +21,7 @@ const postRoutes = require("./routes/postRoutes");
 const connectionRoutes = require("./routes/connectionRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const eventRoutes = require("./routes/eventRoutes");
-const chatRoutes = require("./routes/chatRoutes"); // NEW: Chat routes
+const chatRoutes = require("./routes/chatRoutes");
 
 // Connect to database
 connectDB();
@@ -59,6 +59,15 @@ app.use(
   express.static(path.join(__dirname, "uploads/events")),
 );
 
+// CRITICAL FIX: Serve chat audio files
+app.use(
+  "/uploads/chat/audio",
+  express.static(path.join(__dirname, "uploads/chat/audio")),
+);
+
+// Also serve any other uploads
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/profile", profileRoutes);
@@ -66,7 +75,7 @@ app.use("/api/posts", postRoutes);
 app.use("/api/connections", connectionRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/events", eventRoutes);
-app.use("/api/chat", chatRoutes); // NEW: Mount chat routes
+app.use("/api/chat", chatRoutes);
 
 // Redirect for old verification links
 app.get("/verify-email/:token", (req, res) => {
@@ -78,7 +87,7 @@ app.get("/verify-email/:token", (req, res) => {
 app.get("/", (req, res) => {
   res.json({
     message: "Univibe API is running!",
-    version: "1.5.0", // Updated version
+    version: "1.5.0",
     endpoints: {
       auth: "/api/auth",
       profile: "/api/profile",
@@ -86,7 +95,7 @@ app.get("/", (req, res) => {
       connections: "/api/connections",
       notifications: "/api/notifications",
       events: "/api/events",
-      chat: "/api/chat", // NEW: Chat endpoint
+      chat: "/api/chat",
     },
     websocket: {
       status: "active",
@@ -122,6 +131,7 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`   Cover Photos: /uploads/cover-photos`);
   console.log(`   Post Images: /uploads/posts`);
   console.log(`   Event Images: /uploads/events`);
+  console.log(`   Chat Audio: /uploads/chat/audio`);
   console.log(`\n📱 API Endpoints:`);
   console.log(`   Auth: /api/auth`);
   console.log(`   Profile: /api/profile`);
@@ -129,7 +139,7 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`   Connections: /api/connections`);
   console.log(`   Notifications: /api/notifications`);
   console.log(`   Events: /api/events`);
-  console.log(`   Chat: /api/chat`); // NEW
+  console.log(`   Chat: /api/chat`);
   console.log(`\n💬 Real-time Events Available:`);
   console.log(`   join_room, leave_room`);
   console.log(`   send_message, receive_message`);

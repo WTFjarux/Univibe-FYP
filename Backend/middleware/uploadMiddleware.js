@@ -1,183 +1,252 @@
+/**
+ * Upload Middleware
+ *
+ * Handles file uploads for:
+ * - Profile pictures
+ * - Cover photos
+ * - Event images
+ * - Audio messages (voice notes)
+ *
+ * Features:
+ * - Automatic directory creation
+ * - File type validation
+ * - Image optimization with Sharp
+ * - Audio file support (mp3, m4a, aac, wav)
+ * - Error handling with user-friendly messages
+ */
+
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const sharp = require("sharp");
 
-// Create uploads directories if they don't exist
-const profilePicsDir = "uploads/profile-pictures";
-const coverPhotosDir = "uploads/cover-photos";
-const eventImagesDir = "uploads/events"; // New directory for event images
+// ============================================
+// DIRECTORY CONFIGURATION
+// ============================================
 
-[profilePicsDir, coverPhotosDir, eventImagesDir].forEach((dir) => {
+const uploadDirectories = {
+  profilePictures: "uploads/profile-pictures",
+  coverPhotos: "uploads/cover-photos",
+  eventImages: "uploads/events",
+  chatAudio: "uploads/chat/audio", // New: Audio messages directory
+};
+
+// Create all required directories
+Object.values(uploadDirectories).forEach((dir) => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
-    console.log(`✅ Created upload directory: ${dir}`);
   }
 });
 
-// Configure storage for different upload types
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+/**
+ * Format file size for logging
+ * @param {number} bytes - File size in bytes
+ * @param {number} decimals - Decimal places
+ * @returns {string} Formatted file size
+ */
+const formatBytes = (bytes, decimals = 2) => {
+  if (bytes === 0) return "0 Bytes";
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ["Bytes", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + " " + sizes[i];
+};
+
+/**
+ * Delete old image file
+ * @param {string} filePath - Path to file to delete
+ * @returns {Promise<boolean>} Success status
+ */
+const deleteOldImage = async (filePath) => {
+  if (!filePath) return false;
+  try {
+    let cleanPath = filePath;
+    if (filePath.startsWith("http")) {
+      const urlParts = filePath.split("/uploads/");
+      if (urlParts[1]) cleanPath = `uploads/${urlParts[1]}`;
+    }
+    if (fs.existsSync(cleanPath)) {
+      await fs.promises.unlink(cleanPath);
+      return true;
+    }
+  } catch (error) {
+    console.error(`Error deleting image: ${error.message}`);
+  }
+  return false;
+};
+
+/**
+ * Delete audio file
+ * @param {string} filePath - Path to audio file
+ * @returns {Promise<boolean>} Success status
+ */
+const deleteAudioFile = async (filePath) => {
+  if (!filePath) return false;
+  try {
+    let cleanPath = filePath;
+    if (filePath.startsWith("http")) {
+      const urlParts = filePath.split("/uploads/");
+      if (urlParts[1]) cleanPath = `uploads/${urlParts[1]}`;
+    }
+    if (fs.existsSync(cleanPath)) {
+      await fs.promises.unlink(cleanPath);
+      return true;
+    }
+  } catch (error) {
+    console.error(`Error deleting audio: ${error.message}`);
+  }
+  return false;
+};
+
+// ============================================
+// STORAGE CONFIGURATION
+// ============================================
+
+const getDestination = (fieldname) => {
+  const destinations = {
+    profilePicture: uploadDirectories.profilePictures,
+    coverPhoto: uploadDirectories.coverPhotos,
+    images: uploadDirectories.eventImages,
+    eventImage: uploadDirectories.eventImages,
+    audio: uploadDirectories.chatAudio, // New: Audio destination
+  };
+  return destinations[fieldname] || uploadDirectories.eventImages;
+};
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Determine destination based on field name
-    if (file.fieldname === "profilePicture") {
-      cb(null, profilePicsDir);
-    } else if (file.fieldname === "coverPhoto") {
-      cb(null, coverPhotosDir);
-    } else if (file.fieldname === "images" || file.fieldname === "eventImage") {
-      // Handle event images (single or multiple)
-      cb(null, eventImagesDir);
-    } else {
-      cb(new Error("Invalid field name"), null);
-    }
+    const dest = getDestination(file.fieldname);
+    cb(null, dest);
   },
   filename: (req, file, cb) => {
-    // Get user ID from request (set by auth middleware)
     const userId = req.user?.id || req.user?._id || "unknown";
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-
-    // Get extension from original name or default to .jpg
     let ext = path.extname(file.originalname).toLowerCase();
 
-    // Handle iPhone HEIC photos - convert to jpg
+    // Handle iPhone HEIC/HEIF photos
     if (ext === ".heic" || ext === ".heif") {
       ext = ".jpg";
-      console.log(`📱 iPhone HEIC/HEIF file detected, converting to JPG`);
     }
 
-    // If no extension, add .jpg
-    if (!ext) {
-      ext = ".jpg";
-    }
+    if (!ext) ext = ".jpg";
 
-    // Create filename with field type prefix
     let prefix = file.fieldname;
-    if (file.fieldname === "images") {
-      prefix = "event";
-    }
+    if (file.fieldname === "images") prefix = "event";
+    if (file.fieldname === "audio") prefix = "voice";
 
     const filename = `${prefix}-${userId}-${uniqueSuffix}${ext}`;
-
-    console.log(`📁 File upload details:`, {
-      fieldname: file.fieldname,
-      userId,
-      originalname: file.originalname,
-      mimetype: file.mimetype,
-      size: formatBytes(file.size),
-      finalFilename: filename,
-    });
-
     cb(null, filename);
   },
 });
 
-// File filter - MORE LENIENT for iPhone photos
-const fileFilter = (req, file, cb) => {
-  // Log file info for debugging
-  console.log("🔍 File filter checking:", {
-    fieldname: file.fieldname,
-    originalname: file.originalname,
-    mimetype: file.mimetype,
-    size: formatBytes(file.size),
-  });
+// ============================================
+// FILE FILTERS
+// ============================================
 
-  // Get file extension
+/**
+ * Image file filter - Allows images and iPhone HEIC/HEIF
+ */
+const imageFileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
-
-  // ALLOW iPhone HEIC/HEIF files
-  if (ext === ".heic" || ext === ".heif") {
-    console.log(
-      `✅ iPhone photo accepted: ${file.originalname} (${file.mimetype}) - Size: ${formatBytes(file.size)}`,
-    );
-    return cb(null, true);
-  }
-
-  // Check if it's an image file
+  const isHeic = ext === ".heic" || ext === ".heif";
   const isImage = file.mimetype.startsWith("image/");
 
-  if (isImage) {
-    console.log(
-      `✅ Image accepted: ${file.originalname} (${file.mimetype}) - Size: ${formatBytes(file.size)}`,
-    );
+  if (isImage || isHeic) {
     cb(null, true);
   } else {
-    console.log(
-      `❌ File rejected - not an image: ${file.originalname} (${file.mimetype})`,
-    );
-    cb(new Error("Only image files are allowed"));
+    cb(new Error("Only image files are allowed"), false);
   }
 };
 
-// Create multer instance with 75MB file size limit
-const upload = multer({
+/**
+ * Audio file filter - Allows common audio formats
+ */
+const audioFileFilter = (req, file, cb) => {
+  const allowedAudioTypes = [
+    "audio/mpeg", // mp3
+    "audio/mp3", // mp3
+    "audio/m4a", // m4a (iPhone voice memos)
+    "audio/aac", // aac
+    "audio/wav", // wav
+    "audio/x-m4a", // m4a alternative
+  ];
+
+  const isAudio = allowedAudioTypes.includes(file.mimetype);
+  const ext = path.extname(file.originalname).toLowerCase();
+  const isAudioExt = [".mp3", ".m4a", ".aac", ".wav"].includes(ext);
+
+  if (isAudio || isAudioExt) {
+    cb(null, true);
+  } else {
+    cb(new Error("Only audio files are allowed (mp3, m4a, aac, wav)"), false);
+  }
+};
+
+// ============================================
+// MULTER INSTANCES
+// ============================================
+
+// Image upload (75MB limit)
+const imageUpload = multer({
   storage,
-  fileFilter,
-  limits: {
-    fileSize: 75 * 1024 * 1024, // 75MB limit
-    files: 10, // Increased for multiple event images (max 5 + 2 profile pics)
-  },
+  fileFilter: imageFileFilter,
+  limits: { fileSize: 75 * 1024 * 1024, files: 10 },
 });
 
-// Middleware for profile picture upload only
-const uploadProfilePicture = (req, res, next) => {
-  const uploadSingle = upload.single("profilePicture");
+// Audio upload (25MB limit for voice messages)
+const audioUpload = multer({
+  storage,
+  fileFilter: audioFileFilter,
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB limit
+});
 
-  uploadSingle(req, res, function (err) {
-    handleUploadError(err, req, res, next);
-  });
-};
+// ============================================
+// ERROR HANDLER
+// ============================================
 
-// Middleware for cover photo upload only
-const uploadCoverPhoto = (req, res, next) => {
-  const uploadSingle = upload.single("coverPhoto");
-
-  uploadSingle(req, res, function (err) {
-    handleUploadError(err, req, res, next);
-  });
+const handleUploadError = (err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    let errorMessage = `Upload error: ${err.message}`;
+    if (err.code === "LIMIT_FILE_SIZE") {
+      errorMessage = `File size too large. Maximum: ${err.field === "audio" ? "25MB" : "75MB"}.`;
+    } else if (err.code === "LIMIT_FILE_COUNT") {
+      errorMessage = "Too many files. Maximum 5 images per event.";
+    } else if (err.code === "LIMIT_UNEXPECTED_FILE") {
+      errorMessage = 'Unexpected file field. Use "images" for event photos.';
+    }
+    return res.status(400).json({ success: false, message: errorMessage });
+  } else if (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+  next();
 };
 
 // ============================================
-// NEW: Middleware for event images
+// IMAGE PROCESSING
 // ============================================
 
-// Upload multiple event images (up to 5)
-const uploadEventImages = (req, res, next) => {
-  const uploadMultiple = upload.array("images", 5); // Max 5 images
-
-  uploadMultiple(req, res, function (err) {
-    handleUploadError(err, req, res, next);
-  });
-};
-
-// Upload single event image
-const uploadEventImage = (req, res, next) => {
-  const uploadSingle = upload.single("eventImage");
-
-  uploadSingle(req, res, function (err) {
-    handleUploadError(err, req, res, next);
-  });
-};
-
-// Process and optimize event images with Sharp
+/**
+ * Process and optimize images with Sharp
+ */
 const processEventImages = async (files) => {
-  if (!files || files.length === 0) return files;
-
+  if (!files?.length) return files;
   const processedFiles = [];
 
   for (const file of files) {
     try {
-      // Skip if file is not an image or already processed
       if (!file.path || !fs.existsSync(file.path)) {
         processedFiles.push(file);
         continue;
       }
 
-      // Process image with Sharp
       let sharpInstance = sharp(file.path);
-
-      // Get metadata
       const metadata = await sharpInstance.metadata();
 
-      // Resize if too large (max 1920px width)
       if (metadata.width && metadata.width > 1920) {
         sharpInstance = sharpInstance.resize(1920, null, {
           withoutEnlargement: true,
@@ -185,188 +254,121 @@ const processEventImages = async (files) => {
         });
       }
 
-      // Compress based on format
-      if (file.mimetype === "image/jpeg" || file.mimetype === "image/jpg") {
+      const ext = path.extname(file.filename).toLowerCase();
+      if (ext === ".jpg" || ext === ".jpeg") {
         sharpInstance = sharpInstance.jpeg({ quality: 80, progressive: true });
-      } else if (file.mimetype === "image/png") {
+      } else if (ext === ".png") {
         sharpInstance = sharpInstance.png({ quality: 80, compressionLevel: 8 });
-      } else if (file.mimetype === "image/webp") {
+      } else if (ext === ".webp") {
         sharpInstance = sharpInstance.webp({ quality: 80 });
       }
 
-      // Save optimized image (overwrite original)
       await sharpInstance.toFile(file.path + ".tmp");
       fs.unlinkSync(file.path);
       fs.renameSync(file.path + ".tmp", file.path);
 
-      // Update file size
-      const stats = fs.statSync(file.path);
-      file.size = stats.size;
-
-      console.log(
-        `🖼️ Image optimized: ${file.filename} (${formatBytes(file.size)} -> ${formatBytes(stats.size)})`,
-      );
-
       processedFiles.push(file);
     } catch (error) {
-      console.error(`Error processing image ${file.filename}:`, error);
-      // Keep original file if processing fails
+      console.error(`Image processing error: ${error.message}`);
       processedFiles.push(file);
     }
   }
-
   return processedFiles;
 };
 
-// Middleware for event images with optimization
+// ============================================
+// EXPORTED MIDDLEWARES
+// ============================================
+
+// Image uploads
+const uploadProfilePicture = (req, res, next) => {
+  imageUpload.single("profilePicture")(req, res, (err) =>
+    handleUploadError(err, req, res, next),
+  );
+};
+
+const uploadCoverPhoto = (req, res, next) => {
+  imageUpload.single("coverPhoto")(req, res, (err) =>
+    handleUploadError(err, req, res, next),
+  );
+};
+
+const uploadEventImages = (req, res, next) => {
+  imageUpload.array("images", 5)(req, res, (err) =>
+    handleUploadError(err, req, res, next),
+  );
+};
+
+const uploadEventImage = (req, res, next) => {
+  imageUpload.single("eventImage")(req, res, (err) =>
+    handleUploadError(err, req, res, next),
+  );
+};
+
 const uploadAndOptimizeEventImages = async (req, res, next) => {
-  const uploadMultiple = upload.array("images", 5);
-
-  uploadMultiple(req, res, async function (err) {
-    if (err) {
-      return handleUploadError(err, req, res, next);
+  imageUpload.array("images", 5)(req, res, async (err) => {
+    if (err) return handleUploadError(err, req, res, next);
+    if (req.files?.length) {
+      req.files = await processEventImages(req.files);
     }
-
-    if (req.files && req.files.length > 0) {
-      try {
-        // Process and optimize images
-        req.files = await processEventImages(req.files);
-      } catch (error) {
-        console.error("Error optimizing images:", error);
-        // Continue with original files if optimization fails
-      }
-    }
-
     next();
   });
 };
 
-// Middleware for both profile and cover photo upload
-const uploadBoth = upload.fields([
+const uploadBoth = imageUpload.fields([
   { name: "profilePicture", maxCount: 1 },
   { name: "coverPhoto", maxCount: 1 },
 ]);
 
 const uploadWithErrorHandling = (req, res, next) => {
-  uploadBoth(req, res, function (err) {
-    handleUploadError(err, req, res, next);
+  uploadBoth(req, res, (err) => handleUploadError(err, req, res, next));
+};
+
+// ============================================
+// NEW: AUDIO UPLOAD MIDDLEWARE
+// ============================================
+
+/**
+ * Upload single audio file for voice messages
+ * Returns the file info for further processing
+ */
+const uploadAudioMessage = (req, res, next) => {
+  audioUpload.single("audio")(req, res, (err) => {
+    if (err) return handleUploadError(err, req, res, next);
+    if (req.file) {
+      // Add audio metadata for response
+      req.audioInfo = {
+        filename: req.file.filename,
+        url: `/uploads/chat/audio/${req.file.filename}`,
+        size: req.file.size,
+        mimetype: req.file.mimetype,
+      };
+    }
+    next();
   });
 };
 
-// Error handling function
-function handleUploadError(err, req, res, next) {
-  if (err instanceof multer.MulterError) {
-    // Multer-specific errors
-    let errorMessage = `Upload error: ${err.message}`;
-
-    if (err.code === "LIMIT_FILE_SIZE") {
-      errorMessage = `File size is too large. Maximum size is 75MB.`;
-    } else if (err.code === "LIMIT_FILE_COUNT") {
-      errorMessage = "Too many files uploaded. Maximum is 5 images per event.";
-    } else if (err.code === "LIMIT_UNEXPECTED_FILE") {
-      errorMessage = 'Unexpected file field. Use "images" for event photos.';
-    }
-
-    console.error("❌ Multer error:", err.code, err.message);
-    return res.status(400).json({
-      success: false,
-      message: errorMessage,
-    });
-  } else if (err) {
-    // Other errors (file filter, etc.)
-    console.error("❌ Upload error:", err.message);
-    return res.status(400).json({
-      success: false,
-      message: err.message || "File upload failed",
-    });
-  }
-
-  // Log successful file info
-  if (req.files) {
-    // Multiple files
-    if (Array.isArray(req.files)) {
-      // Event images array
-      console.log(
-        `✅ ${req.files.length} event image(s) uploaded successfully:`,
-      );
-      req.files.forEach((file) => {
-        console.log(`  - ${file.filename} (${formatBytes(file.size)})`);
-      });
-    } else {
-      // Object with fieldnames
-      Object.keys(req.files).forEach((fieldname) => {
-        req.files[fieldname].forEach((file) => {
-          console.log(`✅ ${fieldname} uploaded successfully:`, {
-            filename: file.filename,
-            originalname: file.originalname,
-            size: formatBytes(file.size),
-            mimetype: file.mimetype,
-            path: file.path,
-          });
-        });
-      });
-    }
-  } else if (req.file) {
-    // Single file
-    console.log("✅ File uploaded successfully:", {
-      fieldname: req.file.fieldname,
-      filename: req.file.filename,
-      originalname: req.file.originalname,
-      size: formatBytes(req.file.size),
-      mimetype: req.file.mimetype,
-      path: req.file.path,
-    });
-  }
-
-  // No errors, proceed
-  next();
-}
-
-// Helper function to format file size
-function formatBytes(bytes, decimals = 2) {
-  if (bytes === 0) return "0 Bytes";
-
-  const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ["Bytes", "KB", "MB", "GB"];
-
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + " " + sizes[i];
-}
-
-// Helper to delete old image files
-const deleteOldImage = async (filePath) => {
-  if (!filePath) return false;
-
-  try {
-    // Extract relative path from full URL if needed
-    let cleanPath = filePath;
-    if (filePath.startsWith("http")) {
-      const urlParts = filePath.split("/uploads/");
-      if (urlParts[1]) {
-        cleanPath = `uploads/${urlParts[1]}`;
-      }
-    }
-
-    if (fs.existsSync(cleanPath)) {
-      await fs.promises.unlink(cleanPath);
-      console.log(`🗑️ Deleted old image: ${cleanPath}`);
-      return true;
-    }
-  } catch (error) {
-    console.error(`Error deleting image ${filePath}:`, error);
-  }
-  return false;
+/**
+ * Delete audio file after message is deleted or failed
+ */
+const deleteAudioFileIfExists = async (fileUrl) => {
+  return await deleteAudioFile(fileUrl);
 };
 
 module.exports = {
+  // Image uploads
   uploadProfilePicture,
   uploadCoverPhoto,
   uploadEventImages,
   uploadEventImage,
   uploadAndOptimizeEventImages,
   uploadWithErrorHandling,
+
+  // Audio uploads
+  uploadAudioMessage,
+  deleteAudioFileIfExists,
+
+  // Utilities
   deleteOldImage,
   formatBytes,
 };

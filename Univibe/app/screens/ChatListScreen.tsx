@@ -151,8 +151,13 @@ export default function ChatListScreen() {
    * Creates or retrieves existing chat room
    * @param userId - Target user ID
    * @param userName - Target user name
+   * @param userAvatar - Target user avatar
    */
-  const startNewChat = async (userId: string, userName: string) => {
+  const startNewChat = async (
+    userId: string,
+    userName: string,
+    userAvatar?: string,
+  ) => {
     setShowNewChatModal(false);
     setSearchUserQuery("");
     setUsers([]);
@@ -171,6 +176,7 @@ export default function ChatListScreen() {
             roomId: data.data.roomId,
             otherUserName: userName,
             otherUserId: userId,
+            otherUserAvatar: userAvatar || "", // Add this
           },
         });
       }
@@ -184,11 +190,13 @@ export default function ChatListScreen() {
    * @param roomId - Chat room ID
    * @param name - Other user's name
    * @param otherUserId - Other user's ID
+   * @param otherUserAvatar - Other user's avatar URL
    */
   const navigateToChat = (
     roomId: string,
     name: string,
     otherUserId?: string,
+    otherUserAvatar?: string,
   ) => {
     router.push({
       pathname: "/screens/ChatScreen",
@@ -196,6 +204,7 @@ export default function ChatListScreen() {
         roomId,
         otherUserName: name,
         otherUserId: otherUserId || "",
+        otherUserAvatar: otherUserAvatar || "", // Add this
       },
     });
   };
@@ -251,8 +260,16 @@ export default function ChatListScreen() {
     return (
       <TouchableOpacity
         style={styles.chatItem}
-        onPress={() => navigateToChat(item.roomId, item.name, item.otherUserId)}
+        onPress={() =>
+          navigateToChat(
+            item.roomId,
+            item.name,
+            item.otherUserId,
+            item.otherUserAvatar, // Pass the avatar
+          )
+        }
       >
+        {/* Rest of the component remains the same */}
         <View style={styles.avatarContainer}>
           {avatarUrl ? (
             <Image source={{ uri: avatarUrl }} style={styles.avatar} />
@@ -289,7 +306,7 @@ export default function ChatListScreen() {
   const renderUserItem = ({ item }: { item: User }) => (
     <TouchableOpacity
       style={styles.userItem}
-      onPress={() => startNewChat(item._id, item.name)}
+      onPress={() => startNewChat(item._id, item.name, item.profilePicture)} // Pass avatar
     >
       {item.profilePicture ? (
         <Image

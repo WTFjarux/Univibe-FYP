@@ -1,7 +1,7 @@
 /**
  * controllers/chatController.js — REST API for Chat
  *
- * Handles HTTP endpoints for chat functionality
+ * Handles HTTP endpoints for chat functionality including audio messages and reactions
  */
 
 const Message = require("../models/Message");
@@ -77,6 +77,15 @@ const getMessageHistory = async (req, res) => {
       .populate("sender", "name email")
       .lean();
 
+    // Format messages with reactions and audio duration
+    const formattedMessages = messages.map((msg) => ({
+      ...msg,
+      formattedDuration: msg.duration
+        ? `${Math.floor(msg.duration / 60)}:${(msg.duration % 60).toString().padStart(2, "0")}`
+        : null,
+      reactions: msg.reactions || [],
+    }));
+
     // Mark messages as read
     await Message.updateMany(
       { roomId, "readBy.userId": { $ne: currentUserId } },
@@ -87,7 +96,7 @@ const getMessageHistory = async (req, res) => {
       success: true,
       data: {
         roomId,
-        messages: messages.reverse(),
+        messages: formattedMessages.reverse(),
         hasMore: messages.length === parseInt(limit),
       },
     });
@@ -240,10 +249,225 @@ const getOtherUserProfile = async (req, res) => {
   }
 };
 
+/**
+ * Mark audio message as played
+ */
+const markAudioAsPlayed = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user.id;
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({
+        success: false,
+        message: "Message not found",
+      });
+    }
+
+    // Update isPlayed field if it exists
+    if (message.type === "audio") {
+      message.isPlayed = true;
+      await message.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Audio marked as played",
+    });
+  } catch (error) {
+    console.error("Error marking audio as played:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+/**
+ * Get unplayed audio messages for a room
+ */
+const getUnplayedAudio = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const userId = req.user.id;
+
+    const unplayedAudio = await Message.find({
+      roomId,
+      type: "audio",
+      isPlayed: false,
+      sender: { $ne: userId },
+      isDeleted: false,
+    }).sort({ createdAt: 1 });
+
+    res.status(200).json({
+      success: true,
+      data: unplayedAudio,
+    });
+  } catch (error) {
+    console.error("Error getting unplayed audio:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// ============================================
+// REACTION HANDLERS
+// ============================================
+
+/**
+ * Add or update reaction to a message
+ */
+const addReaction = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { reaction } = req.body;
+    const userId = req.user.id;
+
+    // Validate reaction
+    const validReactions = ["👍", "❤️", "😂", "😮", "😢", "😡"];
+    if (!validReactions.includes(reaction)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid reaction",
+      });
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({
+        success: false,
+        message: "Message not found",
+      });
+    }
+
+    // Initialize reactions array if it doesn't exist
+    if (!message.reactions) {
+      message.reactions = [];
+    }
+
+    // Check if user already reacted
+    const existingReactionIndex = message.reactions.findIndex(
+      (r) => r.userId.toString() === userId,
+    );
+
+    if (existingReactionIndex !== -1) {
+      // Update existing reaction
+      message.reactions[existingReactionIndex].reaction = reaction;
+      message.reactions[existingReactionIndex].createdAt = new Date();
+    } else {
+      // Add new reaction
+      message.reactions.push({
+        userId,
+        reaction,
+        createdAt: new Date(),
+      });
+    }
+
+    await message.save();
+
+    // Populate user info for reactions
+    const populatedMessage = await Message.findById(messageId)
+      .populate("reactions.userId", "name username")
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      reactions: populatedMessage.reactions || [],
+      message: "Reaction added successfully",
+    });
+  } catch (error) {
+    console.error("Error adding reaction:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to add reaction",
+    });
+  }
+};
+
+/**
+ * Remove reaction from a message
+ */
+const removeReaction = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user.id;
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({
+        success: false,
+        message: "Message not found",
+      });
+    }
+
+    // Initialize reactions array if it doesn't exist
+    if (!message.reactions) {
+      message.reactions = [];
+    }
+
+    // Remove user's reaction
+    message.reactions = message.reactions.filter(
+      (r) => r.userId.toString() !== userId,
+    );
+
+    await message.save();
+
+    // Populate user info for reactions
+    const populatedMessage = await Message.findById(messageId)
+      .populate("reactions.userId", "name username")
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      reactions: populatedMessage.reactions || [],
+      message: "Reaction removed successfully",
+    });
+  } catch (error) {
+    console.error("Error removing reaction:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to remove reaction",
+    });
+  }
+};
+
+/**
+ * Get all reactions for a message
+ */
+const getMessageReactions = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+
+    const message = await Message.findById(messageId)
+      .populate("reactions.userId", "name username")
+      .lean();
+
+    if (!message) {
+      return res.status(404).json({
+        success: false,
+        message: "Message not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      reactions: message.reactions || [],
+    });
+  } catch (error) {
+    console.error("Error getting message reactions:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get reactions",
+    });
+  }
+};
+
 module.exports = {
   getOrCreateDirectRoom,
   getMessageHistory,
   getUserChatRooms,
   deleteMessage,
   getOtherUserProfile,
+  markAudioAsPlayed,
+  getUnplayedAudio,
+  addReaction,
+  removeReaction,
+  getMessageReactions,
 };

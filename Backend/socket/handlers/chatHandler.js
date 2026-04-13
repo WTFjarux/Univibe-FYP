@@ -1,7 +1,7 @@
 /**
  * socket/handlers/chatHandler.js — Real-time Chat Event Handlers
  *
- * Handles all chat-related socket events
+ * Handles all chat-related socket events including text, images, and audio messages
  */
 
 const Message = require("../../models/Message");
@@ -25,6 +25,7 @@ const EVENTS = {
   MESSAGE_READ: "message_read",
   GET_MESSAGES: "get_messages",
   MESSAGES_HISTORY: "messages_history",
+  AUDIO_PLAYED: "audio_played",
   ERROR: "error",
 };
 
@@ -103,15 +104,22 @@ const setupChatHandlers = (io, socket) => {
   });
 
   /**
-   * Send a message
+   * Send a message (supports text, image, audio, file)
    */
   socket.on(
     EVENTS.SEND_MESSAGE,
-    async ({ roomId, message, type = "text", replyTo = null }) => {
+    async ({
+      roomId,
+      message,
+      type = "text",
+      replyTo = null,
+      mediaUrl = null,
+      duration = null,
+    }) => {
       try {
-        if (!roomId || !message) {
+        if (!roomId || (!message && type !== "audio")) {
           socket.emit(EVENTS.ERROR, {
-            message: "Room ID and message are required",
+            message: "Room ID and message content are required",
           });
           return;
         }
@@ -119,29 +127,41 @@ const setupChatHandlers = (io, socket) => {
         // Get user profile for avatar
         const profile = await Profile.findOne({ user: userId });
 
-        // Create message object
+        // Create message object with audio support
         const messageData = {
           sender: userId,
           senderName: user.name,
           senderAvatar: profile?.profilePicture || "",
           roomId,
-          message,
+          message: type === "audio" ? "🎤 Voice message" : message,
           type,
           replyTo,
           readBy: [{ userId, readAt: new Date() }],
           status: "sent",
         };
 
+        // Add audio-specific fields
+        if (type === "audio" && mediaUrl) {
+          messageData.mediaUrl = mediaUrl;
+          messageData.duration = duration || 0;
+          messageData.mediaSize = 0; // Will be updated from file
+        }
+
         // Save to database
         const savedMessage = new Message(messageData);
         await savedMessage.save();
 
         // Update chat room last message
+        const lastMessageText =
+          type === "audio"
+            ? "🎤 Voice message"
+            : message?.substring(0, 100) || "Media message";
+
         await ChatRoom.findOneAndUpdate(
           { roomId },
           {
             lastMessage: {
-              message: message.substring(0, 100),
+              message: lastMessageText,
               sender: userId,
               sentAt: new Date(),
             },
@@ -150,12 +170,14 @@ const setupChatHandlers = (io, socket) => {
           { upsert: true },
         );
 
-        // Prepare response
+        // Prepare response with full message data
         const responseMessage = {
           ...messageData,
           _id: savedMessage._id,
           createdAt: savedMessage.createdAt,
           messageId: savedMessage._id,
+          duration: savedMessage.duration,
+          mediaUrl: savedMessage.mediaUrl,
         };
 
         // Emit to sender (delivery confirmation)
@@ -164,7 +186,9 @@ const setupChatHandlers = (io, socket) => {
         // Emit to everyone else in the room
         socket.to(roomId).emit(EVENTS.RECEIVE_MESSAGE, responseMessage);
 
-        console.log(`📨 Message sent to room ${roomId} from ${user.name}`);
+        console.log(
+          `📨 ${type} message sent to room ${roomId} from ${user.name}`,
+        );
       } catch (error) {
         console.error("Error sending message:", error);
         socket.emit(EVENTS.ERROR, { message: "Failed to send message" });
@@ -218,6 +242,24 @@ const setupChatHandlers = (io, socket) => {
   });
 
   /**
+   * Mark audio message as played
+   */
+  socket.on(EVENTS.AUDIO_PLAYED, async ({ messageId, roomId }) => {
+    try {
+      await Message.markAudioAsPlayed(messageId, userId);
+
+      // Notify room that audio was played (optional)
+      socket.to(roomId).emit(EVENTS.AUDIO_PLAYED, {
+        userId,
+        messageId,
+        roomId,
+      });
+    } catch (error) {
+      console.error("Error marking audio as played:", error);
+    }
+  });
+
+  /**
    * Get message history
    */
   socket.on(
@@ -235,9 +277,17 @@ const setupChatHandlers = (io, socket) => {
           .populate("sender", "name email")
           .lean();
 
+        // Add formatted duration for audio messages
+        const formattedMessages = messages.map((msg) => ({
+          ...msg,
+          formattedDuration: msg.duration
+            ? `${Math.floor(msg.duration / 60)}:${(msg.duration % 60).toString().padStart(2, "0")}`
+            : null,
+        }));
+
         socket.emit(EVENTS.MESSAGES_HISTORY, {
           roomId,
-          messages: messages.reverse(),
+          messages: formattedMessages.reverse(),
           hasMore: messages.length === limit,
         });
       } catch (error) {
