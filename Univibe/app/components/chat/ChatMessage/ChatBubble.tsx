@@ -1,4 +1,5 @@
-// app/components/chat/ChatMessage.tsx (FIXED - check for undefined)
+// app/components/chat/ChatMessage.tsx (FULLY UPDATED)
+
 import React, { useState } from "react";
 import {
   View,
@@ -13,6 +14,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
+import * as Haptics from "expo-haptics";
 import AudioPlayer from "./AudioPlayer";
 import ChatMessageOptionsModal from "./ChatMessageOptionsModal";
 
@@ -45,11 +47,16 @@ interface ChatMessageProps {
   getFullImageUrl: (url: string) => string;
   DEFAULT_AVATAR: any;
   onAudioPlayed?: (messageId: string) => void;
-  onReaction?: (messageId: string, reaction: string) => void;
+  onReaction?: (
+    messageId: string,
+    reaction: string,
+    shouldRemove?: boolean,
+  ) => void;
   onReply?: (message: Message) => void;
   onDelete?: (messageId: string) => void;
   onForward?: (message: Message) => void;
   currentUserId?: string;
+  onScrollToMessage?: (messageId: string) => void;
 }
 
 export default function ChatMessage({
@@ -66,6 +73,7 @@ export default function ChatMessage({
   onDelete,
   onForward,
   currentUserId,
+  onScrollToMessage,
 }: ChatMessageProps) {
   const [showOptions, setShowOptions] = useState(false);
   const [optionsPosition, setOptionsPosition] = useState({ x: 0, y: 0 });
@@ -74,6 +82,11 @@ export default function ChatMessage({
   const avatarUrl = message.senderAvatar
     ? getFullImageUrl(message.senderAvatar)
     : "";
+
+  // Get current user's reaction if any
+  const currentUserReaction = message.reactions?.find(
+    (r) => r.userId === currentUserId,
+  )?.reaction;
 
   // Group reactions for display
   const reactionGroups = message.reactions?.reduce(
@@ -85,22 +98,30 @@ export default function ChatMessage({
   );
 
   const handleLongPress = (event: any) => {
+    // Trigger haptic feedback on long press
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
     const { pageX, pageY } = event.nativeEvent;
     setOptionsPosition({ x: pageX - 100, y: pageY - 80 });
     setShowOptions(true);
   };
 
   const handleCopy = async () => {
+    // Haptic feedback for copy action
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await Clipboard.setStringAsync(message.message);
     setShowOptions(false);
   };
 
   const handleReply = () => {
+    // Haptic feedback for reply action
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (onReply) onReply(message);
     setShowOptions(false);
   };
 
   const handleDelete = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     Alert.alert(
       "Delete Message",
       "Are you sure you want to delete this message?",
@@ -110,6 +131,7 @@ export default function ChatMessage({
           text: "Delete",
           style: "destructive",
           onPress: () => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             if (onDelete) onDelete(message._id);
             setShowOptions(false);
           },
@@ -119,6 +141,8 @@ export default function ChatMessage({
   };
 
   const handleForward = async () => {
+    // Haptic feedback for forward action
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (onForward) {
       onForward(message);
     } else {
@@ -127,11 +151,48 @@ export default function ChatMessage({
     setShowOptions(false);
   };
 
-  const handleReaction = (reaction: string) => {
+  const handleReaction = (reaction: string, shouldRemove?: boolean) => {
+    // Different haptic feedback for add vs remove
+    if (shouldRemove) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+
     setSelectedReaction(reaction);
     setTimeout(() => setSelectedReaction(null), 200);
-    if (onReaction) onReaction(message._id, reaction);
+    if (onReaction) onReaction(message._id, reaction, shouldRemove);
     setShowOptions(false);
+  };
+
+  const handleReplyPreviewPress = () => {
+    if (message.replyTo && onScrollToMessage) {
+      // Haptic feedback when tapping reply preview
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      onScrollToMessage(message.replyTo.messageId);
+    }
+  };
+
+  const renderReplyPreview = () => {
+    if (!message.replyTo) return null;
+
+    return (
+      <TouchableOpacity
+        style={styles.replyPreviewContainer}
+        onPress={handleReplyPreviewPress}
+        activeOpacity={0.7}
+      >
+        <View style={styles.replyPreviewBar} />
+        <View style={styles.replyPreviewContent}>
+          <Text style={styles.replyPreviewSender}>
+            {message.replyTo.senderName}
+          </Text>
+          <Text style={styles.replyPreviewText} numberOfLines={1}>
+            {message.replyTo.message}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
   };
 
   const renderMessageContent = () => {
@@ -151,7 +212,7 @@ export default function ChatMessage({
             <View style={styles.audioLoadingIconWrap}>
               <ActivityIndicator
                 size="small"
-                color={isOwnMessage ? "#fff" : "#007AFF"}
+                color={isOwnMessage ? "#fff" : "#585858"}
               />
             </View>
             <View style={styles.waveformContainer}>
@@ -164,8 +225,8 @@ export default function ChatMessage({
                       height: h,
                       opacity: 0.3,
                       backgroundColor: isOwnMessage
-                        ? "rgba(255,255,255,0.5)"
-                        : "#007AFF",
+                        ? "rgba(255, 255, 255, 0.5)"
+                        : "#007bff",
                     },
                   ]}
                 />
@@ -252,20 +313,8 @@ export default function ChatMessage({
 
           {/* Message Content */}
           <View style={styles.messageContent}>
-            {/* Reply Preview */}
-            {message.replyTo && (
-              <View style={styles.replyPreview}>
-                <View style={styles.replyPreviewBar} />
-                <View style={styles.replyPreviewContent}>
-                  <Text style={styles.replyPreviewSender}>
-                    {message.replyTo.senderName}
-                  </Text>
-                  <Text style={styles.replyPreviewText} numberOfLines={1}>
-                    {message.replyTo.message}
-                  </Text>
-                </View>
-              </View>
-            )}
+            {/* Reply Preview - Now clickable */}
+            {renderReplyPreview()}
 
             {/* Message Bubble */}
             <View
@@ -313,13 +362,14 @@ export default function ChatMessage({
         onReaction={handleReaction}
         isOwnMessage={isOwnMessage}
         position={optionsPosition}
-        selectedReaction={selectedReaction}
+        selectedReaction={currentUserReaction || selectedReaction}
         message={{
           _id: message._id,
           message: message.message,
           type: message.type,
           mediaUrl: message.mediaUrl,
           senderName: message.senderName,
+          replyTo: message.replyTo,
         }}
         getFullImageUrl={getFullImageUrl}
       />
@@ -366,7 +416,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   ownBubble: {
-    backgroundColor: "#007AFF",
+    backgroundColor: "#8b5cf6",
     borderBottomRightRadius: 4,
   },
   otherBubble: {
@@ -425,7 +475,7 @@ const styles = StyleSheet.create({
   ownAudioLabel: {
     color: "#fff",
   },
-  replyPreview: {
+  replyPreviewContainer: {
     flexDirection: "row",
     marginBottom: 6,
     paddingBottom: 6,
@@ -434,7 +484,7 @@ const styles = StyleSheet.create({
   },
   replyPreviewBar: {
     width: 3,
-    backgroundColor: "#007AFF",
+    backgroundColor: "#8b5cf6",
     borderRadius: 2,
     marginRight: 8,
   },
@@ -444,7 +494,7 @@ const styles = StyleSheet.create({
   replyPreviewSender: {
     fontSize: 11,
     fontWeight: "600",
-    color: "#007AFF",
+    color: "#8b5cf6",
     fontFamily: "SofiaSans-Bold",
     marginBottom: 2,
   },

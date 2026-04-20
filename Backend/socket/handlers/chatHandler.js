@@ -1,7 +1,8 @@
 /**
  * socket/handlers/chatHandler.js — Real-time Chat Event Handlers
  *
- * Handles all chat-related socket events including text, images, and audio messages
+ * Handles all chat-related socket events including text, images, audio, and replies
+ * with support for optimistic message updates via tempId tracking
  */
 
 const Message = require("../../models/Message");
@@ -105,7 +106,8 @@ const setupChatHandlers = (io, socket) => {
   });
 
   /**
-   * Send a message (supports text, image, audio, file)
+   * Send a message with reply support and tempId acknowledgment
+   * FULLY UPDATED: Handles text, audio, and all message types with real-time delivery
    */
   socket.on(
     EVENTS.SEND_MESSAGE,
@@ -116,19 +118,28 @@ const setupChatHandlers = (io, socket) => {
       replyTo = null,
       mediaUrl = null,
       duration = null,
+      tempId = null,
     }) => {
       try {
+        // Validation
         if (!roomId || (!message && type !== "audio")) {
-          socket.emit(EVENTS.ERROR, {
-            message: "Room ID and message content are required",
-          });
+          const errorResponse = {
+            success: false,
+            error: "Room ID and message content are required",
+          };
+          if (tempId) errorResponse.tempId = tempId;
+          socket.emit(EVENTS.ERROR, errorResponse);
           return;
         }
+
+        console.log(
+          `📤 Sending ${type} message${tempId ? ` with tempId: ${tempId}` : ""} to room: ${roomId}`,
+        );
 
         // Get user profile for avatar
         const profile = await Profile.findOne({ user: userId });
 
-        // Create message object with audio support
+        // Create message object
         const messageData = {
           sender: userId,
           senderName: user.name,
@@ -136,21 +147,68 @@ const setupChatHandlers = (io, socket) => {
           roomId,
           message: type === "audio" ? "🎤 Voice message" : message,
           type,
-          replyTo,
           readBy: [{ userId, readAt: new Date() }],
           status: "sent",
+          createdAt: new Date(),
         };
 
-        // Add audio-specific fields
-        if (type === "audio" && mediaUrl) {
+        // Add audio-specific fields (CRITICAL for voice messages)
+        if (type === "audio") {
+          if (!mediaUrl) {
+            console.error("❌ Audio message missing mediaUrl");
+            const errorResponse = {
+              success: false,
+              error: "Audio message requires mediaUrl",
+            };
+            if (tempId) errorResponse.tempId = tempId;
+            socket.emit(EVENTS.ERROR, errorResponse);
+            return;
+          }
           messageData.mediaUrl = mediaUrl;
           messageData.duration = duration || 0;
-          messageData.mediaSize = 0; // Will be updated from file
+          messageData.mediaSize = 0;
+          console.log(
+            `🎤 Audio message details - URL: ${mediaUrl}, Duration: ${duration}s`,
+          );
+        }
+
+        // Add replyTo data if present
+        if (replyTo && replyTo.messageId) {
+          try {
+            const mongoose = require("mongoose");
+            if (mongoose.Types.ObjectId.isValid(replyTo.messageId)) {
+              console.log(
+                `🔍 Looking up original message: ${replyTo.messageId}`,
+              );
+              const originalMessage = await Message.findById(replyTo.messageId);
+
+              if (originalMessage && !originalMessage.isDeleted) {
+                messageData.replyTo = {
+                  messageId: replyTo.messageId,
+                  message: (
+                    originalMessage.message || "Media message"
+                  ).substring(0, 100),
+                  senderName: originalMessage.senderName || "Unknown",
+                };
+                console.log(
+                  `✅ Attached replyTo context for sender: ${messageData.replyTo.senderName}`,
+                );
+              }
+            }
+          } catch (err) {
+            console.error("⚠️ Error processing replyTo context:", err);
+          }
         }
 
         // Save to database
         const savedMessage = new Message(messageData);
         await savedMessage.save();
+        console.log(`💾 Message saved to DB with ID: ${savedMessage._id}`);
+
+        // Fetch the complete message with populated fields
+        const populatedMessage = await Message.findById(savedMessage._id)
+          .populate("sender", "name email")
+          .lean();
 
         // Update chat room last message
         const lastMessageText =
@@ -173,36 +231,90 @@ const setupChatHandlers = (io, socket) => {
 
         // Prepare response with full message data
         const responseMessage = {
-          ...messageData,
+          ...populatedMessage,
           _id: savedMessage._id,
           createdAt: savedMessage.createdAt,
           messageId: savedMessage._id,
           duration: savedMessage.duration,
           mediaUrl: savedMessage.mediaUrl,
+          type: savedMessage.type,
         };
 
-        // Emit to sender (delivery confirmation)
-        socket.emit(EVENTS.MESSAGE_DELIVERED, responseMessage);
+        // Send delivery confirmation to sender with tempId mapping
+        const deliveryConfirmation = {
+          success: true,
+          messageId: savedMessage._id,
+          message: responseMessage,
+          _id: savedMessage._id,
+          createdAt: savedMessage.createdAt,
+        };
 
-        // Emit to everyone else in the room
+        if (tempId) {
+          deliveryConfirmation.tempId = tempId;
+          console.log(
+            `✅ Delivery confirmation sent: tempId ${tempId} → messageId ${savedMessage._id}`,
+          );
+        }
+
+        socket.emit(EVENTS.MESSAGE_DELIVERED, deliveryConfirmation);
+
+        // CRITICAL: Broadcast to everyone else in the room
+        // This ensures real-time delivery for all message types including audio
         socket.to(roomId).emit(EVENTS.RECEIVE_MESSAGE, responseMessage);
+        console.log(
+          `📡 Broadcasted ${type} message to room ${roomId} (${socket.adapter.rooms.get(roomId)?.size || 0} recipients)`,
+        );
 
         console.log(
-          `📨 ${type} message sent to room ${roomId} from ${user.name}`,
+          `✅ ${type.toUpperCase()} message sent successfully - Room: ${roomId}, Sender: ${user.name}${tempId ? `, TempID: ${tempId}` : ""}`,
         );
       } catch (error) {
-        console.error("Error sending message:", error);
-        socket.emit(EVENTS.ERROR, { message: "Failed to send message" });
+        console.error("❌ CRITICAL ERROR in SEND_MESSAGE handler:");
+        console.error("   Error Message:", error.message);
+        console.error("   Stack Trace:", error.stack);
+
+        const errorResponse = {
+          success: false,
+          message: "Failed to send message",
+          error: error.message,
+        };
+
+        if (tempId) errorResponse.tempId = tempId;
+
+        socket.emit(EVENTS.ERROR, errorResponse);
       }
     },
   );
+
+  /**
+   * Handle audio played confirmation
+   */
+  socket.on(EVENTS.AUDIO_PLAYED, async ({ messageId, roomId }) => {
+    try {
+      await Message.findByIdAndUpdate(messageId, {
+        $addToSet: { playedBy: userId },
+        isPlayed: true,
+      });
+
+      // Notify sender that audio was played (optional)
+      socket.to(roomId).emit(EVENTS.AUDIO_PLAYED, {
+        userId,
+        messageId,
+        roomId,
+        playedAt: new Date(),
+      });
+
+      console.log(`🎧 Audio message ${messageId} played by ${user.name}`);
+    } catch (error) {
+      console.error("Error marking audio as played:", error);
+    }
+  });
 
   /**
    * Delete a message (soft delete) and broadcast to room
    */
   socket.on(EVENTS.DELETE_MESSAGE, async ({ messageId, roomId }) => {
     try {
-      // Verify the message exists
       const message = await Message.findById(messageId);
 
       if (!message) {
@@ -210,7 +322,6 @@ const setupChatHandlers = (io, socket) => {
         return;
       }
 
-      // Check if user is authorized to delete (must be sender)
       if (message.sender.toString() !== userId) {
         socket.emit(EVENTS.ERROR, {
           message: "Not authorized to delete this message",
@@ -218,12 +329,11 @@ const setupChatHandlers = (io, socket) => {
         return;
       }
 
-      // Perform soft delete
       message.isDeleted = true;
       message.deletedFor.push(userId);
       await message.save();
 
-      // Update chat room's last message to the most recent non-deleted message
+      // Update chat room's last message
       const lastMessage = await Message.findOne({
         roomId: message.roomId,
         isDeleted: false,
@@ -249,7 +359,6 @@ const setupChatHandlers = (io, socket) => {
         },
       );
 
-      // Broadcast to everyone in the room that a message was deleted
       io.to(roomId).emit("message_deleted", {
         roomId,
         messageId,
@@ -296,11 +405,10 @@ const setupChatHandlers = (io, socket) => {
         { _id: { $in: messageIds }, "readBy.userId": { $ne: userId } },
         {
           $addToSet: { readBy: { userId, readAt: new Date() } },
-          $set: { isRead: true, status: "read" },
+          $set: { status: "read" },
         },
       );
 
-      // Notify room that messages were read
       socket.to(roomId).emit(EVENTS.MESSAGE_READ, {
         userId,
         roomId,
@@ -308,24 +416,6 @@ const setupChatHandlers = (io, socket) => {
       });
     } catch (error) {
       console.error("Error marking messages as read:", error);
-    }
-  });
-
-  /**
-   * Mark audio message as played
-   */
-  socket.on(EVENTS.AUDIO_PLAYED, async ({ messageId, roomId }) => {
-    try {
-      await Message.markAudioAsPlayed(messageId, userId);
-
-      // Notify room that audio was played (optional)
-      socket.to(roomId).emit(EVENTS.AUDIO_PLAYED, {
-        userId,
-        messageId,
-        roomId,
-      });
-    } catch (error) {
-      console.error("Error marking audio as played:", error);
     }
   });
 
@@ -347,7 +437,6 @@ const setupChatHandlers = (io, socket) => {
           .populate("sender", "name email")
           .lean();
 
-        // Add formatted duration for audio messages
         const formattedMessages = messages.map((msg) => ({
           ...msg,
           formattedDuration: msg.duration

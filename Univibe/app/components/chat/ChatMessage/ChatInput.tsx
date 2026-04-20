@@ -1,6 +1,11 @@
-// app/components/chat/ChatInput.tsx (updated with cancel support)
-
-import React, { useState, useRef, forwardRef, useEffect } from "react";
+// app/components/chat/ChatInput.tsx (UPDATED - added ref support)
+import React, {
+  useState,
+  useRef,
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+} from "react";
 import {
   View,
   TextInput,
@@ -18,6 +23,12 @@ import * as Haptics from "expo-haptics";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
+export interface ChatInputRef {
+  focus: () => void;
+  blur: () => void;
+  clear: () => void;
+}
+
 interface ChatInputProps {
   onSendMessage: (text: string) => void;
   onStartRecording: () => Promise<void>;
@@ -29,7 +40,7 @@ interface ChatInputProps {
   socketConnected: boolean;
 }
 
-const ChatInput = forwardRef<TextInput, ChatInputProps>(
+const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
   (
     {
       onSendMessage,
@@ -46,7 +57,18 @@ const ChatInput = forwardRef<TextInput, ChatInputProps>(
     const [inputText, setInputText] = useState("");
     const [showRecordingUI, setShowRecordingUI] = useState(false);
     const inputRef = useRef<TextInput>(null);
-    const combinedRef = ref || inputRef;
+
+    useImperativeHandle(ref, () => ({
+      focus: () => {
+        inputRef.current?.focus();
+      },
+      blur: () => {
+        inputRef.current?.blur();
+      },
+      clear: () => {
+        setInputText("");
+      },
+    }));
 
     // Animation values
     const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -199,26 +221,13 @@ const ChatInput = forwardRef<TextInput, ChatInputProps>(
       setShowRecordingUI(false);
     };
 
-    // Calculate waveform bar heights
-    const getWaveformHeight = (index: number) => {
-      const baseHeight = 4;
-      const maxHeight = 30;
-      // Create a sine wave pattern
-      const value = waveAnim.interpolate({
-        inputRange: [0, 0.5, 1],
-        outputRange: [0, Math.PI * 2, Math.PI * 4],
-      });
-      // This will be animated, but for now return base height
-      return baseHeight + (Math.sin(Date.now() * 0.003 + index) * 10 + 10);
-    };
-
     // Normal input UI (when not recording)
     const renderNormalUI = () => (
       <View style={styles.inputArea}>
         <View style={styles.inputContainer}>
           <View style={styles.inputWrapper}>
             <TextInput
-              ref={combinedRef}
+              ref={inputRef}
               style={styles.input}
               value={inputText}
               onChangeText={setInputText}

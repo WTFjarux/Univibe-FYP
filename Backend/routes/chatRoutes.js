@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 const { protect } = require("../middleware/authmiddleware");
 const { uploadAudioMessage } = require("../middleware/uploadMiddleware");
+const fs = require("fs"); // Add this import
 
 // Import models
 const User = require("../models/User");
@@ -36,42 +37,82 @@ router.get("/user-profile/:otherUserId", getOtherUserProfile);
 router.get("/messages/:roomId", getMessageHistory);
 router.delete("/message/:messageId", deleteMessage);
 
-// Audio specific endpoints
+// Audio specific endpoints - UPDATED
 router.post("/upload-audio", uploadAudioMessage, async (req, res) => {
   try {
-    if (!req.file) {
-      return res
-        .status(400)
-        .json({ success: false, message: "No audio file uploaded" });
+    console.log("=== AUDIO UPLOAD ===");
+    console.log("File received:", req.file ? "Yes" : "No");
+    console.log("Audio info:", req.audioInfo);
+
+    if (!req.file || !req.audioInfo) {
+      return res.status(400).json({
+        success: false,
+        message: "No audio file uploaded",
+      });
     }
 
-    const { roomId, duration } = req.body;
+    const { roomId, duration, replyToId, replyToMessage, replyToSender } =
+      req.body;
     const userId = req.user.id;
+
+    // Verify file exists on disk
+    if (!fs.existsSync(req.file.path)) {
+      console.error("File not found at path:", req.file.path);
+      return res.status(500).json({
+        success: false,
+        message: "File not saved properly",
+      });
+    }
 
     const user = await User.findById(userId);
     if (!user) {
-      return res
-        .status(404)
-        .json({ success: false, message: "User not found" });
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
     }
 
     const profile = await Profile.findOne({ user: userId });
 
-    const message = new Message({
+    // Construct URL - use req.audioInfo.url or create it manually
+    const audioUrl =
+      req.audioInfo.url || `/uploads/chat/audio/${req.file.filename}`;
+    const fileSize = req.file.size;
+
+    console.log("💾 Saving audio message:");
+    console.log("   URL:", audioUrl);
+    console.log("   Size:", fileSize);
+    console.log("   Duration:", duration);
+
+    const messageData = {
       sender: userId,
       senderName: user.name,
       senderAvatar: profile?.profilePicture || "",
       roomId: roomId,
       message: "🎤 Voice message",
       type: "audio",
-      mediaUrl: req.audioInfo.url,
-      mediaSize: req.file.size,
+      mediaUrl: audioUrl, // CRITICAL: This MUST be set
+      mediaSize: fileSize,
+      mediaName: req.file.originalname || `voice_${Date.now()}.m4a`,
       mediaMimeType: req.file.mimetype,
       duration: parseInt(duration) || 0,
       status: "sent",
-    });
+    };
 
-    await message.save();
+    // Add replyTo data if present
+    if (replyToId) {
+      messageData.replyTo = {
+        messageId: replyToId,
+        message: replyToMessage || "Media message",
+        senderName: replyToSender || "Unknown",
+      };
+    }
+
+    const message = new Message(messageData);
+
+    const savedMessage = await message.save();
+    console.log("✅ Message saved with ID:", savedMessage._id);
+    console.log("✅ Saved mediaUrl:", savedMessage.mediaUrl);
 
     // Update chat room last message
     await ChatRoom.findOneAndUpdate(
@@ -90,23 +131,21 @@ router.post("/upload-audio", uploadAudioMessage, async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Audio uploaded successfully",
-      url: req.audioInfo.url,
+      url: audioUrl,
       data: {
-        _id: message._id,
-        type: message.type,
-        duration: message.duration,
-        createdAt: message.createdAt,
-        mediaUrl: req.audioInfo.url,
+        _id: savedMessage._id,
+        type: savedMessage.type,
+        duration: savedMessage.duration,
+        createdAt: savedMessage.createdAt,
+        mediaUrl: savedMessage.mediaUrl, // Return the saved URL
       },
     });
   } catch (error) {
-    console.error("Audio upload error:", error.message);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to upload audio: " + error.message,
-      });
+    console.error("Audio upload error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to upload audio: " + error.message,
+    });
   }
 });
 

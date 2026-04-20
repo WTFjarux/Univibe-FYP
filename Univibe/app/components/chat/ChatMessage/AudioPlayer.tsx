@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { Audio } from "expo-av";
 import { Ionicons } from "@expo/vector-icons";
-import { API_BASE_URL } from "../../../constants/ipConstants";
+import { API_BASE_URL } from "../../../../constants/ipConstants";
 
 interface AudioPlayerProps {
   audioUrl: string;

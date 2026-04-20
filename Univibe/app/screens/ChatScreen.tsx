@@ -1,4 +1,5 @@
-// app/screens/ChatScreen.tsx - COMPLETELY FIXED with robust message filtering
+// app/screens/ChatScreen.tsx (FULLY UPDATED - REAL-TIME AUDIO FIXED)
+
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
@@ -12,23 +13,23 @@ import {
   Text,
   Animated,
   Dimensions,
-  TouchableOpacity,
-  StyleSheet,
 } from "react-native";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../lib/contexts/AuthContext";
 import { socketService } from "../../lib/services";
 import { API_BASE_URL } from "../../constants/ipConstants";
-import { profileService } from "../../lib/services/profileService";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Audio } from "expo-av";
-import {
-  ChatHeader,
-  ChatMessage,
-  ChatInput,
-  ChatAttachmentMenu,
-} from "../components/chat";
+import * as Haptics from "expo-haptics";
+import ChatHeader from "../components/chat/ChatMessage/ChatHeader";
+import ChatInput from "../components/chat/ChatMessage/ChatInput";
+import ChatAttachmentMenu from "../components/chat/ChatMessage/ChatAttachmentMenu";
+import SwipeableChatMessage from "../components/chat/ChatMessage/SwipeableChatMessage";
+import ReplyIndicator from "../components/chat/ChatMessage/ReplyIndicator";
+import { useMessageScroll } from "../../hooks/useMessageScroll";
+import { generateTempId, isTempId } from "../../lib/utils/messageIdGenerator";
+
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -52,6 +53,16 @@ interface Message {
     message: string;
     senderName: string;
   };
+  tempId?: string;
+}
+
+interface PendingMessage {
+  tempId: string;
+  message: string;
+  timestamp: number;
+  type?: string;
+  mediaUrl?: string;
+  duration?: number;
 }
 
 export default function ChatScreen() {
@@ -64,7 +75,6 @@ export default function ChatScreen() {
   let otherUserId = params.otherUserId as string;
   const otherUserAvatar = params.otherUserAvatar as string;
 
-  // Helper functions
   const extractOtherUserIdFromRoomId = (
     roomId: string,
     currentUserId: string,
@@ -92,7 +102,12 @@ export default function ChatScreen() {
   const [isOnline, setIsOnline] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
+  const [replyToMessage, setReplyToMessage] = useState<{
+    _id: string;
+    senderName: string;
+    message: string;
+    senderId?: string;
+  } | null>(null);
 
   // Audio recording states
   const [isRecording, setIsRecording] = useState(false);
@@ -101,14 +116,24 @@ export default function ChatScreen() {
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isStoppingRef = useRef(false);
   const isMountedRef = useRef(true);
-  const tempMessagesRef = useRef<Set<string>>(new Set());
+
+  // Track pending messages with temp IDs
+  const pendingMessagesRef = useRef<Map<string, PendingMessage>>(new Map());
+  const pendingTimeoutsRef = useRef<Map<string, number>>(new Map());
   const processedMessageIds = useRef<Set<string>>(new Set());
 
   const flatListRef = useRef<FlatList>(null);
   const slideAnim = useRef(new Animated.Value(-SCREEN_WIDTH)).current;
+  const inputRef = useRef<any>(null);
   const DEFAULT_AVATAR = require("../../assets/images/default-avatar.png");
 
-  // Attachment options
+  const {
+    highlightedMessageId,
+    registerMessagePosition,
+    scrollToMessage,
+    clearHighlight,
+  } = useMessageScroll(flatListRef as React.RefObject<FlatList>);
+
   const attachmentOptions = [
     {
       id: "photo",
@@ -144,7 +169,6 @@ export default function ChatScreen() {
     },
   ];
 
-  // Helper functions
   const getFullImageUrl = (url: string): string => {
     if (!url) return "";
     if (url.startsWith("http")) return url;
@@ -158,24 +182,14 @@ export default function ChatScreen() {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
-  // CRITICAL: Validate if a message is valid (not a ghost message)
   const isValidMessage = useCallback((msg: Message): boolean => {
-    // Never allow temp messages
-    if (msg._id?.startsWith("temp_")) return false;
-
-    // Never allow sending status messages
+    if (isTempId(msg._id)) return false;
     if (msg.status === "sending") return false;
-
-    // For audio messages, must have valid mediaUrl
     if (msg.type === "audio" && !msg.mediaUrl) return false;
-
-    // Must have valid ID
     if (!msg._id) return false;
-
     return true;
   }, []);
 
-  // Filter out ALL invalid messages
   const filterInvalidMessages = useCallback(
     (msgs: Message[]): Message[] => {
       return msgs.filter(isValidMessage);
@@ -194,25 +208,24 @@ export default function ChatScreen() {
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
       }
+      pendingTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
+      pendingTimeoutsRef.current.clear();
+      pendingMessagesRef.current.clear();
     };
   }, []);
 
-  // Clear invalid messages when screen loses focus
   useFocusEffect(
     useCallback(() => {
-      // When screen comes into focus, load fresh messages
       loadMessages(true);
-
       return () => {
-        // CRITICAL: Clear ALL invalid messages when leaving the screen
-        setMessages((prev) => filterInvalidMessages(prev));
-        tempMessagesRef.current.clear();
-        processedMessageIds.current.clear();
+        pendingTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
+        pendingTimeoutsRef.current.clear();
+        setReplyToMessage(null);
+        clearHighlight();
       };
     }, []),
   );
 
-  // Monitor socket connection
   useEffect(() => {
     const checkConnection = () =>
       setSocketConnected(socketService.getConnectionStatus());
@@ -227,22 +240,78 @@ export default function ChatScreen() {
     socketService.joinRoom(roomId, otherUserId);
     loadMessages(true);
 
-    socketService.on("receive_message", (message: Message) => {
-      if (message.roomId === roomId && isMountedRef.current) {
-        // Skip invalid messages
-        if (!isValidMessage(message)) return;
+    // Handle message delivered event with tempId mapping
+    socketService.on("message_delivered", (data: any) => {
+      console.log("✅ Message delivered event:", data);
 
-        // Prevent duplicate processing
+      const { tempId, messageId, message: messageData, success } = data;
+
+      if (success === false) {
+        console.log("❌ Message delivery failed:", data.error);
+        if (tempId && pendingMessagesRef.current.has(tempId)) {
+          pendingMessagesRef.current.delete(tempId);
+          const timeout = pendingTimeoutsRef.current.get(tempId);
+          if (timeout) {
+            clearTimeout(timeout);
+            pendingTimeoutsRef.current.delete(tempId);
+          }
+          setMessages((prev) =>
+            prev.filter((msg) => msg.tempId !== tempId && msg._id !== tempId),
+          );
+          Alert.alert("Error", data.error || "Failed to send message");
+        }
+        return;
+      }
+
+      if (tempId && pendingMessagesRef.current.has(tempId)) {
+        console.log(
+          `🔄 Replacing temp message ${tempId} with real message ${messageId}`,
+        );
+
+        pendingMessagesRef.current.delete(tempId);
+        const timeout = pendingTimeoutsRef.current.get(tempId);
+        if (timeout) {
+          clearTimeout(timeout);
+          pendingTimeoutsRef.current.delete(tempId);
+        }
+
+        setMessages((prev) => {
+          const tempIndex = prev.findIndex(
+            (msg) => msg.tempId === tempId || msg._id === tempId,
+          );
+          if (tempIndex !== -1) {
+            const newMessages = [...prev];
+            const realMessage: Message = {
+              ...(messageData || {}),
+              _id: messageId,
+              status: "sent",
+            };
+            newMessages[tempIndex] = realMessage;
+            processedMessageIds.current.add(messageId);
+            return newMessages;
+          }
+          return prev;
+        });
+      }
+    });
+
+    // Handle incoming messages from others (TEXT, AUDIO, etc.)
+    socketService.on("receive_message", (message: Message) => {
+      console.log("📨 Received message:", message._id, "Type:", message.type);
+
+      if (message.roomId === roomId && isMountedRef.current) {
+        if (!isValidMessage(message)) return;
         if (processedMessageIds.current.has(message._id)) return;
+
         processedMessageIds.current.add(message._id);
 
         setMessages((prev) => {
           const exists = prev.some((msg) => msg._id === message._id);
-          if (exists) {
-            return prev.map((msg) => (msg._id === message._id ? message : msg));
-          }
-          return [...prev, message];
+          if (exists) return prev;
+          console.log("📝 Adding new message to list:", message.type);
+          return [...prev, { ...message, status: "sent" }];
         });
+
         setTimeout(() => flatListRef.current?.scrollToEnd(), 100);
       }
     });
@@ -251,10 +320,10 @@ export default function ChatScreen() {
     socketService.on("user_offline", () => setIsOnline(false));
 
     return () => {
+      socketService.off("message_delivered", () => {});
       socketService.off("receive_message", () => {});
       socketService.off("user_online", () => {});
       socketService.off("user_offline", () => {});
-      processedMessageIds.current.clear();
     };
   }, [roomId]);
 
@@ -262,23 +331,51 @@ export default function ChatScreen() {
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/chat/messages/${roomId}?limit=50`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        },
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       const data = await response.json();
       if (data.success && isMountedRef.current) {
         const serverMessages = data.data.messages || [];
-
-        // CRITICAL: Filter out ALL invalid messages from server
         const cleanMessages = filterInvalidMessages(serverMessages);
 
-        // Update processed IDs set
-        cleanMessages.forEach((msg) => {
-          processedMessageIds.current.add(msg._id);
-        });
+        processedMessageIds.current.clear();
+        cleanMessages.forEach((msg) =>
+          processedMessageIds.current.add(msg._id),
+        );
 
-        setMessages(cleanMessages);
+        // Get pending messages that haven't been confirmed yet
+        const pendingMessagesList = Array.from(
+          pendingMessagesRef.current.values(),
+        );
+
+        const pendingMessages: Message[] = pendingMessagesList.map(
+          (pending) => ({
+            _id: pending.tempId,
+            tempId: pending.tempId,
+            sender: user?.id || "",
+            senderName: user?.name || "You",
+            message:
+              pending.type === "audio" ? "🎤 Voice message" : pending.message,
+            roomId: roomId,
+            createdAt: new Date(pending.timestamp).toISOString(),
+            status: "sending" as const,
+            type: pending.type as "text" | "audio" | "image" | "file",
+            mediaUrl: pending.mediaUrl,
+            duration: pending.duration,
+          }),
+        );
+
+        const finalMessages = [
+          ...cleanMessages.filter((msg) => !isTempId(msg._id)),
+          ...pendingMessages,
+        ];
+
+        finalMessages.sort(
+          (a, b) =>
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        );
+
+        setMessages(finalMessages);
       }
     } catch (error) {
       console.error("Error loading messages:", error);
@@ -289,7 +386,38 @@ export default function ChatScreen() {
       }
     }
   };
+  const handleReply = useCallback((message: Message) => {
+    if (isTempId(message._id) || message.status === "sending") return;
 
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const senderId =
+      typeof message.sender === "string"
+        ? message.sender
+        : message.sender?._id || "";
+
+    setReplyToMessage({
+      _id: message._id,
+      senderName: message.senderName,
+      message: message.message,
+      senderId: senderId,
+    });
+
+    setTimeout(() => inputRef.current?.focus(), 100);
+  }, []);
+
+  const cancelReply = useCallback(() => {
+    setReplyToMessage(null);
+    clearHighlight();
+  }, [clearHighlight]);
+
+  const handleScrollToMessage = useCallback(
+    (messageId: string) => {
+      scrollToMessage(messageId);
+    },
+    [scrollToMessage],
+  );
+
+  // Send message function with tempId tracking
   const sendMessage = (text: string) => {
     if (!text.trim()) return;
     if (!socketConnected) {
@@ -297,39 +425,73 @@ export default function ChatScreen() {
       return;
     }
 
+    const tempId = generateTempId();
+    const currentReplyTo = replyToMessage;
+
     const tempMessage: Message = {
-      _id: `temp_${Date.now()}`,
+      _id: tempId,
+      tempId: tempId,
       sender: user?.id || "",
       senderName: user?.name || "You",
       message: text,
       roomId: roomId,
       createdAt: new Date().toISOString(),
-      status: "sent",
+      status: "sending",
       type: "text",
-      replyTo: replyToMessage
+      replyTo: currentReplyTo
         ? {
-            messageId: replyToMessage._id,
-            message: replyToMessage.message.substring(0, 100),
-            senderName: replyToMessage.senderName,
+            messageId: currentReplyTo._id,
+            message: currentReplyTo.message.substring(0, 100),
+            senderName: currentReplyTo.senderName,
           }
         : undefined,
     };
 
-    tempMessagesRef.current.add(tempMessage._id);
+    // Track pending message
+    pendingMessagesRef.current.set(tempId, {
+      tempId,
+      message: text,
+      timestamp: Date.now(),
+      type: "text",
+    });
+
     setMessages((prev) => [...prev, tempMessage]);
     flatListRef.current?.scrollToEnd();
-    socketService.sendMessage(roomId, text);
-    setReplyToMessage(null);
 
-    // Remove temp message after 5 seconds (fallback cleanup)
-    setTimeout(() => {
-      if (tempMessagesRef.current.has(tempMessage._id)) {
+    setReplyToMessage(null);
+    setInputText("");
+
+    console.log("📤 Sending text message with tempId:", tempId);
+
+    // Send message via socket with tempId
+    socketService.emit("send_message", {
+      roomId,
+      message: text,
+      type: "text",
+      replyTo: currentReplyTo
+        ? {
+            messageId: currentReplyTo._id,
+            message: currentReplyTo.message.substring(0, 100),
+            senderName: currentReplyTo.senderName,
+          }
+        : undefined,
+      tempId,
+    });
+
+    // Timeout fallback
+    const timeout = setTimeout(() => {
+      console.log("⚠️ Timeout - removing pending message:", tempId);
+      if (pendingMessagesRef.current.has(tempId)) {
+        pendingMessagesRef.current.delete(tempId);
         setMessages((prev) =>
-          prev.filter((msg) => msg._id !== tempMessage._id),
+          prev.filter((msg) => msg.tempId !== tempId && msg._id !== tempId),
         );
-        tempMessagesRef.current.delete(tempMessage._id);
+        Alert.alert("Error", "Message failed to send. Please try again.");
       }
-    }, 5000);
+      pendingTimeoutsRef.current.delete(tempId);
+    }, 10000);
+
+    pendingTimeoutsRef.current.set(tempId, timeout);
   };
 
   // Audio recording functions
@@ -338,9 +500,7 @@ export default function ChatScreen() {
       if (recording) {
         try {
           await recording.stopAndUnloadAsync();
-        } catch (e) {
-          // Ignore
-        }
+        } catch (e) {}
         setRecording(null);
       }
 
@@ -362,10 +522,7 @@ export default function ChatScreen() {
       setIsRecording(true);
       setRecordingDuration(0);
 
-      if (recordingTimerRef.current) {
-        clearInterval(recordingTimerRef.current);
-      }
-
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = setInterval(() => {
         setRecordingDuration((prev) => prev + 1);
       }, 1000);
@@ -398,7 +555,6 @@ export default function ChatScreen() {
 
     try {
       await currentRecording.stopAndUnloadAsync();
-
       if (shouldSend && currentDuration > 0) {
         const uri = currentRecording.getURI();
         if (uri && currentDuration >= 1) {
@@ -409,14 +565,10 @@ export default function ChatScreen() {
             "Recording too short. Please record at least 1 second.",
           );
         }
-      } else {
-        console.log("Recording discarded by user");
       }
     } catch (error) {
       console.error("Error stopping recording:", error);
-      if (shouldSend) {
-        Alert.alert("Error", "Failed to save recording");
-      }
+      if (shouldSend) Alert.alert("Error", "Failed to save recording");
     } finally {
       isStoppingRef.current = false;
     }
@@ -427,10 +579,12 @@ export default function ChatScreen() {
   };
 
   const uploadAndSendAudio = async (uri: string, duration: number) => {
-    // Create a temporary loading message immediately
-    const tempMessageId = `temp_audio_${Date.now()}`;
+    const tempId = generateTempId();
+    const currentReplyTo = replyToMessage;
+
     const tempMessage: Message = {
-      _id: tempMessageId,
+      _id: tempId,
+      tempId: tempId,
       sender: user?.id || "",
       senderName: user?.name || "You",
       message: "🎤 Voice message",
@@ -440,76 +594,105 @@ export default function ChatScreen() {
       type: "audio",
       mediaUrl: undefined,
       duration: duration,
+      replyTo: currentReplyTo
+        ? {
+            messageId: currentReplyTo._id,
+            message: currentReplyTo.message.substring(0, 100),
+            senderName: currentReplyTo.senderName,
+          }
+        : undefined,
     };
 
-    tempMessagesRef.current.add(tempMessageId);
+    // Track pending audio message
+    pendingMessagesRef.current.set(tempId, {
+      tempId,
+      message: "🎤 Voice message",
+      timestamp: Date.now(),
+      type: "audio",
+      duration: duration,
+    });
+
     setMessages((prev) => [...prev, tempMessage]);
     flatListRef.current?.scrollToEnd();
-
     setUploading(true);
+    setReplyToMessage(null);
 
     try {
       const formData = new FormData();
       const filename = `voice_${Date.now()}.m4a`;
 
       formData.append("audio", {
-        uri: uri,
+        uri,
         name: filename,
         type: "audio/m4a",
       } as any);
       formData.append("roomId", roomId);
       formData.append("duration", duration.toString());
+      formData.append("tempId", tempId);
 
+      if (currentReplyTo) {
+        formData.append("replyToId", currentReplyTo._id);
+        formData.append(
+          "replyToMessage",
+          currentReplyTo.message.substring(0, 100),
+        );
+        formData.append("replyToSender", currentReplyTo.senderName);
+      }
+
+      console.log("📤 Uploading audio message...");
       const response = await fetch(`${API_BASE_URL}/api/chat/upload-audio`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
 
       const data = await response.json();
 
       if (data.success && isMountedRef.current) {
-        const finalMessage: Message = {
-          _id: data.data._id,
-          sender: user?.id || "",
-          senderName: user?.name || "You",
-          message: "🎤 Voice message",
+        console.log("✅ Audio uploaded successfully:", data.url);
+
+        // Update pending message with media URL
+        const pending = pendingMessagesRef.current.get(tempId);
+        if (pending) {
+          pending.mediaUrl = data.url;
+          pendingMessagesRef.current.set(tempId, pending);
+        }
+
+        // CRITICAL: Emit socket event for real-time audio delivery
+        socketService.emit("send_message", {
           roomId: roomId,
-          createdAt: new Date().toISOString(),
-          status: "sent",
+          message: "🎤 Voice message",
           type: "audio",
+          replyTo: currentReplyTo
+            ? {
+                messageId: currentReplyTo._id,
+                message: currentReplyTo.message.substring(0, 100),
+                senderName: currentReplyTo.senderName,
+              }
+            : undefined,
           mediaUrl: data.url,
           duration: duration,
-        };
+          tempId: tempId,
+        });
 
-        // Replace loading message with actual message
-        setMessages((prev) =>
-          prev.map((msg) => (msg._id === tempMessageId ? finalMessage : msg)),
-        );
-        tempMessagesRef.current.delete(tempMessageId);
-        processedMessageIds.current.add(finalMessage._id);
-
-        // Send via socket
-        socketService.sendMessage(roomId, "🎤 Voice message", "audio");
+        // Don't remove temp message here - wait for message_delivered event
+        // The message_delivered event will replace the temp message
+        console.log("📡 Audio socket event emitted with tempId:", tempId);
       } else if (isMountedRef.current) {
-        // Remove loading message and show error
-        setMessages((prev) => prev.filter((msg) => msg._id !== tempMessageId));
-        tempMessagesRef.current.delete(tempMessageId);
+        console.error("❌ Audio upload failed:", data.message);
+        pendingMessagesRef.current.delete(tempId);
+        setMessages((prev) => prev.filter((msg) => msg._id !== tempId));
         Alert.alert("Error", data.message || "Failed to send voice message");
       }
     } catch (error) {
       console.error("Upload error:", error);
       if (isMountedRef.current) {
-        setMessages((prev) => prev.filter((msg) => msg._id !== tempMessageId));
-        tempMessagesRef.current.delete(tempMessageId);
+        pendingMessagesRef.current.delete(tempId);
+        setMessages((prev) => prev.filter((msg) => msg._id !== tempId));
         Alert.alert("Error", "Failed to send voice message");
       }
     } finally {
-      if (isMountedRef.current) {
-        setUploading(false);
-      }
+      if (isMountedRef.current) setUploading(false);
     }
   };
 
@@ -519,13 +702,14 @@ export default function ChatScreen() {
         method: "PUT",
         headers: { Authorization: `Bearer ${token}` },
       });
-    } catch (error) {
-      // Silent fail
-    }
+    } catch (error) {}
   };
 
-  // Message actions
-  const handleReaction = async (messageId: string, reaction: string) => {
+  const handleReaction = async (
+    messageId: string,
+    reaction: string,
+    shouldRemove?: boolean,
+  ) => {
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/chat/message/${messageId}/react`,
@@ -535,7 +719,7 @@ export default function ChatScreen() {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ reaction }),
+          body: JSON.stringify({ reaction, remove: shouldRemove || false }),
         },
       );
 
@@ -548,12 +732,8 @@ export default function ChatScreen() {
         );
       }
     } catch (error) {
-      Alert.alert("Error", "Failed to add reaction");
+      Alert.alert("Error", "Failed to update reaction");
     }
-  };
-
-  const handleReply = (message: Message) => {
-    setReplyToMessage(message);
   };
 
   const handleDelete = async (messageId: string) => {
@@ -574,19 +754,12 @@ export default function ChatScreen() {
                   headers: { Authorization: `Bearer ${token}` },
                 },
               );
-
               const data = await response.json();
               if (data.success) {
-                // Update local messages
                 setMessages((prev) =>
                   prev.filter((msg) => msg._id !== messageId),
                 );
-
-                // Emit socket event for message deletion using the new emit method
-                socketService.emit("delete_message", {
-                  messageId,
-                  roomId,
-                });
+                socketService.emit("delete_message", { messageId, roomId });
               }
             } catch (error) {
               Alert.alert("Error", "Failed to delete message");
@@ -601,11 +774,6 @@ export default function ChatScreen() {
     Alert.alert("Forward", "Forward feature coming soon!");
   };
 
-  const cancelReply = () => {
-    setReplyToMessage(null);
-  };
-
-  // Media upload functions
   const pickImage = async () => {
     setShowAttachmentMenu(false);
     Alert.alert("Coming Soon", "Image sharing will be available soon!");
@@ -655,8 +823,10 @@ export default function ChatScreen() {
 
   const isOwnMessage = (message: Message): boolean => {
     if (!user?.id) return false;
+    if (message.tempId && pendingMessagesRef.current.has(message.tempId))
+      return true;
+    if (isTempId(message._id)) return true;
     const senderId = getSenderId(message);
-    if (message._id?.startsWith("temp_")) return true;
     return senderId.toString() === user.id.toString();
   };
 
@@ -670,21 +840,30 @@ export default function ChatScreen() {
       getSenderId(messages[index + 1]) !== getSenderId(item);
 
     return (
-      <ChatMessage
-        message={item}
-        isOwnMessage={ownMessage}
-        showAvatar={showAvatar}
-        showTime={showTime}
-        formatTime={formatTime}
-        getFullImageUrl={getFullImageUrl}
-        DEFAULT_AVATAR={DEFAULT_AVATAR}
-        onAudioPlayed={markAudioAsPlayed}
-        onReaction={handleReaction}
-        onReply={handleReply}
-        onDelete={handleDelete}
-        onForward={handleForward}
-        currentUserId={user?.id}
-      />
+      <View
+        onLayout={(event) => {
+          const layout = event.nativeEvent.layout;
+          registerMessagePosition(item._id, layout.y);
+        }}
+      >
+        <SwipeableChatMessage
+          message={item}
+          isOwnMessage={ownMessage}
+          showAvatar={showAvatar}
+          showTime={showTime}
+          formatTime={formatTime}
+          getFullImageUrl={getFullImageUrl}
+          DEFAULT_AVATAR={DEFAULT_AVATAR}
+          onAudioPlayed={markAudioAsPlayed}
+          onReaction={handleReaction}
+          onReply={handleReply}
+          onDelete={handleDelete}
+          onForward={handleForward}
+          currentUserId={user?.id}
+          highlightedMessageId={highlightedMessageId || undefined}
+          onScrollToMessage={handleScrollToMessage}
+        />
+      </View>
     );
   };
 
@@ -716,30 +895,10 @@ export default function ChatScreen() {
         getFullImageUrl={getFullImageUrl}
       />
 
-      {/* Reply Indicator */}
-      {replyToMessage && (
-        <View style={styles.replyIndicator}>
-          <View style={styles.replyContent}>
-            <View style={styles.replyBar} />
-            <View style={styles.replyTextContainer}>
-              <Text style={styles.replyLabel}>
-                Replying to {replyToMessage.senderName}
-              </Text>
-              <Text style={styles.replyMessage} numberOfLines={1}>
-                {replyToMessage.message}
-              </Text>
-            </View>
-            <TouchableOpacity onPress={cancelReply} style={styles.replyCancel}>
-              <Ionicons name="close" size={20} color="#8E8E93" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
       <KeyboardAvoidingView
         style={{ flex: 1, backgroundColor: "#f8f9fa" }}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? -18 : 0}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
       >
         <FlatList
           ref={flatListRef}
@@ -786,7 +945,13 @@ export default function ChatScreen() {
           }
         />
 
+        <ReplyIndicator
+          replyToMessage={replyToMessage}
+          onCancelReply={cancelReply}
+        />
+
         <ChatInput
+          ref={inputRef}
           onSendMessage={sendMessage}
           onStartRecording={startRecording}
           onStopRecording={stopRecording}
@@ -808,42 +973,3 @@ export default function ChatScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  replyIndicator: {
-    backgroundColor: "#fff",
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: "#e5e5ea",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  replyContent: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  replyBar: {
-    width: 4,
-    height: 40,
-    backgroundColor: "#007AFF",
-    borderRadius: 2,
-    marginRight: 12,
-  },
-  replyTextContainer: {
-    flex: 1,
-  },
-  replyLabel: {
-    fontSize: 12,
-    color: "#007AFF",
-    fontFamily: "SofiaSans-Regular",
-    marginBottom: 2,
-  },
-  replyMessage: {
-    fontSize: 14,
-    color: "#8E8E93",
-    fontFamily: "SofiaSans-Regular",
-  },
-  replyCancel: {
-    padding: 8,
-  },
-});

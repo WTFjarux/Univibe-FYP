@@ -28,15 +28,19 @@ const uploadDirectories = {
   profilePictures: "uploads/profile-pictures",
   coverPhotos: "uploads/cover-photos",
   eventImages: "uploads/events",
-  chatAudio: "uploads/chat/audio", // New: Audio messages directory
+  chatAudio: "uploads/chat/audio",
 };
 
 // Create all required directories
 Object.values(uploadDirectories).forEach((dir) => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
+    console.log(`✅ Created directory: ${dir}`);
   }
 });
+
+console.log("📁 Upload directories ready:");
+console.log(`   Audio files will be saved to: ${uploadDirectories.chatAudio}`);
 
 // ============================================
 // HELPER FUNCTIONS
@@ -44,9 +48,6 @@ Object.values(uploadDirectories).forEach((dir) => {
 
 /**
  * Format file size for logging
- * @param {number} bytes - File size in bytes
- * @param {number} decimals - Decimal places
- * @returns {string} Formatted file size
  */
 const formatBytes = (bytes, decimals = 2) => {
   if (bytes === 0) return "0 Bytes";
@@ -59,8 +60,6 @@ const formatBytes = (bytes, decimals = 2) => {
 
 /**
  * Delete old image file
- * @param {string} filePath - Path to file to delete
- * @returns {Promise<boolean>} Success status
  */
 const deleteOldImage = async (filePath) => {
   if (!filePath) return false;
@@ -72,6 +71,7 @@ const deleteOldImage = async (filePath) => {
     }
     if (fs.existsSync(cleanPath)) {
       await fs.promises.unlink(cleanPath);
+      console.log(`🗑️ Deleted old image: ${cleanPath}`);
       return true;
     }
   } catch (error) {
@@ -82,8 +82,6 @@ const deleteOldImage = async (filePath) => {
 
 /**
  * Delete audio file
- * @param {string} filePath - Path to audio file
- * @returns {Promise<boolean>} Success status
  */
 const deleteAudioFile = async (filePath) => {
   if (!filePath) return false;
@@ -95,6 +93,7 @@ const deleteAudioFile = async (filePath) => {
     }
     if (fs.existsSync(cleanPath)) {
       await fs.promises.unlink(cleanPath);
+      console.log(`🗑️ Deleted audio file: ${cleanPath}`);
       return true;
     }
   } catch (error) {
@@ -113,7 +112,7 @@ const getDestination = (fieldname) => {
     coverPhoto: uploadDirectories.coverPhotos,
     images: uploadDirectories.eventImages,
     eventImage: uploadDirectories.eventImages,
-    audio: uploadDirectories.chatAudio, // New: Audio destination
+    audio: uploadDirectories.chatAudio,
   };
   return destinations[fieldname] || uploadDirectories.eventImages;
 };
@@ -128,7 +127,6 @@ const storage = multer.diskStorage({
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
     let ext = path.extname(file.originalname).toLowerCase();
 
-    // Handle iPhone HEIC/HEIF photos
     if (ext === ".heic" || ext === ".heif") {
       ext = ".jpg";
     }
@@ -149,7 +147,7 @@ const storage = multer.diskStorage({
 // ============================================
 
 /**
- * Image file filter - Allows images and iPhone HEIC/HEIF
+ * Image file filter
  */
 const imageFileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
@@ -168,19 +166,21 @@ const imageFileFilter = (req, file, cb) => {
  */
 const audioFileFilter = (req, file, cb) => {
   const allowedAudioTypes = [
-    "audio/mpeg", // mp3
-    "audio/mp3", // mp3
-    "audio/m4a", // m4a (iPhone voice memos)
-    "audio/aac", // aac
-    "audio/wav", // wav
-    "audio/x-m4a", // m4a alternative
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/m4a",
+    "audio/aac",
+    "audio/wav",
+    "audio/x-m4a",
+    "audio/x-wav",
+    "application/octet-stream",
   ];
 
-  const isAudio = allowedAudioTypes.includes(file.mimetype);
   const ext = path.extname(file.originalname).toLowerCase();
-  const isAudioExt = [".mp3", ".m4a", ".aac", ".wav"].includes(ext);
+  const isAudioExt = [".mp3", ".m4a", ".aac", ".wav", ".m4r"].includes(ext);
+  const isAudio = allowedAudioTypes.includes(file.mimetype) || isAudioExt;
 
-  if (isAudio || isAudioExt) {
+  if (isAudio) {
     cb(null, true);
   } else {
     cb(new Error("Only audio files are allowed (mp3, m4a, aac, wav)"), false);
@@ -191,18 +191,16 @@ const audioFileFilter = (req, file, cb) => {
 // MULTER INSTANCES
 // ============================================
 
-// Image upload (75MB limit)
 const imageUpload = multer({
   storage,
   fileFilter: imageFileFilter,
   limits: { fileSize: 75 * 1024 * 1024, files: 10 },
 });
 
-// Audio upload (25MB limit for voice messages)
 const audioUpload = multer({
   storage,
   fileFilter: audioFileFilter,
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB limit
+  limits: { fileSize: 25 * 1024 * 1024 },
 });
 
 // ============================================
@@ -230,9 +228,6 @@ const handleUploadError = (err, req, res, next) => {
 // IMAGE PROCESSING
 // ============================================
 
-/**
- * Process and optimize images with Sharp
- */
 const processEventImages = async (files) => {
   if (!files?.length) return files;
   const processedFiles = [];
@@ -325,7 +320,7 @@ const uploadWithErrorHandling = (req, res, next) => {
 };
 
 // ============================================
-// NEW: AUDIO UPLOAD MIDDLEWARE
+// AUDIO UPLOAD MIDDLEWARE (UPDATED)
 // ============================================
 
 /**
@@ -333,9 +328,28 @@ const uploadWithErrorHandling = (req, res, next) => {
  * Returns the file info for further processing
  */
 const uploadAudioMessage = (req, res, next) => {
+  console.log("🔊 [uploadAudioMessage] Processing audio upload...");
+
   audioUpload.single("audio")(req, res, (err) => {
-    if (err) return handleUploadError(err, req, res, next);
+    if (err) {
+      console.error("❌ Multer error:", err);
+      return handleUploadError(err, req, res, next);
+    }
+
     if (req.file) {
+      // Verify file was actually saved
+      const filePath = req.file.path;
+      if (fs.existsSync(filePath)) {
+        const stats = fs.statSync(filePath);
+        console.log("✅ Audio file saved successfully:");
+        console.log(`   📁 Path: ${filePath}`);
+        console.log(`   📝 Filename: ${req.file.filename}`);
+        console.log(`   📏 Size: ${formatBytes(stats.size)}`);
+        console.log(`   🎵 Type: ${req.file.mimetype}`);
+      } else {
+        console.error("❌ File not found at path after save:", filePath);
+      }
+
       // Add audio metadata for response
       req.audioInfo = {
         filename: req.file.filename,
@@ -343,7 +357,11 @@ const uploadAudioMessage = (req, res, next) => {
         size: req.file.size,
         mimetype: req.file.mimetype,
       };
+      console.log("📦 audioInfo set:", req.audioInfo);
+    } else {
+      console.error("❌ No file in request after multer processing");
     }
+
     next();
   });
 };

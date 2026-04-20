@@ -90,8 +90,11 @@ const messageSchema = new mongoose.Schema(
 
     // Reply threading
     replyTo: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Message",
+      type: {
+        messageId: { type: mongoose.Schema.Types.ObjectId, ref: "Message" },
+        message: String,
+        senderName: String,
+      },
       default: null,
     },
 

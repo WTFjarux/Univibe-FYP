@@ -14,7 +14,8 @@
  * - WebRTC signaling for future calls
  */
 
-import io, { Socket } from 'socket.io-client';
+import io from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { API_BASE_URL } from '../../constants/ipConstants';
@@ -71,12 +72,12 @@ type EventCallback = (data: any) => void;
 const getSocketUrl = (): string => {
   // Remove any trailing slashes and '/api' from the base URL
   let baseUrl = API_BASE_URL.replace(/\/api$/, '').replace(/\/$/, '');
-  
+
   // Platform-specific adjustments if needed
   if (Platform.OS === 'android' && baseUrl.includes('localhost')) {
     baseUrl = baseUrl.replace('localhost', '10.0.2.2');
   }
-  
+
   console.log('🔌 Socket URL:', baseUrl);
   return baseUrl;
 };
@@ -107,7 +108,7 @@ class SocketService {
   async connect(): Promise<Socket | null> {
     try {
       const token = await SecureStore.getItemAsync('authToken');
-      
+
       if (!token) {
         // Schedule retry if token not available yet
         if (this.connectionRetryTimeout) {
@@ -128,9 +129,9 @@ class SocketService {
         this.socket.disconnect();
         this.socket = null;
       }
-      
+
       console.log('🔌 Connecting to Socket.IO at:', SOCKET_URL);
-      
+
       this.socket = io(SOCKET_URL, {
         auth: { token },
         transports: ['websocket'],
@@ -161,15 +162,15 @@ class SocketService {
       this.isConnected = true;
       this.reconnectAttempts = 0;
       this.emitEvent('socket_connected', {});
-      
+
       // Join any rooms that were queued while disconnected
       if (this.pendingRooms.length > 0) {
         console.log(`📦 Joining ${this.pendingRooms.length} pending rooms`);
         this.pendingRooms.forEach(room => {
-          this.socket?.emit('join_room', { 
-            roomId: room.roomId, 
-            type: room.type, 
-            otherUserId: room.otherUserId 
+          this.socket?.emit('join_room', {
+            roomId: room.roomId,
+            type: room.type,
+            otherUserId: room.otherUserId
           });
         });
         this.pendingRooms = [];
@@ -180,7 +181,7 @@ class SocketService {
       console.log('❌ Socket disconnected. Reason:', reason);
       this.isConnected = false;
       this.emitEvent('socket_disconnected', { reason });
-      
+
       // Auto-reconnect for unexpected disconnections
       if (reason === 'io server disconnect' || reason === 'transport close') {
         console.log('🔄 Attempting to reconnect...');
@@ -285,7 +286,7 @@ class SocketService {
     });
   }
 
-  
+
 
   // ============================================
   // EVENT MANAGEMENT
@@ -367,22 +368,38 @@ class SocketService {
     }
   }
 
-  /**
-   * Send a message to a room
-   * @param roomId - Room identifier
-   * @param message - Message content
-   * @param type - Message type ('text', 'image', etc.)
-   */
-  sendMessage(roomId: string, message: string, type: string = 'text'): void {
-    if (this.socket && this.isConnected) {
-      console.log(`📤 Sending ${type} message to room ${roomId}`);
-      this.socket.emit('send_message', { roomId, message, type });
+/**
+ * Send a message to a room with acknowledgment callback
+ * @param roomId - Room identifier
+ * @param message - Message content
+ * @param type - Message type ('text', 'image', etc.)
+ * @param replyTo - Optional reply information
+ * @param callback - Optional callback for acknowledgment
+ */
+sendMessage(
+  roomId: string,
+  message: string,
+  type: string = "text",
+  replyTo?: { messageId: string; message: string; senderName: string },
+  callback?: (response: any) => void
+): void {
+  if (this.socket && this.isConnected) {
+    console.log(`📤 Sending ${type} message to room ${roomId}`);
+    // Use emit with acknowledgment if callback is provided
+    if (callback) {
+      this.socket.emit("send_message", { roomId, message, type, replyTo }, callback);
     } else {
-      console.error('❌ Cannot send message - socket not connected');
-      this.emitEvent('socket_error', { message: 'Socket not connected' });
-      this.connect();
+      this.socket.emit("send_message", { roomId, message, type, replyTo });
     }
+  } else {
+    console.error("❌ Cannot send message - socket not connected");
+    this.emitEvent("socket_error", { message: "Socket not connected" });
+    if (callback) {
+      callback({ success: false, error: "Socket not connected" });
+    }
+    this.connect();
   }
+}
 
   /**
    * Send typing indicator to a room
@@ -512,11 +529,11 @@ class SocketService {
   // CONNECTION MANAGEMENT
   // ============================================
 
-   /**
-   * Emit a custom event to the server
-   * @param event - Event name
-   * @param data - Event data
-   */
+  /**
+  * Emit a custom event to the server
+  * @param event - Event name
+  * @param data - Event data
+  */
   emit(event: string, data: any): void {
     if (this.socket && this.isConnected) {
       console.log(`📡 Emitting event: ${event}`);
@@ -535,7 +552,7 @@ class SocketService {
       clearTimeout(this.connectionRetryTimeout);
       this.connectionRetryTimeout = null;
     }
-    
+
     if (this.socket) {
       console.log('🔌 Disconnecting socket...');
       this.socket.disconnect();

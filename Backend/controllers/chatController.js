@@ -351,10 +351,42 @@ const getUnplayedAudio = async (req, res) => {
 const addReaction = async (req, res) => {
   try {
     const { messageId } = req.params;
-    const { reaction } = req.body;
+    const { reaction, remove } = req.body; // ← Add remove flag
     const userId = req.user.id;
 
-    // Validate reaction
+    // If remove flag is true, call removeReaction logic
+    if (remove) {
+      const message = await Message.findById(messageId);
+      if (!message) {
+        return res.status(404).json({
+          success: false,
+          message: "Message not found",
+        });
+      }
+
+      if (!message.reactions) {
+        message.reactions = [];
+      }
+
+      // Remove user's reaction
+      message.reactions = message.reactions.filter(
+        (r) => r.userId.toString() !== userId,
+      );
+
+      await message.save();
+
+      const populatedMessage = await Message.findById(messageId)
+        .populate("reactions.userId", "name username")
+        .lean();
+
+      return res.status(200).json({
+        success: true,
+        reactions: populatedMessage.reactions || [],
+        message: "Reaction removed successfully",
+      });
+    }
+
+    // Otherwise, add/update reaction (existing logic)
     const validReactions = ["👍", "❤️", "😂", "😮", "😢", "😡"];
     if (!validReactions.includes(reaction)) {
       return res.status(400).json({
@@ -371,22 +403,18 @@ const addReaction = async (req, res) => {
       });
     }
 
-    // Initialize reactions array if it doesn't exist
     if (!message.reactions) {
       message.reactions = [];
     }
 
-    // Check if user already reacted
     const existingReactionIndex = message.reactions.findIndex(
       (r) => r.userId.toString() === userId,
     );
 
     if (existingReactionIndex !== -1) {
-      // Update existing reaction
       message.reactions[existingReactionIndex].reaction = reaction;
       message.reactions[existingReactionIndex].createdAt = new Date();
     } else {
-      // Add new reaction
       message.reactions.push({
         userId,
         reaction,
@@ -396,7 +424,6 @@ const addReaction = async (req, res) => {
 
     await message.save();
 
-    // Populate user info for reactions
     const populatedMessage = await Message.findById(messageId)
       .populate("reactions.userId", "name username")
       .lean();
