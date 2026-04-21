@@ -10,6 +10,41 @@ const Profile = require("../models/Profile");
 const ChatRoom = require("../models/ChatRoom");
 
 /**
+ * Helper function to generate direct room ID
+ */
+const getDirectRoomId = (userId1, userId2) => {
+  const ids = [userId1.toString(), userId2.toString()].sort();
+  return `direct_${ids[0]}_${ids[1]}`;
+};
+
+/**
+ * Helper function to detect reply type from message content
+ */
+const detectReplyType = (replyTo) => {
+  if (!replyTo) return "text";
+
+  // Check if it's an audio message
+  if (
+    replyTo.message === "🎤 Voice message" ||
+    replyTo.message?.includes("Voice message") ||
+    replyTo.mediaUrl?.includes("audio")
+  ) {
+    return "audio";
+  }
+
+  // Check if it's an image message
+  if (
+    replyTo.message === "📷 Photo" ||
+    replyTo.message?.includes("Photo") ||
+    replyTo.mediaUrl?.includes("image")
+  ) {
+    return "image";
+  }
+
+  return "text";
+};
+
+/**
  * Get or create a direct message room
  */
 const getOrCreateDirectRoom = async (req, res) => {
@@ -50,15 +85,7 @@ const getOrCreateDirectRoom = async (req, res) => {
 };
 
 /**
- * Helper function to generate direct room ID
- */
-const getDirectRoomId = (userId1, userId2) => {
-  const ids = [userId1.toString(), userId2.toString()].sort();
-  return `direct_${ids[0]}_${ids[1]}`;
-};
-
-/**
- * Get message history for a room - UPDATED with full replyTo support
+ * Get message history for a room - UPDATED with full replyTo support including senderId
  */
 const getMessageHistory = async (req, res) => {
   try {
@@ -77,7 +104,7 @@ const getMessageHistory = async (req, res) => {
       .populate("sender", "name email")
       .lean();
 
-    // Format messages with reactions and audio duration, ensuring replyTo has all fields
+    // Format messages with reactions and audio duration, ensuring replyTo has all fields including senderId
     const formattedMessages = messages.map((msg) => ({
       ...msg,
       formattedDuration: msg.duration
@@ -90,6 +117,7 @@ const getMessageHistory = async (req, res) => {
             messageId: msg.replyTo.messageId,
             message: msg.replyTo.message,
             senderName: msg.replyTo.senderName,
+            senderId: msg.replyTo.senderId || null, // ✅ Include senderId, fallback to null for old messages
             type: msg.replyTo.type || detectReplyType(msg.replyTo),
             mediaUrl: msg.replyTo.mediaUrl || "",
             duration: msg.replyTo.duration || 0,
@@ -115,33 +143,6 @@ const getMessageHistory = async (req, res) => {
     console.error("Error getting message history:", error);
     res.status(500).json({ success: false, message: "Server error" });
   }
-};
-
-/**
- * Helper function to detect reply type from message content
- */
-const detectReplyType = (replyTo) => {
-  if (!replyTo) return "text";
-
-  // Check if it's an audio message
-  if (
-    replyTo.message === "🎤 Voice message" ||
-    replyTo.message?.includes("Voice message") ||
-    replyTo.mediaUrl?.includes("audio")
-  ) {
-    return "audio";
-  }
-
-  // Check if it's an image message
-  if (
-    replyTo.message === "📷 Photo" ||
-    replyTo.message?.includes("Photo") ||
-    replyTo.mediaUrl?.includes("image")
-  ) {
-    return "image";
-  }
-
-  return "text";
 };
 
 /**

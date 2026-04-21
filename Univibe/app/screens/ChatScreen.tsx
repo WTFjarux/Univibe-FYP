@@ -648,11 +648,60 @@ export default function ChatScreen() {
   };
 
   // ========== REACTIONS & DELETE ==========
+  // In ChatScreen.tsx, update the handleReaction function:
+
   const handleReaction = async (
     messageId: string,
     reaction: string,
     shouldRemove?: boolean,
   ) => {
+    // Optimistically update UI immediately
+    setMessages((prev) =>
+      prev.map((msg) => {
+        if (msg._id !== messageId) return msg;
+
+        const currentReactions = msg.reactions || [];
+
+        if (shouldRemove) {
+          // Remove the reaction
+          return {
+            ...msg,
+            reactions: currentReactions.filter((r) => r.userId !== user?.id),
+          };
+        } else {
+          // Add or update the reaction
+          const existingIndex = currentReactions.findIndex(
+            (r) => r.userId === user?.id,
+          );
+
+          if (existingIndex !== -1) {
+            // Update existing reaction
+            const updatedReactions = [...currentReactions];
+            updatedReactions[existingIndex] = {
+              ...updatedReactions[existingIndex],
+              reaction,
+              createdAt: new Date().toISOString(),
+            };
+            return { ...msg, reactions: updatedReactions };
+          } else {
+            // Add new reaction
+            return {
+              ...msg,
+              reactions: [
+                ...currentReactions,
+                {
+                  userId: user?.id || "",
+                  reaction,
+                  createdAt: new Date().toISOString(),
+                },
+              ],
+            };
+          }
+        }
+      }),
+    );
+
+    // Then send to server
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/chat/message/${messageId}/react`,
@@ -668,14 +717,20 @@ export default function ChatScreen() {
 
       const data = await response.json();
       if (data.success) {
+        // Update with server data to ensure consistency
         setMessages((prev) =>
           prev.map((msg) =>
             msg._id === messageId ? { ...msg, reactions: data.reactions } : msg,
           ),
         );
+      } else {
+        // Revert on failure - reload messages
+        loadMessages(true);
       }
     } catch (error) {
+      // Revert on error
       Alert.alert("Error", "Failed to update reaction");
+      loadMessages(true);
     }
   };
 

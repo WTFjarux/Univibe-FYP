@@ -88,15 +88,16 @@ const messageSchema = new mongoose.Schema(
       name: { type: String, default: "" },
     },
 
-    // Reply threading - FIXED: removed default: null from nested object
+    // Reply threading - ADDED senderId field
     replyTo: {
       messageId: { type: mongoose.Schema.Types.ObjectId, ref: "Message" },
       message: { type: String },
       senderName: { type: String },
-      type: { 
-        type: String, 
+      senderId: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // ✅ ADD THIS FIELD
+      type: {
+        type: String,
         enum: ["text", "image", "audio", "video", "file"],
-        default: "text" 
+        default: "text",
       },
       mediaUrl: { type: String, default: "" },
       duration: { type: Number, default: 0 },
@@ -154,6 +155,7 @@ messageSchema.index({ "readBy.userId": 1 });
 messageSchema.index({ type: 1 });
 messageSchema.index({ createdAt: -1 });
 messageSchema.index({ "replyTo.messageId": 1 });
+messageSchema.index({ "replyTo.senderId": 1 }); // ✅ Add index for senderId
 
 // Virtual for getting audio duration in minutes:seconds format
 messageSchema.virtual("formattedDuration").get(function () {
@@ -213,15 +215,19 @@ messageSchema.pre("save", function (next) {
   next();
 });
 
-// Pre-save middleware to ensure replyTo has default type
+// Pre-save middleware to ensure replyTo has default type and preserve senderId
 messageSchema.pre("save", function (next) {
   if (this.replyTo && this.replyTo.message && !this.replyTo.type) {
     // Detect type from message content or mediaUrl
-    if (this.replyTo.message === "🎤 Voice message" || 
-        (this.replyTo.mediaUrl && this.replyTo.mediaUrl.includes("audio"))) {
+    if (
+      this.replyTo.message === "🎤 Voice message" ||
+      (this.replyTo.mediaUrl && this.replyTo.mediaUrl.includes("audio"))
+    ) {
       this.replyTo.type = "audio";
-    } else if (this.replyTo.message === "📷 Photo" || 
-               (this.replyTo.mediaUrl && this.replyTo.mediaUrl.includes("image"))) {
+    } else if (
+      this.replyTo.message === "📷 Photo" ||
+      (this.replyTo.mediaUrl && this.replyTo.mediaUrl.includes("image"))
+    ) {
       this.replyTo.type = "image";
     } else {
       this.replyTo.type = "text";
@@ -247,12 +253,16 @@ messageSchema.statics.getUnplayedAudio = async function (userId, roomId) {
 };
 
 // Static method to get messages with full reply data
-messageSchema.statics.getMessagesWithReplies = async function (roomId, limit = 50, before = null) {
+messageSchema.statics.getMessagesWithReplies = async function (
+  roomId,
+  limit = 50,
+  before = null,
+) {
   let query = { roomId, isDeleted: false };
   if (before) {
     query.createdAt = { $lt: new Date(before) };
   }
-  
+
   return this.find(query)
     .sort({ createdAt: -1 })
     .limit(parseInt(limit))

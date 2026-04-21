@@ -127,22 +127,8 @@ export default function ChatBubble({
 
   const handleDelete = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Alert.alert(
-      "Delete Message",
-      "Are you sure you want to delete this message?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            if (onDelete) onDelete(message._id);
-            setShowOptions(false);
-          },
-        },
-      ],
-    );
+    setShowOptions(false);
+    if (onDelete) onDelete(message._id);
   };
 
   const handleForward = async () => {
@@ -161,8 +147,11 @@ export default function ChatBubble({
     } else {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    setSelectedReaction(reaction);
-    setTimeout(() => setSelectedReaction(null), 200);
+
+    // Optimistically update the UI immediately
+    setSelectedReaction(shouldRemove ? null : reaction);
+
+    // Call the parent handler
     if (onReaction) onReaction(message._id, reaction, shouldRemove);
     setShowOptions(false);
   };

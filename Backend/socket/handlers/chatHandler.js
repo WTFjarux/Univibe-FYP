@@ -172,7 +172,7 @@ const setupChatHandlers = (io, socket) => {
           );
         }
 
-        // Add replyTo data if present
+        // Add replyTo data if present - FIXED: Now properly saves senderId
         if (replyTo && replyTo.messageId) {
           try {
             const mongoose = require("mongoose");
@@ -183,17 +183,37 @@ const setupChatHandlers = (io, socket) => {
               const originalMessage = await Message.findById(replyTo.messageId);
 
               if (originalMessage && !originalMessage.isDeleted) {
+                // Use the provided replyTo data first (from frontend), fallback to database lookup
                 messageData.replyTo = {
                   messageId: replyTo.messageId,
-                  message: (
-                    originalMessage.message || "Media message"
-                  ).substring(0, 100),
-                  senderName: originalMessage.senderName || "Unknown",
+                  message:
+                    replyTo.message ||
+                    (originalMessage.message || "Media message").substring(
+                      0,
+                      100,
+                    ),
+                  senderName:
+                    replyTo.senderName ||
+                    originalMessage.senderName ||
+                    "Unknown",
+                  senderId:
+                    replyTo.senderId || originalMessage.sender.toString(), // ✅ CRITICAL: Save senderId
+                  type: replyTo.type || originalMessage.type || "text",
+                  mediaUrl:
+                    replyTo.mediaUrl || originalMessage.mediaUrl || null,
+                  duration:
+                    replyTo.duration || originalMessage.duration || null,
                 };
                 console.log(
-                  `✅ Attached replyTo context for sender: ${messageData.replyTo.senderName}`,
+                  `✅ Attached replyTo context - Sender: ${messageData.replyTo.senderName}, ID: ${messageData.replyTo.senderId}`,
+                );
+              } else {
+                console.log(
+                  `⚠️ Original message ${replyTo.messageId} not found or deleted`,
                 );
               }
+            } else {
+              console.log(`⚠️ Invalid message ID format: ${replyTo.messageId}`);
             }
           } catch (err) {
             console.error("⚠️ Error processing replyTo context:", err);
@@ -233,11 +253,13 @@ const setupChatHandlers = (io, socket) => {
         const responseMessage = {
           ...populatedMessage,
           _id: savedMessage._id,
+          id: savedMessage._id,
           createdAt: savedMessage.createdAt,
           messageId: savedMessage._id,
           duration: savedMessage.duration,
           mediaUrl: savedMessage.mediaUrl,
           type: savedMessage.type,
+          replyTo: savedMessage.replyTo, // ✅ Ensure replyTo is included in response
         };
 
         // Send delivery confirmation to sender with tempId mapping
@@ -247,6 +269,7 @@ const setupChatHandlers = (io, socket) => {
           message: responseMessage,
           _id: savedMessage._id,
           createdAt: savedMessage.createdAt,
+          replyTo: savedMessage.replyTo, // ✅ Include replyTo in delivery confirmation
         };
 
         if (tempId) {

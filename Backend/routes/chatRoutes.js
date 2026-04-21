@@ -38,7 +38,7 @@ router.get("/user-profile/:otherUserId", getOtherUserProfile);
 router.get("/messages/:roomId", getMessageHistory);
 router.delete("/message/:messageId", deleteMessage);
 
-// Audio specific endpoints - FULLY UPDATED with reply support
+// Audio specific endpoints - FULLY UPDATED with reply support including senderId
 router.post("/upload-audio", uploadAudioMessage, async (req, res) => {
   try {
     console.log("=== AUDIO UPLOAD ===");
@@ -59,6 +59,7 @@ router.post("/upload-audio", uploadAudioMessage, async (req, res) => {
       replyToId,
       replyToMessage,
       replyToSender,
+      replyToSenderId, // ✅ ADD THIS - Get senderId from frontend
       replyToType,
       replyToMediaUrl,
       replyToDuration,
@@ -98,6 +99,8 @@ router.post("/upload-audio", uploadAudioMessage, async (req, res) => {
       replyToId,
       replyToType,
       replyToDuration,
+      replyToSender,
+      replyToSenderId, // ✅ Log senderId
     });
 
     const messageData = {
@@ -115,17 +118,19 @@ router.post("/upload-audio", uploadAudioMessage, async (req, res) => {
       status: "sent",
     };
 
-    // Add replyTo data if present - NOW WITH FULL FIELDS
+    // Add replyTo data if present - NOW WITH SENDERID INCLUDED
     if (replyToId) {
       messageData.replyTo = {
         messageId: replyToId,
         message: replyToMessage || "Media message",
         senderName: replyToSender || "Unknown",
+        senderId: replyToSenderId || null, // ✅ ADD THIS - Save the senderId
         type: replyToType || "text",
         mediaUrl: replyToMediaUrl || "",
         duration: replyToDuration ? parseInt(replyToDuration) : 0,
       };
       console.log("✅ Added replyTo with type:", messageData.replyTo.type);
+      console.log("✅ replyTo senderId:", messageData.replyTo.senderId);
     }
 
     const message = new Message(messageData);
@@ -134,6 +139,7 @@ router.post("/upload-audio", uploadAudioMessage, async (req, res) => {
     console.log("✅ Message saved with ID:", savedMessage._id);
     console.log("✅ Saved mediaUrl:", savedMessage.mediaUrl);
     console.log("✅ Saved replyTo:", savedMessage.replyTo);
+    console.log("✅ Saved replyTo.senderId:", savedMessage.replyTo?.senderId);
 
     // Update chat room last message
     await ChatRoom.findOneAndUpdate(

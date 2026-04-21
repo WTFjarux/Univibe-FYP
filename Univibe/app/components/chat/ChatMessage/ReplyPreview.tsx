@@ -1,4 +1,4 @@
-// app/components/chat/ChatMessage/ReplyPreview.tsx (NO RIGHT-ALIGNMENT)
+// app/components/chat/ChatMessage/ReplyPreview.tsx
 
 import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
@@ -76,27 +76,29 @@ export default function ReplyPreview({
   const getReplyPreviewText = (): string => {
     const repliedSenderName = replyTo.senderName;
 
-    // Check if the person who wrote the original message is the current user
-    const isReplyingToSelf =
-      replyTo.senderId && replyTo.senderId === currentUserId;
+    // Check if original message is from current user
+    const isOriginalFromCurrentUser =
+      (replyTo.senderId &&
+        currentUserId &&
+        String(replyTo.senderId) === String(currentUserId)) ||
+      repliedSenderName === "You";
 
-    // Case 1: User is replying to their own message
-    if (isReplyingToSelf) {
-      if (isOwnMessage) {
-        // Current user sees their own reply to themselves
-        return "You replied to yourself";
-      } else {
-        // Other user sees that someone replied to themselves
-        return `${repliedSenderName} replied to themselves`;
-      }
+    // Case 1: Current user replying to their own message
+    if (isOwnMessage && isOriginalFromCurrentUser) {
+      return "You replied to yourself";
     }
 
-    // Case 2: Current user replied to someone else's message
-    if (isOwnMessage) {
+    // Case 2: Current user replying to other person's message
+    if (isOwnMessage && !isOriginalFromCurrentUser) {
       return `You replied to ${repliedSenderName}`;
     }
 
-    // Case 3: Someone else replied to current user's message
+    // Case 3: Other person replying to their own message
+    if (!isOwnMessage && !isOriginalFromCurrentUser) {
+      return `${repliedSenderName} replied to themselves`;
+    }
+
+    // Case 4: Other person replying to current user's message
     return `${repliedSenderName} replied to you`;
   };
 
