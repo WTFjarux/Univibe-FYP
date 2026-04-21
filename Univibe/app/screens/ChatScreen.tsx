@@ -1,6 +1,12 @@
-// app/screens/ChatScreen.tsx (FULLY UPDATED - REAL-TIME AUDIO FIXED)
+// app/screens/ChatScreen.tsx
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import {
   View,
   FlatList,
@@ -25,13 +31,26 @@ import * as Haptics from "expo-haptics";
 import ChatHeader from "../components/chat/ChatMessage/ChatHeader";
 import ChatInput from "../components/chat/ChatMessage/ChatInput";
 import ChatAttachmentMenu from "../components/chat/ChatMessage/ChatAttachmentMenu";
-import SwipeableChatMessage from "../components/chat/ChatMessage/SwipeableChatMessage";
 import ReplyIndicator from "../components/chat/ChatMessage/ReplyIndicator";
+import MessageItem from "../components/chat/ChatMessage/MessageItem";
 import { useMessageScroll } from "../../hooks/useMessageScroll";
 import { generateTempId, isTempId } from "../../lib/utils/messageIdGenerator";
 
-
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+
+// ============================================
+// TYPES
+// ============================================
+
+interface ReplyTo {
+  messageId: string;
+  message: string;
+  senderName: string;
+  senderId?: string;
+  type?: string;
+  mediaUrl?: string;
+  duration?: number;
+}
 
 interface Message {
   _id: string;
@@ -48,11 +67,7 @@ interface Message {
   mediaName?: string;
   duration?: number;
   reactions?: Array<{ userId: string; reaction: string; createdAt: string }>;
-  replyTo?: {
-    messageId: string;
-    message: string;
-    senderName: string;
-  };
+  replyTo?: ReplyTo;
   tempId?: string;
 }
 
@@ -63,18 +78,80 @@ interface PendingMessage {
   type?: string;
   mediaUrl?: string;
   duration?: number;
+  replyTo?: ReplyTo;
 }
+
+interface ReplyToState {
+  _id: string;
+  senderName: string;
+  message: string;
+  senderId?: string;
+  type?: string;
+  mediaUrl?: string;
+  duration?: number;
+}
+
+// ============================================
+// CONSTANTS
+// ============================================
+
+const ATTACHMENT_OPTIONS = [
+  {
+    id: "photo",
+    title: "Photo",
+    icon: "images-outline",
+    color: "#007AFF",
+    bgColor: "#E3F2FD",
+    action: "pickImage",
+  },
+  {
+    id: "camera",
+    title: "Camera",
+    icon: "camera-outline",
+    color: "#34C759",
+    bgColor: "#E8F5E9",
+    action: "takePhoto",
+  },
+  {
+    id: "document",
+    title: "Document",
+    icon: "document-outline",
+    color: "#FF9500",
+    bgColor: "#FFF3E0",
+    action: "pickDocument",
+  },
+  {
+    id: "location",
+    title: "Location",
+    icon: "location-outline",
+    color: "#FF3B30",
+    bgColor: "#FFEBEE",
+    action: "shareLocation",
+  },
+];
+
+const MESSAGE_FETCH_LIMIT = 50;
+const SEND_TIMEOUT_MS = 10000;
+const MIN_RECORDING_SECONDS = 1;
+const AUTO_SCROLL_TIMEOUT = 3000;
+const SCROLL_TO_MESSAGE_TIMEOUT = 5000;
+
+// ============================================
+// MAIN COMPONENT
+// ============================================
 
 export default function ChatScreen() {
   const params = useLocalSearchParams();
-  const router = useRouter();
   const { token, user } = useAuth();
+  const isMountedRef = useRef(true);
 
+  // ========== ROUTE PARAMS ==========
   const roomId = params.roomId as string;
   const otherUserName = params.otherUserName as string;
   let otherUserId = params.otherUserId as string;
   const otherUserAvatar = params.otherUserAvatar as string;
 
+  // ========== DERIVED VALUES ==========
   const extractOtherUserIdFromRoomId = (
     roomId: string,
     currentUserId: string,
@@ -82,9 +159,7 @@ export default function ChatScreen() {
     if (!roomId || !currentUserId) return "";
     const parts = roomId.split("_");
     if (parts.length >= 3) {
-      const userId1 = parts[1];
-      const userId2 = parts[2];
-      return userId1 === currentUserId ? userId2 : userId1;
+      return parts[1] === currentUserId ? parts[2] : parts[1];
     }
     return "";
   };
@@ -93,7 +168,7 @@ export default function ChatScreen() {
     otherUserId = extractOtherUserIdFromRoomId(roomId, user.id);
   }
 
-  // State declarations
+  // ========== STATE ==========
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState("");
   const [loading, setLoading] = useState(true);
@@ -102,73 +177,46 @@ export default function ChatScreen() {
   const [isOnline, setIsOnline] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [replyToMessage, setReplyToMessage] = useState<{
-    _id: string;
-    senderName: string;
-    message: string;
-    senderId?: string;
-  } | null>(null);
+  const [replyToMessage, setReplyToMessage] = useState<ReplyToState | null>(
+    null,
+  );
 
-  // Audio recording states
+  // Audio recording state
   const [isRecording, setIsRecording] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isStoppingRef = useRef(false);
-  const isMountedRef = useRef(true);
 
-  // Track pending messages with temp IDs
+  // Pending messages tracking
   const pendingMessagesRef = useRef<Map<string, PendingMessage>>(new Map());
   const pendingTimeoutsRef = useRef<Map<string, number>>(new Map());
   const processedMessageIds = useRef<Set<string>>(new Set());
 
+  // Scroll management refs
   const flatListRef = useRef<FlatList>(null);
   const slideAnim = useRef(new Animated.Value(-SCREEN_WIDTH)).current;
   const inputRef = useRef<any>(null);
+  const isInitialLoadRef = useRef(true);
+  const autoScrollEnabledRef = useRef(true);
+  const isManualScrollRef = useRef(false);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const manualScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const DEFAULT_AVATAR = require("../../assets/images/default-avatar.png");
 
+  // Message scroll hook
   const {
     highlightedMessageId,
-    registerMessagePosition,
+    registerMessageRef,
     scrollToMessage,
     clearHighlight,
+    onScroll: onScrollHook,
+    onLayout,
   } = useMessageScroll(flatListRef as React.RefObject<FlatList>);
 
-  const attachmentOptions = [
-    {
-      id: "photo",
-      title: "Photo",
-      icon: "images-outline",
-      color: "#007AFF",
-      bgColor: "#E3F2FD",
-      action: "pickImage",
-    },
-    {
-      id: "camera",
-      title: "Camera",
-      icon: "camera-outline",
-      color: "#34C759",
-      bgColor: "#E8F5E9",
-      action: "takePhoto",
-    },
-    {
-      id: "document",
-      title: "Document",
-      icon: "document-outline",
-      color: "#FF9500",
-      bgColor: "#FFF3E0",
-      action: "pickDocument",
-    },
-    {
-      id: "location",
-      title: "Location",
-      icon: "location-outline",
-      color: "#FF3B30",
-      bgColor: "#FFEBEE",
-      action: "shareLocation",
-    },
-  ];
-
+  // ========== HELPER FUNCTIONS ==========
   const getFullImageUrl = (url: string): string => {
     if (!url) return "";
     if (url.startsWith("http")) return url;
@@ -186,8 +234,7 @@ export default function ChatScreen() {
     if (isTempId(msg._id)) return false;
     if (msg.status === "sending") return false;
     if (msg.type === "audio" && !msg.mediaUrl) return false;
-    if (!msg._id) return false;
-    return true;
+    return !!msg._id;
   }, []);
 
   const filterInvalidMessages = useCallback(
@@ -197,209 +244,90 @@ export default function ChatScreen() {
     [isValidMessage],
   );
 
-  // Cleanup on unmount
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-      if (recording) {
-        recording.stopAndUnloadAsync().catch(console.error);
-      }
-      if (recordingTimerRef.current) {
-        clearInterval(recordingTimerRef.current);
-      }
-      pendingTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
-      pendingTimeoutsRef.current.clear();
-      pendingMessagesRef.current.clear();
-    };
+  const detectReplyType = useCallback((replyTo: ReplyToState): string => {
+    if (replyTo.type) return replyTo.type;
+    if (
+      replyTo.message === "🎤 Voice message" ||
+      replyTo.mediaUrl?.includes("audio")
+    )
+      return "audio";
+    if (replyTo.message === "📷 Photo" || replyTo.mediaUrl?.includes("image"))
+      return "image";
+    return "text";
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      loadMessages(true);
-      return () => {
-        pendingTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
-        pendingTimeoutsRef.current.clear();
-        setReplyToMessage(null);
-        clearHighlight();
-      };
-    }, []),
+  const getSenderId = (message: Message): string =>
+    typeof message.sender === "string"
+      ? message.sender
+      : message.sender?._id || "";
+
+  const isOwnMessage = (message: Message): boolean => {
+    if (!user?.id) return false;
+    if (message.tempId && pendingMessagesRef.current.has(message.tempId))
+      return true;
+    if (isTempId(message._id)) return true;
+    return getSenderId(message).toString() === user.id.toString();
+  };
+
+  // ========== SCROLL HANDLERS ==========
+  const handleScroll = useCallback(
+    (event: any) => {
+      onScrollHook(event);
+
+      // Reset manual scroll flag when user manually scrolls
+      if (isManualScrollRef.current) {
+        isManualScrollRef.current = false;
+        if (manualScrollTimeoutRef.current) {
+          clearTimeout(manualScrollTimeoutRef.current);
+        }
+      }
+
+      // Store scroll values for later use
+      const { contentOffset, contentSize, layoutMeasurement } =
+        event.nativeEvent;
+      const isNearBottom =
+        contentOffset.y + layoutMeasurement.height >= contentSize.height - 100;
+
+      // Disable auto-scroll when user starts scrolling
+      if (autoScrollEnabledRef.current) {
+        autoScrollEnabledRef.current = false;
+
+        // Clear previous timeout
+        if (scrollTimeoutRef.current) {
+          clearTimeout(scrollTimeoutRef.current);
+        }
+
+        // Re-enable auto-scroll after user stops scrolling
+        scrollTimeoutRef.current = setTimeout(() => {
+          if (isNearBottom) {
+            autoScrollEnabledRef.current = true;
+          } else {
+            // If not near bottom, keep auto-scroll disabled and check again later
+            scrollTimeoutRef.current = setTimeout(() => {
+              autoScrollEnabledRef.current = true;
+            }, 5000);
+          }
+        }, AUTO_SCROLL_TIMEOUT);
+      }
+    },
+    [onScrollHook],
   );
 
-  useEffect(() => {
-    const checkConnection = () =>
-      setSocketConnected(socketService.getConnectionStatus());
-    checkConnection();
-    const interval = setInterval(checkConnection, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Setup chat room and socket listeners
-  useEffect(() => {
-    if (!roomId) return;
-    socketService.joinRoom(roomId, otherUserId);
-    loadMessages(true);
-
-    // Handle message delivered event with tempId mapping
-    socketService.on("message_delivered", (data: any) => {
-      console.log("✅ Message delivered event:", data);
-
-      const { tempId, messageId, message: messageData, success } = data;
-
-      if (success === false) {
-        console.log("❌ Message delivery failed:", data.error);
-        if (tempId && pendingMessagesRef.current.has(tempId)) {
-          pendingMessagesRef.current.delete(tempId);
-          const timeout = pendingTimeoutsRef.current.get(tempId);
-          if (timeout) {
-            clearTimeout(timeout);
-            pendingTimeoutsRef.current.delete(tempId);
-          }
-          setMessages((prev) =>
-            prev.filter((msg) => msg.tempId !== tempId && msg._id !== tempId),
-          );
-          Alert.alert("Error", data.error || "Failed to send message");
-        }
-        return;
-      }
-
-      if (tempId && pendingMessagesRef.current.has(tempId)) {
-        console.log(
-          `🔄 Replacing temp message ${tempId} with real message ${messageId}`,
-        );
-
-        pendingMessagesRef.current.delete(tempId);
-        const timeout = pendingTimeoutsRef.current.get(tempId);
-        if (timeout) {
-          clearTimeout(timeout);
-          pendingTimeoutsRef.current.delete(tempId);
-        }
-
-        setMessages((prev) => {
-          const tempIndex = prev.findIndex(
-            (msg) => msg.tempId === tempId || msg._id === tempId,
-          );
-          if (tempIndex !== -1) {
-            const newMessages = [...prev];
-            const realMessage: Message = {
-              ...(messageData || {}),
-              _id: messageId,
-              status: "sent",
-            };
-            newMessages[tempIndex] = realMessage;
-            processedMessageIds.current.add(messageId);
-            return newMessages;
-          }
-          return prev;
-        });
-      }
-    });
-
-    // Handle incoming messages from others (TEXT, AUDIO, etc.)
-    socketService.on("receive_message", (message: Message) => {
-      console.log("📨 Received message:", message._id, "Type:", message.type);
-
-      if (message.roomId === roomId && isMountedRef.current) {
-        if (!isValidMessage(message)) return;
-        if (processedMessageIds.current.has(message._id)) return;
-
-        processedMessageIds.current.add(message._id);
-
-        setMessages((prev) => {
-          const exists = prev.some((msg) => msg._id === message._id);
-          if (exists) return prev;
-          console.log("📝 Adding new message to list:", message.type);
-          return [...prev, { ...message, status: "sent" }];
-        });
-
-        setTimeout(() => flatListRef.current?.scrollToEnd(), 100);
-      }
-    });
-
-    socketService.on("user_online", () => setIsOnline(true));
-    socketService.on("user_offline", () => setIsOnline(false));
-
-    return () => {
-      socketService.off("message_delivered", () => {});
-      socketService.off("receive_message", () => {});
-      socketService.off("user_online", () => {});
-      socketService.off("user_offline", () => {});
-    };
-  }, [roomId]);
-
-  const loadMessages = async (forceRefresh: boolean = false) => {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/chat/messages/${roomId}?limit=50`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-      const data = await response.json();
-      if (data.success && isMountedRef.current) {
-        const serverMessages = data.data.messages || [];
-        const cleanMessages = filterInvalidMessages(serverMessages);
-
-        processedMessageIds.current.clear();
-        cleanMessages.forEach((msg) =>
-          processedMessageIds.current.add(msg._id),
-        );
-
-        // Get pending messages that haven't been confirmed yet
-        const pendingMessagesList = Array.from(
-          pendingMessagesRef.current.values(),
-        );
-
-        const pendingMessages: Message[] = pendingMessagesList.map(
-          (pending) => ({
-            _id: pending.tempId,
-            tempId: pending.tempId,
-            sender: user?.id || "",
-            senderName: user?.name || "You",
-            message:
-              pending.type === "audio" ? "🎤 Voice message" : pending.message,
-            roomId: roomId,
-            createdAt: new Date(pending.timestamp).toISOString(),
-            status: "sending" as const,
-            type: pending.type as "text" | "audio" | "image" | "file",
-            mediaUrl: pending.mediaUrl,
-            duration: pending.duration,
-          }),
-        );
-
-        const finalMessages = [
-          ...cleanMessages.filter((msg) => !isTempId(msg._id)),
-          ...pendingMessages,
-        ];
-
-        finalMessages.sort(
-          (a, b) =>
-            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-        );
-
-        setMessages(finalMessages);
-      }
-    } catch (error) {
-      console.error("Error loading messages:", error);
-    } finally {
-      if (isMountedRef.current) {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    }
-  };
+  // ========== MESSAGE ACTIONS ==========
   const handleReply = useCallback((message: Message) => {
     if (isTempId(message._id) || message.status === "sending") return;
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const senderId =
-      typeof message.sender === "string"
-        ? message.sender
-        : message.sender?._id || "";
+    const senderId = getSenderId(message);
 
     setReplyToMessage({
       _id: message._id,
       senderName: message.senderName,
       message: message.message,
       senderId: senderId,
+      type: message.type,
+      mediaUrl: message.mediaUrl,
+      duration: message.duration,
     });
 
     setTimeout(() => inputRef.current?.focus(), 100);
@@ -412,95 +340,116 @@ export default function ChatScreen() {
 
   const handleScrollToMessage = useCallback(
     (messageId: string) => {
+      // Mark manual scroll and disable auto-scroll
+      isManualScrollRef.current = true;
+      autoScrollEnabledRef.current = false;
+
+      // Clear any pending timeouts
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+      if (manualScrollTimeoutRef.current) {
+        clearTimeout(manualScrollTimeoutRef.current);
+      }
+
+      // Scroll to the message
       scrollToMessage(messageId);
+
+      // Reset manual scroll flag after animation completes
+      setTimeout(() => {
+        isManualScrollRef.current = false;
+      }, 1000);
+
+      // Re-enable auto-scroll after delay
+      manualScrollTimeoutRef.current = setTimeout(() => {
+        autoScrollEnabledRef.current = true;
+      }, SCROLL_TO_MESSAGE_TIMEOUT);
     },
     [scrollToMessage],
   );
 
-  // Send message function with tempId tracking
-  const sendMessage = (text: string) => {
-    if (!text.trim()) return;
-    if (!socketConnected) {
-      Alert.alert("Error", "Not connected to chat server");
-      return;
-    }
-
-    const tempId = generateTempId();
-    const currentReplyTo = replyToMessage;
-
-    const tempMessage: Message = {
-      _id: tempId,
-      tempId: tempId,
-      sender: user?.id || "",
-      senderName: user?.name || "You",
-      message: text,
-      roomId: roomId,
-      createdAt: new Date().toISOString(),
-      status: "sending",
-      type: "text",
-      replyTo: currentReplyTo
-        ? {
-            messageId: currentReplyTo._id,
-            message: currentReplyTo.message.substring(0, 100),
-            senderName: currentReplyTo.senderName,
-          }
-        : undefined,
-    };
-
-    // Track pending message
-    pendingMessagesRef.current.set(tempId, {
-      tempId,
-      message: text,
-      timestamp: Date.now(),
-      type: "text",
-    });
-
-    setMessages((prev) => [...prev, tempMessage]);
-    flatListRef.current?.scrollToEnd();
-
-    setReplyToMessage(null);
-    setInputText("");
-
-    console.log("📤 Sending text message with tempId:", tempId);
-
-    // Send message via socket with tempId
-    socketService.emit("send_message", {
-      roomId,
-      message: text,
-      type: "text",
-      replyTo: currentReplyTo
-        ? {
-            messageId: currentReplyTo._id,
-            message: currentReplyTo.message.substring(0, 100),
-            senderName: currentReplyTo.senderName,
-          }
-        : undefined,
-      tempId,
-    });
-
-    // Timeout fallback
-    const timeout = setTimeout(() => {
-      console.log("⚠️ Timeout - removing pending message:", tempId);
-      if (pendingMessagesRef.current.has(tempId)) {
-        pendingMessagesRef.current.delete(tempId);
-        setMessages((prev) =>
-          prev.filter((msg) => msg.tempId !== tempId && msg._id !== tempId),
-        );
-        Alert.alert("Error", "Message failed to send. Please try again.");
+  // ========== SEND MESSAGE ==========
+  const sendMessage = useCallback(
+    (text: string) => {
+      if (!text.trim()) return;
+      if (!socketConnected) {
+        Alert.alert("Error", "Not connected to chat server");
+        return;
       }
-      pendingTimeoutsRef.current.delete(tempId);
-    }, 10000);
 
-    pendingTimeoutsRef.current.set(tempId, timeout);
-  };
+      const tempId = generateTempId();
+      const currentReplyTo = replyToMessage;
 
-  // Audio recording functions
+      // Enable auto-scroll when sending a new message
+      autoScrollEnabledRef.current = true;
+
+      const replyToData = currentReplyTo
+        ? {
+            messageId: currentReplyTo._id,
+            message: currentReplyTo.message.substring(0, 100),
+            senderName: currentReplyTo.senderName,
+            senderId: currentReplyTo.senderId,
+            type: currentReplyTo.type || detectReplyType(currentReplyTo),
+            mediaUrl: currentReplyTo.mediaUrl,
+            duration: currentReplyTo.duration,
+          }
+        : undefined;
+
+      const tempMessage: Message = {
+        _id: tempId,
+        tempId,
+        sender: user?.id || "",
+        senderName: user?.name || "You",
+        message: text,
+        roomId,
+        createdAt: new Date().toISOString(),
+        status: "sending",
+        type: "text",
+        replyTo: replyToData,
+      };
+
+      pendingMessagesRef.current.set(tempId, {
+        tempId,
+        message: text,
+        timestamp: Date.now(),
+        type: "text",
+        replyTo: replyToData,
+      });
+
+      setMessages((prev) => [...prev, tempMessage]);
+      flatListRef.current?.scrollToEnd();
+      setReplyToMessage(null);
+      setInputText("");
+
+      socketService.emit("send_message", {
+        roomId,
+        message: text,
+        type: "text",
+        replyTo: replyToData,
+        tempId,
+      });
+
+      const timeout = setTimeout(() => {
+        if (pendingMessagesRef.current.has(tempId)) {
+          pendingMessagesRef.current.delete(tempId);
+          setMessages((prev) =>
+            prev.filter((msg) => msg.tempId !== tempId && msg._id !== tempId),
+          );
+          Alert.alert("Error", "Message failed to send. Please try again.");
+        }
+        pendingTimeoutsRef.current.delete(tempId);
+      }, SEND_TIMEOUT_MS);
+
+      pendingTimeoutsRef.current.set(tempId, timeout);
+    },
+    [socketConnected, replyToMessage, user, roomId, detectReplyType],
+  );
+
+  // ========== AUDIO RECORDING ==========
   const startRecording = async () => {
     try {
       if (recording) {
-        try {
-          await recording.stopAndUnloadAsync();
-        } catch (e) {}
+        await recording.stopAndUnloadAsync().catch(() => {});
         setRecording(null);
       }
 
@@ -527,7 +476,6 @@ export default function ChatScreen() {
         setRecordingDuration((prev) => prev + 1);
       }, 1000);
     } catch (err) {
-      console.error("Failed to start recording", err);
       Alert.alert("Error", "Failed to start recording");
       setIsRecording(false);
       setRecording(null);
@@ -555,19 +503,18 @@ export default function ChatScreen() {
 
     try {
       await currentRecording.stopAndUnloadAsync();
-      if (shouldSend && currentDuration > 0) {
+      if (shouldSend && currentDuration >= MIN_RECORDING_SECONDS) {
         const uri = currentRecording.getURI();
-        if (uri && currentDuration >= 1) {
+        if (uri) {
           await uploadAndSendAudio(uri, currentDuration);
-        } else if (currentDuration < 1) {
-          Alert.alert(
-            "Info",
-            "Recording too short. Please record at least 1 second.",
-          );
         }
+      } else if (currentDuration < MIN_RECORDING_SECONDS && shouldSend) {
+        Alert.alert(
+          "Info",
+          "Recording too short. Please record at least 1 second.",
+        );
       }
     } catch (error) {
-      console.error("Error stopping recording:", error);
       if (shouldSend) Alert.alert("Error", "Failed to save recording");
     } finally {
       isStoppingRef.current = false;
@@ -582,34 +529,43 @@ export default function ChatScreen() {
     const tempId = generateTempId();
     const currentReplyTo = replyToMessage;
 
+    // Enable auto-scroll when sending a new audio message
+    autoScrollEnabledRef.current = true;
+
+    const replyToData = currentReplyTo
+      ? {
+          messageId: currentReplyTo._id,
+          message: currentReplyTo.message.substring(0, 100),
+          senderName: currentReplyTo.senderName,
+          senderId: currentReplyTo.senderId,
+          type: currentReplyTo.type || detectReplyType(currentReplyTo),
+          mediaUrl: currentReplyTo.mediaUrl,
+          duration: currentReplyTo.duration,
+        }
+      : undefined;
+
     const tempMessage: Message = {
       _id: tempId,
-      tempId: tempId,
+      tempId,
       sender: user?.id || "",
       senderName: user?.name || "You",
       message: "🎤 Voice message",
-      roomId: roomId,
+      roomId,
       createdAt: new Date().toISOString(),
       status: "sending",
       type: "audio",
       mediaUrl: undefined,
-      duration: duration,
-      replyTo: currentReplyTo
-        ? {
-            messageId: currentReplyTo._id,
-            message: currentReplyTo.message.substring(0, 100),
-            senderName: currentReplyTo.senderName,
-          }
-        : undefined,
+      duration,
+      replyTo: replyToData,
     };
 
-    // Track pending audio message
     pendingMessagesRef.current.set(tempId, {
       tempId,
       message: "🎤 Voice message",
       timestamp: Date.now(),
       type: "audio",
-      duration: duration,
+      duration,
+      replyTo: replyToData,
     });
 
     setMessages((prev) => [...prev, tempMessage]);
@@ -637,9 +593,20 @@ export default function ChatScreen() {
           currentReplyTo.message.substring(0, 100),
         );
         formData.append("replyToSender", currentReplyTo.senderName);
+        formData.append("replyToSenderId", currentReplyTo.senderId || "");
+        formData.append(
+          "replyToType",
+          currentReplyTo.type || detectReplyType(currentReplyTo),
+        );
+        if (currentReplyTo.mediaUrl)
+          formData.append("replyToMediaUrl", currentReplyTo.mediaUrl);
+        if (currentReplyTo.duration)
+          formData.append(
+            "replyToDuration",
+            currentReplyTo.duration.toString(),
+          );
       }
 
-      console.log("📤 Uploading audio message...");
       const response = await fetch(`${API_BASE_URL}/api/chat/upload-audio`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -649,43 +616,27 @@ export default function ChatScreen() {
       const data = await response.json();
 
       if (data.success && isMountedRef.current) {
-        console.log("✅ Audio uploaded successfully:", data.url);
-
-        // Update pending message with media URL
         const pending = pendingMessagesRef.current.get(tempId);
         if (pending) {
           pending.mediaUrl = data.url;
           pendingMessagesRef.current.set(tempId, pending);
         }
 
-        // CRITICAL: Emit socket event for real-time audio delivery
         socketService.emit("send_message", {
-          roomId: roomId,
+          roomId,
           message: "🎤 Voice message",
           type: "audio",
-          replyTo: currentReplyTo
-            ? {
-                messageId: currentReplyTo._id,
-                message: currentReplyTo.message.substring(0, 100),
-                senderName: currentReplyTo.senderName,
-              }
-            : undefined,
+          replyTo: replyToData,
           mediaUrl: data.url,
-          duration: duration,
-          tempId: tempId,
+          duration,
+          tempId,
         });
-
-        // Don't remove temp message here - wait for message_delivered event
-        // The message_delivered event will replace the temp message
-        console.log("📡 Audio socket event emitted with tempId:", tempId);
       } else if (isMountedRef.current) {
-        console.error("❌ Audio upload failed:", data.message);
         pendingMessagesRef.current.delete(tempId);
         setMessages((prev) => prev.filter((msg) => msg._id !== tempId));
         Alert.alert("Error", data.message || "Failed to send voice message");
       }
     } catch (error) {
-      console.error("Upload error:", error);
       if (isMountedRef.current) {
         pendingMessagesRef.current.delete(tempId);
         setMessages((prev) => prev.filter((msg) => msg._id !== tempId));
@@ -696,15 +647,7 @@ export default function ChatScreen() {
     }
   };
 
-  const markAudioAsPlayed = async (messageId: string) => {
-    try {
-      await fetch(`${API_BASE_URL}/api/chat/audio/${messageId}/played`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-    } catch (error) {}
-  };
-
+  // ========== REACTIONS & DELETE ==========
   const handleReaction = async (
     messageId: string,
     reaction: string,
@@ -770,10 +713,16 @@ export default function ChatScreen() {
     );
   };
 
-  const handleForward = (message: Message) => {
-    Alert.alert("Forward", "Forward feature coming soon!");
+  const markAudioAsPlayed = async (messageId: string) => {
+    try {
+      await fetch(`${API_BASE_URL}/api/chat/audio/${messageId}/played`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch (error) {}
   };
 
+  // ========== ATTACHMENT HANDLERS ==========
   const pickImage = async () => {
     setShowAttachmentMenu(false);
     Alert.alert("Coming Soon", "Image sharing will be available soon!");
@@ -811,25 +760,192 @@ export default function ChatScreen() {
     }
   };
 
+  const handleForward = (message: Message) => {
+    Alert.alert("Forward", "Forward feature coming soon!");
+  };
+
+  // ========== LOAD MESSAGES ==========
+  const loadMessages = async (forceRefresh: boolean = false) => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/chat/messages/${roomId}?limit=${MESSAGE_FETCH_LIMIT}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+      const data = await response.json();
+      if (data.success && isMountedRef.current) {
+        const serverMessages = data.data.messages || [];
+        const cleanMessages = filterInvalidMessages(serverMessages);
+
+        processedMessageIds.current.clear();
+        cleanMessages.forEach((msg) =>
+          processedMessageIds.current.add(msg._id),
+        );
+
+        const pendingMessagesList = Array.from(
+          pendingMessagesRef.current.values(),
+        );
+        const pendingMessages: Message[] = pendingMessagesList.map(
+          (pending) => ({
+            _id: pending.tempId,
+            tempId: pending.tempId,
+            sender: user?.id || "",
+            senderName: user?.name || "You",
+            message:
+              pending.type === "audio" ? "🎤 Voice message" : pending.message,
+            roomId,
+            createdAt: new Date(pending.timestamp).toISOString(),
+            status: "sending" as const,
+            type: pending.type as "text" | "audio" | "image" | "file",
+            mediaUrl: pending.mediaUrl,
+            duration: pending.duration,
+            replyTo: pending.replyTo,
+          }),
+        );
+
+        const finalMessages = [
+          ...cleanMessages.filter((msg) => !isTempId(msg._id)),
+          ...pendingMessages,
+        ];
+
+        finalMessages.sort(
+          (a, b) =>
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        );
+        setMessages(finalMessages);
+      }
+    } catch (error) {
+      console.error("Error loading messages:", error);
+    } finally {
+      if (isMountedRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    }
+  };
+
   const onRefresh = () => {
     setRefreshing(true);
     loadMessages(true);
   };
 
-  const getSenderId = (message: Message): string =>
-    typeof message.sender === "string"
-      ? message.sender
-      : message.sender?._id || "";
+  // ========== SOCKET SETUP ==========
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (recording) recording.stopAndUnloadAsync().catch(() => {});
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      pendingTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
+      pendingTimeoutsRef.current.clear();
+      pendingMessagesRef.current.clear();
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+      if (manualScrollTimeoutRef.current)
+        clearTimeout(manualScrollTimeoutRef.current);
+    };
+  }, []);
 
-  const isOwnMessage = (message: Message): boolean => {
-    if (!user?.id) return false;
-    if (message.tempId && pendingMessagesRef.current.has(message.tempId))
-      return true;
-    if (isTempId(message._id)) return true;
-    const senderId = getSenderId(message);
-    return senderId.toString() === user.id.toString();
-  };
+  useFocusEffect(
+    useCallback(() => {
+      loadMessages(true);
+      return () => {
+        pendingTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
+        pendingTimeoutsRef.current.clear();
+        setReplyToMessage(null);
+        clearHighlight();
+      };
+    }, []),
+  );
 
+  useEffect(() => {
+    const checkConnection = () =>
+      setSocketConnected(socketService.getConnectionStatus());
+    checkConnection();
+    const interval = setInterval(checkConnection, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (!roomId) return;
+    socketService.joinRoom(roomId, otherUserId);
+    loadMessages(true);
+
+    socketService.on("message_delivered", (data: any) => {
+      const { tempId, messageId, message: messageData, success } = data;
+
+      if (success === false) {
+        if (tempId && pendingMessagesRef.current.has(tempId)) {
+          pendingMessagesRef.current.delete(tempId);
+          const timeout = pendingTimeoutsRef.current.get(tempId);
+          if (timeout) clearTimeout(timeout);
+          pendingTimeoutsRef.current.delete(tempId);
+          setMessages((prev) =>
+            prev.filter((msg) => msg.tempId !== tempId && msg._id !== tempId),
+          );
+          Alert.alert("Error", data.error || "Failed to send message");
+        }
+        return;
+      }
+
+      if (tempId && pendingMessagesRef.current.has(tempId)) {
+        pendingMessagesRef.current.delete(tempId);
+        const timeout = pendingTimeoutsRef.current.get(tempId);
+        if (timeout) clearTimeout(timeout);
+        pendingTimeoutsRef.current.delete(tempId);
+
+        setMessages((prev) => {
+          const tempIndex = prev.findIndex(
+            (msg) => msg.tempId === tempId || msg._id === tempId,
+          );
+          if (tempIndex !== -1) {
+            const newMessages = [...prev];
+            newMessages[tempIndex] = {
+              ...(messageData || {}),
+              _id: messageId,
+              status: "sent",
+            };
+            processedMessageIds.current.add(messageId);
+            return newMessages;
+          }
+          return prev;
+        });
+      }
+    });
+
+    socketService.on("receive_message", (message: Message) => {
+      if (message.roomId === roomId && isMountedRef.current) {
+        if (!isValidMessage(message)) return;
+        if (processedMessageIds.current.has(message._id)) return;
+
+        processedMessageIds.current.add(message._id);
+        setMessages((prev) => {
+          if (prev.some((msg) => msg._id === message._id)) return prev;
+          return [...prev, { ...message, status: "sent" }];
+        });
+
+        // Only auto-scroll if enabled and not in manual scroll mode
+        if (autoScrollEnabledRef.current && !isManualScrollRef.current) {
+          setTimeout(
+            () => flatListRef.current?.scrollToEnd({ animated: true }),
+            100,
+          );
+        }
+      }
+    });
+
+    socketService.on("user_online", () => setIsOnline(true));
+    socketService.on("user_offline", () => setIsOnline(false));
+
+    return () => {
+      socketService.off("message_delivered", () => {});
+      socketService.off("receive_message", () => {});
+      socketService.off("user_online", () => {});
+      socketService.off("user_offline", () => {});
+    };
+  }, [roomId]);
+
+  // ========== RENDER ==========
   const renderMessage = ({ item, index }: { item: Message; index: number }) => {
     const ownMessage = isOwnMessage(item);
     const showAvatar =
@@ -840,30 +956,25 @@ export default function ChatScreen() {
       getSenderId(messages[index + 1]) !== getSenderId(item);
 
     return (
-      <View
-        onLayout={(event) => {
-          const layout = event.nativeEvent.layout;
-          registerMessagePosition(item._id, layout.y);
-        }}
-      >
-        <SwipeableChatMessage
-          message={item}
-          isOwnMessage={ownMessage}
-          showAvatar={showAvatar}
-          showTime={showTime}
-          formatTime={formatTime}
-          getFullImageUrl={getFullImageUrl}
-          DEFAULT_AVATAR={DEFAULT_AVATAR}
-          onAudioPlayed={markAudioAsPlayed}
-          onReaction={handleReaction}
-          onReply={handleReply}
-          onDelete={handleDelete}
-          onForward={handleForward}
-          currentUserId={user?.id}
-          highlightedMessageId={highlightedMessageId || undefined}
-          onScrollToMessage={handleScrollToMessage}
-        />
-      </View>
+      <MessageItem
+        item={item}
+        index={index}
+        isOwnMessage={ownMessage}
+        showAvatar={showAvatar}
+        showTime={showTime}
+        formatTime={formatTime}
+        getFullImageUrl={getFullImageUrl}
+        DEFAULT_AVATAR={DEFAULT_AVATAR}
+        onAudioPlayed={markAudioAsPlayed}
+        onReaction={handleReaction}
+        onReply={handleReply}
+        onDelete={handleDelete}
+        onForward={handleForward}
+        currentUserId={user?.id}
+        highlightedMessageId={highlightedMessageId || undefined}
+        onScrollToMessage={handleScrollToMessage}
+        registerMessageRef={registerMessageRef}
+      />
     );
   };
 
@@ -898,15 +1009,37 @@ export default function ChatScreen() {
       <KeyboardAvoidingView
         style={{ flex: 1, backgroundColor: "#f8f9fa" }}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+        keyboardVerticalOffset={0}
       >
         <FlatList
           ref={flatListRef}
           data={messages}
           keyExtractor={(item) => item._id}
           renderItem={renderMessage}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
-          onLayout={() => flatListRef.current?.scrollToEnd()}
+          onContentSizeChange={() => {
+            // Only auto-scroll to bottom when enabled and not in manual mode
+            if (
+              messages.length > 0 &&
+              autoScrollEnabledRef.current &&
+              !isManualScrollRef.current &&
+              !isInitialLoadRef.current
+            ) {
+              flatListRef.current?.scrollToEnd({ animated: true });
+            }
+          }}
+          onLayout={(event) => {
+            onLayout(event);
+            // Initial scroll to bottom on first load
+            if (isInitialLoadRef.current && messages.length > 0) {
+              setTimeout(() => {
+                flatListRef.current?.scrollToEnd({ animated: false });
+                isInitialLoadRef.current = false;
+                autoScrollEnabledRef.current = true;
+              }, 100);
+            }
+          }}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
@@ -966,7 +1099,7 @@ export default function ChatScreen() {
       <ChatAttachmentMenu
         visible={showAttachmentMenu}
         slideAnim={slideAnim}
-        attachmentOptions={attachmentOptions}
+        attachmentOptions={ATTACHMENT_OPTIONS}
         onSelectAction={handleAttachmentAction}
         onClose={() => setShowAttachmentMenu(false)}
       />

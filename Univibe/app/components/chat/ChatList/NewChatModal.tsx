@@ -1,3 +1,5 @@
+// app/components/chat/ChatList/NewChatModal.tsx
+
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -10,7 +12,7 @@ import {
   StyleSheet,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { UserItem } from "../ChatList/UserItem";
+import UserItem from "../ChatList/UserItem"; // Import default export
 import { API_BASE_URL } from "../../../../constants/ipConstants";
 
 // Define the User interface
@@ -30,13 +32,14 @@ interface NewChatModalProps {
   token: string | null;
 }
 
-export const NewChatModal: React.FC<NewChatModalProps> = ({
+// Change to default export
+export default function NewChatModal({
   visible,
   onClose,
   onStartChat,
   currentUserId,
   token,
-}) => {
+}: NewChatModalProps) {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -161,7 +164,7 @@ export const NewChatModal: React.FC<NewChatModalProps> = ({
       </View>
     </Modal>
   );
-};
+}
 
 const styles = StyleSheet.create({
   modalContainer: {

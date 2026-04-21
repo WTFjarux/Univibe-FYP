@@ -1,4 +1,4 @@
-// app/components/chat/ChatMessage/ChatMessageOptionsModal.tsx (DECREASED HEIGHT & ORIGINAL COLORS)
+// app/components/chat/ChatMessage/ChatMessageOptionsModal.tsx
 
 import React, { useMemo } from "react";
 import {
@@ -9,31 +9,46 @@ import {
   StyleSheet,
   Dimensions,
   Image,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
+import AudioPlayer from "./AudioPlayer";
+import ReplyPreview from "./ReplyPreview";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "😡"];
-const ELEMENT_WIDTH = 300;
-const REACTION_WIDTH = ELEMENT_WIDTH + 40;
+const REACTION_WIDTH = 340;
 const SIDE_MARGIN = 12;
 const VERTICAL_OFFSET = 12;
 const SAFE_TOP = 60;
 const SAFE_BOTTOM = 30;
+const MAX_BUBBLE_WIDTH = SCREEN_WIDTH * 0.75;
+const ACTIONS_WIDTH = 220;
 
 // Fixed heights
 const REACTION_BAR_HEIGHT = 56;
-const MESSAGE_PREVIEW_HEIGHT = 72;
-const REPLY_PREVIEW_HEIGHT = 45; // Decreased height
 const ACTION_HEIGHT = 48;
 const ACTION_SEPARATOR_HEIGHT = 0.5;
 
+// Waveform constants (matching ChatBubble)
+const WAVEFORM_BARS = [10, 18, 14, 22, 10, 16, 12];
+
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ReplyTo {
+  messageId: string;
+  message: string;
+  senderName: string;
+  senderId?: string;
+  type?: string;
+  mediaUrl?: string;
+  duration?: number;
+}
 
 interface Message {
   _id: string;
@@ -42,12 +57,9 @@ interface Message {
   mediaUrl?: string;
   senderName?: string;
   senderAvatar?: string;
-  replyTo?: {
-    messageId: string;
-    message: string;
-    senderName: string;
-    type?: string;
-  };
+  duration?: number;
+  createdAt?: string;
+  replyTo?: ReplyTo;
 }
 
 interface ChatMessageOptionsModalProps {
@@ -63,7 +75,20 @@ interface ChatMessageOptionsModalProps {
   selectedReaction?: string | null;
   message: Message;
   getFullImageUrl?: (url: string) => string;
+  formatTime?: (dateString: string) => string;
+  currentUserId?: string;
 }
+
+// ─── Helper Functions ────────────────────────────────────────────────────────
+
+const isValidReply = (reply?: ReplyTo): boolean => {
+  return !!(
+    reply &&
+    reply.messageId &&
+    reply.senderName &&
+    reply.senderName.trim() !== ""
+  );
+};
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
@@ -80,6 +105,8 @@ export default function ChatMessageOptionsModal({
   selectedReaction,
   message,
   getFullImageUrl,
+  formatTime,
+  currentUserId,
 }: ChatMessageOptionsModalProps) {
   // ─── Calculate number of actions ─────────────────────────────────────────
   const actions = useMemo(() => {
@@ -110,21 +137,40 @@ export default function ChatMessageOptionsModal({
   const actionsHeight =
     actionsCount * ACTION_HEIGHT + (actionsCount - 1) * ACTION_SEPARATOR_HEIGHT;
 
-  // ─── Check if message has reply preview ───────────────────────────────────
-  const hasReplyPreview = !!message.replyTo;
+  // ─── Check if message has a valid reply preview ──────────────────────────
+  const hasValidReply = isValidReply(message.replyTo);
 
-  // Adjust message preview height if reply exists
-  const actualMessagePreviewHeight = hasReplyPreview
-    ? MESSAGE_PREVIEW_HEIGHT + REPLY_PREVIEW_HEIGHT
-    : MESSAGE_PREVIEW_HEIGHT;
+  // Check if reply is voice message
+  const isReplyVoiceMessage = useMemo(() => {
+    if (!message.replyTo) return false;
+    const replyType = message.replyTo.type;
+    const msgText = message.replyTo.message || "";
+    return (
+      replyType === "audio" ||
+      msgText === "🎤 Voice message" ||
+      msgText.includes("Voice message") ||
+      (message.replyTo.mediaUrl && message.replyTo.mediaUrl.includes("audio"))
+    );
+  }, [message.replyTo]);
 
-  // ─── Total modal height ──────────────────────────────────────────────────
+  // ─── Total modal height (dynamic based on content) ───────────────────────
+  const getEstimatedBubbleHeight = (): number => {
+    if (message.type === "image") return 150;
+    if (message.type === "audio") return 70;
+    if (hasValidReply) {
+      if (isReplyVoiceMessage) return 130;
+      return 100;
+    }
+    return 56;
+  };
+
+  const estimatedBubbleHeight = getEstimatedBubbleHeight();
   const totalHeight =
-    REACTION_BAR_HEIGHT + actualMessagePreviewHeight + actionsHeight;
+    REACTION_BAR_HEIGHT + estimatedBubbleHeight + actionsHeight + 20;
 
   // ─── 1. HORIZONTAL POSITIONING ───────────────────────────────────────────
-  const modalLeft = isOwnMessage
-    ? SCREEN_WIDTH - ELEMENT_WIDTH - SIDE_MARGIN
+  const actionsLeft = isOwnMessage
+    ? SCREEN_WIDTH - ACTIONS_WIDTH - SIDE_MARGIN
     : SIDE_MARGIN;
 
   const reactionLeft = isOwnMessage
@@ -158,13 +204,7 @@ export default function ChatMessageOptionsModal({
   // ─── 3. SECTION POSITIONS ─────────────────────────────────────────────────
   const reactionBarTop = modalTop;
   const messagePreviewTop = modalTop + REACTION_BAR_HEIGHT;
-  const actionsTop = messagePreviewTop + actualMessagePreviewHeight;
-
-  // ─── 4. ALIGNMENT FOR MESSAGE BUBBLE ─────────────────────────────────────
-  const bubbleAlignment = isOwnMessage ? "flex-end" : "flex-start";
-  const bubbleStyle = isOwnMessage
-    ? styles.ownMessageBubble
-    : styles.otherMessageBubble;
+  const actionsTop = messagePreviewTop + estimatedBubbleHeight + 15;
 
   // ─── Handle reaction press ────────────────────────────────────────────────
   const handleReactionPress = (reaction: string) => {
@@ -180,95 +220,94 @@ export default function ChatMessageOptionsModal({
     onClose();
   };
 
-  // ─── Render reply preview ─────────────────────────────────────────────────
-  const renderReplyPreview = () => {
-    if (!message.replyTo) return null;
+  // ─── Prepare reply data for ReplyPreview component ───────────────────────
+  const getReplyData = (): ReplyTo | null => {
+    if (!hasValidReply) return null;
 
-    const getReplyPreviewText = () => {
-      if (!message.replyTo) return "";
-      if (message.replyTo.type === "image") return "📷 Photo";
-      if (message.replyTo.type === "audio") return "🎤 Voice message";
-      const replyText = message.replyTo.message || "";
-      return replyText.length > 100
-        ? replyText.substring(0, 100) + "..."
-        : replyText;
+    return {
+      messageId: message.replyTo!.messageId,
+      message: message.replyTo!.message,
+      senderName: message.replyTo!.senderName,
+      senderId: message.replyTo!.senderId,
+      type: message.replyTo!.type,
+      mediaUrl: message.replyTo!.mediaUrl,
+      duration: message.replyTo!.duration,
     };
-
-    const replyText = getReplyPreviewText();
-
-    if (!replyText) return null;
-
-    return (
-      <View style={styles.replyPreviewContainer}>
-        <View style={styles.replyIndicator} />
-        <View style={styles.replyContent}>
-          <Text
-            style={[
-              styles.replySender,
-              isOwnMessage ? styles.ownReplySender : styles.otherReplySender,
-            ]}
-            numberOfLines={1}
-          >
-            {message.replyTo.senderName || "Unknown"}
-          </Text>
-          <Text
-            style={styles.replyMessage}
-            numberOfLines={2}
-            ellipsizeMode="tail"
-          >
-            {replyText}
-          </Text>
-        </View>
-      </View>
-    );
   };
 
-  // ─── Render main message content ─────────────────────────────────────────
-  const renderMainContent = () => {
+  // ─── Format time function ────────────────────────────────────────────────
+  const getFormattedTime = (): string => {
+    if (message.createdAt && formatTime) {
+      return formatTime(message.createdAt);
+    }
+    if (message.createdAt) {
+      // Fallback formatting
+      const date = new Date(message.createdAt);
+      return date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+    return "";
+  };
+
+  // ─── Render main message content (matches ChatBubble exactly) ────────────
+  const renderMessageContent = () => {
     if (message.type === "image" && message.mediaUrl && getFullImageUrl) {
       return (
         <Image
           source={{ uri: getFullImageUrl(message.mediaUrl) }}
-          style={styles.previewImage}
+          style={styles.messageImage}
           resizeMode="cover"
         />
       );
     }
 
     if (message.type === "audio") {
-      return (
-        <View style={styles.audioPreview}>
-          <View style={styles.audioIconWrap}>
-            <Ionicons
-              name="mic"
-              size={16}
-              color={isOwnMessage ? "#FFFFFF" : "#8B5CF6"}
-            />
-          </View>
-          <View style={styles.audioWaveform}>
-            {[10, 18, 14, 22, 10, 16, 12].map((h, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.waveBar,
-                  {
-                    height: h,
-                    backgroundColor: isOwnMessage
-                      ? "rgba(255,255,255,0.7)"
-                      : "#8B5CF6",
-                  },
-                ]}
+      if (!message.mediaUrl) {
+        return (
+          <View style={styles.audioLoadingContainer}>
+            <View style={styles.audioLoadingIconWrap}>
+              <ActivityIndicator
+                size="small"
+                color={isOwnMessage ? "#fff" : "#585858"}
               />
-            ))}
+            </View>
+            <View style={styles.waveformContainer}>
+              {WAVEFORM_BARS.map((h, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.waveBar,
+                    {
+                      height: h,
+                      opacity: 0.3,
+                      backgroundColor: isOwnMessage
+                        ? "rgba(255, 255, 255, 0.5)"
+                        : "#8B5CF6",
+                    },
+                  ]}
+                />
+              ))}
+            </View>
+            <Text
+              style={[styles.audioLabel, isOwnMessage && styles.ownAudioLabel]}
+            >
+              Sending...
+            </Text>
           </View>
-          <Text
-            style={[
-              styles.audioLabel,
-              isOwnMessage ? styles.ownAudioLabel : styles.otherAudioLabel,
-            ]}
-          >
-            Voice message
-          </Text>
+        );
+      }
+
+      return (
+        <View style={styles.audioMessageContainer}>
+          <AudioPlayer
+            audioUrl={message.mediaUrl}
+            duration={message.duration || 0}
+            isOwnMessage={isOwnMessage}
+            messageId={message._id}
+            onPlayed={() => {}}
+          />
         </View>
       );
     }
@@ -276,25 +315,18 @@ export default function ChatMessageOptionsModal({
     return (
       <Text
         style={[
-          styles.previewText,
-          isOwnMessage ? styles.ownPreviewText : styles.otherPreviewText,
+          styles.messageText,
+          isOwnMessage ? styles.ownMessageText : styles.otherMessageText,
         ]}
-        numberOfLines={3}
       >
         {message.message}
       </Text>
     );
   };
 
-  // ─── Render message preview ───────────────────────────────────────────────
-  const renderMessagePreview = () => (
-    <View style={styles.previewWrapper}>
-      {renderReplyPreview()}
-      <View style={styles.mainMessageContent}>{renderMainContent()}</View>
-    </View>
-  );
-
   // ─── Render ────────────────────────────────────────────────────────────────
+  const replyData = getReplyData();
+
   return (
     <Modal
       visible={visible}
@@ -333,25 +365,86 @@ export default function ChatMessageOptionsModal({
         ))}
       </View>
 
-      {/* 2. MESSAGE PREVIEW */}
+      {/* 2. MESSAGE PREVIEW - Align based on message owner */}
       <View
         style={[
-          styles.messagePreviewContainer,
+          styles.messageWrapper,
           {
             top: messagePreviewTop,
-            left: modalLeft,
-            alignItems: bubbleAlignment,
+            left: isOwnMessage ? undefined : SIDE_MARGIN,
+            right: isOwnMessage ? SIDE_MARGIN : undefined,
           },
         ]}
       >
-        <View style={[styles.messageBubble, bubbleStyle]}>
-          {renderMessagePreview()}
+        <View
+          style={[
+            styles.messageRow,
+            isOwnMessage ? styles.ownMessageRow : styles.otherMessageRow,
+          ]}
+        >
+          {/* Avatar spacer - show on left for other messages */}
+          {!isOwnMessage && <View style={styles.avatarSpacer} />}
+
+          {/* For own messages, avatar spacer goes on the right side */}
+          {isOwnMessage && <View style={styles.avatarSpacerRight} />}
+
+          {/* Message Content */}
+          <View style={styles.messageContent}>
+            {replyData && (
+              <View
+                style={[
+                  isOwnMessage
+                    ? styles.replyPreviewWrapperOwn
+                    : styles.replyPreviewWrapperOther,
+                ]}
+              >
+                <View style={styles.replyPreviewInner}>
+                  <ReplyPreview
+                    replyTo={replyData}
+                    isOwnMessage={isOwnMessage}
+                    currentUserId={currentUserId}
+                    onScrollToMessage={undefined}
+                  />
+                </View>
+              </View>
+            )}
+
+            {/* Message Bubble */}
+            <View
+              style={[
+                styles.bubble,
+                isOwnMessage ? styles.ownBubble : styles.otherBubble,
+                message.type !== "audio" && styles.bubbleAutoWidth,
+                isOwnMessage
+                  ? styles.ownBubbleAlignment
+                  : { alignSelf: "flex-start" },
+              ]}
+            >
+              {renderMessageContent()}
+            </View>
+
+            {/* Time and Status */}
+            <View
+              style={[
+                styles.messageFooter,
+                isOwnMessage && styles.ownMessageFooter,
+              ]}
+            >
+              <Text style={styles.timeText}>{getFormattedTime()}</Text>
+            </View>
+          </View>
+
+          {/* For own messages, add spacer on the right side after content */}
+          {isOwnMessage && <View style={styles.avatarSpacer} />}
         </View>
       </View>
 
       {/* 3. ACTIONS LIST */}
       <View
-        style={[styles.actionsContainer, { top: actionsTop, left: modalLeft }]}
+        style={[
+          styles.actionsContainer,
+          { top: actionsTop, left: actionsLeft },
+        ]}
       >
         {actions.map((action, index) => (
           <React.Fragment key={action.label}>
@@ -394,7 +487,7 @@ export default function ChatMessageOptionsModal({
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ─── Styles ──────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   dimLayer: {
@@ -431,125 +524,124 @@ const styles = StyleSheet.create({
   },
   selectedIndicator: {
     position: "absolute",
-    bottom: -4,
+    bottom: 0,
     left: "50%",
-    marginLeft: -4,
-    width: 8,
-    height: 8,
+    marginLeft: 5,
+    width: 4,
+    height: 4,
     borderRadius: 4,
     backgroundColor: "#8B5CF6",
   },
 
-  // Message Preview
-  messagePreviewContainer: {
+  // Message Wrapper
+  messageWrapper: {
     position: "absolute",
-    width: ELEMENT_WIDTH,
+    marginVertical: 4,
   },
-  messageBubble: {
-    width: ELEMENT_WIDTH - 16,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 18,
+  messageRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+  },
+  ownMessageRow: {
+    justifyContent: "flex-end",
+  },
+  otherMessageRow: {
+    justifyContent: "flex-start",
+  },
+  avatarSpacer: {
+    width: 40,
+  },
+  avatarSpacerRight: {
+    width: 40,
+  },
+  messageContent: {
+    maxWidth: MAX_BUBBLE_WIDTH,
+  },
+
+  // Reply Preview Wrappers
+  replyPreviewWrapperOwn: {
+    alignSelf: "flex-end",
+    marginBottom: 8,
+  },
+  replyPreviewWrapperOther: {
+    alignSelf: "flex-start",
+    marginBottom: 8,
+  },
+  replyPreviewInner: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 10,
+    overflow: "hidden",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+    paddingLeft: 8,
+    paddingTop: 5,
+    paddingRight: 60,
   },
-  ownMessageBubble: {
-    backgroundColor: "#8B5CF6",
+
+  // Bubble Styles
+  bubble: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+  },
+  bubbleAutoWidth: {
+    alignSelf: "flex-start",
+  },
+  ownBubbleAlignment: {
+    alignSelf: "flex-end",
+  },
+  ownBubble: {
+    backgroundColor: "#8b5cf6",
     borderBottomRightRadius: 4,
   },
-  otherMessageBubble: {
+  otherBubble: {
     backgroundColor: "#E5E5EA",
     borderBottomLeftRadius: 4,
   },
 
-  // Reply Preview Styles (DECREASED HEIGHT & ORIGINAL COLORS)
-  previewWrapper: {
-    width: "100%",
-  },
-  replyPreviewContainer: {
-    flexDirection: "row",
-    marginBottom: 6,
-    paddingBottom: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(0,0,0,0.1)",
-    minHeight: 45,
-    width: "100%",
-  },
-  replyIndicator: {
-    width: 3,
-    backgroundColor: "#8B5CF6",
-    borderRadius: 2,
-    marginRight: 8,
-    alignSelf: "stretch",
-  },
-  replyContent: {
-    flex: 1,
-    justifyContent: "center",
-    flexShrink: 1,
-  },
-  replySender: {
-    fontSize: 11,
-    fontWeight: "600",
-    marginBottom: 2,
-    fontFamily: "SofiaSans-Bold",
-  },
-  ownReplySender: {
-    color: "rgba(255,255,255,0.9)",
-  },
-  otherReplySender: {
-    color: "#8B5CF6",
-  },
-  replyMessage: {
-    fontSize: 11,
-    color: "#8E8E93",
-    lineHeight: 14,
-    fontFamily: "SofiaSans-Regular",
-    flexShrink: 1,
-    flexWrap: "wrap",
-  },
-  mainMessageContent: {
-    width: "100%",
-  },
-
-  // Text Preview
-  previewText: {
-    fontSize: 14,
+  // Message Text
+  messageText: {
+    fontSize: 15,
     lineHeight: 20,
     fontFamily: "SofiaSans-Regular",
   },
-  ownPreviewText: {
-    color: "#FFFFFF",
+  ownMessageText: {
+    color: "#fff",
   },
-  otherPreviewText: {
-    color: "#000000",
+  otherMessageText: {
+    color: "#000",
   },
 
   // Image Preview
-  previewImage: {
-    width: ELEMENT_WIDTH - 60,
-    height: 120,
+  messageImage: {
+    width: 200,
+    height: 150,
     borderRadius: 12,
   },
 
   // Audio Preview
-  audioPreview: {
+  audioMessageContainer: {
+    minWidth: 200,
+    maxWidth: 250,
+  },
+  audioLoadingContainer: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    minWidth: 180,
+    minWidth: 150,
   },
-  audioIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  audioLoadingIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: "rgba(0,0,0,0.1)",
     justifyContent: "center",
     alignItems: "center",
   },
-  audioWaveform: {
+  waveformContainer: {
     flexDirection: "row",
     alignItems: "center",
     gap: 3,
@@ -560,19 +652,36 @@ const styles = StyleSheet.create({
   },
   audioLabel: {
     fontSize: 12,
+    color: "#000",
+    opacity: 0.7,
     fontFamily: "SofiaSans-Regular",
   },
   ownAudioLabel: {
-    color: "#FFFFFF",
+    color: "#fff",
   },
-  otherAudioLabel: {
-    color: "#8E8E93",
+
+  // Message Footer
+  messageFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    marginTop: 4,
+    marginHorizontal: 4,
+    gap: 4,
+  },
+  ownMessageFooter: {
+    justifyContent: "flex-end",
+  },
+  timeText: {
+    fontSize: 10,
+    color: "#e6e4e4",
+    fontFamily: "SofiaSans-Regular",
   },
 
   // Actions Container
   actionsContainer: {
     position: "absolute",
-    width: ELEMENT_WIDTH,
+    width: ACTIONS_WIDTH,
     backgroundColor: "#FFFFFF",
     borderRadius: 14,
     overflow: "hidden",

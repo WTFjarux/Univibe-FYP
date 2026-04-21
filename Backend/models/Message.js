@@ -68,15 +68,15 @@ const messageSchema = new mongoose.Schema(
 
     // Audio specific fields
     duration: {
-      type: Number, // Duration in seconds for audio messages
+      type: Number,
       default: 0,
     },
     isPlayed: {
-      type: Boolean, // Track if voice message has been played
+      type: Boolean,
       default: false,
     },
     waveformData: {
-      type: [Number], // Optional: waveform data for visual representation
+      type: [Number],
       default: [],
     },
 
@@ -88,14 +88,18 @@ const messageSchema = new mongoose.Schema(
       name: { type: String, default: "" },
     },
 
-    // Reply threading
+    // Reply threading - FIXED: removed default: null from nested object
     replyTo: {
-      type: {
-        messageId: { type: mongoose.Schema.Types.ObjectId, ref: "Message" },
-        message: String,
-        senderName: String,
+      messageId: { type: mongoose.Schema.Types.ObjectId, ref: "Message" },
+      message: { type: String },
+      senderName: { type: String },
+      type: { 
+        type: String, 
+        enum: ["text", "image", "audio", "video", "file"],
+        default: "text" 
       },
-      default: null,
+      mediaUrl: { type: String, default: "" },
+      duration: { type: Number, default: 0 },
     },
 
     // Read receipts
@@ -147,14 +151,23 @@ const messageSchema = new mongoose.Schema(
 messageSchema.index({ roomId: 1, createdAt: -1 });
 messageSchema.index({ sender: 1, createdAt: -1 });
 messageSchema.index({ "readBy.userId": 1 });
-messageSchema.index({ type: 1 }); // Index for filtering by message type
-messageSchema.index({ createdAt: -1 }); // For pagination
+messageSchema.index({ type: 1 });
+messageSchema.index({ createdAt: -1 });
+messageSchema.index({ "replyTo.messageId": 1 });
 
 // Virtual for getting audio duration in minutes:seconds format
 messageSchema.virtual("formattedDuration").get(function () {
   if (!this.duration) return "0:00";
   const minutes = Math.floor(this.duration / 60);
   const seconds = this.duration % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+});
+
+// Virtual for getting reply audio duration in minutes:seconds format
+messageSchema.virtual("replyToFormattedDuration").get(function () {
+  if (!this.replyTo || !this.replyTo.duration) return "0:00";
+  const minutes = Math.floor(this.replyTo.duration / 60);
+  const seconds = this.replyTo.duration % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 });
 
@@ -174,6 +187,18 @@ messageSchema.virtual("mediaIcon").get(function () {
   return icons[this.type] || "📄";
 });
 
+// Virtual for getting reply media icon
+messageSchema.virtual("replyMediaIcon").get(function () {
+  if (!this.replyTo) return null;
+  const icons = {
+    image: "📷",
+    audio: "🎤",
+    video: "🎥",
+    file: "📎",
+  };
+  return icons[this.replyTo.type] || "💬";
+});
+
 // Ensure virtuals are included in JSON output
 messageSchema.set("toJSON", { virtuals: true });
 messageSchema.set("toObject", { virtuals: true });
@@ -184,6 +209,23 @@ messageSchema.pre("save", function (next) {
     const minutes = Math.floor(this.duration / 60);
     const seconds = this.duration % 60;
     this.message = `🎤 Voice message (${minutes}:${seconds.toString().padStart(2, "0")})`;
+  }
+  next();
+});
+
+// Pre-save middleware to ensure replyTo has default type
+messageSchema.pre("save", function (next) {
+  if (this.replyTo && this.replyTo.message && !this.replyTo.type) {
+    // Detect type from message content or mediaUrl
+    if (this.replyTo.message === "🎤 Voice message" || 
+        (this.replyTo.mediaUrl && this.replyTo.mediaUrl.includes("audio"))) {
+      this.replyTo.type = "audio";
+    } else if (this.replyTo.message === "📷 Photo" || 
+               (this.replyTo.mediaUrl && this.replyTo.mediaUrl.includes("image"))) {
+      this.replyTo.type = "image";
+    } else {
+      this.replyTo.type = "text";
+    }
   }
   next();
 });
@@ -202,6 +244,21 @@ messageSchema.statics.getUnplayedAudio = async function (userId, roomId) {
     sender: { $ne: userId },
     isDeleted: false,
   }).sort({ createdAt: 1 });
+};
+
+// Static method to get messages with full reply data
+messageSchema.statics.getMessagesWithReplies = async function (roomId, limit = 50, before = null) {
+  let query = { roomId, isDeleted: false };
+  if (before) {
+    query.createdAt = { $lt: new Date(before) };
+  }
+  
+  return this.find(query)
+    .sort({ createdAt: -1 })
+    .limit(parseInt(limit))
+    .populate("sender", "name email")
+    .populate("replyTo.messageId", "type mediaUrl duration")
+    .lean();
 };
 
 const Message = mongoose.model("Message", messageSchema);

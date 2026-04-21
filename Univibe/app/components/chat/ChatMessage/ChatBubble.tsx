@@ -1,4 +1,4 @@
-// app/components/chat/ChatMessage.tsx (FULLY UPDATED)
+// app/components/chat/ChatMessage/ChatBubble.tsx (UPDATED)
 
 import React, { useState } from "react";
 import {
@@ -17,6 +17,7 @@ import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import AudioPlayer from "./AudioPlayer";
 import ChatMessageOptionsModal from "./ChatMessageOptionsModal";
+import ReplyPreview from "./ReplyPreview";
 
 interface Message {
   _id: string;
@@ -35,10 +36,14 @@ interface Message {
     messageId: string;
     message: string;
     senderName: string;
+    senderId?: string;
+    type?: string;
+    mediaUrl?: string;
+    duration?: number;
   };
 }
 
-interface ChatMessageProps {
+interface ChatBubbleProps {
   message: Message;
   isOwnMessage: boolean;
   showAvatar: boolean;
@@ -59,7 +64,7 @@ interface ChatMessageProps {
   onScrollToMessage?: (messageId: string) => void;
 }
 
-export default function ChatMessage({
+export default function ChatBubble({
   message,
   isOwnMessage,
   showAvatar,
@@ -74,7 +79,7 @@ export default function ChatMessage({
   onForward,
   currentUserId,
   onScrollToMessage,
-}: ChatMessageProps) {
+}: ChatBubbleProps) {
   const [showOptions, setShowOptions] = useState(false);
   const [optionsPosition, setOptionsPosition] = useState({ x: 0, y: 0 });
   const [selectedReaction, setSelectedReaction] = useState<string | null>(null);
@@ -83,12 +88,10 @@ export default function ChatMessage({
     ? getFullImageUrl(message.senderAvatar)
     : "";
 
-  // Get current user's reaction if any
   const currentUserReaction = message.reactions?.find(
     (r) => r.userId === currentUserId,
   )?.reaction;
 
-  // Group reactions for display
   const reactionGroups = message.reactions?.reduce(
     (acc, r) => {
       acc[r.reaction] = (acc[r.reaction] || 0) + 1;
@@ -97,24 +100,26 @@ export default function ChatMessage({
     {} as Record<string, number>,
   );
 
-  const handleLongPress = (event: any) => {
-    // Trigger haptic feedback on long press
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  const getSenderId = (): string => {
+    return typeof message.sender === "string"
+      ? message.sender
+      : message.sender?._id || "";
+  };
 
+  const handleLongPress = (event: any) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const { pageX, pageY } = event.nativeEvent;
     setOptionsPosition({ x: pageX - 100, y: pageY - 80 });
     setShowOptions(true);
   };
 
   const handleCopy = async () => {
-    // Haptic feedback for copy action
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await Clipboard.setStringAsync(message.message);
     setShowOptions(false);
   };
 
   const handleReply = () => {
-    // Haptic feedback for reply action
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (onReply) onReply(message);
     setShowOptions(false);
@@ -141,7 +146,6 @@ export default function ChatMessage({
   };
 
   const handleForward = async () => {
-    // Haptic feedback for forward action
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (onForward) {
       onForward(message);
@@ -152,47 +156,15 @@ export default function ChatMessage({
   };
 
   const handleReaction = (reaction: string, shouldRemove?: boolean) => {
-    // Different haptic feedback for add vs remove
     if (shouldRemove) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } else {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-
     setSelectedReaction(reaction);
     setTimeout(() => setSelectedReaction(null), 200);
     if (onReaction) onReaction(message._id, reaction, shouldRemove);
     setShowOptions(false);
-  };
-
-  const handleReplyPreviewPress = () => {
-    if (message.replyTo && onScrollToMessage) {
-      // Haptic feedback when tapping reply preview
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      onScrollToMessage(message.replyTo.messageId);
-    }
-  };
-
-  const renderReplyPreview = () => {
-    if (!message.replyTo) return null;
-
-    return (
-      <TouchableOpacity
-        style={styles.replyPreviewContainer}
-        onPress={handleReplyPreviewPress}
-        activeOpacity={0.7}
-      >
-        <View style={styles.replyPreviewBar} />
-        <View style={styles.replyPreviewContent}>
-          <Text style={styles.replyPreviewSender}>
-            {message.replyTo.senderName}
-          </Text>
-          <Text style={styles.replyPreviewText} numberOfLines={1}>
-            {message.replyTo.message}
-          </Text>
-        </View>
-      </TouchableOpacity>
-    );
   };
 
   const renderMessageContent = () => {
@@ -205,7 +177,6 @@ export default function ChatMessage({
         />
       );
     } else if (message.type === "audio") {
-      // Show loading state for sending audio (when mediaUrl is undefined or status is sending)
       if (message.status === "sending" || !message.mediaUrl) {
         return (
           <View style={styles.audioLoadingContainer}>
@@ -226,7 +197,7 @@ export default function ChatMessage({
                       opacity: 0.3,
                       backgroundColor: isOwnMessage
                         ? "rgba(255, 255, 255, 0.5)"
-                        : "#007bff",
+                        : "#8B5CF6",
                     },
                   ]}
                 />
@@ -241,7 +212,6 @@ export default function ChatMessage({
         );
       }
 
-      // Normal audio player for loaded messages
       return (
         <View style={styles.audioMessageContainer}>
           <AudioPlayer
@@ -283,6 +253,21 @@ export default function ChatMessage({
     }
   };
 
+  // Prepare reply data for the modal with proper senderId
+  const getReplyDataForModal = () => {
+    if (!message.replyTo) return undefined;
+
+    return {
+      messageId: message.replyTo.messageId,
+      message: message.replyTo.message,
+      senderName: message.replyTo.senderName,
+      senderId: message.replyTo.senderId,
+      type: message.replyTo.type,
+      mediaUrl: message.replyTo.mediaUrl,
+      duration: message.replyTo.duration,
+    };
+  };
+
   return (
     <>
       <Pressable
@@ -313,14 +298,31 @@ export default function ChatMessage({
 
           {/* Message Content */}
           <View style={styles.messageContent}>
-            {/* Reply Preview - Now clickable */}
-            {renderReplyPreview()}
+            {/* Reply Preview Component */}
+            {message.replyTo && (
+              <ReplyPreview
+                replyTo={{
+                  messageId: message.replyTo.messageId,
+                  message: message.replyTo.message,
+                  senderName: message.replyTo.senderName,
+                  senderId: message.replyTo.senderId,
+                  type: message.replyTo.type,
+                  mediaUrl: message.replyTo.mediaUrl,
+                  duration: message.replyTo.duration,
+                }}
+                isOwnMessage={isOwnMessage}
+                currentUserId={currentUserId}
+                onScrollToMessage={onScrollToMessage}
+              />
+            )}
 
             {/* Message Bubble */}
             <View
               style={[
                 styles.bubble,
                 isOwnMessage ? styles.ownBubble : styles.otherBubble,
+                message.type !== "audio" && styles.bubbleAutoWidth,
+                isOwnMessage && styles.ownBubbleAlignment,
               ]}
             >
               {renderMessageContent()}
@@ -328,7 +330,12 @@ export default function ChatMessage({
 
             {/* Reactions Row */}
             {reactionGroups && Object.keys(reactionGroups).length > 0 && (
-              <View style={styles.reactionsRow}>
+              <View
+                style={[
+                  styles.reactionsRow,
+                  isOwnMessage && styles.ownReactionsRow,
+                ]}
+              >
                 {Object.entries(reactionGroups).map(([reaction, count]) => (
                   <View key={reaction} style={styles.reactionBadge}>
                     <Text style={styles.reactionEmoji}>{reaction}</Text>
@@ -341,7 +348,12 @@ export default function ChatMessage({
             )}
 
             {/* Time and Status */}
-            <View style={styles.messageFooter}>
+            <View
+              style={[
+                styles.messageFooter,
+                isOwnMessage && styles.ownMessageFooter,
+              ]}
+            >
               <Text style={styles.timeText}>
                 {formatTime(message.createdAt)}
               </Text>
@@ -351,7 +363,6 @@ export default function ChatMessage({
         </View>
       </Pressable>
 
-      {/* Options Modal */}
       <ChatMessageOptionsModal
         visible={showOptions}
         onClose={() => setShowOptions(false)}
@@ -369,9 +380,13 @@ export default function ChatMessage({
           type: message.type,
           mediaUrl: message.mediaUrl,
           senderName: message.senderName,
-          replyTo: message.replyTo,
+          replyTo: getReplyDataForModal(),
+          createdAt: message.createdAt,
+          duration: message.duration,
         }}
         getFullImageUrl={getFullImageUrl}
+        formatTime={formatTime}
+        currentUserId={currentUserId}
       />
     </>
   );
@@ -414,6 +429,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 18,
+  },
+  bubbleAutoWidth: {
+    alignSelf: "flex-start",
+  },
+  ownBubbleAlignment: {
+    alignSelf: "flex-end",
   },
   ownBubble: {
     backgroundColor: "#8b5cf6",
@@ -475,38 +496,15 @@ const styles = StyleSheet.create({
   ownAudioLabel: {
     color: "#fff",
   },
-  replyPreviewContainer: {
-    flexDirection: "row",
-    marginBottom: 6,
-    paddingBottom: 6,
-    borderBottomWidth: 0.5,
-    borderBottomColor: "rgba(0,0,0,0.1)",
-  },
-  replyPreviewBar: {
-    width: 3,
-    backgroundColor: "#8b5cf6",
-    borderRadius: 2,
-    marginRight: 8,
-  },
-  replyPreviewContent: {
-    flex: 1,
-  },
-  replyPreviewSender: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#8b5cf6",
-    fontFamily: "SofiaSans-Bold",
-    marginBottom: 2,
-  },
-  replyPreviewText: {
-    fontSize: 11,
-    color: "#8E8E93",
-    fontFamily: "SofiaSans-Regular",
-  },
   reactionsRow: {
     flexDirection: "row",
     marginTop: 4,
     marginLeft: 8,
+  },
+  ownReactionsRow: {
+    justifyContent: "flex-end",
+    marginLeft: 0,
+    marginRight: 8,
   },
   reactionBadge: {
     flexDirection: "row",
@@ -538,6 +536,9 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginHorizontal: 4,
     gap: 4,
+  },
+  ownMessageFooter: {
+    justifyContent: "flex-end",
   },
   timeText: {
     fontSize: 10,

@@ -1,8 +1,20 @@
+// app/components/chat/ChatList/UserItem.tsx
+
 import React from "react";
 import { View, Text, Image, TouchableOpacity, StyleSheet } from "react-native";
 import { getAvatarUrl, getInitials } from "../../../../lib/utils/chatUtils";
 
-export const UserItem = ({ user, onPress }: any) => (
+interface UserItemProps {
+  user: {
+    _id: string;
+    name: string;
+    username?: string;
+    profilePicture?: string;
+  };
+  onPress: () => void;
+}
+
+const UserItem = ({ user, onPress }: UserItemProps) => (
   <TouchableOpacity style={styles.userItem} onPress={onPress}>
     {user.profilePicture ? (
       <Image
@@ -21,6 +33,10 @@ export const UserItem = ({ user, onPress }: any) => (
   </TouchableOpacity>
 );
 
+// Export both named and default
+export { UserItem };
+export default UserItem;
+
 const styles = StyleSheet.create({
   userItem: {
     flexDirection: "row",
@@ -30,7 +46,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#f0f0f0",
   },
-  userAvatar: { width: 50, height: 50, borderRadius: 25, marginRight: 15 },
+  userAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 15,
+  },
   userAvatarPlaceholder: {
     width: 50,
     height: 50,
@@ -40,8 +61,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginRight: 15,
   },
-  userAvatarText: { color: "#fff", fontSize: 20, fontWeight: "600" },
-  userInfo: { flex: 1 },
-  userName: { fontSize: 16, fontWeight: "600", color: "#000" },
-  userUsername: { fontSize: 14, color: "#8E8E93", marginTop: 2 },
+  userAvatarText: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "600",
+  },
+  userInfo: {
+    flex: 1,
+  },
+  userName: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#000",
+  },
+  userUsername: {
+    fontSize: 14,
+    color: "#8E8E93",
+    marginTop: 2,
+  },
 });

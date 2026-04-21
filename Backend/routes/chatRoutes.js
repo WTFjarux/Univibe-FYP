@@ -1,9 +1,10 @@
 // Backend/routes/chatRoutes.js
+
 const express = require("express");
 const router = express.Router();
 const { protect } = require("../middleware/authmiddleware");
 const { uploadAudioMessage } = require("../middleware/uploadMiddleware");
-const fs = require("fs"); // Add this import
+const fs = require("fs");
 
 // Import models
 const User = require("../models/User");
@@ -37,12 +38,13 @@ router.get("/user-profile/:otherUserId", getOtherUserProfile);
 router.get("/messages/:roomId", getMessageHistory);
 router.delete("/message/:messageId", deleteMessage);
 
-// Audio specific endpoints - UPDATED
+// Audio specific endpoints - FULLY UPDATED with reply support
 router.post("/upload-audio", uploadAudioMessage, async (req, res) => {
   try {
     console.log("=== AUDIO UPLOAD ===");
     console.log("File received:", req.file ? "Yes" : "No");
     console.log("Audio info:", req.audioInfo);
+    console.log("Request body:", req.body);
 
     if (!req.file || !req.audioInfo) {
       return res.status(400).json({
@@ -51,8 +53,17 @@ router.post("/upload-audio", uploadAudioMessage, async (req, res) => {
       });
     }
 
-    const { roomId, duration, replyToId, replyToMessage, replyToSender } =
-      req.body;
+    const {
+      roomId,
+      duration,
+      replyToId,
+      replyToMessage,
+      replyToSender,
+      replyToType,
+      replyToMediaUrl,
+      replyToDuration,
+    } = req.body;
+
     const userId = req.user.id;
 
     // Verify file exists on disk
@@ -83,6 +94,11 @@ router.post("/upload-audio", uploadAudioMessage, async (req, res) => {
     console.log("   URL:", audioUrl);
     console.log("   Size:", fileSize);
     console.log("   Duration:", duration);
+    console.log("   ReplyTo data:", {
+      replyToId,
+      replyToType,
+      replyToDuration,
+    });
 
     const messageData = {
       sender: userId,
@@ -91,7 +107,7 @@ router.post("/upload-audio", uploadAudioMessage, async (req, res) => {
       roomId: roomId,
       message: "🎤 Voice message",
       type: "audio",
-      mediaUrl: audioUrl, // CRITICAL: This MUST be set
+      mediaUrl: audioUrl,
       mediaSize: fileSize,
       mediaName: req.file.originalname || `voice_${Date.now()}.m4a`,
       mediaMimeType: req.file.mimetype,
@@ -99,20 +115,25 @@ router.post("/upload-audio", uploadAudioMessage, async (req, res) => {
       status: "sent",
     };
 
-    // Add replyTo data if present
+    // Add replyTo data if present - NOW WITH FULL FIELDS
     if (replyToId) {
       messageData.replyTo = {
         messageId: replyToId,
         message: replyToMessage || "Media message",
         senderName: replyToSender || "Unknown",
+        type: replyToType || "text",
+        mediaUrl: replyToMediaUrl || "",
+        duration: replyToDuration ? parseInt(replyToDuration) : 0,
       };
+      console.log("✅ Added replyTo with type:", messageData.replyTo.type);
     }
 
     const message = new Message(messageData);
-
     const savedMessage = await message.save();
+
     console.log("✅ Message saved with ID:", savedMessage._id);
     console.log("✅ Saved mediaUrl:", savedMessage.mediaUrl);
+    console.log("✅ Saved replyTo:", savedMessage.replyTo);
 
     // Update chat room last message
     await ChatRoom.findOneAndUpdate(
@@ -128,6 +149,7 @@ router.post("/upload-audio", uploadAudioMessage, async (req, res) => {
       { upsert: true },
     );
 
+    // Return the saved message with full replyTo data
     res.status(200).json({
       success: true,
       message: "Audio uploaded successfully",
@@ -137,7 +159,8 @@ router.post("/upload-audio", uploadAudioMessage, async (req, res) => {
         type: savedMessage.type,
         duration: savedMessage.duration,
         createdAt: savedMessage.createdAt,
-        mediaUrl: savedMessage.mediaUrl, // Return the saved URL
+        mediaUrl: savedMessage.mediaUrl,
+        replyTo: savedMessage.replyTo, // Include full replyTo in response
       },
     });
   } catch (error) {

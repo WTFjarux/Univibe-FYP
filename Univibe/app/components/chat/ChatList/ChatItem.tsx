@@ -57,7 +57,7 @@ export interface ChatItemProps {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export const ChatItem: React.FC<ChatItemProps> = ({
+const ChatItem: React.FC<ChatItemProps> = ({
   item,
   isSelected,
   highlightAnim,
@@ -225,6 +225,10 @@ export const ChatItem: React.FC<ChatItemProps> = ({
     </Animated.View>
   );
 };
+
+// Export both named and default
+export { ChatItem };
+export default ChatItem;
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 

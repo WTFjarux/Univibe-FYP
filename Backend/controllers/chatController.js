@@ -58,7 +58,7 @@ const getDirectRoomId = (userId1, userId2) => {
 };
 
 /**
- * Get message history for a room
+ * Get message history for a room - UPDATED with full replyTo support
  */
 const getMessageHistory = async (req, res) => {
   try {
@@ -77,13 +77,24 @@ const getMessageHistory = async (req, res) => {
       .populate("sender", "name email")
       .lean();
 
-    // Format messages with reactions and audio duration
+    // Format messages with reactions and audio duration, ensuring replyTo has all fields
     const formattedMessages = messages.map((msg) => ({
       ...msg,
       formattedDuration: msg.duration
         ? `${Math.floor(msg.duration / 60)}:${(msg.duration % 60).toString().padStart(2, "0")}`
         : null,
       reactions: msg.reactions || [],
+      // Ensure replyTo has all fields, with fallbacks for older messages
+      replyTo: msg.replyTo
+        ? {
+            messageId: msg.replyTo.messageId,
+            message: msg.replyTo.message,
+            senderName: msg.replyTo.senderName,
+            type: msg.replyTo.type || detectReplyType(msg.replyTo),
+            mediaUrl: msg.replyTo.mediaUrl || "",
+            duration: msg.replyTo.duration || 0,
+          }
+        : null,
     }));
 
     // Mark messages as read
@@ -107,8 +118,32 @@ const getMessageHistory = async (req, res) => {
 };
 
 /**
- * Get user's chat rooms with profile pictures
+ * Helper function to detect reply type from message content
  */
+const detectReplyType = (replyTo) => {
+  if (!replyTo) return "text";
+
+  // Check if it's an audio message
+  if (
+    replyTo.message === "🎤 Voice message" ||
+    replyTo.message?.includes("Voice message") ||
+    replyTo.mediaUrl?.includes("audio")
+  ) {
+    return "audio";
+  }
+
+  // Check if it's an image message
+  if (
+    replyTo.message === "📷 Photo" ||
+    replyTo.message?.includes("Photo") ||
+    replyTo.mediaUrl?.includes("image")
+  ) {
+    return "image";
+  }
+
+  return "text";
+};
+
 /**
  * Get user's chat rooms with profile pictures
  */
@@ -129,7 +164,7 @@ const getUserChatRooms = async (req, res) => {
         const lastMessage = await Message.findOne({
           roomId: room.roomId,
           isDeleted: false,
-          deletedFor: { $ne: currentUserId }, // Exclude messages deleted by current user
+          deletedFor: { $ne: currentUserId },
         })
           .sort({ createdAt: -1 })
           .lean();
@@ -351,7 +386,7 @@ const getUnplayedAudio = async (req, res) => {
 const addReaction = async (req, res) => {
   try {
     const { messageId } = req.params;
-    const { reaction, remove } = req.body; // ← Add remove flag
+    const { reaction, remove } = req.body;
     const userId = req.user.id;
 
     // If remove flag is true, call removeReaction logic

@@ -24,3 +24,5 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 34, fontWeight: "700", color: "#000" },
   createButton: { padding: 8 },
 });
+
+export default ChatListHeader;

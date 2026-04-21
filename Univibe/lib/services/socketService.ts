@@ -35,6 +35,16 @@ interface Message {
   type: string;
   createdAt?: Date;
   status?: string;
+  mediaUrl?: string;
+  duration?: number;
+  replyTo?: {
+    messageId: string;
+    message: string;
+    senderName: string;
+    type?: string;
+    mediaUrl?: string;
+    duration?: number;
+  };
 }
 
 interface UserStatus {
@@ -63,6 +73,15 @@ interface CallData {
   answer?: any;
   candidate?: any;
   timestamp?: Date;
+}
+
+interface ReplyToData {
+  messageId: string;
+  message: string;
+  senderName: string;
+  type?: string;
+  mediaUrl?: string;
+  duration?: number;
 }
 
 type EventCallback = (data: any) => void;
@@ -210,12 +229,14 @@ class SocketService {
     // Chat events
     this.socket.on('receive_message', (message: Message) => {
       console.log('📨 Received message:', message.message?.substring(0, 50));
+      console.log('📎 Reply data:', message.replyTo);
       this.emitEvent('receive_message', message);
       this.emitEvent('new_message', message);
     });
 
     this.socket.on('message_delivered', (message: Message) => {
       console.log('✅ Message delivered:', message._id);
+      console.log('📎 Delivered message replyTo:', message.replyTo);
       this.emitEvent('message_delivered', message);
     });
 
@@ -285,8 +306,6 @@ class SocketService {
       this.emitEvent('socket_error', error);
     });
   }
-
-
 
   // ============================================
   // EVENT MANAGEMENT
@@ -368,38 +387,41 @@ class SocketService {
     }
   }
 
-/**
- * Send a message to a room with acknowledgment callback
- * @param roomId - Room identifier
- * @param message - Message content
- * @param type - Message type ('text', 'image', etc.)
- * @param replyTo - Optional reply information
- * @param callback - Optional callback for acknowledgment
- */
-sendMessage(
-  roomId: string,
-  message: string,
-  type: string = "text",
-  replyTo?: { messageId: string; message: string; senderName: string },
-  callback?: (response: any) => void
-): void {
-  if (this.socket && this.isConnected) {
-    console.log(`📤 Sending ${type} message to room ${roomId}`);
-    // Use emit with acknowledgment if callback is provided
-    if (callback) {
-      this.socket.emit("send_message", { roomId, message, type, replyTo }, callback);
+  /**
+   * Send a message to a room with acknowledgment callback
+   * @param roomId - Room identifier
+   * @param message - Message content
+   * @param type - Message type ('text', 'image', 'audio', etc.)
+   * @param replyTo - Optional reply information with full type support
+   * @param callback - Optional callback for acknowledgment
+   */
+  sendMessage(
+    roomId: string,
+    message: string,
+    type: string = "text",
+    replyTo?: ReplyToData,
+    callback?: (response: any) => void
+  ): void {
+    if (this.socket && this.isConnected) {
+      console.log(`📤 Sending ${type} message to room ${roomId}`);
+      console.log("📎 Reply data:", replyTo);
+      
+      const data = { roomId, message, type, replyTo };
+      
+      if (callback) {
+        this.socket.emit("send_message", data, callback);
+      } else {
+        this.socket.emit("send_message", data);
+      }
     } else {
-      this.socket.emit("send_message", { roomId, message, type, replyTo });
+      console.error("❌ Cannot send message - socket not connected");
+      this.emitEvent("socket_error", { message: "Socket not connected" });
+      if (callback) {
+        callback({ success: false, error: "Socket not connected" });
+      }
+      this.connect();
     }
-  } else {
-    console.error("❌ Cannot send message - socket not connected");
-    this.emitEvent("socket_error", { message: "Socket not connected" });
-    if (callback) {
-      callback({ success: false, error: "Socket not connected" });
-    }
-    this.connect();
   }
-}
 
   /**
    * Send typing indicator to a room
