@@ -373,6 +373,209 @@ const deleteAudioFileIfExists = async (fileUrl) => {
   return await deleteAudioFile(fileUrl);
 };
 
+// ============================================
+// 🔴 Updated: ATTACHMENT UPLOAD CONFIGURATION (Multiple Files)
+// ============================================
+
+// Ensure attachment directory exists
+const attachmentDir = "uploads/chat/attachments";
+if (!fs.existsSync(attachmentDir)) {
+  fs.mkdirSync(attachmentDir, { recursive: true });
+  console.log(`✅ Created directory: ${attachmentDir}`);
+}
+
+/**
+ * Attachment file filter - Allows images, videos, documents
+ */
+const attachmentFileFilter = (req, file, cb) => {
+  const allowedImageTypes = [
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+  ];
+  const allowedVideoTypes = [
+    "video/mp4",
+    "video/quicktime",
+    "video/x-msvideo",
+    "video/webm",
+  ];
+  const allowedDocTypes = [
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "text/plain",
+    "application/zip",
+    "application/x-rar-compressed",
+    "application/octet-stream",
+  ];
+
+  const allAllowed = [
+    ...allowedImageTypes,
+    ...allowedVideoTypes,
+    ...allowedDocTypes,
+  ];
+  const ext = path.extname(file.originalname).toLowerCase();
+  const allowedExts = [
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".webp",
+    ".heic",
+    ".heif",
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".webm",
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".txt",
+    ".csv",
+    ".zip",
+    ".rar",
+  ];
+
+  if (allAllowed.includes(file.mimetype) || allowedExts.includes(ext)) {
+    cb(null, true);
+  } else {
+    cb(new Error(`File type not supported: ${file.originalname}`), false);
+  }
+};
+
+// 🔴 Storage for multiple attachments
+const attachmentStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, attachmentDir);
+  },
+  filename: (req, file, cb) => {
+    const userId = req.user?.id || "unknown";
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname).toLowerCase() || ".bin";
+    const filename = `attachment-${userId}-${uniqueSuffix}${ext}`;
+    cb(null, filename);
+  },
+});
+
+// 🔴 Updated: Allow up to 10 files, 50MB each
+const attachmentUpload = multer({
+  storage: attachmentStorage,
+  fileFilter: attachmentFileFilter,
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB per file
+    files: 10, // Max 10 files per upload
+  },
+});
+
+/**
+ * 🔴 Upload multiple attachments (images, videos, documents)
+ * Supports up to 10 files in a single request
+ */
+const uploadAttachments = (req, res, next) => {
+  console.log("📎 [uploadAttachments] Processing attachment upload...");
+
+  // Accept multiple files with field name "attachments"
+  attachmentUpload.array("attachments", 10)(req, res, (err) => {
+    if (err) {
+      console.error("❌ Attachment upload error:", err);
+      return handleUploadError(err, req, res, next);
+    }
+
+    if (req.files && req.files.length > 0) {
+      console.log(`✅ ${req.files.length} attachment(s) saved successfully:`);
+
+      req.attachmentsInfo = req.files
+        .map((file) => {
+          const filePath = file.path;
+          if (fs.existsSync(filePath)) {
+            const stats = fs.statSync(filePath);
+            console.log(
+              `   📁 ${file.originalname} (${formatBytes(stats.size)})`,
+            );
+
+            // Determine attachment type
+            let attachmentType = "file";
+            if (file.mimetype.startsWith("image/")) attachmentType = "image";
+            else if (file.mimetype.startsWith("video/"))
+              attachmentType = "video";
+
+            return {
+              filename: file.filename,
+              originalname: file.originalname,
+              url: `/uploads/chat/attachments/${file.filename}`,
+              size: file.size,
+              mimetype: file.mimetype,
+              type: attachmentType,
+            };
+          }
+          return null;
+        })
+        .filter(Boolean);
+    } else {
+      console.log("ℹ️ No files in request (may be location share)");
+    }
+
+    next();
+  });
+};
+
+/**
+ * 🔴 Also keep single file upload for backward compatibility
+ */
+const uploadSingleAttachment = (req, res, next) => {
+  console.log(
+    "📎 [uploadSingleAttachment] Processing single attachment upload...",
+  );
+
+  attachmentUpload.single("attachment")(req, res, (err) => {
+    if (err) {
+      console.error("❌ Attachment upload error:", err);
+      return handleUploadError(err, req, res, next);
+    }
+
+    if (req.file) {
+      const filePath = req.file.path;
+      if (fs.existsSync(filePath)) {
+        const stats = fs.statSync(filePath);
+        console.log("✅ Attachment saved successfully:");
+        console.log(`   📁 Path: ${filePath}`);
+        console.log(`   📝 Filename: ${req.file.filename}`);
+        console.log(`   📏 Size: ${formatBytes(stats.size)}`);
+        console.log(`   📎 Type: ${req.file.mimetype}`);
+
+        let attachmentType = "file";
+        if (req.file.mimetype.startsWith("image/")) attachmentType = "image";
+        else if (req.file.mimetype.startsWith("video/"))
+          attachmentType = "video";
+
+        req.attachmentInfo = {
+          filename: req.file.filename,
+          originalname: req.file.originalname,
+          url: `/uploads/chat/attachments/${req.file.filename}`,
+          size: req.file.size,
+          mimetype: req.file.mimetype,
+          type: attachmentType,
+        };
+      }
+    } else {
+      console.error("❌ No file in request after multer processing");
+    }
+
+    next();
+  });
+};
+
 module.exports = {
   // Image uploads
   uploadProfilePicture,
@@ -385,6 +588,10 @@ module.exports = {
   // Audio uploads
   uploadAudioMessage,
   deleteAudioFileIfExists,
+
+  // Attachment uploads 
+  uploadAttachments,
+  uploadSingleAttachment,
 
   // Utilities
   deleteOldImage,

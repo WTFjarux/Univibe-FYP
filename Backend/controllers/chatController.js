@@ -1,16 +1,16 @@
-/**
- * controllers/chatController.js — REST API for Chat
- *
- * Handles HTTP endpoints for chat functionality including audio messages and reactions
- */
+// backend/controllers/chatController.js
 
 const Message = require("../models/Message");
 const User = require("../models/User");
 const Profile = require("../models/Profile");
 const ChatRoom = require("../models/ChatRoom");
 
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
 /**
- * Helper function to generate direct room ID
+ * Generate direct room ID (sorted user IDs for consistency)
  */
 const getDirectRoomId = (userId1, userId2) => {
   const ids = [userId1.toString(), userId2.toString()].sort();
@@ -18,12 +18,11 @@ const getDirectRoomId = (userId1, userId2) => {
 };
 
 /**
- * Helper function to detect reply type from message content
+ * Detect reply type from message content
  */
 const detectReplyType = (replyTo) => {
   if (!replyTo) return "text";
 
-  // Check if it's an audio message
   if (
     replyTo.message === "🎤 Voice message" ||
     replyTo.message?.includes("Voice message") ||
@@ -32,7 +31,6 @@ const detectReplyType = (replyTo) => {
     return "audio";
   }
 
-  // Check if it's an image message
   if (
     replyTo.message === "📷 Photo" ||
     replyTo.message?.includes("Photo") ||
@@ -44,6 +42,10 @@ const detectReplyType = (replyTo) => {
   return "text";
 };
 
+// ============================================
+// CHAT ROOM CONTROLLERS
+// ============================================
+
 /**
  * Get or create a direct message room
  */
@@ -52,7 +54,6 @@ const getOrCreateDirectRoom = async (req, res) => {
     const { otherUserId } = req.params;
     const currentUserId = req.user.id;
 
-    // Generate room ID (sorted user IDs)
     const roomId = getDirectRoomId(currentUserId, otherUserId);
 
     let chatRoom = await ChatRoom.findOne({ roomId });
@@ -61,9 +62,20 @@ const getOrCreateDirectRoom = async (req, res) => {
       chatRoom = new ChatRoom({
         roomId,
         type: "direct",
+        // 🔴 FIXED: Pass participant objects (not strings)
         participants: [
-          { userId: currentUserId, joinedAt: new Date(), role: "member" },
-          { userId: otherUserId, joinedAt: new Date(), role: "member" },
+          {
+            userId: currentUserId,
+            joinedAt: new Date(),
+            role: "member",
+            lastReadAt: new Date(),
+          },
+          {
+            userId: otherUserId,
+            joinedAt: new Date(),
+            role: "member",
+            lastReadAt: new Date(),
+          },
         ],
         createdBy: currentUserId,
       });
@@ -75,6 +87,7 @@ const getOrCreateDirectRoom = async (req, res) => {
       data: {
         roomId: chatRoom.roomId,
         type: chatRoom.type,
+        participants: chatRoom.participants,
         createdAt: chatRoom.createdAt,
       },
     });
@@ -85,83 +98,23 @@ const getOrCreateDirectRoom = async (req, res) => {
 };
 
 /**
- * Get message history for a room - UPDATED with full replyTo support including senderId
- */
-const getMessageHistory = async (req, res) => {
-  try {
-    const { roomId } = req.params;
-    const { limit = 50, before } = req.query;
-    const currentUserId = req.user.id;
-
-    let query = { roomId, isDeleted: false };
-    if (before) {
-      query.createdAt = { $lt: new Date(before) };
-    }
-
-    const messages = await Message.find(query)
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .populate("sender", "name email")
-      .lean();
-
-    // Format messages with reactions and audio duration, ensuring replyTo has all fields including senderId
-    const formattedMessages = messages.map((msg) => ({
-      ...msg,
-      formattedDuration: msg.duration
-        ? `${Math.floor(msg.duration / 60)}:${(msg.duration % 60).toString().padStart(2, "0")}`
-        : null,
-      reactions: msg.reactions || [],
-      // Ensure replyTo has all fields, with fallbacks for older messages
-      replyTo: msg.replyTo
-        ? {
-            messageId: msg.replyTo.messageId,
-            message: msg.replyTo.message,
-            senderName: msg.replyTo.senderName,
-            senderId: msg.replyTo.senderId || null, // ✅ Include senderId, fallback to null for old messages
-            type: msg.replyTo.type || detectReplyType(msg.replyTo),
-            mediaUrl: msg.replyTo.mediaUrl || "",
-            duration: msg.replyTo.duration || 0,
-          }
-        : null,
-    }));
-
-    // Mark messages as read
-    await Message.updateMany(
-      { roomId, "readBy.userId": { $ne: currentUserId } },
-      { $addToSet: { readBy: { userId: currentUserId, readAt: new Date() } } },
-    );
-
-    res.status(200).json({
-      success: true,
-      data: {
-        roomId,
-        messages: formattedMessages.reverse(),
-        hasMore: messages.length === parseInt(limit),
-      },
-    });
-  } catch (error) {
-    console.error("Error getting message history:", error);
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-};
-
-/**
- * Get user's chat rooms with profile pictures
+ * Get user's chat rooms with full read receipt data
  */
 const getUserChatRooms = async (req, res) => {
   try {
     const currentUserId = req.user.id;
 
+    // 🔴 FIXED: Query by participant.userId (embedded document)
     const chatRooms = await ChatRoom.find({
       "participants.userId": currentUserId,
     })
-      .populate("participants.userId", "name email")
-      .sort({ updatedAt: -1 });
+      .sort({ updatedAt: -1 })
+      .lean();
 
-    // Format response with profile pictures
+    // Format response with profile pictures and read receipts
     const formattedRooms = await Promise.all(
       chatRooms.map(async (room) => {
-        // Get the last message that is NOT deleted for the current user
+        // Get the last message
         const lastMessage = await Message.findOne({
           roomId: room.roomId,
           isDeleted: false,
@@ -171,45 +124,61 @@ const getUserChatRooms = async (req, res) => {
           .lean();
 
         if (room.type === "direct") {
-          // Get other participant info
+          // Find the other participant's userId
           const otherParticipant = room.participants.find(
-            (p) => p.userId._id.toString() !== currentUserId,
+            (p) => p.userId.toString() !== currentUserId,
           );
 
-          const otherUserId = otherParticipant?.userId?._id;
-
-          // Fetch profile picture for the other user
+          const otherUserId = otherParticipant?.userId;
+          let otherUser = null;
           let profilePicture = null;
+
           if (otherUserId) {
+            otherUser = await User.findById(otherUserId)
+              .select("name email username")
+              .lean();
+
             const profile = await Profile.findOne({ user: otherUserId }).lean();
-            if (profile && profile.profilePicture) {
-              profilePicture = profile.profilePicture;
-            }
+            profilePicture = profile?.profilePicture || null;
           }
+
+          // Build lastMessage with readBy array
+          const lastMessageData = lastMessage
+            ? {
+                message:
+                  lastMessage.type === "audio"
+                    ? "🎤 Voice message"
+                    : lastMessage.message,
+                sentAt: lastMessage.createdAt,
+                senderId: lastMessage.sender,
+                senderName: lastMessage.senderName,
+                type: lastMessage.type,
+                readBy:
+                  lastMessage.readBy?.map(
+                    (r) => r.user?.toString() || r.toString(),
+                  ) || [],
+              }
+            : null;
 
           return {
             roomId: room.roomId,
             type: room.type,
-            name: otherParticipant?.userId?.name || "Unknown",
-            otherUserId: otherUserId || null,
-            otherUserAvatar: profilePicture || null,
-            lastMessage: lastMessage
-              ? {
-                  message:
-                    lastMessage.type === "audio"
-                      ? "🎤 Voice message"
-                      : lastMessage.message,
-                  sentAt: lastMessage.createdAt,
-                }
-              : null,
+            name: otherUser?.name || "Unknown",
+            otherUserId: otherUserId?.toString() || null,
+            otherUserAvatar: profilePicture,
+            lastMessage: lastMessageData,
             updatedAt: lastMessage?.createdAt || room.updatedAt,
+            participants: room.participants.map((p) => p.userId.toString()),
+            isPinned: false,
+            isMuted: false,
           };
         }
 
+        // Group chat
         return {
           roomId: room.roomId,
           type: room.type,
-          name: room.name,
+          name: room.name || "Group Chat",
           avatar: room.avatar,
           otherUserId: null,
           otherUserAvatar: null,
@@ -220,9 +189,19 @@ const getUserChatRooms = async (req, res) => {
                     ? "🎤 Voice message"
                     : lastMessage.message,
                 sentAt: lastMessage.createdAt,
+                senderId: lastMessage.sender,
+                senderName: lastMessage.senderName,
+                type: lastMessage.type,
+                readBy:
+                  lastMessage.readBy?.map(
+                    (r) => r.user?.toString() || r.toString(),
+                  ) || [],
               }
             : null,
           updatedAt: lastMessage?.createdAt || room.updatedAt,
+          participants: room.participants.map((p) => p.userId.toString()),
+          isPinned: false,
+          isMuted: false,
         };
       }),
     );
@@ -243,6 +222,191 @@ const getUserChatRooms = async (req, res) => {
   }
 };
 
+/**
+ * Get message history with full read receipt data
+ */
+const getMessageHistory = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { limit = 50, before } = req.query;
+    const currentUserId = req.user.id;
+
+    let query = {
+      roomId,
+      isDeleted: false,
+      deletedFor: { $ne: currentUserId },
+    };
+
+    if (before) {
+      query.createdAt = { $lt: new Date(before) };
+    }
+
+    const messages = await Message.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .populate("sender", "name email avatar")
+      .populate("readBy.user", "name avatar")
+      .populate("deliveredTo.user", "name avatar")
+      .populate("reactions.user", "name")
+      .lean();
+
+    // Format messages with proper read/delivered arrays
+    const formattedMessages = messages.map((msg) => ({
+      ...msg,
+      formattedDuration: msg.duration
+        ? `${Math.floor(msg.duration / 60)}:${(msg.duration % 60).toString().padStart(2, "0")}`
+        : null,
+      reactions: msg.reactions || [],
+      readBy: (msg.readBy || []).map((r) => ({
+        userId: r.user?._id || r.user,
+        readAt: r.readAt,
+      })),
+      deliveredTo: (msg.deliveredTo || []).map((d) => ({
+        userId: d.user?._id || d.user,
+        deliveredAt: d.deliveredAt,
+      })),
+      replyTo: msg.replyTo
+        ? {
+            messageId: msg.replyTo.messageId,
+            message: msg.replyTo.message,
+            senderName: msg.replyTo.senderName,
+            senderId: msg.replyTo.senderId || null,
+            type: msg.replyTo.type || detectReplyType(msg.replyTo),
+            mediaUrl: msg.replyTo.mediaUrl || "",
+            duration: msg.replyTo.duration || 0,
+          }
+        : null,
+    }));
+
+    // Mark messages as delivered when fetched
+    const unDeliveredMessages = messages.filter(
+      (msg) =>
+        !msg.deliveredTo?.some(
+          (d) => d.user?.toString() === currentUserId.toString(),
+        ),
+    );
+
+    if (unDeliveredMessages.length > 0) {
+      await Promise.all(
+        unDeliveredMessages.map((msg) =>
+          Message.findByIdAndUpdate(
+            msg._id,
+            {
+              $addToSet: {
+                deliveredTo: { user: currentUserId, deliveredAt: new Date() },
+              },
+            },
+            { new: true },
+          ),
+        ),
+      );
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        roomId,
+        messages: formattedMessages.reverse(),
+        hasMore: messages.length === parseInt(limit),
+      },
+    });
+  } catch (error) {
+    console.error("Error getting message history:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+/**
+ * Mark all messages in a room as read
+ */
+const markRoomAsRead = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const userId = req.user.id;
+
+    const modifiedCount = await Message.markRoomAsRead(roomId, userId);
+
+    // Update room's lastMessage.readBy
+    const room = await ChatRoom.findOne({ roomId });
+    if (room?.lastMessage) {
+      if (!room.lastMessage.readBy) {
+        room.lastMessage.readBy = [];
+      }
+      if (
+        !room.lastMessage.readBy.some(
+          (id) => id.toString() === userId.toString(),
+        )
+      ) {
+        room.lastMessage.readBy.push(userId);
+        await room.save();
+      }
+    }
+
+    // Get other participant for socket notification
+    const otherParticipant = room?.participants.find(
+      (p) => p.userId.toString() !== userId.toString(),
+    );
+
+    res.status(200).json({
+      success: true,
+      message: `Marked ${modifiedCount} messages as read`,
+      modifiedCount,
+      otherUserId: otherParticipant?.userId.toString() || null,
+    });
+  } catch (error) {
+    console.error("Error marking room as read:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+/**
+ * Mark room as unread for current user
+ * This removes the user from readBy array of the last message
+ */
+const markRoomAsUnread = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const userId = req.user.id;
+
+    // Find the room
+    const room = await ChatRoom.findOne({ roomId });
+
+    if (!room) {
+      return res.status(404).json({
+        success: false,
+        message: "Room not found",
+      });
+    }
+
+    // Remove user from lastMessage.readBy
+    if (room.lastMessage && room.lastMessage.readBy) {
+      room.lastMessage.readBy = room.lastMessage.readBy.filter(
+        (id) => id.toString() !== userId.toString(),
+      );
+      await room.save();
+    }
+
+    // Also remove user from readBy of the actual last message
+    const lastMessage = await Message.findOne({ roomId }).sort({
+      createdAt: -1,
+    });
+
+    if (lastMessage) {
+      lastMessage.readBy = lastMessage.readBy.filter(
+        (r) => r.user.toString() !== userId.toString(),
+      );
+      await lastMessage.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Room marked as unread",
+    });
+  } catch (error) {
+    console.error("Error marking room as unread:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
 /**
  * Delete a message (soft delete)
  */
@@ -319,6 +483,10 @@ const getOtherUserProfile = async (req, res) => {
   }
 };
 
+// ============================================
+// AUDIO CONTROLLERS
+// ============================================
+
 /**
  * Mark audio message as played
  */
@@ -335,7 +503,6 @@ const markAudioAsPlayed = async (req, res) => {
       });
     }
 
-    // Update isPlayed field if it exists
     if (message.type === "audio") {
       message.isPlayed = true;
       await message.save();
@@ -365,6 +532,7 @@ const getUnplayedAudio = async (req, res) => {
       isPlayed: false,
       sender: { $ne: userId },
       isDeleted: false,
+      deletedFor: { $ne: userId },
     }).sort({ createdAt: 1 });
 
     res.status(200).json({
@@ -378,7 +546,7 @@ const getUnplayedAudio = async (req, res) => {
 };
 
 // ============================================
-// REACTION HANDLERS
+// REACTION CONTROLLERS
 // ============================================
 
 /**
@@ -390,41 +558,20 @@ const addReaction = async (req, res) => {
     const { reaction, remove } = req.body;
     const userId = req.user.id;
 
-    // If remove flag is true, call removeReaction logic
-    if (remove) {
-      const message = await Message.findById(messageId);
-      if (!message) {
-        return res.status(404).json({
-          success: false,
-          message: "Message not found",
-        });
-      }
+    const validReactions = [
+      "👍",
+      "❤️",
+      "😂",
+      "😮",
+      "😢",
+      "😡",
+      "🎉",
+      "🙏",
+      "👏",
+      "🔥",
+    ];
 
-      if (!message.reactions) {
-        message.reactions = [];
-      }
-
-      // Remove user's reaction
-      message.reactions = message.reactions.filter(
-        (r) => r.userId.toString() !== userId,
-      );
-
-      await message.save();
-
-      const populatedMessage = await Message.findById(messageId)
-        .populate("reactions.userId", "name username")
-        .lean();
-
-      return res.status(200).json({
-        success: true,
-        reactions: populatedMessage.reactions || [],
-        message: "Reaction removed successfully",
-      });
-    }
-
-    // Otherwise, add/update reaction (existing logic)
-    const validReactions = ["👍", "❤️", "😂", "😮", "😢", "😡"];
-    if (!validReactions.includes(reaction)) {
+    if (!remove && !validReactions.includes(reaction)) {
       return res.status(400).json({
         success: false,
         message: "Invalid reaction",
@@ -443,31 +590,37 @@ const addReaction = async (req, res) => {
       message.reactions = [];
     }
 
-    const existingReactionIndex = message.reactions.findIndex(
-      (r) => r.userId.toString() === userId,
-    );
-
-    if (existingReactionIndex !== -1) {
-      message.reactions[existingReactionIndex].reaction = reaction;
-      message.reactions[existingReactionIndex].createdAt = new Date();
+    if (remove) {
+      message.reactions = message.reactions.filter(
+        (r) => r.user.toString() !== userId,
+      );
     } else {
-      message.reactions.push({
-        userId,
-        reaction,
-        createdAt: new Date(),
-      });
+      const existingIndex = message.reactions.findIndex(
+        (r) => r.user.toString() === userId,
+      );
+
+      if (existingIndex !== -1) {
+        message.reactions[existingIndex].reaction = reaction;
+        message.reactions[existingIndex].createdAt = new Date();
+      } else {
+        message.reactions.push({
+          user: userId,
+          reaction,
+          createdAt: new Date(),
+        });
+      }
     }
 
     await message.save();
 
     const populatedMessage = await Message.findById(messageId)
-      .populate("reactions.userId", "name username")
+      .populate("reactions.user", "name username")
       .lean();
 
     res.status(200).json({
       success: true,
       reactions: populatedMessage.reactions || [],
-      message: "Reaction added successfully",
+      message: remove ? "Reaction removed" : "Reaction added",
     });
   } catch (error) {
     console.error("Error adding reaction:", error);
@@ -494,21 +647,18 @@ const removeReaction = async (req, res) => {
       });
     }
 
-    // Initialize reactions array if it doesn't exist
     if (!message.reactions) {
       message.reactions = [];
     }
 
-    // Remove user's reaction
     message.reactions = message.reactions.filter(
-      (r) => r.userId.toString() !== userId,
+      (r) => r.user.toString() !== userId,
     );
 
     await message.save();
 
-    // Populate user info for reactions
     const populatedMessage = await Message.findById(messageId)
-      .populate("reactions.userId", "name username")
+      .populate("reactions.user", "name username")
       .lean();
 
     res.status(200).json({
@@ -533,7 +683,7 @@ const getMessageReactions = async (req, res) => {
     const { messageId } = req.params;
 
     const message = await Message.findById(messageId)
-      .populate("reactions.userId", "name username")
+      .populate("reactions.user", "name username")
       .lean();
 
     if (!message) {
@@ -556,10 +706,16 @@ const getMessageReactions = async (req, res) => {
   }
 };
 
+// ============================================
+// EXPORTS
+// ============================================
+
 module.exports = {
   getOrCreateDirectRoom,
   getMessageHistory,
   getUserChatRooms,
+  markRoomAsRead,
+  markRoomAsUnread,
   deleteMessage,
   getOtherUserProfile,
   markAudioAsPlayed,

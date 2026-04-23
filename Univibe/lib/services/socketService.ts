@@ -1,6 +1,5 @@
-// services/socketService.ts
 /**
- * Socket.IO Service
+ * services/socketService.ts
  * 
  * Manages real-time WebSocket connections for chat, typing indicators,
  * user presence, and WebRTC signaling.
@@ -11,6 +10,8 @@
  * - Room-based message isolation
  * - Real-time typing indicators
  * - User online/offline presence
+ * - WhatsApp-level read receipts
+ * - Message reactions
  * - WebRTC signaling for future calls
  */
 
@@ -37,10 +38,13 @@ interface Message {
   status?: string;
   mediaUrl?: string;
   duration?: number;
+  readBy?: Array<{ user: string; readAt: Date }>;
+  deliveredTo?: Array<{ user: string; deliveredAt: Date }>;
   replyTo?: {
     messageId: string;
     message: string;
     senderName: string;
+    senderId?: string;
     type?: string;
     mediaUrl?: string;
     duration?: number;
@@ -79,20 +83,48 @@ interface ReplyToData {
   messageId: string;
   message: string;
   senderName: string;
+  senderId?: string;
   type?: string;
   mediaUrl?: string;
   duration?: number;
 }
 
+interface ReadReceiptData {
+  roomId: string;
+  userId: string;
+  readAt?: string;
+}
+
+interface MessageReadData {
+  messageId: string;
+  roomId: string;
+  userId: string;
+  readAt?: string;
+}
+
+interface ReactionData {
+  messageId: string;
+  userId: string;
+  reaction?: string;
+  reactions?: any[];
+}
+
+interface DeleteMessageData {
+  roomId: string;
+  messageId: string;
+  deletedBy: string;
+  timestamp?: Date;
+}
+
 type EventCallback = (data: any) => void;
 
-// Socket URL - Use the same base URL as API
-// Remove '/api' if present and ensure it's just the base URL
+// ============================================
+// SOCKET URL CONFIGURATION
+// ============================================
+
 const getSocketUrl = (): string => {
-  // Remove any trailing slashes and '/api' from the base URL
   let baseUrl = API_BASE_URL.replace(/\/api$/, '').replace(/\/$/, '');
 
-  // Platform-specific adjustments if needed
   if (Platform.OS === 'android' && baseUrl.includes('localhost')) {
     baseUrl = baseUrl.replace('localhost', '10.0.2.2');
   }
@@ -116,20 +148,20 @@ class SocketService {
   private pendingRooms: Array<{ roomId: string; otherUserId: string | null; type: string }> = [];
   private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  constructor() {
-    // Initialization happens when connect() is called
-  }
+  constructor() {}
+
+  // ============================================
+  // CONNECTION MANAGEMENT
+  // ============================================
 
   /**
    * Establish socket connection with authentication
-   * @returns Socket instance or null if connection fails
    */
   async connect(): Promise<Socket | null> {
     try {
       const token = await SecureStore.getItemAsync('authToken');
 
       if (!token) {
-        // Schedule retry if token not available yet
         if (this.connectionRetryTimeout) {
           clearTimeout(this.connectionRetryTimeout);
         }
@@ -143,7 +175,6 @@ class SocketService {
         return this.socket;
       }
 
-      // Clean up existing connection
       if (this.socket) {
         this.socket.disconnect();
         this.socket = null;
@@ -175,14 +206,16 @@ class SocketService {
   private setupEventListeners(): void {
     if (!this.socket) return;
 
-    // Connection events
+    // ============================================
+    // CONNECTION EVENTS
+    // ============================================
+
     this.socket.on('connect', () => {
       console.log('✅ Socket connected successfully! ID:', this.socket?.id);
       this.isConnected = true;
       this.reconnectAttempts = 0;
       this.emitEvent('socket_connected', {});
 
-      // Join any rooms that were queued while disconnected
       if (this.pendingRooms.length > 0) {
         console.log(`📦 Joining ${this.pendingRooms.length} pending rooms`);
         this.pendingRooms.forEach(room => {
@@ -201,7 +234,6 @@ class SocketService {
       this.isConnected = false;
       this.emitEvent('socket_disconnected', { reason });
 
-      // Auto-reconnect for unexpected disconnections
       if (reason === 'io server disconnect' || reason === 'transport close') {
         console.log('🔄 Attempting to reconnect...');
         setTimeout(() => this.connect(), 1000);
@@ -226,17 +258,18 @@ class SocketService {
       this.emitEvent('socket_reconnect_failed', {});
     });
 
-    // Chat events
+    // ============================================
+    // CHAT EVENTS
+    // ============================================
+
     this.socket.on('receive_message', (message: Message) => {
       console.log('📨 Received message:', message.message?.substring(0, 50));
-      console.log('📎 Reply data:', message.replyTo);
       this.emitEvent('receive_message', message);
       this.emitEvent('new_message', message);
     });
 
     this.socket.on('message_delivered', (message: Message) => {
       console.log('✅ Message delivered:', message._id);
-      console.log('📎 Delivered message replyTo:', message.replyTo);
       this.emitEvent('message_delivered', message);
     });
 
@@ -245,7 +278,57 @@ class SocketService {
       this.emitEvent('room_joined', data);
     });
 
-    // Typing events
+    // ============================================
+    // 🔴 READ RECEIPT EVENTS (WHATSAPP-LEVEL)
+    // ============================================
+
+    this.socket.on('messages_read', (data: ReadReceiptData) => {
+      console.log(`📖 Messages read in room ${data.roomId} by ${data.userId}`);
+      this.emitEvent('messages_read', data);
+    });
+
+    this.socket.on('message_read', (data: MessageReadData) => {
+      console.log(`📖 Message ${data.messageId} read by ${data.userId}`);
+      this.emitEvent('message_read', data);
+    });
+
+    this.socket.on('messages_marked_read', (data: { roomId: string; modifiedCount: number }) => {
+      console.log(`✅ Marked ${data.modifiedCount} messages as read in room ${data.roomId}`);
+      this.emitEvent('messages_marked_read', data);
+    });
+
+    this.socket.on('message_delivered_to_recipient', (data: { messageId: string; recipientId: string }) => {
+      console.log(`✅ Message ${data.messageId} delivered to ${data.recipientId}`);
+      this.emitEvent('message_delivered_to_recipient', data);
+    });
+
+    // ============================================
+    // 🔴 MESSAGE DELETION EVENTS
+    // ============================================
+
+    this.socket.on('message_deleted', (data: DeleteMessageData) => {
+      console.log(`🗑️ Message ${data.messageId} deleted in room ${data.roomId}`);
+      this.emitEvent('message_deleted', data);
+    });
+
+    // ============================================
+    // 🔴 REACTION EVENTS
+    // ============================================
+
+    this.socket.on('reaction_added', (data: ReactionData) => {
+      console.log(`👍 Reaction added to ${data.messageId}: ${data.reaction}`);
+      this.emitEvent('reaction_added', data);
+    });
+
+    this.socket.on('reaction_removed', (data: ReactionData) => {
+      console.log(`👎 Reaction removed from ${data.messageId}`);
+      this.emitEvent('reaction_removed', data);
+    });
+
+    // ============================================
+    // TYPING EVENTS
+    // ============================================
+
     this.socket.on('typing', (data: TypingData) => {
       this.emitEvent('typing', data);
       this.emitEvent('user_typing', data);
@@ -256,7 +339,10 @@ class SocketService {
       this.emitEvent('user_stop_typing', data);
     });
 
-    // User presence events
+    // ============================================
+    // USER PRESENCE EVENTS
+    // ============================================
+
     this.socket.on('user_online', (data: UserStatus) => {
       console.log('👤 User online:', data.userId);
       this.emitEvent('user_online', data);
@@ -267,7 +353,15 @@ class SocketService {
       this.emitEvent('user_offline', data);
     });
 
-    // WebRTC signaling events (future implementation)
+    this.socket.on('user_joined_room', (data: { userId: string; roomId: string }) => {
+      console.log(`👤 User ${data.userId} joined room ${data.roomId}`);
+      this.emitEvent('user_joined_room', data);
+    });
+
+    // ============================================
+    // WEBRTC SIGNALING EVENTS
+    // ============================================
+
     this.socket.on('call_user', (data: CallData) => {
       console.log('📞 Incoming call from:', data.fromUserId);
       this.emitEvent('incoming_call', data);
@@ -300,10 +394,23 @@ class SocketService {
       this.emitEvent('call_ended', data);
     });
 
-    // Error handling
+    // ============================================
+    // ERROR HANDLING
+    // ============================================
+
     this.socket.on('error', (error: Error) => {
       console.error('❌ Socket error:', error);
       this.emitEvent('socket_error', error);
+    });
+
+this.socket.on('message_error', (error: any) => {
+  if (!error) {
+    console.error('❌ Message error: Unknown server error');
+    this.emitEvent('message_error', { message: 'Unknown server error' });
+    return;
+  }
+  console.error('❌ Message error:', error.message || error.error || 'Unknown error');
+  this.emitEvent('message_error', error);
     });
   }
 
@@ -313,8 +420,6 @@ class SocketService {
 
   /**
    * Register event listener
-   * @param event - Event name
-   * @param callback - Callback function
    */
   on(event: string, callback: EventCallback): void {
     if (!this.eventListeners.has(event)) {
@@ -325,8 +430,6 @@ class SocketService {
 
   /**
    * Remove event listener
-   * @param event - Event name
-   * @param callback - Callback function to remove
    */
   off(event: string, callback: EventCallback): void {
     const listeners = this.eventListeners.get(event);
@@ -338,7 +441,6 @@ class SocketService {
 
   /**
    * Remove all listeners for an event or all events
-   * @param event - Optional event name
    */
   removeAllListeners(event?: string): void {
     if (event) {
@@ -350,8 +452,6 @@ class SocketService {
 
   /**
    * Emit event to all registered listeners
-   * @param event - Event name
-   * @param data - Event data
    */
   private emitEvent(event: string, data: any): void {
     const listeners = this.eventListeners.get(event);
@@ -372,9 +472,6 @@ class SocketService {
 
   /**
    * Join a chat room
-   * @param roomId - Room identifier
-   * @param otherUserId - Other participant's user ID (for direct chats)
-   * @param type - Room type ('direct' or 'group')
    */
   joinRoom(roomId: string, otherUserId: string | null = null, type: string = 'direct'): void {
     if (this.socket && this.isConnected) {
@@ -388,44 +485,98 @@ class SocketService {
   }
 
   /**
-   * Send a message to a room with acknowledgment callback
-   * @param roomId - Room identifier
-   * @param message - Message content
-   * @param type - Message type ('text', 'image', 'audio', etc.)
-   * @param replyTo - Optional reply information with full type support
-   * @param callback - Optional callback for acknowledgment
+   * Leave a chat room
+   */
+  leaveRoom(roomId: string): void {
+    if (this.socket && this.isConnected) {
+      console.log(`👋 Leaving room: ${roomId}`);
+      this.socket.emit('leave_room', { roomId });
+    }
+  }
+
+  /**
+   * Send a message to a room
    */
   sendMessage(
     roomId: string,
     message: string,
     type: string = "text",
     replyTo?: ReplyToData,
-    callback?: (response: any) => void
+    tempId?: string,
+    mediaUrl?: string,
+    duration?: number
   ): void {
     if (this.socket && this.isConnected) {
       console.log(`📤 Sending ${type} message to room ${roomId}`);
-      console.log("📎 Reply data:", replyTo);
       
-      const data = { roomId, message, type, replyTo };
+      const data: any = { roomId, message, type, replyTo };
+      if (tempId) data.tempId = tempId;
+      if (mediaUrl) data.mediaUrl = mediaUrl;
+      if (duration) data.duration = duration;
       
-      if (callback) {
-        this.socket.emit("send_message", data, callback);
-      } else {
-        this.socket.emit("send_message", data);
-      }
+      this.socket.emit("send_message", data);
     } else {
       console.error("❌ Cannot send message - socket not connected");
-      this.emitEvent("socket_error", { message: "Socket not connected" });
-      if (callback) {
-        callback({ success: false, error: "Socket not connected" });
-      }
+      this.emitEvent("message_error", { 
+        tempId, 
+        error: "Socket not connected" 
+      });
       this.connect();
     }
   }
 
   /**
-   * Send typing indicator to a room
-   * @param roomId - Room identifier
+   * 🔴 Mark all messages in a room as read (WhatsApp-level)
+   */
+  markRoomAsRead(roomId: string): void {
+    if (this.socket && this.isConnected) {
+      console.log(`📖 Marking room as read: ${roomId}`);
+      this.socket.emit('mark_read', { roomId });
+    } else {
+      console.error(`❌ Cannot mark room as read - socket not connected`);
+      this.connect();
+    }
+  }
+
+  /**
+   * 🔴 Mark a single message as read
+   */
+  markMessageAsRead(messageId: string): void {
+    if (this.socket && this.isConnected) {
+      this.socket.emit('mark_message_read', { messageId });
+    }
+  }
+
+  /**
+   * 🔴 Add reaction to a message
+   */
+  addReaction(messageId: string, reaction: string): void {
+    if (this.socket && this.isConnected) {
+      this.socket.emit('add_reaction', { messageId, reaction });
+    }
+  }
+
+  /**
+   * 🔴 Remove reaction from a message
+   */
+  removeReaction(messageId: string): void {
+    if (this.socket && this.isConnected) {
+      this.socket.emit('remove_reaction', { messageId });
+    }
+  }
+
+  /**
+   * Delete a message
+   */
+  deleteMessage(messageId: string, roomId: string): void {
+    if (this.socket && this.isConnected) {
+      console.log(`🗑️ Deleting message: ${messageId}`);
+      this.socket.emit('delete_message', { messageId, roomId });
+    }
+  }
+
+  /**
+   * Send typing indicator
    */
   sendTyping(roomId: string): void {
     if (this.socket && this.isConnected) {
@@ -434,8 +585,7 @@ class SocketService {
   }
 
   /**
-   * Stop typing indicator in a room
-   * @param roomId - Room identifier
+   * Stop typing indicator
    */
   stopTyping(roomId: string): void {
     if (this.socket && this.isConnected) {
@@ -444,21 +594,7 @@ class SocketService {
   }
 
   /**
-   * Mark messages as read
-   * @param roomId - Room identifier
-   * @param messageIds - Array of message IDs
-   */
-  markMessagesAsRead(roomId: string, messageIds: string[]): void {
-    if (this.socket && this.isConnected) {
-      this.socket.emit('message_read', { roomId, messageIds });
-    }
-  }
-
-  /**
-   * Request message history for a room
-   * @param roomId - Room identifier
-   * @param limit - Number of messages to fetch
-   * @param before - Timestamp for pagination
+   * Request message history
    */
   getMessageHistory(roomId: string, limit: number = 50, before: string | null = null): void {
     if (this.socket && this.isConnected) {
@@ -467,15 +603,9 @@ class SocketService {
   }
 
   // ============================================
-  // WEBRTC SIGNALING (FUTURE IMPLEMENTATION)
+  // WEBRTC SIGNALING
   // ============================================
 
-  /**
-   * Initiate a call to another user
-   * @param targetUserId - Target user ID
-   * @param callType - 'audio' or 'video'
-   * @param offer - WebRTC offer
-   */
   callUser(targetUserId: string, callType: string = 'video', offer: any = null): void {
     if (this.socket && this.isConnected) {
       console.log(`📞 Calling user: ${targetUserId}`);
@@ -483,63 +613,36 @@ class SocketService {
     }
   }
 
-  /**
-   * Accept an incoming call
-   * @param targetUserId - Caller user ID
-   */
   acceptCall(targetUserId: string): void {
     if (this.socket && this.isConnected) {
       this.socket.emit('call_accepted', { targetUserId });
     }
   }
 
-  /**
-   * Reject an incoming call
-   * @param targetUserId - Caller user ID
-   */
   rejectCall(targetUserId: string): void {
     if (this.socket && this.isConnected) {
       this.socket.emit('call_rejected', { targetUserId });
     }
   }
 
-  /**
-   * Send WebRTC offer
-   * @param targetUserId - Target user ID
-   * @param offer - WebRTC offer
-   */
   sendOffer(targetUserId: string, offer: any): void {
     if (this.socket && this.isConnected) {
       this.socket.emit('offer', { targetUserId, offer });
     }
   }
 
-  /**
-   * Send WebRTC answer
-   * @param targetUserId - Target user ID
-   * @param answer - WebRTC answer
-   */
   sendAnswer(targetUserId: string, answer: any): void {
     if (this.socket && this.isConnected) {
       this.socket.emit('answer', { targetUserId, answer });
     }
   }
 
-  /**
-   * Send ICE candidate
-   * @param targetUserId - Target user ID
-   * @param candidate - ICE candidate
-   */
   sendICECandidate(targetUserId: string, candidate: any): void {
     if (this.socket && this.isConnected) {
       this.socket.emit('ice_candidate', { targetUserId, candidate });
     }
   }
 
-  /**
-   * End an active call
-   * @param targetUserId - Other participant's user ID
-   */
   endCall(targetUserId: string): void {
     if (this.socket && this.isConnected) {
       console.log(`📞 Ending call with: ${targetUserId}`);
@@ -548,14 +651,12 @@ class SocketService {
   }
 
   // ============================================
-  // CONNECTION MANAGEMENT
+  // UTILITY METHODS
   // ============================================
 
   /**
-  * Emit a custom event to the server
-  * @param event - Event name
-  * @param data - Event data
-  */
+   * Emit a custom event to the server
+   */
   emit(event: string, data: any): void {
     if (this.socket && this.isConnected) {
       console.log(`📡 Emitting event: ${event}`);
@@ -567,7 +668,7 @@ class SocketService {
   }
 
   /**
-   * Disconnect the socket connection
+   * Disconnect the socket
    */
   disconnect(): void {
     if (this.connectionRetryTimeout) {
@@ -585,7 +686,7 @@ class SocketService {
   }
 
   /**
-   * Manually reconnect the socket
+   * Manually reconnect
    */
   reconnect(): void {
     console.log('🔄 Manual reconnect requested');
@@ -594,16 +695,14 @@ class SocketService {
   }
 
   /**
-   * Get current connection status
-   * @returns True if connected, false otherwise
+   * Get connection status
    */
   getConnectionStatus(): boolean {
     return this.isConnected;
   }
 
   /**
-   * Get current socket ID
-   * @returns Socket ID or null
+   * Get socket ID
    */
   getSocketId(): string | null {
     return this.socket?.id || null;
@@ -611,3 +710,4 @@ class SocketService {
 }
 
 export default new SocketService();
+export { SocketService };

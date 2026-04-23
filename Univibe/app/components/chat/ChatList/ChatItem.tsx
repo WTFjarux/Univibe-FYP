@@ -1,29 +1,30 @@
-/**
- * ChatItem.tsx
- *
- * A single row in the chat list.
- */
+// app/components/chat/ChatList/ChatItem.tsx
 
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import {
   View,
   Text,
-  TouchableOpacity,
+  Pressable,
   Image,
   StyleSheet,
   Animated,
   Dimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import {
-  getAvatarUrl,
-  formatTime,
-  getInitials,
-} from "../../../../lib/utils/chatUtils";
+import * as Haptics from "expo-haptics";
+import { getAvatarUrl, formatTime } from "../../../../lib/utils/chatUtils";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ============================================
+// DEFAULT AVATAR
+// ============================================
+
+const DEFAULT_AVATAR = require("../../../../assets/images/default-avatar.png");
+
+// ──────────────────────────────────────────────────────────────────────────────
+// TYPES
+// ──────────────────────────────────────────────────────────────────────────────
 
 export interface ChatRoom {
   roomId: string;
@@ -34,11 +35,16 @@ export interface ChatRoom {
   lastMessage?: {
     message: string;
     sentAt: string;
+    senderId: string;
+    senderName: string;
+    type: string;
+    readBy: string[];
   };
   updatedAt: string;
   isPinned?: boolean;
   isMuted?: boolean;
   isRead?: boolean;
+  participants?: string[];
 }
 
 export interface ChatItemProps {
@@ -53,9 +59,14 @@ export interface ChatItemProps {
     item: ChatRoom,
     layout: { y: number; height: number; pageX: number; pageY: number },
   ) => void;
+  isUnread?: boolean;
+  currentUserId?: string;
+  disableSelectedStyle?: boolean;
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
+// COMPONENT
+// ──────────────────────────────────────────────────────────────────────────────
 
 const ChatItem: React.FC<ChatItemProps> = ({
   item,
@@ -66,14 +77,62 @@ const ChatItem: React.FC<ChatItemProps> = ({
   itemTranslateYAnim,
   onPress,
   onLongPress,
+  isUnread: isUnreadProp,
+  currentUserId,
+  disableSelectedStyle = false,
 }) => {
   const rowRef = useRef<View>(null);
+  const [avatarError, setAvatarError] = useState(false);
+  const [isPressed, setIsPressed] = useState(false);
 
-  const avatarUrl = getAvatarUrl(item.otherUserAvatar);
-  const isUnread = item.isRead === false && !!item.lastMessage;
+  const isUnread =
+    isUnreadProp !== undefined
+      ? isUnreadProp
+      : item.isRead === false && !!item.lastMessage;
+
   const isMuted = item.isMuted === true;
+  const isLastMessageFromMe = item.lastMessage?.senderId === currentUserId;
 
-  // ── Highlight tint interpolation ──────────────────────────────────────────
+  const getAvatarSource = () => {
+    if (avatarError) {
+      return DEFAULT_AVATAR;
+    }
+
+    const avatarUrl = getAvatarUrl(item.otherUserAvatar);
+    if (avatarUrl && avatarUrl.length > 0) {
+      return { uri: avatarUrl };
+    }
+
+    return DEFAULT_AVATAR;
+  };
+
+  const getLastMessageText = (): string => {
+    if (!item.lastMessage) return "No messages yet";
+
+    const { type, message } = item.lastMessage;
+    let displayMessage = message;
+
+    switch (type) {
+      case "audio":
+        displayMessage = "🎤 Voice message";
+        break;
+      case "image":
+        displayMessage = "📷 Photo";
+        break;
+      case "file":
+        displayMessage = "📎 File";
+        break;
+      default:
+        displayMessage = message || "No messages yet";
+    }
+
+    if (isLastMessageFromMe) {
+      return `You: ${displayMessage}`;
+    }
+
+    return displayMessage;
+  };
+
   const highlightBackground =
     isHighlighted && highlightAnim
       ? highlightAnim.interpolate({
@@ -82,9 +141,10 @@ const ChatItem: React.FC<ChatItemProps> = ({
         })
       : "transparent";
 
-  // ── Long-press handler ────────────────────────────────────────────────────
   const handleLongPress = () => {
-    // Use setTimeout to ensure measurement happens after layout is complete
+    setIsPressed(false); // Reset press state
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
     setTimeout(() => {
       if (rowRef.current) {
         rowRef.current.measure(
@@ -96,23 +156,13 @@ const ChatItem: React.FC<ChatItemProps> = ({
             pageX: number,
             pageY: number,
           ) => {
-            console.log("Measured layout:", {
-              x,
-              y,
-              width,
-              height,
-              pageX,
-              pageY,
-            });
-
-            // Only call if we have valid measurements
             if (pageY > 0 && height > 0) {
               onLongPress(item, { y: pageY, height, pageX, pageY });
             }
           },
         );
       }
-    }, 50); // Small delay to ensure layout is ready
+    }, 50);
   };
 
   return (
@@ -121,59 +171,43 @@ const ChatItem: React.FC<ChatItemProps> = ({
         ref={rowRef}
         style={[
           styles.wrapper,
-          isSelected && {
-            transform: [
-              { scale: itemScaleAnim },
-              { translateY: itemTranslateYAnim },
-            ],
-            shadowColor: "#000",
-            shadowOffset: { width: 0, height: 8 },
-            shadowOpacity: 0.25,
-            shadowRadius: 12,
-            elevation: 10,
-            backgroundColor: "rgba(0, 122, 255, 0.04)",
-            borderRadius: 14,
-            marginHorizontal: 8,
-            width: SCREEN_WIDTH - 16,
-            alignSelf: "center",
-          },
+          isSelected &&
+            !disableSelectedStyle && {
+              backgroundColor: "transparent",
+            },
         ]}
       >
-        <TouchableOpacity
-          style={styles.row}
+        {/* 🔴 Replace TouchableOpacity with Pressable */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.row,
+            // Only show press effect for tap (not long press)
+            pressed && !isPressed ? styles.rowPressed : null,
+          ]}
           onPress={onPress}
+          onPressIn={() => setIsPressed(false)} // Reset on press in
           onLongPress={handleLongPress}
           delayLongPress={300}
-          activeOpacity={0.7}
         >
-          {/* ── Avatar ── */}
+          {/* Avatar Section */}
           <View style={styles.avatarContainer}>
-            {avatarUrl ? (
-              <Image source={{ uri: avatarUrl }} style={styles.avatar} />
-            ) : (
-              <View
-                style={[styles.avatar, item.isPinned && styles.pinnedAvatar]}
-              >
-                <Text style={styles.avatarInitials}>
-                  {getInitials(item.name)}
-                </Text>
-              </View>
-            )}
+            <Image
+              source={getAvatarSource()}
+              style={[styles.avatar, item.isPinned && styles.pinnedAvatar]}
+              onError={() => setAvatarError(true)}
+            />
 
-            {/* Muted badge */}
             {isMuted && (
               <View style={styles.mutedBadge}>
                 <Ionicons name="volume-mute" size={12} color="#fff" />
               </View>
             )}
 
-            {/* Unread dot */}
             {isUnread && <View style={styles.unreadDot} />}
           </View>
 
-          {/* ── Text info ── */}
+          {/* Content Section */}
           <View style={styles.info}>
-            {/* Name row */}
             <View style={styles.headerRow}>
               <View style={styles.nameRow}>
                 {item.isPinned && (
@@ -193,7 +227,6 @@ const ChatItem: React.FC<ChatItemProps> = ({
               </View>
             </View>
 
-            {/* Last message row with time inline */}
             <View style={styles.messageRow}>
               {isMuted && (
                 <Ionicons
@@ -211,7 +244,7 @@ const ChatItem: React.FC<ChatItemProps> = ({
                 ]}
                 numberOfLines={1}
               >
-                {item.lastMessage?.message ?? "No messages yet"}
+                {getLastMessageText()}
               </Text>
               {item.lastMessage && (
                 <Text style={[styles.time, isUnread && styles.timeUnread]}>
@@ -220,17 +253,18 @@ const ChatItem: React.FC<ChatItemProps> = ({
               )}
             </View>
           </View>
-        </TouchableOpacity>
+        </Pressable>
       </Animated.View>
     </Animated.View>
   );
 };
 
-// Export both named and default
 export { ChatItem };
 export default ChatItem;
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
+// STYLES
+// ──────────────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   wrapper: {
@@ -246,8 +280,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     width: "100%",
   },
+  rowPressed: {
+    backgroundColor: "rgba(0, 0, 0, 0.03)",
+  },
 
-  // Avatar
   avatarContainer: {
     marginRight: 15,
     position: "relative",
@@ -257,17 +293,10 @@ const styles = StyleSheet.create({
     height: 50,
     borderRadius: 25,
     backgroundColor: "#007AFF",
-    justifyContent: "center",
-    alignItems: "center",
   },
   pinnedAvatar: {
     borderWidth: 2,
     borderColor: "#007AFF",
-  },
-  avatarInitials: {
-    color: "#fff",
-    fontSize: 20,
-    fontWeight: "600",
   },
   mutedBadge: {
     position: "absolute",
@@ -293,8 +322,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#fff",
   },
-
-  // Info section
   info: { flex: 1 },
   headerRow: {
     flexDirection: "row",
@@ -313,11 +340,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "500",
     color: "#000",
+    fontFamily: "SofiaSans-Medium",
   },
   nameUnread: {
     fontWeight: "700",
+    fontFamily: "SofiaSans-Bold",
   },
-
   messageRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -331,10 +359,12 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: "#8E8E93",
+    fontFamily: "SofiaSans-Regular",
   },
   lastMessageUnread: {
     color: "#000",
     fontWeight: "500",
+    fontFamily: "SofiaSans-Medium",
   },
   lastMessageMuted: {
     color: "#C7C7CC",
@@ -348,6 +378,6 @@ const styles = StyleSheet.create({
   timeUnread: {
     color: "#007AFF",
     fontWeight: "600",
-    fontFamily: "SofiaSans-Regular",
+    fontFamily: "SofiaSans-SemiBold",
   },
 });

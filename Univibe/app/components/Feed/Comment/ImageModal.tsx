@@ -1,3 +1,4 @@
+// app/components/Feed/Comment/ImageModal.tsx
 import React from "react";
 import {
   View,

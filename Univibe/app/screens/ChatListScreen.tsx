@@ -1,7 +1,7 @@
 /**
  * ChatListScreen.tsx
  *
- * Root screen for the chat list.
+ * Root screen for the chat list with WhatsApp-level read/unread functionality.
  */
 
 import React, { useState, useCallback } from "react";
@@ -18,7 +18,8 @@ import { useFocusEffect, useRouter } from "expo-router";
 
 import { useAuth } from "../../lib/contexts/AuthContext";
 import { useChatRooms } from "../../hooks/useChatRooms";
-import { useChatListSocket } from "../../hooks/useChatListScoket";
+import { useChatListSocket } from "../../hooks/useChatListSocket";
+import { useActiveRoom } from "../../lib/contexts/ActiveRoomContext";
 import { useChatItemAnimations } from "../../hooks/useChatItemAnimation";
 
 import { ChatListHeader } from "../components/chat/ChatList/ChatListHeader";
@@ -29,13 +30,19 @@ import ChatItem, { ChatRoom } from "../components/chat/ChatList/ChatItem";
 import ChatListOptionsModal, {
   ItemLayout,
 } from "../components/chat/ChatList/ChatListOptionsModal";
-// ─── Screen ───────────────────────────────────────────────────────────────────
+
+// ────────────────────────────────────────────────────────────────────────────────
+// SCREEN
+// ────────────────────────────────────────────────────────────────────────────────
 
 export default function ChatListScreen() {
   const router = useRouter();
   const { token, user } = useAuth();
 
-  // ── Data & actions ────────────────────────────────────────────────────────
+  // Get active room from context (not used directly, but available)
+  const { activeRoomId } = useActiveRoom();
+
+  // Data & actions with read/unread functionality
   const {
     filteredRooms,
     loading,
@@ -44,17 +51,26 @@ export default function ChatListScreen() {
     setSearchQuery,
     fetchChatRooms,
     onRefresh,
+    refreshSingleRoom,
     updateChatRoomLastMessage,
+    handleMessagesRead,
+    markRoomAsReadOnServer,
+    isRoomUnread,
     pinChat,
     toggleRead,
     toggleMute,
     deleteChat,
-  } = useChatRooms(token);
+  } = useChatRooms(token, user?.id);
 
-  // Real-time socket updates
-  useChatListSocket(updateChatRoomLastMessage, fetchChatRooms);
+  // Real-time socket updates with read receipts
+  // activeRoomId is automatically used from context inside the hook
+  useChatListSocket(
+    updateChatRoomLastMessage,
+    refreshSingleRoom,
+    handleMessagesRead,
+  );
 
-  // ── Long-press selection state ────────────────────────────────────────────
+  // Long-press selection state
   const [selectedRoom, setSelectedRoom] = useState<ChatRoom | null>(null);
   const [selectedItemLayout, setSelectedItemLayout] = useState<ItemLayout>({
     y: 0,
@@ -62,7 +78,7 @@ export default function ChatListScreen() {
   });
   const [showOptionsModal, setShowOptionsModal] = useState(false);
 
-  // ── Item animations ───────────────────────────────────────────────────────
+  // Item animations
   const {
     itemScaleAnim,
     itemTranslateYAnim,
@@ -72,17 +88,18 @@ export default function ChatListScreen() {
     resetItemAnimation,
   } = useChatItemAnimations();
 
-  // ── New-chat modal ────────────────────────────────────────────────────────
+  // New-chat modal
   const [showNewChatModal, setShowNewChatModal] = useState(false);
 
-  // ── Handlers ──────────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────────────────────────────────────
+  // HANDLERS
+  // ──────────────────────────────────────────────────────────────────────────
 
   const handleLongPress = useCallback(
     (
       item: ChatRoom,
       layout: { y: number; height: number; pageX: number; pageY: number },
     ) => {
-      console.log("Long press layout:", layout); // Debug log
       setSelectedRoom(item);
       setSelectedItemLayout(layout);
       animateItemPop();
@@ -100,6 +117,12 @@ export default function ChatListScreen() {
   const navigateToChat = useCallback(
     (room: ChatRoom) => {
       if (showOptionsModal) return;
+
+      // Mark room as read when opening (if unread)
+      if (isRoomUnread(room)) {
+        markRoomAsReadOnServer(room.roomId);
+      }
+
       router.push({
         pathname: "/screens/ChatScreen",
         params: {
@@ -110,7 +133,7 @@ export default function ChatListScreen() {
         },
       });
     },
-    [showOptionsModal, router],
+    [showOptionsModal, router, isRoomUnread, markRoomAsReadOnServer],
   );
 
   const handleStartNewChat = useCallback(
@@ -129,11 +152,42 @@ export default function ChatListScreen() {
     [router],
   );
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // RENDER ITEM
+  // ──────────────────────────────────────────────────────────────────────────
+
+  const renderItem = ({ item }: { item: ChatRoom }) => {
+    const isUnread = isRoomUnread(item);
+
+    return (
+      <ChatItem
+        item={item}
+        isUnread={isUnread}
+        currentUserId={user?.id} // 🔴 Pass current user ID
+        isSelected={selectedRoom?.roomId === item.roomId && showOptionsModal}
+        highlightAnim={highlightAnimRef.current}
+        isHighlighted={highlightedRoomIdRef.current === item.roomId}
+        itemScaleAnim={itemScaleAnim}
+        itemTranslateYAnim={itemTranslateYAnim}
+        onPress={() => navigateToChat(item)}
+        onLongPress={handleLongPress}
+      />
+    );
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // EFFECTS
+  // ──────────────────────────────────────────────────────────────────────────
+
   useFocusEffect(
     useCallback(() => {
       fetchChatRooms();
     }, [fetchChatRooms]),
   );
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ──────────────────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -154,20 +208,7 @@ export default function ChatListScreen() {
         <FlatList
           data={filteredRooms}
           keyExtractor={(item) => item.roomId}
-          renderItem={({ item }) => (
-            <ChatItem
-              item={item}
-              isSelected={
-                selectedRoom?.roomId === item.roomId && showOptionsModal
-              }
-              highlightAnim={highlightAnimRef.current}
-              isHighlighted={highlightedRoomIdRef.current === item.roomId}
-              itemScaleAnim={itemScaleAnim}
-              itemTranslateYAnim={itemTranslateYAnim}
-              onPress={() => navigateToChat(item)}
-              onLongPress={handleLongPress}
-            />
-          )}
+          renderItem={renderItem}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
@@ -193,7 +234,7 @@ export default function ChatListScreen() {
         itemLayout={selectedItemLayout}
         isPinned={selectedRoom?.isPinned ?? false}
         isMuted={selectedRoom?.isMuted ?? false}
-        isRead={selectedRoom?.isRead !== false}
+        isRead={selectedRoom ? !isRoomUnread(selectedRoom) : true}
         onPin={() => pinChat(selectedRoom)}
         onToggleRead={() => toggleRead(selectedRoom)}
         onMute={() => toggleMute(selectedRoom)}
@@ -202,6 +243,10 @@ export default function ChatListScreen() {
     </SafeAreaView>
   );
 }
+
+// ────────────────────────────────────────────────────────────────────────────────
+// STYLES
+// ────────────────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   safeArea: {

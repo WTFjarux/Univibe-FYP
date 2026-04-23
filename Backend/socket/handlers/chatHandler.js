@@ -1,8 +1,11 @@
 /**
  * socket/handlers/chatHandler.js — Real-time Chat Event Handlers
  *
- * Handles all chat-related socket events including text, images, audio, and replies
- * with support for optimistic message updates via tempId tracking
+ * Handles all chat-related socket events including:
+ * - WhatsApp-level read receipts (readBy array)
+ * - Text, images, audio, and replies
+ * - Real-time delivery and read status
+ * - Optimistic message updates via tempId tracking
  */
 
 const Message = require("../../models/Message");
@@ -12,29 +15,57 @@ const {
   getDirectRoomId,
   addUserToRoom,
   removeUserFromRoom,
+  getUserSocketId,
+  isUserOnline,
 } = require("../utils/roomManager");
 
 // Socket event constants
 const EVENTS = {
+  // Room management
   JOIN_ROOM: "join_room",
   LEAVE_ROOM: "leave_room",
+
+  // Messaging
   SEND_MESSAGE: "send_message",
   RECEIVE_MESSAGE: "receive_message",
+  MESSAGE_DELIVERED: "message_delivered",
+  MESSAGE_DELIVERED_TO_RECIPIENT: "message_delivered_to_recipient",
+
+  // 🔴 Read Receipts (WhatsApp-level)
+  MARK_READ: "mark_read",
+  MESSAGES_READ: "messages_read",
+  MESSAGES_MARKED_READ: "messages_marked_read",
+  MARK_MESSAGE_READ: "mark_message_read",
+  MESSAGE_READ: "message_read",
+
+  // Typing indicators
   TYPING: "typing",
   STOP_TYPING: "stop_typing",
-  MESSAGE_DELIVERED: "message_delivered",
-  MESSAGE_READ: "message_read",
+
+  // History
   GET_MESSAGES: "get_messages",
   MESSAGES_HISTORY: "messages_history",
+
+  // Audio
   AUDIO_PLAYED: "audio_played",
+
+  // Deletion
   DELETE_MESSAGE: "delete_message",
+  MESSAGE_DELETED: "message_deleted",
+
+  // Reactions
+  ADD_REACTION: "add_reaction",
+  REMOVE_REACTION: "remove_reaction",
+  REACTION_ADDED: "reaction_added",
+  REACTION_REMOVED: "reaction_removed",
+
+  // Errors
   ERROR: "error",
+  MESSAGE_ERROR: "message_error",
 };
 
 /**
  * Setup chat event handlers
- * @param {Object} io - Socket.IO server
- * @param {Object} socket - Socket instance
  */
 const setupChatHandlers = (io, socket) => {
   const userId = socket.userId;
@@ -43,48 +74,50 @@ const setupChatHandlers = (io, socket) => {
   /**
    * Join a chat room
    */
-  socket.on(
-    EVENTS.JOIN_ROOM,
-    async ({ roomId, type = "direct", otherUserId = null }) => {
-      try {
-        let finalRoomId = roomId;
+  socket.on(EVENTS.JOIN_ROOM, async ({ roomId, otherUserId = null }) => {
+    try {
+      let finalRoomId = roomId;
 
-        // For direct messages, generate room ID if not provided
-        if (type === "direct" && otherUserId) {
-          finalRoomId = getDirectRoomId(userId, otherUserId);
-
-          // Create or get chat room in database
-          let chatRoom = await ChatRoom.findOne({ roomId: finalRoomId });
-          if (!chatRoom) {
-            chatRoom = new ChatRoom({
-              roomId: finalRoomId,
-              type: "direct",
-              participants: [
-                { userId, joinedAt: new Date(), role: "member" },
-                { userId: otherUserId, joinedAt: new Date(), role: "member" },
-              ],
-              createdBy: userId,
-            });
-            await chatRoom.save();
-          }
-        }
-
-        // Join socket room
-        socket.join(finalRoomId);
-        addUserToRoom(userId, finalRoomId);
-
-        socket.emit("room_joined", {
-          roomId: finalRoomId,
-          success: true,
-        });
-
-        console.log(`✅ User ${user.name} joined room: ${finalRoomId}`);
-      } catch (error) {
-        console.error("Error joining room:", error);
-        socket.emit(EVENTS.ERROR, { message: "Failed to join room" });
+      if (!finalRoomId && otherUserId) {
+        finalRoomId = getDirectRoomId(userId, otherUserId);
       }
-    },
-  );
+
+      if (!finalRoomId) {
+        socket.emit(EVENTS.ERROR, { message: "Room ID is required" });
+        return;
+      }
+
+      // Join socket room
+      socket.join(finalRoomId);
+      addUserToRoom(userId, finalRoomId);
+
+      // Create or get chat room in database
+      let chatRoom = await ChatRoom.findOne({ roomId: finalRoomId });
+      if (!chatRoom) {
+        const otherId =
+          otherUserId || finalRoomId.split("_").find((id) => id !== userId);
+        chatRoom = new ChatRoom({
+          roomId: finalRoomId,
+          type: "direct",
+          participants: [userId, otherId].filter(Boolean),
+          createdBy: userId,
+        });
+        await chatRoom.save();
+      }
+
+      socket.emit("room_joined", {
+        roomId: finalRoomId,
+        success: true,
+      });
+
+      console.log(
+        `✅ User ${user?.name || userId} joined room: ${finalRoomId}`,
+      );
+    } catch (error) {
+      console.error("Error joining room:", error);
+      socket.emit(EVENTS.ERROR, { message: "Failed to join room" });
+    }
+  });
 
   /**
    * Leave a chat room
@@ -93,21 +126,15 @@ const setupChatHandlers = (io, socket) => {
     try {
       socket.leave(roomId);
       removeUserFromRoom(userId, roomId);
-
-      socket.emit("room_left", {
-        roomId,
-        success: true,
-      });
-
-      console.log(`👋 User ${user.name} left room: ${roomId}`);
+      socket.emit("room_left", { roomId, success: true });
+      console.log(`👋 User ${user?.name || userId} left room: ${roomId}`);
     } catch (error) {
       console.error("Error leaving room:", error);
     }
   });
 
   /**
-   * Send a message with reply support and tempId acknowledgment
-   * FULLY UPDATED: Handles text, audio, and all message types with real-time delivery
+   * 🔴 Send a message with full read receipt support
    */
   socket.on(
     EVENTS.SEND_MESSAGE,
@@ -121,205 +148,240 @@ const setupChatHandlers = (io, socket) => {
       tempId = null,
     }) => {
       try {
-        // Validation
         if (!roomId || (!message && type !== "audio")) {
           const errorResponse = {
             success: false,
             error: "Room ID and message content are required",
           };
           if (tempId) errorResponse.tempId = tempId;
-          socket.emit(EVENTS.ERROR, errorResponse);
+          socket.emit(EVENTS.MESSAGE_ERROR, errorResponse);
           return;
         }
 
-        console.log(
-          `📤 Sending ${type} message${tempId ? ` with tempId: ${tempId}` : ""} to room: ${roomId}`,
-        );
+        console.log(`📤 Sending ${type} message to room: ${roomId}`);
 
-        // Get user profile for avatar
         const profile = await Profile.findOne({ user: userId });
 
-        // Create message object
+        // 🔴 Create message with sender already marked as read
         const messageData = {
           sender: userId,
-          senderName: user.name,
+          senderName: user?.name || "Unknown",
           senderAvatar: profile?.profilePicture || "",
           roomId,
           message: type === "audio" ? "🎤 Voice message" : message,
           type,
-          readBy: [{ userId, readAt: new Date() }],
+          readBy: [{ user: userId, readAt: new Date() }],
+          deliveredTo: [{ user: userId, deliveredAt: new Date() }],
           status: "sent",
           createdAt: new Date(),
         };
 
-        // Add audio-specific fields (CRITICAL for voice messages)
         if (type === "audio") {
           if (!mediaUrl) {
-            console.error("❌ Audio message missing mediaUrl");
             const errorResponse = {
               success: false,
               error: "Audio message requires mediaUrl",
             };
             if (tempId) errorResponse.tempId = tempId;
-            socket.emit(EVENTS.ERROR, errorResponse);
+            socket.emit(EVENTS.MESSAGE_ERROR, errorResponse);
             return;
           }
           messageData.mediaUrl = mediaUrl;
           messageData.duration = duration || 0;
-          messageData.mediaSize = 0;
-          console.log(
-            `🎤 Audio message details - URL: ${mediaUrl}, Duration: ${duration}s`,
-          );
         }
 
-        // Add replyTo data if present - FIXED: Now properly saves senderId
-        if (replyTo && replyTo.messageId) {
-          try {
-            const mongoose = require("mongoose");
-            if (mongoose.Types.ObjectId.isValid(replyTo.messageId)) {
-              console.log(
-                `🔍 Looking up original message: ${replyTo.messageId}`,
-              );
-              const originalMessage = await Message.findById(replyTo.messageId);
-
-              if (originalMessage && !originalMessage.isDeleted) {
-                // Use the provided replyTo data first (from frontend), fallback to database lookup
-                messageData.replyTo = {
-                  messageId: replyTo.messageId,
-                  message:
-                    replyTo.message ||
-                    (originalMessage.message || "Media message").substring(
-                      0,
-                      100,
-                    ),
-                  senderName:
-                    replyTo.senderName ||
-                    originalMessage.senderName ||
-                    "Unknown",
-                  senderId:
-                    replyTo.senderId || originalMessage.sender.toString(), // ✅ CRITICAL: Save senderId
-                  type: replyTo.type || originalMessage.type || "text",
-                  mediaUrl:
-                    replyTo.mediaUrl || originalMessage.mediaUrl || null,
-                  duration:
-                    replyTo.duration || originalMessage.duration || null,
-                };
-                console.log(
-                  `✅ Attached replyTo context - Sender: ${messageData.replyTo.senderName}, ID: ${messageData.replyTo.senderId}`,
-                );
-              } else {
-                console.log(
-                  `⚠️ Original message ${replyTo.messageId} not found or deleted`,
-                );
-              }
-            } else {
-              console.log(`⚠️ Invalid message ID format: ${replyTo.messageId}`);
-            }
-          } catch (err) {
-            console.error("⚠️ Error processing replyTo context:", err);
-          }
+        // Add replyTo data
+        if (replyTo?.messageId) {
+          messageData.replyTo = {
+            messageId: replyTo.messageId,
+            message: replyTo.message || "Media message",
+            senderName: replyTo.senderName || "Unknown",
+            senderId: replyTo.senderId || null,
+            type: replyTo.type || "text",
+            mediaUrl: replyTo.mediaUrl || null,
+            duration: replyTo.duration || null,
+          };
         }
 
         // Save to database
         const savedMessage = new Message(messageData);
         await savedMessage.save();
-        console.log(`💾 Message saved to DB with ID: ${savedMessage._id}`);
 
-        // Fetch the complete message with populated fields
+        // Populate sender info
         const populatedMessage = await Message.findById(savedMessage._id)
-          .populate("sender", "name email")
+
+          .populate("sender", "name email avatar")
+
+          .populate("readBy.user", "name avatar")
+
           .lean();
 
-        // Update chat room last message
+        if (tempId) {
+          populatedMessage.tempId = tempId;
+        }
+        // Update chat room last message with readBy array
         const lastMessageText =
-          type === "audio"
-            ? "🎤 Voice message"
-            : message?.substring(0, 100) || "Media message";
+          type === "audio" ? "🎤 Voice message" : message?.substring(0, 100);
 
         await ChatRoom.findOneAndUpdate(
           { roomId },
           {
             lastMessage: {
               message: lastMessageText,
-              sender: userId,
               sentAt: new Date(),
+              senderId: userId,
+              senderName: user?.name || "Unknown",
+              type,
+              readBy: [userId],
             },
+            updatedAt: new Date(),
             $inc: { messageCount: 1 },
           },
           { upsert: true },
         );
 
-        // Prepare response with full message data
-        const responseMessage = {
-          ...populatedMessage,
-          _id: savedMessage._id,
-          id: savedMessage._id,
-          createdAt: savedMessage.createdAt,
-          messageId: savedMessage._id,
-          duration: savedMessage.duration,
-          mediaUrl: savedMessage.mediaUrl,
-          type: savedMessage.type,
-          replyTo: savedMessage.replyTo, // ✅ Ensure replyTo is included in response
-        };
-
-        // Send delivery confirmation to sender with tempId mapping
+        // 🔴 Send delivery confirmation to sender
         const deliveryConfirmation = {
           success: true,
           messageId: savedMessage._id,
-          message: responseMessage,
-          _id: savedMessage._id,
-          createdAt: savedMessage.createdAt,
-          replyTo: savedMessage.replyTo, // ✅ Include replyTo in delivery confirmation
+          message: populatedMessage,
+          tempId,
         };
-
-        if (tempId) {
-          deliveryConfirmation.tempId = tempId;
-          console.log(
-            `✅ Delivery confirmation sent: tempId ${tempId} → messageId ${savedMessage._id}`,
-          );
-        }
-
         socket.emit(EVENTS.MESSAGE_DELIVERED, deliveryConfirmation);
 
-        // CRITICAL: Broadcast to everyone else in the room
-        // This ensures real-time delivery for all message types including audio
-        socket.to(roomId).emit(EVENTS.RECEIVE_MESSAGE, responseMessage);
-        console.log(
-          `📡 Broadcasted ${type} message to room ${roomId} (${socket.adapter.rooms.get(roomId)?.size || 0} recipients)`,
+        // 🔴 Broadcast to room
+        socket.to(roomId).emit(EVENTS.RECEIVE_MESSAGE, populatedMessage);
+
+        // 🔴 Get room participants and mark as delivered for online users
+        const room = await ChatRoom.findOne({ roomId });
+        const otherUserId = room?.participants.find(
+          (p) => p.toString() !== userId.toString(),
         );
 
+        if (otherUserId && isUserOnline(otherUserId.toString())) {
+          // Mark as delivered in database
+          await Message.findByIdAndUpdate(savedMessage._id, {
+            $addToSet: {
+              deliveredTo: { user: otherUserId, deliveredAt: new Date() },
+            },
+          });
+
+          // Notify sender that message was delivered
+          socket.emit(EVENTS.MESSAGE_DELIVERED_TO_RECIPIENT, {
+            messageId: savedMessage._id,
+            recipientId: otherUserId.toString(),
+          });
+        }
+
         console.log(
-          `✅ ${type.toUpperCase()} message sent successfully - Room: ${roomId}, Sender: ${user.name}${tempId ? `, TempID: ${tempId}` : ""}`,
+          `✅ Message sent - Room: ${roomId}, ID: ${savedMessage._id}`,
         );
       } catch (error) {
-        console.error("❌ CRITICAL ERROR in SEND_MESSAGE handler:");
-        console.error("   Error Message:", error.message);
-        console.error("   Stack Trace:", error.stack);
-
-        const errorResponse = {
+        console.error("Send message error:", error);
+        socket.emit(EVENTS.MESSAGE_ERROR, {
           success: false,
-          message: "Failed to send message",
           error: error.message,
-        };
-
-        if (tempId) errorResponse.tempId = tempId;
-
-        socket.emit(EVENTS.ERROR, errorResponse);
+          tempId,
+        });
       }
     },
   );
+
+  /**
+   * 🔴 Mark all messages in a room as read (WhatsApp-level)
+   */
+  socket.on(EVENTS.MARK_READ, async ({ roomId }) => {
+    try {
+      if (!roomId) return;
+
+      console.log(`📖 User ${userId} marking room ${roomId} as read`);
+
+      // Mark all messages as read in database
+      const modifiedCount = await Message.markRoomAsRead(roomId, userId);
+
+      // Update room's lastMessage.readBy
+      const room = await ChatRoom.findOne({ roomId });
+      if (room?.lastMessage) {
+        if (!room.lastMessage.readBy) {
+          room.lastMessage.readBy = [];
+        }
+        if (
+          !room.lastMessage.readBy.some(
+            (id) => id.toString() === userId.toString(),
+          )
+        ) {
+          room.lastMessage.readBy.push(userId);
+          await room.save();
+        }
+      }
+
+      // 🔴 Get other participant and notify them
+      const otherUserId = room?.participants.find(
+        (p) => p.toString() !== userId.toString(),
+      );
+
+      if (otherUserId) {
+        const otherUserSocketId = getUserSocketId(otherUserId.toString());
+        if (otherUserSocketId) {
+          io.to(otherUserSocketId).emit(EVENTS.MESSAGES_READ, {
+            roomId,
+            userId,
+            readAt: new Date(),
+          });
+        }
+      }
+
+      // Acknowledge to reader
+      socket.emit(EVENTS.MESSAGES_MARKED_READ, {
+        roomId,
+        modifiedCount,
+      });
+
+      console.log(
+        `✅ User ${userId} read ${modifiedCount} messages in room ${roomId}`,
+      );
+    } catch (error) {
+      console.error("Mark read error:", error);
+      socket.emit(EVENTS.ERROR, { message: "Failed to mark messages as read" });
+    }
+  });
+
+  /**
+   * 🔴 Mark a single message as read
+   */
+  socket.on(EVENTS.MARK_MESSAGE_READ, async ({ messageId }) => {
+    try {
+      const message = await Message.markMessageAsRead(messageId, userId);
+
+      if (message) {
+        // Notify sender
+        const senderId = message.sender.toString();
+        if (senderId !== userId) {
+          const senderSocketId = getUserSocketId(senderId);
+          if (senderSocketId) {
+            io.to(senderSocketId).emit(EVENTS.MESSAGE_READ, {
+              messageId,
+              roomId: message.roomId,
+              userId,
+              readAt: new Date(),
+            });
+          }
+        }
+
+        socket.emit("message_marked_read", { messageId });
+      }
+    } catch (error) {
+      console.error("Mark message read error:", error);
+    }
+  });
 
   /**
    * Handle audio played confirmation
    */
   socket.on(EVENTS.AUDIO_PLAYED, async ({ messageId, roomId }) => {
     try {
-      await Message.findByIdAndUpdate(messageId, {
-        $addToSet: { playedBy: userId },
-        isPlayed: true,
-      });
+      await Message.findByIdAndUpdate(messageId, { isPlayed: true });
 
-      // Notify sender that audio was played (optional)
       socket.to(roomId).emit(EVENTS.AUDIO_PLAYED, {
         userId,
         messageId,
@@ -327,14 +389,14 @@ const setupChatHandlers = (io, socket) => {
         playedAt: new Date(),
       });
 
-      console.log(`🎧 Audio message ${messageId} played by ${user.name}`);
+      console.log(`🎧 Audio ${messageId} played by user ${userId}`);
     } catch (error) {
       console.error("Error marking audio as played:", error);
     }
   });
 
   /**
-   * Delete a message (soft delete) and broadcast to room
+   * Delete a message
    */
   socket.on(EVENTS.DELETE_MESSAGE, async ({ messageId, roomId }) => {
     try {
@@ -346,52 +408,23 @@ const setupChatHandlers = (io, socket) => {
       }
 
       if (message.sender.toString() !== userId) {
-        socket.emit(EVENTS.ERROR, {
-          message: "Not authorized to delete this message",
-        });
+        socket.emit(EVENTS.ERROR, { message: "Not authorized" });
         return;
       }
 
       message.isDeleted = true;
+      message.deletedFor = message.deletedFor || [];
       message.deletedFor.push(userId);
       await message.save();
 
-      // Update chat room's last message
-      const lastMessage = await Message.findOne({
-        roomId: message.roomId,
-        isDeleted: false,
-        deletedFor: { $ne: userId },
-      })
-        .sort({ createdAt: -1 })
-        .lean();
-
-      await ChatRoom.findOneAndUpdate(
-        { roomId: message.roomId },
-        {
-          lastMessage: lastMessage
-            ? {
-                message:
-                  lastMessage.type === "audio"
-                    ? "🎤 Voice message"
-                    : lastMessage.message,
-                sender: lastMessage.sender,
-                sentAt: lastMessage.createdAt,
-              }
-            : null,
-          updatedAt: lastMessage?.createdAt || new Date(),
-        },
-      );
-
-      io.to(roomId).emit("message_deleted", {
+      io.to(roomId).emit(EVENTS.MESSAGE_DELETED, {
         roomId,
         messageId,
         deletedBy: userId,
         timestamp: new Date(),
       });
 
-      console.log(
-        `🗑️ Message ${messageId} deleted by ${user.name} in room ${roomId}`,
-      );
+      console.log(`🗑️ Message ${messageId} deleted in room ${roomId}`);
     } catch (error) {
       console.error("Error deleting message:", error);
       socket.emit(EVENTS.ERROR, { message: "Failed to delete message" });
@@ -399,47 +432,78 @@ const setupChatHandlers = (io, socket) => {
   });
 
   /**
-   * Handle typing indicator
+   * 🔴 Add reaction to a message
+   */
+  socket.on(EVENTS.ADD_REACTION, async ({ messageId, reaction }) => {
+    try {
+      const message = await Message.findById(messageId);
+      if (!message) return;
+
+      const existingIndex =
+        message.reactions?.findIndex((r) => r.user.toString() === userId) ?? -1;
+
+      if (existingIndex !== -1) {
+        message.reactions[existingIndex].reaction = reaction;
+        message.reactions[existingIndex].createdAt = new Date();
+      } else {
+        message.reactions = message.reactions || [];
+        message.reactions.push({
+          user: userId,
+          reaction,
+          createdAt: new Date(),
+        });
+      }
+
+      await message.save();
+
+      io.to(message.roomId).emit(EVENTS.REACTION_ADDED, {
+        messageId,
+        userId,
+        reaction,
+        reactions: message.reactions,
+      });
+    } catch (error) {
+      console.error("Add reaction error:", error);
+    }
+  });
+
+  /**
+   * 🔴 Remove reaction from a message
+   */
+  socket.on(EVENTS.REMOVE_REACTION, async ({ messageId }) => {
+    try {
+      const message = await Message.findById(messageId);
+      if (!message) return;
+
+      message.reactions = (message.reactions || []).filter(
+        (r) => r.user.toString() !== userId,
+      );
+
+      await message.save();
+
+      io.to(message.roomId).emit(EVENTS.REACTION_REMOVED, {
+        messageId,
+        userId,
+        reactions: message.reactions,
+      });
+    } catch (error) {
+      console.error("Remove reaction error:", error);
+    }
+  });
+
+  /**
+   * Handle typing indicators
    */
   socket.on(EVENTS.TYPING, ({ roomId }) => {
     socket.to(roomId).emit(EVENTS.TYPING, {
       userId,
-      userName: user.name,
+      userName: user?.name,
       roomId,
     });
   });
 
-  /**
-   * Handle stop typing indicator
-   */
   socket.on(EVENTS.STOP_TYPING, ({ roomId }) => {
-    socket.to(roomId).emit(EVENTS.STOP_TYPING, {
-      userId,
-      roomId,
-    });
-  });
-
-  /**
-   * Mark messages as read
-   */
-  socket.on(EVENTS.MESSAGE_READ, async ({ roomId, messageIds }) => {
-    try {
-      await Message.updateMany(
-        { _id: { $in: messageIds }, "readBy.userId": { $ne: userId } },
-        {
-          $addToSet: { readBy: { userId, readAt: new Date() } },
-          $set: { status: "read" },
-        },
-      );
-
-      socket.to(roomId).emit(EVENTS.MESSAGE_READ, {
-        userId,
-        roomId,
-        messageIds,
-      });
-    } catch (error) {
-      console.error("Error marking messages as read:", error);
-    }
+    socket.to(roomId).emit(EVENTS.STOP_TYPING, { userId, roomId });
   });
 
   /**
@@ -449,15 +513,14 @@ const setupChatHandlers = (io, socket) => {
     EVENTS.GET_MESSAGES,
     async ({ roomId, limit = 50, before = null }) => {
       try {
-        let query = { roomId, isDeleted: false };
-        if (before) {
-          query.createdAt = { $lt: new Date(before) };
-        }
+        let query = { roomId, isDeleted: false, deletedFor: { $ne: userId } };
+        if (before) query.createdAt = { $lt: new Date(before) };
 
         const messages = await Message.find(query)
           .sort({ createdAt: -1 })
           .limit(limit)
-          .populate("sender", "name email")
+          .populate("sender", "name email avatar")
+          .populate("readBy.user", "name avatar")
           .lean();
 
         const formattedMessages = messages.map((msg) => ({

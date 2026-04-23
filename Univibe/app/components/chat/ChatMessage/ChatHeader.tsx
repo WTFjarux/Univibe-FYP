@@ -1,4 +1,5 @@
 // app/components/chat/ChatHeader.tsx
+
 import React from "react";
 import {
   View,
@@ -30,8 +31,16 @@ export default function ChatHeader({
 }: ChatHeaderProps) {
   const router = useRouter();
 
-  // Use the passed avatar directly
-  const avatarUrl = otherUserAvatar ? getFullImageUrl(otherUserAvatar) : "";
+  // 🔴 FIXED: Properly get avatar source with fallback
+  const getAvatarSource = () => {
+    if (otherUserAvatar) {
+      const fullUrl = getFullImageUrl(otherUserAvatar);
+      if (fullUrl && fullUrl.length > 0) {
+        return { uri: fullUrl };
+      }
+    }
+    return DEFAULT_AVATAR;
+  };
 
   return (
     <View style={styles.header}>
@@ -44,10 +53,7 @@ export default function ChatHeader({
         onPress={() => router.push(`/profile/${otherUserId}`)}
       >
         <View style={styles.headerAvatar}>
-          <Image
-            source={avatarUrl ? { uri: avatarUrl } : DEFAULT_AVATAR}
-            style={styles.headerAvatarImage}
-          />
+          <Image source={getAvatarSource()} style={styles.headerAvatarImage} />
           {isOnline && <View style={styles.headerOnlineDot} />}
         </View>
         <View>

@@ -1,10 +1,12 @@
 // app/_layout.tsx
+
 import { Stack } from "expo-router";
 import { useFonts } from "expo-font";
 import { SplashScreen } from "expo-router";
 import { AuthProvider } from "../lib/contexts/AuthContext";
 import { ProfileProvider } from "../lib/contexts/ProfileContext";
 import { ChatProvider } from "../lib/contexts/ChatContext";
+import { ActiveRoomProvider } from "../lib/contexts/ActiveRoomContext"; 
 import { View, ActivityIndicator } from "react-native";
 import { useEffect } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -39,39 +41,42 @@ export default function RootLayout() {
         <AuthProvider>
           <ProfileProvider>
             <ChatProvider>
-              <Stack screenOptions={{ headerShown: false }}>
-                {/* Public routes - don't require auth */}
-                <Stack.Screen name="index" />
-                <Stack.Screen name="(auth)" />
+              {/* 🔴 Wrap Stack with ActiveRoomProvider */}
+              <ActiveRoomProvider>
+                <Stack screenOptions={{ headerShown: false }}>
+                  {/* Public routes - don't require auth */}
+                  <Stack.Screen name="index" />
+                  <Stack.Screen name="(auth)" />
 
-                {/* Verification route - modal presentation */}
-                <Stack.Screen
-                  name="verify"
-                  options={{
-                    presentation: "modal",
-                    animation: "slide_from_bottom",
-                  }}
-                />
+                  {/* Verification route - modal presentation */}
+                  <Stack.Screen
+                    name="verify"
+                    options={{
+                      presentation: "modal",
+                      animation: "slide_from_bottom",
+                    }}
+                  />
 
-                {/* Profile routes - includes both index and dynamic [id] */}
-                <Stack.Screen name="(tabs)" />
-                <Stack.Screen name="profile" />
+                  {/* Profile routes - includes both index and dynamic [id] */}
+                  <Stack.Screen name="(tabs)" />
+                  <Stack.Screen name="profile" />
 
-                {/* Chat screens */}
-                <Stack.Screen
-                  name="screens/ChatScreen"
-                  options={{
-                    headerShown: false,
-                    presentation: "card",
-                  }}
-                />
-                <Stack.Screen
-                  name="screens/ChatListScreen"
-                  options={{
-                    headerShown: false,
-                  }}
-                />
-              </Stack>
+                  {/* Chat screens */}
+                  <Stack.Screen
+                    name="screens/ChatScreen"
+                    options={{
+                      headerShown: false,
+                      presentation: "card",
+                    }}
+                  />
+                  <Stack.Screen
+                    name="screens/ChatListScreen"
+                    options={{
+                      headerShown: false,
+                    }}
+                  />
+                </Stack>
+              </ActiveRoomProvider>
             </ChatProvider>
           </ProfileProvider>
         </AuthProvider>

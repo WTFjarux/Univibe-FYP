@@ -11,14 +11,11 @@ export function useMessageScroll(flatListRef: React.RefObject<FlatList>) {
   const registerMessageRef = useCallback((messageId: string, ref: React.RefObject<View>) => {
     if (messageId && !messageId.startsWith('temp_') && ref && ref.current) {
       messageRefs.current.set(messageId, ref);
-      console.log(`Registered ref for message: ${messageId}`);
     }
   }, []);
 
   const scrollToMessage = useCallback((messageId: string) => {
     const messageRef = messageRefs.current.get(messageId);
-    
-    console.log(`Scrolling to message: ${messageId}`);
     
     if (messageRef?.current && flatListRef.current) {
       try {
@@ -33,12 +30,10 @@ export function useMessageScroll(flatListRef: React.RefObject<FlatList>) {
           UIManager.measureLayout(
             messageNode,
             listNode,
-            (error: any) => {
-              console.error(`Failed to measure message ${messageId}:`, error);
+            () => {
+              // Silent fail - measurement failed
             },
             (x: number, y: number, width: number, height: number) => {
-              console.log(`Message position measured: y=${y}, height=${height}`);
-              
               // Scroll to the measured position with offset
               const scrollOffset = Math.max(0, y - 80);
               
@@ -60,17 +55,12 @@ export function useMessageScroll(flatListRef: React.RefObject<FlatList>) {
               }, 2500);
             }
           );
-        } else {
-          console.warn(`Could not get native nodes for message ${messageId}`);
         }
       } catch (error) {
-        console.error(`Error measuring message ${messageId}:`, error);
+        // Silent fail
       }
-    } else {
-      console.warn(`Message ref not found for ID: ${messageId}`);
-      console.log('Available refs:', Array.from(messageRefs.current.keys()));
     }
-  }, []);
+  }, [flatListRef]);
 
   const clearHighlight = useCallback(() => {
     if (highlightTimeoutRef.current) {
@@ -81,12 +71,11 @@ export function useMessageScroll(flatListRef: React.RefObject<FlatList>) {
   }, []);
 
   const onScroll = useCallback((event: any) => {
-    // Optional: Track scroll position for debugging
-    // const yOffset = event.nativeEvent.contentOffset.y;
+    // Optional: Track scroll position if needed
   }, []);
 
   const onLayout = useCallback((event: any) => {
-    // Optional: Track FlatList layout
+    // Optional: Track FlatList layout if needed
   }, []);
 
   return {

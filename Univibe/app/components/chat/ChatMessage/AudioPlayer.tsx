@@ -1,5 +1,6 @@
 // app/components/chat/AudioPlayer.tsx
-import React, { useState, useEffect, useRef } from "react";
+
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -11,6 +12,7 @@ import {
 import { Audio } from "expo-av";
 import { Ionicons } from "@expo/vector-icons";
 import { API_BASE_URL } from "../../../../constants/ipConstants";
+import AudioManager from "../../../../lib/utils/AudioManager";
 
 interface AudioPlayerProps {
   audioUrl: string;
@@ -41,12 +43,14 @@ export default function AudioPlayer({
   const waveAnimations = useRef(
     [...Array(7)].map(() => new Animated.Value(0)),
   ).current;
+  const waveLoopRef = useRef<Animated.CompositeAnimation | null>(null);
 
   const playbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
     null,
   );
   const isResettingRef = useRef(false);
   const isFinishedRef = useRef(false);
+  const isUnloadingRef = useRef(false);
 
   // Fade-in animation on mount
   useEffect(() => {
@@ -57,42 +61,102 @@ export default function AudioPlayer({
     }).start();
   }, []);
 
-  // Waveform animation when playing
+  // 🔴 Stop wave animations
+  const stopWaveAnimation = useCallback(() => {
+    if (waveLoopRef.current) {
+      waveLoopRef.current.stop();
+      waveLoopRef.current = null;
+    }
+    waveAnimations.forEach((anim) => anim.setValue(0));
+  }, [waveAnimations]);
+
+  // 🔴 Start wave animations
+  const startWaveAnimation = useCallback(() => {
+    stopWaveAnimation();
+
+    const animations = waveAnimations.map((anim, index) => {
+      return Animated.sequence([
+        Animated.timing(anim, {
+          toValue: 1,
+          duration: 400 + index * 30,
+          useNativeDriver: false,
+        }),
+        Animated.timing(anim, {
+          toValue: 0,
+          duration: 400 + index * 30,
+          useNativeDriver: false,
+        }),
+      ]);
+    });
+
+    waveLoopRef.current = Animated.loop(Animated.parallel(animations));
+    waveLoopRef.current.start();
+  }, [waveAnimations, stopWaveAnimation]);
+
+  // Pause audio and stop animations
+  const pauseAudio = useCallback(async () => {
+    setIsPlaying(false);
+    stopWaveAnimation();
+
+    if (playbackIntervalRef.current) {
+      clearInterval(playbackIntervalRef.current);
+      playbackIntervalRef.current = null;
+    }
+
+    if (sound && !isUnloadingRef.current) {
+      try {
+        const status = await sound.getStatusAsync();
+        if (status.isLoaded && status.isPlaying) {
+          await sound.pauseAsync();
+        }
+      } catch (error) {
+        // Ignore
+      }
+    }
+  }, [sound, stopWaveAnimation]);
+
+  // 🔴 Listen for other audio playing - stop this one immediately
+  useEffect(() => {
+    const unsubscribe = AudioManager.registerPlayCallback(
+      (playingMessageId: string) => {
+        if (playingMessageId !== messageId) {
+          // Immediately stop animations and update state
+          setIsPlaying(false);
+          stopWaveAnimation();
+          if (playbackIntervalRef.current) {
+            clearInterval(playbackIntervalRef.current);
+            playbackIntervalRef.current = null;
+          }
+          // Try to pause the actual sound (don't await)
+          if (sound && !isUnloadingRef.current) {
+            sound.pauseAsync().catch(() => {});
+          }
+        }
+      },
+    );
+
+    return () => {
+      unsubscribe();
+    };
+  }, [messageId, sound, stopWaveAnimation]);
+
+  // 🔴 Control wave animation based on isPlaying state
   useEffect(() => {
     if (isPlaying) {
-      // Create staggered animations for each bar (Instagram-style)
-      const animations = waveAnimations.map((anim, index) => {
-        return Animated.sequence([
-          Animated.timing(anim, {
-            toValue: 1,
-            duration: 400 + index * 30,
-            useNativeDriver: false,
-          }),
-          Animated.timing(anim, {
-            toValue: 0,
-            duration: 400 + index * 30,
-            useNativeDriver: false,
-          }),
-        ]);
-      });
-
-      Animated.loop(Animated.parallel(animations)).start();
+      startWaveAnimation();
     } else {
-      // Stop all animations and reset
-      waveAnimations.forEach((anim) => anim.setValue(0));
+      stopWaveAnimation();
     }
-  }, [isPlaying]);
+  }, [isPlaying, startWaveAnimation, stopWaveAnimation]);
 
   // Play button press animation
-  const animateButtonPress = async () => {
-    // Scale down
+  const animateButtonPress = () => {
     Animated.spring(buttonScaleAnim, {
       toValue: 0.9,
       friction: 5,
       useNativeDriver: true,
     }).start();
 
-    // Scale back up after delay
     setTimeout(() => {
       Animated.spring(buttonScaleAnim, {
         toValue: 1,
@@ -105,11 +169,15 @@ export default function AudioPlayer({
   // Clean up on unmount
   useEffect(() => {
     return () => {
+      isUnloadingRef.current = true;
+      stopWaveAnimation();
       if (playbackIntervalRef.current) {
         clearInterval(playbackIntervalRef.current);
+        playbackIntervalRef.current = null;
       }
       if (sound) {
-        sound.unloadAsync();
+        AudioManager.clearCurrentSound(messageId);
+        sound.unloadAsync().catch(() => {});
       }
     };
   }, []);
@@ -130,8 +198,8 @@ export default function AudioPlayer({
       loadSound();
     }
     return () => {
-      if (sound) {
-        sound.unloadAsync();
+      if (sound && !isUnloadingRef.current) {
+        sound.unloadAsync().catch(() => {});
       }
       if (playbackIntervalRef.current) {
         clearInterval(playbackIntervalRef.current);
@@ -151,7 +219,7 @@ export default function AudioPlayer({
       setError(null);
 
       if (sound) {
-        await sound.unloadAsync();
+        await sound.unloadAsync().catch(() => {});
         setSound(null);
       }
 
@@ -169,36 +237,37 @@ export default function AudioPlayer({
       );
 
       setSound(newSound);
+      isUnloadingRef.current = false;
 
-      // Get actual duration
       const status = await newSound.getStatusAsync();
       if (status.isLoaded && status.durationMillis) {
         setTotalDuration(status.durationMillis / 1000);
       }
 
-      // Set up playback status listener with reliable completion detection
       newSound.setOnPlaybackStatusUpdate((status) => {
         if (!status.isLoaded) return;
 
-        // Update current time when playing
         if (status.isPlaying) {
           setCurrentTime(status.positionMillis / 1000);
         }
 
-        // Reliable completion detection
         const isComplete =
           status.didJustFinish ||
           (status.durationMillis &&
             status.positionMillis >= status.durationMillis - 50 &&
             !status.isPlaying);
 
-        if (isComplete && !isResettingRef.current && !isFinishedRef.current) {
+        if (
+          isComplete &&
+          !isResettingRef.current &&
+          !isFinishedRef.current &&
+          !isUnloadingRef.current
+        ) {
           isFinishedRef.current = true;
           resetAudio();
         }
       });
     } catch (error: any) {
-      console.error("Error loading sound:", error.message);
       setError(error.message);
     } finally {
       setIsLoading(false);
@@ -211,46 +280,55 @@ export default function AudioPlayer({
     }
 
     playbackIntervalRef.current = setInterval(async () => {
-      if (sound && !isResettingRef.current) {
+      if (sound && !isResettingRef.current && !isUnloadingRef.current) {
         try {
           const status = await sound.getStatusAsync();
           if (status.isLoaded && status.isPlaying) {
             const newTime = status.positionMillis / 1000;
             setCurrentTime(newTime);
 
-            // Additional completion check
             if (
               status.durationMillis &&
               newTime >= status.durationMillis / 1000 - 0.05
             ) {
-              if (!isResettingRef.current && !isFinishedRef.current) {
+              if (
+                !isResettingRef.current &&
+                !isFinishedRef.current &&
+                !isUnloadingRef.current
+              ) {
                 isFinishedRef.current = true;
                 resetAudio();
               }
             }
           }
         } catch (error) {
-          console.error("Error getting status:", error);
+          // Ignore
         }
       }
     }, 100);
   };
 
   const resetAudio = async () => {
-    if (isResettingRef.current) return;
+    if (isResettingRef.current || isUnloadingRef.current) return;
     isResettingRef.current = true;
 
     try {
       if (sound) {
         const status = await sound.getStatusAsync();
         if (status.isLoaded) {
-          await sound.stopAsync();
-          await sound.setPositionAsync(0);
+          if (status.isPlaying) {
+            await sound.stopAsync().catch(() => {});
+          }
+          if (!isUnloadingRef.current) {
+            await sound.setPositionAsync(0).catch(() => {});
+          }
         }
       }
 
       setIsPlaying(false);
       setCurrentTime(0);
+      stopWaveAnimation();
+      AudioManager.clearCurrentSound(messageId);
 
       if (playbackIntervalRef.current) {
         clearInterval(playbackIntervalRef.current);
@@ -261,14 +339,13 @@ export default function AudioPlayer({
         isFinishedRef.current = false;
       }, 100);
     } catch (error) {
-      console.error("Error resetting audio:", error);
+      // Ignore
     } finally {
       isResettingRef.current = false;
     }
   };
 
   const togglePlayback = async () => {
-    // Trigger button animation
     animateButtonPress();
 
     if (error) {
@@ -281,22 +358,13 @@ export default function AudioPlayer({
       return;
     }
 
+    if (isUnloadingRef.current) return;
+
     isFinishedRef.current = false;
 
     if (isPlaying) {
-      // Pause
-      try {
-        await sound.pauseAsync();
-        setIsPlaying(false);
-        if (playbackIntervalRef.current) {
-          clearInterval(playbackIntervalRef.current);
-          playbackIntervalRef.current = null;
-        }
-      } catch (error) {
-        console.error("Error pausing:", error);
-      }
+      await pauseAudio();
     } else {
-      // Play
       try {
         const status = await sound.getStatusAsync();
         if (status.isLoaded) {
@@ -304,29 +372,27 @@ export default function AudioPlayer({
             status.durationMillis &&
             status.positionMillis >= status.durationMillis - 100
           ) {
-            await sound.setPositionAsync(0);
+            await sound.setPositionAsync(0).catch(() => {});
             setCurrentTime(0);
           }
 
-          await sound.playAsync();
+          await AudioManager.playSound(sound, messageId, onPlayed);
           setIsPlaying(true);
           startProgressTracking();
 
           if (!isPlayed && onPlayed) {
             setIsPlayed(true);
-            onPlayed(messageId);
           }
         }
       } catch (err) {
-        console.error("Error playing sound:", err);
         await loadSound();
-        if (sound) {
+        if (sound && !isUnloadingRef.current) {
           try {
-            await sound.playAsync();
+            await AudioManager.playSound(sound, messageId, onPlayed);
             setIsPlaying(true);
             startProgressTracking();
           } catch (playError) {
-            console.error("Error playing after reload:", playError);
+            // Ignore
           }
         }
       }
@@ -340,7 +406,6 @@ export default function AudioPlayer({
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // Animated waveform bars with Instagram-style pulsing
   const renderWaveform = () => {
     const bars = [10, 18, 14, 22, 10, 16, 12];
 
@@ -419,12 +484,7 @@ export default function AudioPlayer({
   return (
     <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
       <Animated.View
-        style={[
-          styles.playButton,
-          {
-            transform: [{ scale: buttonScaleAnim }],
-          },
-        ]}
+        style={[styles.playButton, { transform: [{ scale: buttonScaleAnim }] }]}
       >
         <TouchableOpacity
           onPress={togglePlayback}

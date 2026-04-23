@@ -4,7 +4,7 @@
  * Context-menu modal triggered by a long-press on a chat row.
  */
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -12,12 +12,10 @@ import {
   Modal,
   StyleSheet,
   Dimensions,
-  Animated,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
-import { usePopAnimation } from "../../../../hooks/usePopAnimation";
 import { ChatItem, ChatRoom } from "./ChatItem";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -51,6 +49,7 @@ interface ChatListOptionsModalProps {
   isRead?: boolean;
   item: ChatRoom | null;
   itemLayout?: ItemLayout;
+  currentUserId?: string;
 }
 
 export default function ChatListOptionsModal({
@@ -65,70 +64,31 @@ export default function ChatListOptionsModal({
   isRead = true,
   item,
   itemLayout,
+  currentUserId,
 }: ChatListOptionsModalProps) {
   const [panelHeight, setPanelHeight] = useState(0);
-  const previewScale = useRef(new Animated.Value(1)).current;
-  const previewTranslateY = useRef(new Animated.Value(0)).current;
-
-  const {
-    scaleAnim,
-    opacityAnim,
-    translateYAnim,
-    animateIn,
-    animateOut,
-    reset,
-  } = usePopAnimation({
-    scaleFrom: 0.94,
-    scaleTo: 1,
-    opacityFrom: 0,
-    opacityTo: 1,
-    translateYFrom: 6,
-    translateYTo: 0,
-    damping: 15,
-    stiffness: 130,
-  });
-
-  useEffect(() => {
-    if (visible) {
-      reset();
-      animateIn();
-    } else {
-      animateOut();
-    }
-  }, [visible]);
 
   const getPositions = () => {
-    // Default position (centered, but we'll use this as fallback)
     let previewTop = SCREEN_HEIGHT / 2 - 50;
     let panelTop = SCREEN_HEIGHT / 2 + 50;
     let panelLeft = SCREEN_WIDTH - PANEL_WIDTH - 16;
 
-    // If we have layout info from the long-pressed item
     if (itemLayout && itemLayout.pageY) {
       const rowY = itemLayout.pageY;
       const rowHeight = itemLayout.height || 82;
 
-      console.log("Modal positioning:", { rowY, rowHeight, panelHeight }); // Debug log
-
-      // Position preview exactly where the row was
       previewTop = rowY;
-
-      // Position panel directly below the row
       panelTop = rowY + rowHeight + PANEL_GAP;
 
-      // Check if panel goes off screen
       if (panelTop + panelHeight > SCREEN_HEIGHT - 20 && panelHeight > 0) {
-        // Position above instead
         panelTop = rowY - panelHeight - PANEL_GAP;
       }
 
-      // Keep panel within screen bounds
       panelTop = Math.max(
         10,
         Math.min(panelTop, SCREEN_HEIGHT - panelHeight - 10),
       );
 
-      // Right-align the panel
       panelLeft = SCREEN_WIDTH - PANEL_WIDTH - 16;
     }
 
@@ -177,67 +137,45 @@ export default function ChatListOptionsModal({
     <Modal
       visible={visible}
       transparent
-      animationType="none"
+      animationType="fade"
       statusBarTranslucent
       onRequestClose={onClose}
     >
-      {/* Backdrop - lighter blur */}
+      {/* Backdrop */}
       <TouchableOpacity
-        style={StyleSheet.absoluteFill}
+        style={styles.backdrop}
         activeOpacity={1}
         onPress={() => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           onClose();
         }}
       >
-        <Animated.View
-          style={[StyleSheet.absoluteFill, { opacity: opacityAnim }]}
-        >
-          <BlurView
-            intensity={30}
-            tint="light"
-            style={StyleSheet.absoluteFill}
-          />
-          <View style={styles.dimOverlay} />
-        </Animated.View>
+        <BlurView intensity={20} tint="light" style={StyleSheet.absoluteFill} />
+        <View style={styles.dimOverlay} />
       </TouchableOpacity>
 
-      {/* Preview Strip - exactly where the original row was */}
-      <Animated.View
-        style={[
-          styles.previewStrip,
-          {
-            top: previewTop,
-            opacity: opacityAnim,
-            transform: [{ scale: scaleAnim }, { translateY: translateYAnim }],
-          },
-        ]}
-      >
+      {/* Preview Strip */}
+      <View style={[styles.previewStrip, { top: previewTop }]}>
         <View pointerEvents="none">
           <ChatItem
             item={item}
             isSelected={false}
+            disableSelectedStyle={true}
             highlightAnim={null}
             isHighlighted={false}
-            itemScaleAnim={previewScale}
-            itemTranslateYAnim={previewTranslateY}
+            itemScaleAnim={{ current: 1 } as any}
+            itemTranslateYAnim={{ current: 0 } as any}
             onPress={() => {}}
             onLongPress={() => {}}
+            currentUserId={currentUserId}
+            isUnread={!isRead}
           />
         </View>
-      </Animated.View>
+      </View>
 
-      {/* Actions Panel - Light theme */}
-      <Animated.View
-        style={[
-          styles.panel,
-          {
-            top: panelTop,
-            left: panelLeft,
-            opacity: opacityAnim,
-            transform: [{ scale: scaleAnim }, { translateY: translateYAnim }],
-          },
-        ]}
+      {/* Actions Panel */}
+      <View
+        style={[styles.panel, { top: panelTop, left: panelLeft }]}
         onLayout={(event) => {
           const { height } = event.nativeEvent.layout;
           if (height !== panelHeight) {
@@ -271,14 +209,17 @@ export default function ChatListOptionsModal({
             </React.Fragment>
           ))}
         </View>
-      </Animated.View>
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
   dimOverlay: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.2)",
   },
   previewStrip: {

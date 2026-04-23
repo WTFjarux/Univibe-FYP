@@ -1,12 +1,6 @@
 // app/screens/ChatScreen.tsx
 
-import React, {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  useMemo,
-} from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   FlatList,
@@ -19,8 +13,10 @@ import {
   Text,
   Animated,
   Dimensions,
+  Image,
 } from "react-native";
-import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
+import { StyleSheet } from "react-native";
+import { useLocalSearchParams, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../lib/contexts/AuthContext";
 import { socketService } from "../../lib/services";
@@ -29,14 +25,17 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Audio } from "expo-av";
 import * as Haptics from "expo-haptics";
 import ChatHeader from "../components/chat/ChatMessage/ChatHeader";
-import ChatInput from "../components/chat/ChatMessage/ChatInput";
-import ChatAttachmentMenu from "../components/chat/ChatMessage/ChatAttachmentMenu";
+import ChatInput, {
+  AttachmentData,
+} from "../components/chat/ChatMessage/ChatInput";
 import ReplyIndicator from "../components/chat/ChatMessage/ReplyIndicator";
 import MessageItem from "../components/chat/ChatMessage/MessageItem";
+import DateSeparator from "../components/chat/ChatMessage/DateSeparator";
 import { useMessageScroll } from "../../hooks/useMessageScroll";
 import { generateTempId, isTempId } from "../../lib/utils/messageIdGenerator";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const DEFAULT_AVATAR = require("../../assets/images/default-avatar.png");
 
 // ============================================
 // TYPES
@@ -61,14 +60,19 @@ interface Message {
   roomId: string;
   createdAt: string;
   status?: "sent" | "delivered" | "read" | "sending";
-  type?: "text" | "image" | "audio" | "file";
+  type?: "text" | "image" | "audio" | "video" | "file" | "location";
   mediaUrl?: string;
   mediaSize?: number;
   mediaName?: string;
+  mediaMimeType?: string;
   duration?: number;
+  locationData?: { latitude: number; longitude: number; locationName: string };
   reactions?: Array<{ userId: string; reaction: string; createdAt: string }>;
   replyTo?: ReplyTo;
   tempId?: string;
+  groupId?: string;
+  groupIndex?: number;
+  groupTotal?: number;
 }
 
 interface PendingMessage {
@@ -95,46 +99,12 @@ interface ReplyToState {
 // CONSTANTS
 // ============================================
 
-const ATTACHMENT_OPTIONS = [
-  {
-    id: "photo",
-    title: "Photo",
-    icon: "images-outline",
-    color: "#007AFF",
-    bgColor: "#E3F2FD",
-    action: "pickImage",
-  },
-  {
-    id: "camera",
-    title: "Camera",
-    icon: "camera-outline",
-    color: "#34C759",
-    bgColor: "#E8F5E9",
-    action: "takePhoto",
-  },
-  {
-    id: "document",
-    title: "Document",
-    icon: "document-outline",
-    color: "#FF9500",
-    bgColor: "#FFF3E0",
-    action: "pickDocument",
-  },
-  {
-    id: "location",
-    title: "Location",
-    icon: "location-outline",
-    color: "#FF3B30",
-    bgColor: "#FFEBEE",
-    action: "shareLocation",
-  },
-];
-
 const MESSAGE_FETCH_LIMIT = 50;
 const SEND_TIMEOUT_MS = 10000;
 const MIN_RECORDING_SECONDS = 1;
 const AUTO_SCROLL_TIMEOUT = 3000;
 const SCROLL_TO_MESSAGE_TIMEOUT = 5000;
+const MESSAGE_TIME_GAP_MINUTES = 5;
 
 // ============================================
 // MAIN COMPONENT
@@ -145,22 +115,19 @@ export default function ChatScreen() {
   const { token, user } = useAuth();
   const isMountedRef = useRef(true);
 
-  // ========== ROUTE PARAMS ==========
   const roomId = params.roomId as string;
   const otherUserName = params.otherUserName as string;
   let otherUserId = params.otherUserId as string;
   const otherUserAvatar = params.otherUserAvatar as string;
 
-  // ========== DERIVED VALUES ==========
   const extractOtherUserIdFromRoomId = (
     roomId: string,
     currentUserId: string,
   ): string => {
     if (!roomId || !currentUserId) return "";
     const parts = roomId.split("_");
-    if (parts.length >= 3) {
+    if (parts.length >= 3)
       return parts[1] === currentUserId ? parts[2] : parts[1];
-    }
     return "";
   };
 
@@ -168,34 +135,30 @@ export default function ChatScreen() {
     otherUserId = extractOtherUserIdFromRoomId(roomId, user.id);
   }
 
-  // ========== STATE ==========
+  // State
   const [messages, setMessages] = useState<Message[]>([]);
-  const [inputText, setInputText] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
-  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
   const [replyToMessage, setReplyToMessage] = useState<ReplyToState | null>(
     null,
   );
 
-  // Audio recording state
+  // Audio state
   const [isRecording, setIsRecording] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isStoppingRef = useRef(false);
 
-  // Pending messages tracking
+  // Refs
   const pendingMessagesRef = useRef<Map<string, PendingMessage>>(new Map());
   const pendingTimeoutsRef = useRef<Map<string, number>>(new Map());
   const processedMessageIds = useRef<Set<string>>(new Set());
-
-  // Scroll management refs
   const flatListRef = useRef<FlatList>(null);
-  const slideAnim = useRef(new Animated.Value(-SCREEN_WIDTH)).current;
   const inputRef = useRef<any>(null);
   const isInitialLoadRef = useRef(true);
   const autoScrollEnabledRef = useRef(true);
@@ -204,9 +167,7 @@ export default function ChatScreen() {
   const manualScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
-  const DEFAULT_AVATAR = require("../../assets/images/default-avatar.png");
 
-  // Message scroll hook
   const {
     highlightedMessageId,
     registerMessageRef,
@@ -216,7 +177,7 @@ export default function ChatScreen() {
     onLayout,
   } = useMessageScroll(flatListRef as React.RefObject<FlatList>);
 
-  // ========== HELPER FUNCTIONS ==========
+  // ========== HELPERS ==========
   const getFullImageUrl = (url: string): string => {
     if (!url) return "";
     if (url.startsWith("http")) return url;
@@ -225,22 +186,62 @@ export default function ChatScreen() {
     return `${API_BASE_URL}/uploads/${url}`;
   };
 
-  const formatTime = (dateString: string) => {
+  const formatMessageTime = (dateString: string): string => {
     const date = new Date(dateString);
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const now = new Date();
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (date.toDateString() === now.toDateString()) {
+      return date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return `Yesterday ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    }
+    return `${date.toLocaleDateString([], { month: "short", day: "numeric" })} ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  };
+
+  const formatDateSeparator = (dateString: string): string => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (date.toDateString() === now.toDateString()) return "Today";
+    if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+    return date.toLocaleDateString([], {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+    });
+  };
+
+  const isNewDay = (date1: string, date2: string): boolean => {
+    const d1 = new Date(date1),
+      d2 = new Date(date2);
+    return (
+      d1.getDate() !== d2.getDate() ||
+      d1.getMonth() !== d2.getMonth() ||
+      d1.getFullYear() !== d2.getFullYear()
+    );
+  };
+
+  const getTimeDifferenceInMinutes = (date1: string, date2: string): number => {
+    return (
+      Math.abs(new Date(date1).getTime() - new Date(date2).getTime()) /
+      (1000 * 60)
+    );
   };
 
   const isValidMessage = useCallback((msg: Message): boolean => {
-    if (isTempId(msg._id)) return false;
-    if (msg.status === "sending") return false;
+    if (isTempId(msg._id) || msg.status === "sending") return false;
     if (msg.type === "audio" && !msg.mediaUrl) return false;
     return !!msg._id;
   }, []);
 
   const filterInvalidMessages = useCallback(
-    (msgs: Message[]): Message[] => {
-      return msgs.filter(isValidMessage);
-    },
+    (msgs: Message[]): Message[] => msgs.filter(isValidMessage),
     [isValidMessage],
   );
 
@@ -269,44 +270,28 @@ export default function ChatScreen() {
     return getSenderId(message).toString() === user.id.toString();
   };
 
-  // ========== SCROLL HANDLERS ==========
+  // ========== SCROLL ==========
   const handleScroll = useCallback(
     (event: any) => {
       onScrollHook(event);
-
-      // Reset manual scroll flag when user manually scrolls
       if (isManualScrollRef.current) {
         isManualScrollRef.current = false;
-        if (manualScrollTimeoutRef.current) {
+        if (manualScrollTimeoutRef.current)
           clearTimeout(manualScrollTimeoutRef.current);
-        }
       }
-
-      // Store scroll values for later use
       const { contentOffset, contentSize, layoutMeasurement } =
         event.nativeEvent;
       const isNearBottom =
         contentOffset.y + layoutMeasurement.height >= contentSize.height - 100;
-
-      // Disable auto-scroll when user starts scrolling
       if (autoScrollEnabledRef.current) {
         autoScrollEnabledRef.current = false;
-
-        // Clear previous timeout
-        if (scrollTimeoutRef.current) {
-          clearTimeout(scrollTimeoutRef.current);
-        }
-
-        // Re-enable auto-scroll after user stops scrolling
+        if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
         scrollTimeoutRef.current = setTimeout(() => {
-          if (isNearBottom) {
-            autoScrollEnabledRef.current = true;
-          } else {
-            // If not near bottom, keep auto-scroll disabled and check again later
+          if (isNearBottom) autoScrollEnabledRef.current = true;
+          else
             scrollTimeoutRef.current = setTimeout(() => {
               autoScrollEnabledRef.current = true;
             }, 5000);
-          }
         }, AUTO_SCROLL_TIMEOUT);
       }
     },
@@ -316,20 +301,16 @@ export default function ChatScreen() {
   // ========== MESSAGE ACTIONS ==========
   const handleReply = useCallback((message: Message) => {
     if (isTempId(message._id) || message.status === "sending") return;
-
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const senderId = getSenderId(message);
-
     setReplyToMessage({
       _id: message._id,
       senderName: message.senderName,
       message: message.message,
-      senderId: senderId,
+      senderId: getSenderId(message),
       type: message.type,
       mediaUrl: message.mediaUrl,
       duration: message.duration,
     });
-
     setTimeout(() => inputRef.current?.focus(), 100);
   }, []);
 
@@ -340,27 +321,15 @@ export default function ChatScreen() {
 
   const handleScrollToMessage = useCallback(
     (messageId: string) => {
-      // Mark manual scroll and disable auto-scroll
       isManualScrollRef.current = true;
       autoScrollEnabledRef.current = false;
-
-      // Clear any pending timeouts
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-      if (manualScrollTimeoutRef.current) {
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+      if (manualScrollTimeoutRef.current)
         clearTimeout(manualScrollTimeoutRef.current);
-      }
-
-      // Scroll to the message
       scrollToMessage(messageId);
-
-      // Reset manual scroll flag after animation completes
       setTimeout(() => {
         isManualScrollRef.current = false;
       }, 1000);
-
-      // Re-enable auto-scroll after delay
       manualScrollTimeoutRef.current = setTimeout(() => {
         autoScrollEnabledRef.current = true;
       }, SCROLL_TO_MESSAGE_TIMEOUT);
@@ -368,19 +337,16 @@ export default function ChatScreen() {
     [scrollToMessage],
   );
 
-  // ========== SEND MESSAGE ==========
+  // ========== SEND TEXT MESSAGE ==========
   const sendMessage = useCallback(
     (text: string) => {
-      if (!text.trim()) return;
-      if (!socketConnected) {
-        Alert.alert("Error", "Not connected to chat server");
+      if (!text.trim() || !socketConnected) {
+        if (!socketConnected)
+          Alert.alert("Error", "Not connected to chat server");
         return;
       }
-
       const tempId = generateTempId();
       const currentReplyTo = replyToMessage;
-
-      // Enable auto-scroll when sending a new message
       autoScrollEnabledRef.current = true;
 
       const replyToData = currentReplyTo
@@ -415,11 +381,9 @@ export default function ChatScreen() {
         type: "text",
         replyTo: replyToData,
       });
-
       setMessages((prev) => [...prev, tempMessage]);
       flatListRef.current?.scrollToEnd();
       setReplyToMessage(null);
-      setInputText("");
 
       socketService.emit("send_message", {
         roomId,
@@ -439,42 +403,38 @@ export default function ChatScreen() {
         }
         pendingTimeoutsRef.current.delete(tempId);
       }, SEND_TIMEOUT_MS);
-
       pendingTimeoutsRef.current.set(tempId, timeout);
     },
     [socketConnected, replyToMessage, user, roomId, detectReplyType],
   );
 
-  // ========== AUDIO RECORDING ==========
+  // ========== AUDIO ==========
   const startRecording = async () => {
     try {
       if (recording) {
         await recording.stopAndUnloadAsync().catch(() => {});
         setRecording(null);
       }
-
       const permission = await Audio.requestPermissionsAsync();
       if (permission.status !== "granted") {
         Alert.alert("Permission needed", "Please grant microphone permission");
         return;
       }
-
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
       });
-
       const { recording: newRecording } = await Audio.Recording.createAsync(
         Audio.RecordingOptionsPresets.HIGH_QUALITY,
       );
       setRecording(newRecording);
       setIsRecording(true);
       setRecordingDuration(0);
-
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-      recordingTimerRef.current = setInterval(() => {
-        setRecordingDuration((prev) => prev + 1);
-      }, 1000);
+      recordingTimerRef.current = setInterval(
+        () => setRecordingDuration((prev) => prev + 1),
+        1000,
+      );
     } catch (err) {
       Alert.alert("Error", "Failed to start recording");
       setIsRecording(false);
@@ -482,32 +442,26 @@ export default function ChatScreen() {
     }
   };
 
-  const stopRecording = async (shouldSend: boolean = true) => {
+  const stopRecording = async (shouldSend = true) => {
     if (!recording || isStoppingRef.current) {
       setIsRecording(false);
       return;
     }
-
     isStoppingRef.current = true;
     const currentRecording = recording;
     const currentDuration = recordingDuration;
-
     setRecording(null);
     setIsRecording(false);
-
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
     }
     setRecordingDuration(0);
-
     try {
       await currentRecording.stopAndUnloadAsync();
       if (shouldSend && currentDuration >= MIN_RECORDING_SECONDS) {
         const uri = currentRecording.getURI();
-        if (uri) {
-          await uploadAndSendAudio(uri, currentDuration);
-        }
+        if (uri) await uploadAndSendAudio(uri, currentDuration);
       } else if (currentDuration < MIN_RECORDING_SECONDS && shouldSend) {
         Alert.alert(
           "Info",
@@ -528,8 +482,6 @@ export default function ChatScreen() {
   const uploadAndSendAudio = async (uri: string, duration: number) => {
     const tempId = generateTempId();
     const currentReplyTo = replyToMessage;
-
-    // Enable auto-scroll when sending a new audio message
     autoScrollEnabledRef.current = true;
 
     const replyToData = currentReplyTo
@@ -554,7 +506,6 @@ export default function ChatScreen() {
       createdAt: new Date().toISOString(),
       status: "sending",
       type: "audio",
-      mediaUrl: undefined,
       duration,
       replyTo: replyToData,
     };
@@ -567,7 +518,6 @@ export default function ChatScreen() {
       duration,
       replyTo: replyToData,
     });
-
     setMessages((prev) => [...prev, tempMessage]);
     flatListRef.current?.scrollToEnd();
     setUploading(true);
@@ -575,17 +525,14 @@ export default function ChatScreen() {
 
     try {
       const formData = new FormData();
-      const filename = `voice_${Date.now()}.m4a`;
-
       formData.append("audio", {
         uri,
-        name: filename,
+        name: `voice_${Date.now()}.m4a`,
         type: "audio/m4a",
       } as any);
       formData.append("roomId", roomId);
       formData.append("duration", duration.toString());
       formData.append("tempId", tempId);
-
       if (currentReplyTo) {
         formData.append("replyToId", currentReplyTo._id);
         formData.append(
@@ -612,16 +559,9 @@ export default function ChatScreen() {
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
-
       const data = await response.json();
 
       if (data.success && isMountedRef.current) {
-        const pending = pendingMessagesRef.current.get(tempId);
-        if (pending) {
-          pending.mediaUrl = data.url;
-          pendingMessagesRef.current.set(tempId, pending);
-        }
-
         socketService.emit("send_message", {
           roomId,
           message: "🎤 Voice message",
@@ -647,61 +587,176 @@ export default function ChatScreen() {
     }
   };
 
-  // ========== REACTIONS & DELETE ==========
-  // In ChatScreen.tsx, update the handleReaction function:
+  // ========== 🔴 ATTACHMENTS ==========
+  const handleAttachmentsSelected = useCallback(
+    async (attachments: AttachmentData[]) => {
+      if (attachments.length === 0) return;
+      try {
+        setAttachmentUploading(true);
+        autoScrollEnabledRef.current = true;
 
+        // 🔴 Generate group ID for photos sent together
+        const allImages = attachments.every((a) => a.type === "image");
+        const groupId =
+          attachments.length > 1 && allImages
+            ? `group_${Date.now()}`
+            : undefined;
+
+        const tempMessages: Message[] = attachments.map(
+          (attachment, index) => ({
+            _id: generateTempId(),
+            tempId: generateTempId(),
+            sender: user?.id || "",
+            senderName: user?.name || "You",
+            message:
+              attachment.type === "image"
+                ? "📷 Photo"
+                : attachment.type === "video"
+                  ? "🎥 Video"
+                  : `📎 ${attachment.name || "File"}`,
+            roomId,
+            createdAt: new Date().toISOString(),
+            status: "sending",
+            type: attachment.type === "document" ? "file" : attachment.type,
+            mediaUrl: attachment.uri,
+            mediaName: attachment.name,
+            mediaSize: attachment.size,
+            // 🔴 Group info
+            groupId,
+            groupIndex: groupId ? index : undefined,
+            groupTotal: groupId ? attachments.length : undefined,
+          }),
+        );
+
+        setMessages((prev) => [...prev, ...tempMessages]);
+        flatListRef.current?.scrollToEnd();
+
+        const formData = new FormData();
+        attachments.forEach((attachment, index) => {
+          formData.append("attachments", {
+            uri: attachment.uri,
+            name: attachment.name || `file_${Date.now()}_${index}`,
+            type: attachment.mimeType || "application/octet-stream",
+          } as any);
+        });
+        formData.append("roomId", roomId);
+
+        const response = await fetch(
+          `${API_BASE_URL}/api/chat/upload-attachments`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+            body: formData,
+          },
+        );
+
+        const data = await response.json();
+
+        if (data.success) {
+          // 🔴 Replace temp messages with server ones (server already broadcasts)
+          setMessages((prev) => {
+            const updated = prev.map((msg) => {
+              if (msg.status === "sending") {
+                const serverMsg = data.data.find(
+                  (m: any) => m.mediaName === msg.mediaName,
+                );
+                if (serverMsg) {
+                  return {
+                    ...msg,
+                    ...serverMsg,
+                    status: "sent",
+                    _id: serverMsg._id,
+                  };
+                }
+              }
+              return msg;
+            });
+            return updated;
+          });
+          // 🔴 DON'T emit send_message - server already broadcasts via receive_message
+        } else {
+          setMessages((prev) => prev.filter((msg) => msg.status !== "sending"));
+          Alert.alert("Error", "Failed to send attachments");
+        }
+      } catch (error) {
+        setMessages((prev) => prev.filter((msg) => msg.status !== "sending"));
+        Alert.alert("Error", "Failed to send attachments");
+      } finally {
+        setAttachmentUploading(false);
+      }
+    },
+    [roomId, user, token],
+  );
+
+  const handleLocationShared = useCallback(
+    async (location: AttachmentData) => {
+      const tempId = generateTempId();
+      const tempMessage: Message = {
+        _id: tempId,
+        tempId,
+        sender: user?.id || "",
+        senderName: user?.name || "You",
+        message: `📍 ${location.locationName || "Location"}`,
+        roomId,
+        createdAt: new Date().toISOString(),
+        status: "sending",
+        type: "location",
+      };
+      setMessages((prev) => [...prev, tempMessage]);
+      flatListRef.current?.scrollToEnd();
+      socketService.emit("send_message", {
+        roomId,
+        message: `📍 ${location.locationName}`,
+        type: "location",
+        latitude: location.latitude,
+        longitude: location.longitude,
+        locationName: location.locationName,
+        tempId,
+      });
+    },
+    [roomId, user],
+  );
+
+  // ========== REACTIONS & DELETE ==========
   const handleReaction = async (
     messageId: string,
     reaction: string,
     shouldRemove?: boolean,
   ) => {
-    // Optimistically update UI immediately
     setMessages((prev) =>
       prev.map((msg) => {
         if (msg._id !== messageId) return msg;
-
         const currentReactions = msg.reactions || [];
-
-        if (shouldRemove) {
-          // Remove the reaction
+        if (shouldRemove)
           return {
             ...msg,
             reactions: currentReactions.filter((r) => r.userId !== user?.id),
           };
-        } else {
-          // Add or update the reaction
-          const existingIndex = currentReactions.findIndex(
-            (r) => r.userId === user?.id,
-          );
-
-          if (existingIndex !== -1) {
-            // Update existing reaction
-            const updatedReactions = [...currentReactions];
-            updatedReactions[existingIndex] = {
-              ...updatedReactions[existingIndex],
+        const existingIndex = currentReactions.findIndex(
+          (r) => r.userId === user?.id,
+        );
+        if (existingIndex !== -1) {
+          const updated = [...currentReactions];
+          updated[existingIndex] = {
+            ...updated[existingIndex],
+            reaction,
+            createdAt: new Date().toISOString(),
+          };
+          return { ...msg, reactions: updated };
+        }
+        return {
+          ...msg,
+          reactions: [
+            ...currentReactions,
+            {
+              userId: user?.id || "",
               reaction,
               createdAt: new Date().toISOString(),
-            };
-            return { ...msg, reactions: updatedReactions };
-          } else {
-            // Add new reaction
-            return {
-              ...msg,
-              reactions: [
-                ...currentReactions,
-                {
-                  userId: user?.id || "",
-                  reaction,
-                  createdAt: new Date().toISOString(),
-                },
-              ],
-            };
-          }
-        }
+            },
+          ],
+        };
       }),
     );
-
-    // Then send to server
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/chat/message/${messageId}/react`,
@@ -714,21 +769,15 @@ export default function ChatScreen() {
           body: JSON.stringify({ reaction, remove: shouldRemove || false }),
         },
       );
-
       const data = await response.json();
       if (data.success) {
-        // Update with server data to ensure consistency
         setMessages((prev) =>
           prev.map((msg) =>
             msg._id === messageId ? { ...msg, reactions: data.reactions } : msg,
           ),
         );
-      } else {
-        // Revert on failure - reload messages
-        loadMessages(true);
-      }
+      } else loadMessages(true);
     } catch (error) {
-      // Revert on error
       Alert.alert("Error", "Failed to update reaction");
       loadMessages(true);
     }
@@ -777,93 +826,45 @@ export default function ChatScreen() {
     } catch (error) {}
   };
 
-  // ========== ATTACHMENT HANDLERS ==========
-  const pickImage = async () => {
-    setShowAttachmentMenu(false);
-    Alert.alert("Coming Soon", "Image sharing will be available soon!");
-  };
-
-  const takePhoto = async () => {
-    setShowAttachmentMenu(false);
-    Alert.alert("Coming Soon", "Camera will be available soon!");
-  };
-
-  const pickDocument = async () => {
-    setShowAttachmentMenu(false);
-    Alert.alert("Coming Soon", "Document sharing will be available soon!");
-  };
-
-  const shareLocation = () => {
-    setShowAttachmentMenu(false);
-    Alert.alert("Coming Soon", "Location sharing will be available soon!");
-  };
-
-  const handleAttachmentAction = async (action: string) => {
-    switch (action) {
-      case "pickImage":
-        await pickImage();
-        break;
-      case "takePhoto":
-        await takePhoto();
-        break;
-      case "pickDocument":
-        await pickDocument();
-        break;
-      case "shareLocation":
-        shareLocation();
-        break;
-    }
-  };
-
   const handleForward = (message: Message) => {
     Alert.alert("Forward", "Forward feature coming soon!");
   };
 
   // ========== LOAD MESSAGES ==========
-  const loadMessages = async (forceRefresh: boolean = false) => {
+  const loadMessages = async (forceRefresh = false) => {
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/chat/messages/${roomId}?limit=${MESSAGE_FETCH_LIMIT}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        },
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       const data = await response.json();
       if (data.success && isMountedRef.current) {
         const serverMessages = data.data.messages || [];
         const cleanMessages = filterInvalidMessages(serverMessages);
-
         processedMessageIds.current.clear();
         cleanMessages.forEach((msg) =>
           processedMessageIds.current.add(msg._id),
         );
-
-        const pendingMessagesList = Array.from(
-          pendingMessagesRef.current.values(),
-        );
-        const pendingMessages: Message[] = pendingMessagesList.map(
-          (pending) => ({
-            _id: pending.tempId,
-            tempId: pending.tempId,
-            sender: user?.id || "",
-            senderName: user?.name || "You",
-            message:
-              pending.type === "audio" ? "🎤 Voice message" : pending.message,
-            roomId,
-            createdAt: new Date(pending.timestamp).toISOString(),
-            status: "sending" as const,
-            type: pending.type as "text" | "audio" | "image" | "file",
-            mediaUrl: pending.mediaUrl,
-            duration: pending.duration,
-            replyTo: pending.replyTo,
-          }),
-        );
-
+        const pendingList = Array.from(pendingMessagesRef.current.values());
+        const pendingMessages: Message[] = pendingList.map((pending) => ({
+          _id: pending.tempId,
+          tempId: pending.tempId,
+          sender: user?.id || "",
+          senderName: user?.name || "You",
+          message:
+            pending.type === "audio" ? "🎤 Voice message" : pending.message,
+          roomId,
+          createdAt: new Date(pending.timestamp).toISOString(),
+          status: "sending" as const,
+          type: pending.type as any,
+          mediaUrl: pending.mediaUrl,
+          duration: pending.duration,
+          replyTo: pending.replyTo,
+        }));
         const finalMessages = [
           ...cleanMessages.filter((msg) => !isTempId(msg._id)),
           ...pendingMessages,
         ];
-
         finalMessages.sort(
           (a, b) =>
             new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -914,10 +915,9 @@ export default function ChatScreen() {
   );
 
   useEffect(() => {
-    const checkConnection = () =>
-      setSocketConnected(socketService.getConnectionStatus());
-    checkConnection();
-    const interval = setInterval(checkConnection, 5000);
+    const check = () => setSocketConnected(socketService.getConnectionStatus());
+    check();
+    const interval = setInterval(check, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -928,7 +928,6 @@ export default function ChatScreen() {
 
     socketService.on("message_delivered", (data: any) => {
       const { tempId, messageId, message: messageData, success } = data;
-
       if (success === false) {
         if (tempId && pendingMessagesRef.current.has(tempId)) {
           pendingMessagesRef.current.delete(tempId);
@@ -942,13 +941,11 @@ export default function ChatScreen() {
         }
         return;
       }
-
       if (tempId && pendingMessagesRef.current.has(tempId)) {
         pendingMessagesRef.current.delete(tempId);
         const timeout = pendingTimeoutsRef.current.get(tempId);
         if (timeout) clearTimeout(timeout);
         pendingTimeoutsRef.current.delete(tempId);
-
         setMessages((prev) => {
           const tempIndex = prev.findIndex(
             (msg) => msg.tempId === tempId || msg._id === tempId,
@@ -970,22 +967,21 @@ export default function ChatScreen() {
 
     socketService.on("receive_message", (message: Message) => {
       if (message.roomId === roomId && isMountedRef.current) {
-        if (!isValidMessage(message)) return;
-        if (processedMessageIds.current.has(message._id)) return;
-
+        if (
+          !isValidMessage(message) ||
+          processedMessageIds.current.has(message._id)
+        )
+          return;
         processedMessageIds.current.add(message._id);
         setMessages((prev) => {
           if (prev.some((msg) => msg._id === message._id)) return prev;
           return [...prev, { ...message, status: "sent" }];
         });
-
-        // Only auto-scroll if enabled and not in manual scroll mode
-        if (autoScrollEnabledRef.current && !isManualScrollRef.current) {
+        if (autoScrollEnabledRef.current && !isManualScrollRef.current)
           setTimeout(
             () => flatListRef.current?.scrollToEnd({ animated: true }),
             100,
           );
-        }
       }
     });
 
@@ -1001,57 +997,86 @@ export default function ChatScreen() {
   }, [roomId]);
 
   // ========== RENDER ==========
-  const renderMessage = ({ item, index }: { item: Message; index: number }) => {
+  const renderItem = ({ item, index }: { item: Message; index: number }) => {
     const ownMessage = isOwnMessage(item);
+
+    // 🔴 Group detection
+    const prevMessage = index > 0 ? messages[index - 1] : null;
+    const nextMessage =
+      index < messages.length - 1 ? messages[index + 1] : null;
+
+    // Check if in same group
+    const isInGroup = !!(
+      item.groupId &&
+      (prevMessage?.groupId === item.groupId ||
+        nextMessage?.groupId === item.groupId)
+    );
+
+    const isFirstInGroup = isInGroup && prevMessage?.groupId !== item.groupId;
+    const isLastInGroup = isInGroup && nextMessage?.groupId !== item.groupId;
+
+    // Only show avatar for first in group or non-grouped messages
+    const showDateSeparator =
+      index === 0 || isNewDay(item.createdAt, messages[index - 1].createdAt);
+
     const showAvatar =
       !ownMessage &&
+      !isInGroup && // 🔴 Don't show avatar for grouped messages
       (index === 0 || getSenderId(messages[index - 1]) !== getSenderId(item));
+
     const showTime =
-      index === messages.length - 1 ||
-      getSenderId(messages[index + 1]) !== getSenderId(item);
+      isLastInGroup || // 🔴 Show time on last of group
+      (!isInGroup &&
+        (index === 0 ||
+          getTimeDifferenceInMinutes(
+            item.createdAt,
+            messages[index - 1].createdAt,
+          ) > MESSAGE_TIME_GAP_MINUTES ||
+          getSenderId(messages[index - 1]) !== getSenderId(item)));
 
     return (
-      <MessageItem
-        item={item}
-        index={index}
-        isOwnMessage={ownMessage}
-        showAvatar={showAvatar}
-        showTime={showTime}
-        formatTime={formatTime}
-        getFullImageUrl={getFullImageUrl}
-        DEFAULT_AVATAR={DEFAULT_AVATAR}
-        onAudioPlayed={markAudioAsPlayed}
-        onReaction={handleReaction}
-        onReply={handleReply}
-        onDelete={handleDelete}
-        onForward={handleForward}
-        currentUserId={user?.id}
-        highlightedMessageId={highlightedMessageId || undefined}
-        onScrollToMessage={handleScrollToMessage}
-        registerMessageRef={registerMessageRef}
-      />
+      <>
+        {showDateSeparator && (
+          <DateSeparator date={formatDateSeparator(item.createdAt)} />
+        )}
+        <MessageItem
+          item={item}
+          index={index}
+          isOwnMessage={ownMessage}
+          showAvatar={showAvatar}
+          showTime={showTime}
+          formatTime={formatMessageTime}
+          getFullImageUrl={getFullImageUrl}
+          DEFAULT_AVATAR={DEFAULT_AVATAR}
+          onAudioPlayed={markAudioAsPlayed}
+          onReaction={handleReaction}
+          onReply={handleReply}
+          onDelete={handleDelete}
+          onForward={handleForward}
+          currentUserId={user?.id}
+          highlightedMessageId={highlightedMessageId || undefined}
+          onScrollToMessage={handleScrollToMessage}
+          registerMessageRef={registerMessageRef}
+          // 🔴 Pass grouping info
+          isGrouped={isInGroup}
+          isFirstInGroup={isFirstInGroup}
+          isLastInGroup={isLastInGroup}
+        />
+      </>
     );
   };
 
   if (loading) {
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: "center",
-          alignItems: "center",
-          backgroundColor: "#fff",
-        }}
-      >
+      <View style={styles.centered}>
         <ActivityIndicator size="large" color="#007AFF" />
       </View>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }} edges={["top"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-
       <ChatHeader
         otherUserName={otherUserName}
         otherUserId={otherUserId}
@@ -1060,9 +1085,8 @@ export default function ChatScreen() {
         DEFAULT_AVATAR={DEFAULT_AVATAR}
         getFullImageUrl={getFullImageUrl}
       />
-
       <KeyboardAvoidingView
-        style={{ flex: 1, backgroundColor: "#f8f9fa" }}
+        style={styles.kav}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={0}
       >
@@ -1070,21 +1094,18 @@ export default function ChatScreen() {
           ref={flatListRef}
           data={messages}
           keyExtractor={(item) => item._id}
-          renderItem={renderMessage}
+          renderItem={renderItem}
           onContentSizeChange={() => {
-            // Only auto-scroll to bottom when enabled and not in manual mode
             if (
               messages.length > 0 &&
               autoScrollEnabledRef.current &&
               !isManualScrollRef.current &&
               !isInitialLoadRef.current
-            ) {
+            )
               flatListRef.current?.scrollToEnd({ animated: true });
-            }
           }}
           onLayout={(event) => {
             onLayout(event);
-            // Initial scroll to bottom on first load
             if (isInitialLoadRef.current && messages.length > 0) {
               setTimeout(() => {
                 flatListRef.current?.scrollToEnd({ animated: false });
@@ -1098,46 +1119,21 @@ export default function ChatScreen() {
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
-          contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 16 }}
+          contentContainerStyle={styles.listContent}
           ListEmptyComponent={
-            <View
-              style={{
-                alignItems: "center",
-                justifyContent: "center",
-                paddingVertical: 80,
-              }}
-            >
+            <View style={styles.emptyView}>
               <Ionicons name="chatbubbles-outline" size={60} color="#C7C7CC" />
-              <Text
-                style={{
-                  fontSize: 18,
-                  fontWeight: "600",
-                  color: "#333",
-                  marginBottom: 10,
-                  fontFamily: "SofiaSans-Bold",
-                }}
-              >
-                No messages yet
-              </Text>
-              <Text
-                style={{
-                  fontSize: 14,
-                  color: "#999",
-                  textAlign: "center",
-                  fontFamily: "SofiaSans-Regular",
-                }}
-              >
+              <Text style={styles.emptyTitle}>No messages yet</Text>
+              <Text style={styles.emptySubtitle}>
                 Send a message to start the conversation
               </Text>
             </View>
           }
         />
-
         <ReplyIndicator
           replyToMessage={replyToMessage}
           onCancelReply={cancelReply}
         />
-
         <ChatInput
           ref={inputRef}
           onSendMessage={sendMessage}
@@ -1146,18 +1142,42 @@ export default function ChatScreen() {
           onCancelRecording={cancelRecording}
           isRecording={isRecording}
           recordingDuration={recordingDuration}
-          uploading={uploading}
+          uploading={uploading || attachmentUploading}
           socketConnected={socketConnected}
+          onAttachmentsSelected={handleAttachmentsSelected}
+          onLocationShared={handleLocationShared}
         />
       </KeyboardAvoidingView>
-
-      <ChatAttachmentMenu
-        visible={showAttachmentMenu}
-        slideAnim={slideAnim}
-        attachmentOptions={ATTACHMENT_OPTIONS}
-        onSelectAction={handleAttachmentAction}
-        onClose={() => setShowAttachmentMenu(false)}
-      />
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: "#fff" },
+  centered: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#fff",
+  },
+  kav: { flex: 1, backgroundColor: "#f8f9fa" },
+  listContent: { paddingHorizontal: 12, paddingVertical: 16 },
+  emptyView: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 80,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: "600" as const,
+    color: "#333",
+    marginBottom: 10,
+    fontFamily: "SofiaSans-Bold",
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: "#999",
+    textAlign: "center" as const,
+    fontFamily: "SofiaSans-Regular",
+  },
+});
