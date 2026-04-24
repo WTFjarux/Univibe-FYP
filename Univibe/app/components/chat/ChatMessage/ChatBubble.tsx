@@ -31,6 +31,7 @@ interface Message {
   status?: "sent" | "delivered" | "read" | "sending";
   type?: "text" | "image" | "audio" | "video" | "file" | "location";
   mediaUrl?: string;
+  thumbnailUrl?: string;
   mediaSize?: number;
   mediaName?: string;
   mediaMimeType?: string;
@@ -67,10 +68,6 @@ interface ChatBubbleProps {
   onForward?: (message: Message) => void;
   currentUserId?: string;
   onScrollToMessage?: (messageId: string) => void;
-  isGrouped?: boolean;
-  isFirstInGroup?: boolean;
-  isLastInGroup?: boolean;
-  groupId?: string;
 }
 
 export default function ChatBubble({
@@ -94,9 +91,9 @@ export default function ChatBubble({
   const [selectedReaction, setSelectedReaction] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState(false);
 
-  // 🔴 Image viewer state
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
-  const [viewerImageUrl, setViewerImageUrl] = useState("");
+  const [viewerImages, setViewerImages] = useState<string[]>([]);
+  const [viewerIndex, setViewerIndex] = useState(0);
 
   const isMediaType = ["image", "video", "file", "location"].includes(
     message.type || "",
@@ -170,9 +167,9 @@ export default function ChatBubble({
     setShowOptions(false);
   };
 
-  // 🔴 Handle image press - open full screen viewer
   const handleImagePress = (url: string) => {
-    setViewerImageUrl(url);
+    setViewerImages([url]);
+    setViewerIndex(0);
     setImageViewerVisible(true);
   };
 
@@ -186,6 +183,7 @@ export default function ChatBubble({
           mediaUrl={
             message.mediaUrl ? getFullImageUrl(message.mediaUrl) : undefined
           }
+          thumbnailUrl={message.thumbnailUrl}
           mediaName={message.mediaName}
           mediaSize={message.mediaSize}
           locationData={message.locationData}
@@ -411,10 +409,10 @@ export default function ChatBubble({
         currentUserId={currentUserId}
       />
 
-      {/* 🔴 Full screen image viewer */}
       <ChatImageViewer
         visible={imageViewerVisible}
-        imageUrl={viewerImageUrl}
+        images={viewerImages}
+        initialIndex={viewerIndex}
         onClose={() => setImageViewerVisible(false)}
       />
     </>

@@ -1,24 +1,18 @@
-// utils/messageIdGenerator.ts
-import * as Random from 'expo-random';
+import * as Crypto from 'expo-crypto';
+
+const TEMP_ID_PREFIX = 'temp_';
 
 /**
- * Generates a unique temporary ID for optimistic messages
- * Format: temp_{timestamp}_{randomHex}
- * Example: temp_1734567890123_a1b2c3d4e5f6
+ * Generate a unique temporary ID for pending messages
  */
 export const generateTempId = (): string => {
-  // Generate 8 random bytes (16 hex characters)
-  const randomBytes = Random.getRandomBytes(8);
-  const randomHex = Array.from(randomBytes)
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
-  
-  return `temp_${Date.now()}_${randomHex}`;
+  const uuid = Crypto.randomUUID();
+  return `${TEMP_ID_PREFIX}${uuid}`;
 };
 
 /**
  * Check if a message ID is a temporary ID
  */
 export const isTempId = (id: string): boolean => {
-  return id?.startsWith('temp_') || false;
+  return id?.startsWith(TEMP_ID_PREFIX) ?? false;
 };

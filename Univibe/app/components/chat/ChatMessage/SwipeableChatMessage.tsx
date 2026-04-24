@@ -1,7 +1,7 @@
 // app/components/chat/SwipeableChatMessage.tsx
 
 import React, { useRef } from "react";
-import { View, Animated, StyleSheet, Dimensions } from "react-native";
+import { View, Animated, StyleSheet } from "react-native";
 import { PanGestureHandler, State } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
 import ChatMessage from "./ChatBubble";
@@ -29,10 +29,6 @@ interface SwipeableChatMessageProps {
   currentUserId?: string;
   highlightedMessageId?: string;
   onScrollToMessage?: (messageId: string) => void;
-  // 🔴 Grouping props
-  isGrouped?: boolean;
-  isFirstInGroup?: boolean;
-  isLastInGroup?: boolean;
 }
 
 export default function SwipeableChatMessage({
@@ -51,23 +47,15 @@ export default function SwipeableChatMessage({
   currentUserId,
   highlightedMessageId,
   onScrollToMessage,
-  isGrouped,
-  isFirstInGroup,
-  isLastInGroup,
 }: SwipeableChatMessageProps) {
   const translateX = useRef(new Animated.Value(0)).current;
   const hasTriggeredRef = useRef(false);
 
   const isHighlighted = highlightedMessageId === message._id;
-  const isMediaType = ["image", "video", "file", "location"].includes(
-    message.type,
-  );
 
-  // Allow swipe for all messages except temp/sending ones
   const canSwipe =
     message.status !== "sending" && !message._id?.startsWith("temp_");
 
-  // Rubber band effect
   const applyResistance = (value: number, isRightSwipe: boolean) => {
     const threshold = SWIPE_THRESHOLD;
     if (isRightSwipe) {
@@ -80,7 +68,6 @@ export default function SwipeableChatMessage({
     }
   };
 
-  // Icon animations
   const rightSwipeOpacity = translateX.interpolate({
     inputRange: [0, SWIPE_THRESHOLD / 2, SWIPE_THRESHOLD],
     outputRange: [0, 0.5, 1],
@@ -240,10 +227,6 @@ export default function SwipeableChatMessage({
                 onForward={onForward}
                 currentUserId={currentUserId}
                 onScrollToMessage={onScrollToMessage}
-                // 🔴 Pass grouping props to ChatBubble
-                isGrouped={isGrouped}
-                isFirstInGroup={isFirstInGroup}
-                isLastInGroup={isLastInGroup}
               />
             </View>
           </Animated.View>

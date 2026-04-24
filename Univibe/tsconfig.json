@@ -13,6 +13,7 @@
     "expo-env.d.ts",
     "lib/AuthContext.tsx",
     "app/(auth)/verify-link.tsx",
-    "app/components/Profile/FormComponent.tsx"
+    "app/components/Profile/FormComponent.tsx",
+    "hooks/chatScreen"
   ]
 }

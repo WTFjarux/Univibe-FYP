@@ -1,159 +1,129 @@
-/**
- * lib/api/chatApi.ts
- * 
- * Centralized API service for all chat-related endpoints
- */
-
+// lib/services/chatApi.ts
 import { API_BASE_URL } from '../../constants/ipConstants';
+import type {
+  ChatRoomsResponse,
+  SingleRoomResponse,
+  Message,
+  MessagesResponse,
+  MarkReadResponse,
+  Reaction,
+} from '../types/chat.types';
 
-// ============================================================================
-// TYPE DEFINITIONS
-// ============================================================================
+class ChatApiService {
+  private baseUrl: string;
 
-export interface GetChatRoomsResponse {
-  success: boolean;
-  data: ChatRoom[];
-  count?: number;
-}
+  constructor() {
+    this.baseUrl = `${API_BASE_URL}/api/chat`;
+  }
 
-export interface ChatRoom {
-  roomId: string;
-  type: 'direct' | 'group';
-  name: string;
-  avatar?: string | null;
-  otherUserId?: string | null;
-  otherUserAvatar?: string | null;
-  lastMessage: {
-    message: string;
-    sentAt: string;
-    senderId?: string;
-    type?: string;
-  } | null;
-  updatedAt: string;
-  createdAt: string;
-  isPinned: boolean;
-  isMuted: boolean;
-  muteUntil?: string | null;
-  isRead: boolean;
-  unreadCount: number;
-}
+  private getHeaders(token: string): HeadersInit {
+    return {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    };
+  }
 
-export interface GetMessagesResponse {
-  success: boolean;
-  data: {
-    roomId: string;
-    messages: Message[];
-    hasMore: boolean;
-  };
-}
-
-export interface Message {
-  _id: string;
-  sender: string | { _id: string; name: string; avatar?: string };
-  senderName: string;
-  senderAvatar?: string;
-  roomId: string;
-  message: string;
-  type: 'text' | 'image' | 'audio' | 'file';
-  createdAt: string;
-  status: 'sent' | 'delivered' | 'read';
-  mediaUrl?: string;
-  duration?: number;
-  replyTo?: {
-    messageId: string;
-    message: string;
-    senderName: string;
-    senderId?: string;
-    type?: string;
-    mediaUrl?: string;
-  };
-  reactions?: Reaction[];
-}
-
-export interface Reaction {
-  userId: string;
-  reaction: string;
-  createdAt: string;
-  user?: {
-    name: string;
-    username?: string;
-  };
-}
-
-export interface UserProfileResponse {
-  success: boolean;
-  data: {
-    userId: string;
-    name: string;
-    username: string;
-    profilePicture: string | null;
-    bio?: string;
-    hasExistingChat?: boolean;
-    roomId?: string | null;
-  };
-}
-
-// ============================================================================
-// API FUNCTIONS
-// ============================================================================
-
-export const chatApi = {
-  /**
-   * Get all chat rooms for the current user
-   */
-  getChatRooms: async (token: string): Promise<GetChatRoomsResponse> => {
-    const response = await fetch(`${API_BASE_URL}/api/chat/rooms`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
+  private async handleResponse<T>(response: Response): Promise<T> {
+    if (!response.ok) {
+      throw new Error(`API Error: ${response.status} ${response.statusText}`);
+    }
     return response.json();
-  },
+  }
 
-  /**
-   * Get or create a direct message room with another user
-   */
-  getOrCreateRoom: async (token: string, otherUserId: string): Promise<{
-    success: boolean;
-    data: { roomId: string; type: string };
-  }> => {
-    const response = await fetch(`${API_BASE_URL}/api/chat/room/${otherUserId}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
+  // ============================================
+  // CHAT ROOMS
+  // ============================================
+
+  async getChatRooms(token: string): Promise<ChatRoomsResponse> {
+    const response = await fetch(`${this.baseUrl}/rooms`, {
+      headers: this.getHeaders(token),
     });
-    return response.json();
-  },
+    return this.handleResponse<ChatRoomsResponse>(response);
+  }
 
-  /**
-   * Get message history for a room
-   */
-  getMessages: async (
+  async getSingleRoom(token: string, roomId: string): Promise<SingleRoomResponse> {
+    const response = await fetch(`${this.baseUrl}/room/${roomId}`, {
+      headers: this.getHeaders(token),
+    });
+    return this.handleResponse<SingleRoomResponse>(response);
+  }
+
+  // ============================================
+  // ROOM ACTIONS
+  // ============================================
+
+  async markRoomAsRead(token: string, roomId: string): Promise<MarkReadResponse> {
+    const response = await fetch(`${this.baseUrl}/room/${roomId}/read`, {
+      method: 'POST',
+      headers: this.getHeaders(token),
+    });
+    return this.handleResponse<MarkReadResponse>(response);
+  }
+
+  async markRoomAsUnread(token: string, roomId: string): Promise<{ success: boolean; message: string }> {
+    const response = await fetch(`${this.baseUrl}/room/${roomId}/unread`, {
+      method: 'POST',
+      headers: this.getHeaders(token),
+    });
+    return this.handleResponse(response);
+  }
+
+  async togglePin(token: string, roomId: string): Promise<{ success: boolean }> {
+    const response = await fetch(`${this.baseUrl}/room/${roomId}/pin`, {
+      method: 'PUT',
+      headers: this.getHeaders(token),
+    });
+    return this.handleResponse(response);
+  }
+
+  async toggleMute(token: string, roomId: string, duration?: number): Promise<{ success: boolean }> {
+    const response = await fetch(`${this.baseUrl}/room/${roomId}/mute`, {
+      method: 'PUT',
+      headers: this.getHeaders(token),
+      body: JSON.stringify({ duration }),
+    });
+    return this.handleResponse(response);
+  }
+
+  async deleteRoom(token: string, roomId: string): Promise<{ success: boolean; message?: string }> {
+    const response = await fetch(`${this.baseUrl}/room/${roomId}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(token),
+    });
+    return this.handleResponse(response);
+  }
+
+  // ============================================
+  // MESSAGES
+  // ============================================
+
+  /** Full message fetch (for refresh/sync) */
+  async getMessages(
     token: string,
     roomId: string,
     limit: number = 50,
     before?: string
-  ): Promise<GetMessagesResponse> => {
-    let url = `${API_BASE_URL}/api/chat/messages/${roomId}?limit=${limit}`;
-    if (before) {
-      url += `&before=${before}`;
-    }
-    
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    return response.json();
-  },
+  ): Promise<MessagesResponse> {
+    let url = `${this.baseUrl}/messages/${roomId}?limit=${limit}`;
+    if (before) url += `&before=${before}`;
+    const response = await fetch(url, { headers: this.getHeaders(token) });
+    return this.handleResponse<MessagesResponse>(response);
+  }
 
-  /**
-   * Send a message (text or media)
-   */
-  sendMessage: async (
+  /** ✅ NEW: Lightweight message fetch (for initial load + pagination) */
+  async getMessagesLight(
+    token: string,
+    roomId: string,
+    limit: number = 30,
+    before?: string
+  ): Promise<MessagesResponse> {
+    let url = `${this.baseUrl}/messages/${roomId}/light?limit=${limit}`;
+    if (before) url += `&before=${before}`;
+    const response = await fetch(url, { headers: this.getHeaders(token) });
+    return this.handleResponse<MessagesResponse>(response);
+  }
+
+  async sendMessage(
     token: string,
     data: {
       roomId: string;
@@ -162,151 +132,122 @@ export const chatApi = {
       replyTo?: any;
       tempId?: string;
     }
-  ): Promise<any> => {
-    const response = await fetch(`${API_BASE_URL}/api/chat/messages`, {
+  ): Promise<{ success: boolean; data?: Message; message?: string }> {
+    const response = await fetch(`${this.baseUrl}/messages`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
+      headers: this.getHeaders(token),
       body: JSON.stringify(data),
     });
-    return response.json();
-  },
+    return this.handleResponse(response);
+  }
 
-  /**
-   * Delete a message
-   */
-  deleteMessage: async (token: string, messageId: string): Promise<any> => {
-    const response = await fetch(`${API_BASE_URL}/api/chat/message/${messageId}`, {
+  async deleteMessage(
+    token: string,
+    messageId: string
+  ): Promise<{ success: boolean; message?: string }> {
+    const response = await fetch(`${this.baseUrl}/message/${messageId}`, {
       method: 'DELETE',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: this.getHeaders(token),
     });
-    return response.json();
-  },
+    return this.handleResponse(response);
+  }
 
-  /**
-   * Toggle pin status for a chat room
-   */
-  togglePin: async (token: string, roomId: string): Promise<any> => {
-    const response = await fetch(`${API_BASE_URL}/api/chat/room/${roomId}/pin`, {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    return response.json();
-  },
+  // ============================================
+  // REACTIONS
+  // ============================================
 
-  /**
-   * Toggle mute status for a chat room
-   */
-  toggleMute: async (token: string, roomId: string, duration?: number): Promise<any> => {
-    const response = await fetch(`${API_BASE_URL}/api/chat/room/${roomId}/mute`, {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ duration }),
-    });
-    return response.json();
-  },
-
-  /**
-   * Toggle read/unread status
-   */
-  toggleRead: async (token: string, roomId: string, isRead: boolean): Promise<any> => {
-    const response = await fetch(`${API_BASE_URL}/api/chat/room/${roomId}/read`, {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ isRead }),
-    });
-    return response.json();
-  },
-
-  /**
-   * Delete or hide a chat room
-   */
-  deleteChat: async (token: string, roomId: string, permanent: boolean = false): Promise<any> => {
-    const response = await fetch(`${API_BASE_URL}/api/chat/room/${roomId}`, {
-      method: 'DELETE',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ permanent }),
-    });
-    return response.json();
-  },
-
-  /**
-   * Get user profile for chat
-   */
-  getUserProfile: async (token: string, userId: string): Promise<UserProfileResponse> => {
-    const response = await fetch(`${API_BASE_URL}/api/chat/user-profile/${userId}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    return response.json();
-  },
-
-  /**
-   * Add reaction to a message
-   */
-  addReaction: async (token: string, messageId: string, reaction: string): Promise<any> => {
-    const response = await fetch(`${API_BASE_URL}/api/chat/message/${messageId}/react`, {
+  async toggleReaction(
+    token: string,
+    messageId: string,
+    reaction: string,
+    remove?: boolean
+  ): Promise<{ success: boolean; reactions: Reaction[] }> {
+    const response = await fetch(`${this.baseUrl}/message/${messageId}/react`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ reaction }),
+      headers: this.getHeaders(token),
+      body: JSON.stringify({ reaction, remove: remove || false }),
     });
-    return response.json();
-  },
+    return this.handleResponse(response);
+  }
 
-  /**
-   * Remove reaction from a message
-   */
-  removeReaction: async (token: string, messageId: string): Promise<any> => {
-    const response = await fetch(`${API_BASE_URL}/api/chat/message/${messageId}/react`, {
-      method: 'DELETE',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    return response.json();
-  },
+  async addReaction(
+    token: string,
+    messageId: string,
+    reaction: string
+  ): Promise<{ success: boolean; reactions: Reaction[] }> {
+    return this.toggleReaction(token, messageId, reaction, false);
+  }
 
-  /**
-   * Mark audio message as played
-   */
-  markAudioPlayed: async (token: string, messageId: string): Promise<any> => {
-    const response = await fetch(`${API_BASE_URL}/api/chat/audio/${messageId}/played`, {
+  async removeReaction(
+    token: string,
+    messageId: string
+  ): Promise<{ success: boolean; reactions: Reaction[] }> {
+    return this.toggleReaction(token, messageId, '', true);
+  }
+
+  // ============================================
+  // AUDIO
+  // ============================================
+
+  async markAudioPlayed(token: string, messageId: string): Promise<{ success: boolean }> {
+    const response = await fetch(`${this.baseUrl}/audio/${messageId}/played`, {
       method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: this.getHeaders(token),
     });
-    return response.json();
-  },
+    return this.handleResponse(response);
+  }
 
-  /**
-   * Get total unread count
-   */
-  getUnreadCount: async (token: string): Promise<{ success: boolean; data: { totalUnread: number } }> => {
-    const response = await fetch(`${API_BASE_URL}/api/chat/rooms/unread-count`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+  // ============================================
+  // UPLOADS
+  // ============================================
+
+  async uploadAudio(
+    token: string,
+    formData: FormData
+  ): Promise<{ success: boolean; url?: string; message?: string; data?: Message }> {
+    const response = await fetch(`${this.baseUrl}/upload-audio`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
     });
-    return response.json();
-  },
-};
+    return this.handleResponse(response);
+  }
+
+  async uploadAttachments(
+    token: string,
+    formData: FormData
+  ): Promise<{ success: boolean; data?: Message[]; message?: string }> {
+    const response = await fetch(`${this.baseUrl}/upload-attachments`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    return this.handleResponse(response);
+  }
+
+  // ============================================
+  // USER PROFILE
+  // ============================================
+
+  async getUserProfile(
+    token: string,
+    userId: string
+  ): Promise<{
+    success: boolean;
+    data: {
+      userId: string;
+      name: string;
+      username: string;
+      profilePicture: string | null;
+      bio?: string;
+    };
+  }> {
+    const response = await fetch(`${this.baseUrl}/user-profile/${userId}`, {
+      headers: this.getHeaders(token),
+    });
+    return this.handleResponse(response);
+  }
+}
+
+export const chatApi = new ChatApiService();
+export default chatApi;

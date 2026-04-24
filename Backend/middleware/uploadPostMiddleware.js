@@ -123,7 +123,7 @@ const upload = multer({
   fileFilter,
   limits: {
     fileSize: 75 * 1024 * 1024, // 75MB limit per file
-    files: 4, // Max 4 images per post (as per your frontend design)
+    files: 4, // Max 4 images per post 
   },
 });
 

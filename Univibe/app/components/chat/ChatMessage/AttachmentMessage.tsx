@@ -1,26 +1,36 @@
 // app/components/chat/ChatMessage/AttachmentMessage.tsx
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useCallback, memo } from "react";
 import {
   View,
   Text,
-  Image,
   TouchableOpacity,
   StyleSheet,
   Dimensions,
+  ActivityIndicator,
 } from "react-native";
+import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-// 🔴 Base dimensions
-const MAX_IMAGE_WIDTH = SCREEN_WIDTH * 0.55;
-const MAX_IMAGE_HEIGHT = SCREEN_WIDTH * 0.75;
-const MIN_IMAGE_SIZE = 120;
+// ============================================
+// FIXED DIMENSIONS (like Instagram/Messenger)
+// ============================================
+
+const IMAGE_WIDTH = SCREEN_WIDTH * 0.55; // Fixed width
+const IMAGE_HEIGHT = IMAGE_WIDTH * 1.25; // 5:4 aspect ratio portrait
+const IMAGE_HEIGHT_LANDSCAPE = IMAGE_WIDTH * 0.7; // 4:3 landscape for wide images
+const MIN_IMAGE_WIDTH = 120;
+
+// ✅ Blurhash strings for placeholder (you can generate per-image from backend)
+const DEFAULT_BLURHASH = "L5H2EC=PM+yV0g-mq.wG9c010J}I";
+const PHOTO_BLURHASH = "L6PZfSi_.AyE_3t7t7R**0o#DgR4";
 
 interface AttachmentMessageProps {
   type: "image" | "video" | "file" | "location";
   mediaUrl?: string;
+  thumbnailUrl?: string; // ✅ Optional thumbnail for progressive loading
   mediaName?: string;
   mediaSize?: number;
   mediaMimeType?: string;
@@ -35,9 +45,112 @@ interface AttachmentMessageProps {
   onLocationPress?: (latitude: number, longitude: number) => void;
 }
 
+// ============================================
+// HELPERS (outside component = no re-creation)
+// ============================================
+
+const formatFileSize = (bytes?: number): string => {
+  if (!bytes || bytes === 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const getFileIcon = (name?: string): string => {
+  if (!name) return "document-text-outline";
+  const ext = name.split(".").pop()?.toLowerCase();
+  const iconMap: Record<string, string> = {
+    pdf: "document-text-outline",
+    doc: "document-text-outline",
+    docx: "document-text-outline",
+    xls: "grid-outline",
+    xlsx: "grid-outline",
+    ppt: "easel-outline",
+    pptx: "easel-outline",
+    zip: "archive-outline",
+    rar: "archive-outline",
+    txt: "document-outline",
+    csv: "document-outline",
+  };
+  return iconMap[ext || ""] || "document-outline";
+};
+
+const getFileColor = (name?: string): string => {
+  if (!name) return "#007AFF";
+  const ext = name.split(".").pop()?.toLowerCase();
+  const colorMap: Record<string, string> = {
+    pdf: "#FF3B30",
+    doc: "#007AFF",
+    docx: "#007AFF",
+    xls: "#34C759",
+    xlsx: "#34C759",
+    ppt: "#FF9500",
+    pptx: "#FF9500",
+    zip: "#5856D6",
+    rar: "#5856D6",
+    txt: "#8E8E93",
+  };
+  return colorMap[ext || ""] || "#8B5CF6";
+};
+
+// ============================================
+// IMAGE RENDERER (optimized)
+// ============================================
+
+interface ImageBubbleProps {
+  uri: string;
+  thumbnailUri?: string;
+  isOwnMessage: boolean;
+  onPress: () => void;
+}
+
+const ImageBubble = memo(
+  ({ uri, thumbnailUri, isOwnMessage, onPress }: ImageBubbleProps) => {
+    const [loading, setLoading] = useState(true);
+
+    return (
+      <TouchableOpacity
+        style={styles.imageWrapper}
+        activeOpacity={0.92}
+        onPress={onPress}
+      >
+        {/* ✅ Loading indicator */}
+        {loading && (
+          <View style={styles.imageLoadingOverlay}>
+            <ActivityIndicator
+              size="small"
+              color={isOwnMessage ? "#fff" : "#007AFF"}
+            />
+          </View>
+        )}
+
+        {/* ✅ expo-image with blurhash placeholder + fade-in transition */}
+        <Image
+          source={{ uri }}
+          style={styles.image}
+          placeholder={{ blurhash: PHOTO_BLURHASH }}
+          placeholderContentFit="cover"
+          transition={400} // ✅ Smooth fade-in
+          contentFit="cover"
+          cachePolicy="memory-disk" // ✅ Aggressive caching
+          recyclingKey={uri} // ✅ FlatList recycling
+          onLoadEnd={() => setLoading(false)}
+        />
+      </TouchableOpacity>
+    );
+  },
+);
+
+ImageBubble.displayName = "ImageBubble";
+
+// ============================================
+// MAIN COMPONENT
+// ============================================
+
 const AttachmentMessage: React.FC<AttachmentMessageProps> = ({
   type,
   mediaUrl,
+  thumbnailUrl,
   mediaName,
   mediaSize,
   locationData,
@@ -46,121 +159,17 @@ const AttachmentMessage: React.FC<AttachmentMessageProps> = ({
   onFilePress,
   onLocationPress,
 }) => {
-  // 🔴 State for calculated image dimensions
-  const [imageDimensions, setImageDimensions] = useState({
-    width: MAX_IMAGE_WIDTH,
-    height: MAX_IMAGE_WIDTH,
-  });
-
-  // 🔴 Calculate image size based on aspect ratio
-  useEffect(() => {
-    if (type === "image" && mediaUrl) {
-      Image.getSize(
-        mediaUrl,
-        (originalWidth, originalHeight) => {
-          const aspectRatio = originalWidth / originalHeight;
-
-          let displayWidth = MAX_IMAGE_WIDTH;
-          let displayHeight = displayWidth / aspectRatio;
-
-          // If height exceeds max, scale down by height
-          if (displayHeight > MAX_IMAGE_HEIGHT) {
-            displayHeight = MAX_IMAGE_HEIGHT;
-            displayWidth = displayHeight * aspectRatio;
-          }
-
-          // Ensure minimum size
-          if (displayWidth < MIN_IMAGE_SIZE) {
-            displayWidth = MIN_IMAGE_SIZE;
-            displayHeight = displayWidth / aspectRatio;
-          }
-          if (displayHeight < MIN_IMAGE_SIZE) {
-            displayHeight = MIN_IMAGE_SIZE;
-            displayWidth = displayHeight * aspectRatio;
-          }
-
-          setImageDimensions({
-            width: Math.round(displayWidth),
-            height: Math.round(displayHeight),
-          });
-        },
-        () => {
-          // Fallback: square
-          setImageDimensions({
-            width: MAX_IMAGE_WIDTH,
-            height: MAX_IMAGE_WIDTH,
-          });
-        },
-      );
-    }
-  }, [type, mediaUrl]);
-
-  const formatFileSize = (bytes?: number): string => {
-    if (!bytes || bytes === 0) return "";
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
-
-  const getFileIcon = (name?: string): string => {
-    if (!name) return "document-text-outline";
-    const ext = name.split(".").pop()?.toLowerCase();
-    const iconMap: Record<string, string> = {
-      pdf: "document-text-outline",
-      doc: "document-text-outline",
-      docx: "document-text-outline",
-      xls: "grid-outline",
-      xlsx: "grid-outline",
-      ppt: "easel-outline",
-      pptx: "easel-outline",
-      zip: "archive-outline",
-      rar: "archive-outline",
-      txt: "document-outline",
-      csv: "document-outline",
-    };
-    return iconMap[ext || ""] || "document-outline";
-  };
-
-  const getFileColor = (name?: string): string => {
-    if (!name) return "#007AFF";
-    const ext = name.split(".").pop()?.toLowerCase();
-    const colorMap: Record<string, string> = {
-      pdf: "#FF3B30",
-      doc: "#007AFF",
-      docx: "#007AFF",
-      xls: "#34C759",
-      xlsx: "#34C759",
-      ppt: "#FF9500",
-      pptx: "#FF9500",
-      zip: "#5856D6",
-      rar: "#5856D6",
-      txt: "#8E8E93",
-    };
-    return colorMap[ext || ""] || "#8B5CF6";
-  };
-
   // ============================================
-  // 🔴 IMAGE RENDERER - AUTO RESIZE
+  // IMAGE (fixed size, no getSize, blurhash placeholder)
   // ============================================
   if (type === "image" && mediaUrl) {
     return (
-      <TouchableOpacity
-        style={[
-          styles.imageWrapper,
-          { width: imageDimensions.width, height: imageDimensions.height },
-        ]}
-        activeOpacity={0.9}
+      <ImageBubble
+        uri={mediaUrl}
+        thumbnailUri={thumbnailUrl}
+        isOwnMessage={isOwnMessage}
         onPress={() => onImagePress?.(mediaUrl)}
-      >
-        <Image
-          source={{ uri: mediaUrl }}
-          style={[
-            styles.image,
-            { width: imageDimensions.width, height: imageDimensions.height },
-          ]}
-          resizeMode="cover"
-        />
-      </TouchableOpacity>
+      />
     );
   }
 
@@ -292,21 +301,33 @@ const AttachmentMessage: React.FC<AttachmentMessageProps> = ({
 // ============================================
 
 const styles = StyleSheet.create({
-  // Image
+  // Image - FIXED dimensions
   imageWrapper: {
-    overflow: "hidden",
+    width: IMAGE_WIDTH,
+    height: IMAGE_HEIGHT,
     borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "#E5E5EA",
   },
   image: {
+    width: "100%",
+    height: "100%",
     borderRadius: 12,
+  },
+  imageLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    alignItems: "center",
     backgroundColor: "#E5E5EA",
+    borderRadius: 12,
+    zIndex: 1,
   },
 
   // Video
   videoContainer: {
     borderRadius: 16,
     overflow: "hidden",
-    width: MAX_IMAGE_WIDTH,
+    width: IMAGE_WIDTH,
     minHeight: 160,
     justifyContent: "center",
     alignItems: "center",
@@ -345,7 +366,7 @@ const styles = StyleSheet.create({
     padding: 14,
     borderRadius: 14,
     gap: 12,
-    minWidth: MAX_IMAGE_WIDTH * 0.8,
+    minWidth: IMAGE_WIDTH * 0.8,
   },
   fileIcon: {
     width: 48,
@@ -372,7 +393,7 @@ const styles = StyleSheet.create({
   locationContainer: {
     borderRadius: 16,
     padding: 16,
-    minWidth: MAX_IMAGE_WIDTH * 0.8,
+    minWidth: IMAGE_WIDTH * 0.8,
   },
   locationHeader: {
     flexDirection: "row",
@@ -402,4 +423,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default AttachmentMessage;
+export default memo(AttachmentMessage);

@@ -26,11 +26,7 @@ interface MessageItemProps {
   highlightedMessageId?: string;
   onScrollToMessage?: (messageId: string) => void;
   registerMessageRef: (messageId: string, ref: React.RefObject<View>) => void;
-  // 🔴 Grouping props
-  isGrouped?: boolean;
-  isFirstInGroup?: boolean;
-  isLastInGroup?: boolean;
-  messages?: any[]; // Full messages array for group detection
+  messages?: any[];
 }
 
 export default function MessageItem({
@@ -50,9 +46,6 @@ export default function MessageItem({
   highlightedMessageId,
   onScrollToMessage,
   registerMessageRef,
-  isGrouped,
-  isFirstInGroup,
-  isLastInGroup,
 }: MessageItemProps) {
   const messageRef = useRef<View>(null);
 
@@ -62,20 +55,12 @@ export default function MessageItem({
     }
   }, [item._id, registerMessageRef]);
 
-  // 🔴 Calculate margin based on grouping
-  const getMarginStyle = () => {
-    if (!isGrouped) return styles.normalMargin;
-    if (isFirstInGroup) return styles.firstInGroup;
-    if (isLastInGroup) return styles.lastInGroup;
-    return styles.middleInGroup;
-  };
-
   return (
-    <View ref={messageRef} collapsable={false} style={getMarginStyle()}>
+    <View ref={messageRef} collapsable={false} style={styles.margin}>
       <SwipeableChatMessage
         message={item}
         isOwnMessage={isOwnMessage}
-        showAvatar={showAvatar && !isGrouped} // 🔴 Hide avatar for grouped messages
+        showAvatar={showAvatar}
         showTime={showTime}
         formatTime={formatTime}
         getFullImageUrl={getFullImageUrl}
@@ -88,27 +73,11 @@ export default function MessageItem({
         currentUserId={currentUserId}
         highlightedMessageId={highlightedMessageId}
         onScrollToMessage={onScrollToMessage}
-        isGrouped={isGrouped}
-        isFirstInGroup={isFirstInGroup}
-        isLastInGroup={isLastInGroup}
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  normalMargin: {
-    marginVertical: 4,
-  },
-  firstInGroup: {
-    marginTop: 4,
-    marginBottom: 0.5,
-  },
-  middleInGroup: {
-    marginVertical: 0.5,
-  },
-  lastInGroup: {
-    marginTop: 0.5,
-    marginBottom: 4,
-  },
+  margin: { marginVertical: 4 },
 });

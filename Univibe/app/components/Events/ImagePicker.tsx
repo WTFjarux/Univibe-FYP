@@ -67,7 +67,7 @@ export const ImagePickerComponent = ({
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images, // Keep using MediaTypeOptions for older versions
+      mediaTypes: ["images"],
       allowsEditing: false,
       allowsMultipleSelection: true,
       quality: 0.8,
@@ -106,7 +106,7 @@ export const ImagePickerComponent = ({
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images, // Keep using MediaTypeOptions for older versions
+      mediaTypes: ["images"],
       allowsEditing: true,
       quality: 0.8,
     });

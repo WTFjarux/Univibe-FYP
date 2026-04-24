@@ -13,6 +13,8 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { getAvatarUrl, formatTime } from "../../../../lib/utils/chatUtils";
+// ✅ Import centralized type instead of defining local one
+import type { ChatRoom } from "../../../../lib/types/chat.types";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -23,29 +25,8 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const DEFAULT_AVATAR = require("../../../../assets/images/default-avatar.png");
 
 // ──────────────────────────────────────────────────────────────────────────────
-// TYPES
+// TYPES (no more ChatRoom duplicate!)
 // ──────────────────────────────────────────────────────────────────────────────
-
-export interface ChatRoom {
-  roomId: string;
-  type: string;
-  name: string;
-  otherUserId?: string;
-  otherUserAvatar?: string;
-  lastMessage?: {
-    message: string;
-    sentAt: string;
-    senderId: string;
-    senderName: string;
-    type: string;
-    readBy: string[];
-  };
-  updatedAt: string;
-  isPinned?: boolean;
-  isMuted?: boolean;
-  isRead?: boolean;
-  participants?: string[];
-}
 
 export interface ChatItemProps {
   item: ChatRoom;
@@ -65,7 +46,7 @@ export interface ChatItemProps {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// COMPONENT
+// COMPONENT (rest stays the same)
 // ──────────────────────────────────────────────────────────────────────────────
 
 const ChatItem: React.FC<ChatItemProps> = ({
@@ -81,6 +62,7 @@ const ChatItem: React.FC<ChatItemProps> = ({
   currentUserId,
   disableSelectedStyle = false,
 }) => {
+  // ... rest of component code stays exactly the same ...
   const rowRef = useRef<View>(null);
   const [avatarError, setAvatarError] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
@@ -88,7 +70,9 @@ const ChatItem: React.FC<ChatItemProps> = ({
   const isUnread =
     isUnreadProp !== undefined
       ? isUnreadProp
-      : item.isRead === false && !!item.lastMessage;
+      : !!item.lastMessage &&
+        item.lastMessage.senderId !== currentUserId &&
+        !item.lastMessage.readBy.includes(currentUserId || "");
 
   const isMuted = item.isMuted === true;
   const isLastMessageFromMe = item.lastMessage?.senderId === currentUserId;
@@ -142,7 +126,7 @@ const ChatItem: React.FC<ChatItemProps> = ({
       : "transparent";
 
   const handleLongPress = () => {
-    setIsPressed(false); // Reset press state
+    setIsPressed(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     setTimeout(() => {
@@ -177,15 +161,13 @@ const ChatItem: React.FC<ChatItemProps> = ({
             },
         ]}
       >
-        {/* 🔴 Replace TouchableOpacity with Pressable */}
         <Pressable
           style={({ pressed }) => [
             styles.row,
-            // Only show press effect for tap (not long press)
             pressed && !isPressed ? styles.rowPressed : null,
           ]}
           onPress={onPress}
-          onPressIn={() => setIsPressed(false)} // Reset on press in
+          onPressIn={() => setIsPressed(false)}
           onLongPress={handleLongPress}
           delayLongPress={300}
         >
@@ -263,7 +245,7 @@ export { ChatItem };
 export default ChatItem;
 
 // ──────────────────────────────────────────────────────────────────────────────
-// STYLES
+// STYLES (unchanged)
 // ──────────────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
@@ -283,7 +265,6 @@ const styles = StyleSheet.create({
   rowPressed: {
     backgroundColor: "rgba(0, 0, 0, 0.03)",
   },
-
   avatarContainer: {
     marginRight: 15,
     position: "relative",

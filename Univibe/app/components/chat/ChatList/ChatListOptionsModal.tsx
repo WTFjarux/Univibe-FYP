@@ -16,19 +16,16 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
-import { ChatItem, ChatRoom } from "./ChatItem";
+// ✅ Import centralized types
+import type { ChatRoom, ItemLayout } from "../../../../lib/types/chat.types";
+import { ChatItem } from "./ChatItem";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 const PANEL_WIDTH = 260;
 const PANEL_GAP = 8;
 
-export interface ItemLayout {
-  y: number;
-  height: number;
-  pageX?: number;
-  pageY?: number;
-}
+// ✅ ItemLayout is now imported from centralized types, no need to redefine
 
 interface Action {
   icon: keyof typeof Ionicons.glyphMap;
@@ -214,6 +211,7 @@ export default function ChatListOptionsModal({
   );
 }
 
+// ✅ Styles remain unchanged
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
