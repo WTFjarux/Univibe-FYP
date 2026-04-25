@@ -223,7 +223,6 @@ export default function ChatBubble({
     if (!isOwnMessage) return "";
 
     if (message.status === "sending") return "Sending...";
-    if (isMessageRead() || message.status === "read") return "Read";
     if (isMessageDelivered() || message.status === "delivered")
       return "Delivered";
     return "Sent";
@@ -296,6 +295,7 @@ export default function ChatBubble({
           onLocationPress={(lat, lng) =>
             console.log("Open location:", lat, lng)
           }
+          onLongPress={handleLongPress}
         />
       );
     }

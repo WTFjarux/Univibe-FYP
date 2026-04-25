@@ -43,6 +43,8 @@ interface AttachmentMessageProps {
   onImagePress?: (url: string) => void;
   onFilePress?: (url: string, name: string) => void;
   onLocationPress?: (latitude: number, longitude: number) => void;
+  // 🔴 NEW: Long press handler to bubble up to parent
+  onLongPress?: (event: any) => void;
 }
 
 // ============================================
@@ -102,17 +104,28 @@ interface ImageBubbleProps {
   thumbnailUri?: string;
   isOwnMessage: boolean;
   onPress: () => void;
+  // 🔴 NEW: Long press handler
+  onLongPress?: (event: any) => void;
 }
 
 const ImageBubble = memo(
-  ({ uri, thumbnailUri, isOwnMessage, onPress }: ImageBubbleProps) => {
+  ({ uri, thumbnailUri, isOwnMessage, onPress, onLongPress }: ImageBubbleProps) => {
     const [loading, setLoading] = useState(true);
+
+    // 🔴 Handle long press separately from regular press
+    const handleLongPress = useCallback((event: any) => {
+      if (onLongPress) {
+        onLongPress(event);
+      }
+    }, [onLongPress]);
 
     return (
       <TouchableOpacity
         style={styles.imageWrapper}
         activeOpacity={0.92}
         onPress={onPress}
+        onLongPress={handleLongPress}  // 🔴 Add long press handler
+        delayLongPress={300}  // 🔴 Match parent delay
       >
         {/* ✅ Loading indicator */}
         {loading && (
@@ -158,6 +171,7 @@ const AttachmentMessage: React.FC<AttachmentMessageProps> = ({
   onImagePress,
   onFilePress,
   onLocationPress,
+  onLongPress,  // 🔴 NEW: Accept long press handler
 }) => {
   // ============================================
   // IMAGE (fixed size, no getSize, blurhash placeholder)
@@ -169,6 +183,7 @@ const AttachmentMessage: React.FC<AttachmentMessageProps> = ({
         thumbnailUri={thumbnailUrl}
         isOwnMessage={isOwnMessage}
         onPress={() => onImagePress?.(mediaUrl)}
+        onLongPress={onLongPress}  // 🔴 Pass long press handler
       />
     );
   }
@@ -185,6 +200,8 @@ const AttachmentMessage: React.FC<AttachmentMessageProps> = ({
         ]}
         activeOpacity={0.9}
         onPress={() => onImagePress?.(mediaUrl)}
+        onLongPress={onLongPress}  // 🔴 Add long press handler
+        delayLongPress={300}  // 🔴 Match parent delay
       >
         <View style={styles.videoPlayButton}>
           <Ionicons name="play-circle" size={44} color="#fff" />
@@ -221,6 +238,8 @@ const AttachmentMessage: React.FC<AttachmentMessageProps> = ({
         ]}
         activeOpacity={0.7}
         onPress={() => onFilePress?.(mediaUrl, mediaName || "File")}
+        onLongPress={onLongPress}  // 🔴 Add long press handler
+        delayLongPress={300}  // 🔴 Match parent delay
       >
         <View style={[styles.fileIcon, { backgroundColor: `${fileColor}20` }]}>
           <Ionicons
@@ -263,6 +282,8 @@ const AttachmentMessage: React.FC<AttachmentMessageProps> = ({
         onPress={() =>
           onLocationPress?.(locationData.latitude, locationData.longitude)
         }
+        onLongPress={onLongPress}  // 🔴 Add long press handler
+        delayLongPress={300}  // 🔴 Match parent delay
       >
         <View style={styles.locationHeader}>
           <Ionicons

@@ -1,6 +1,6 @@
 // app/components/chat/ChatMessage/ChatMessageOptionsModal.tsx
 
-import React, { useMemo, useCallback, useEffect } from "react";
+import React, { useMemo, useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -8,9 +8,9 @@ import {
   Modal,
   StyleSheet,
   Dimensions,
-  Image,
   ActivityIndicator,
 } from "react-native";
+import { Image } from "expo-image"; // 🔴 Use expo-image like AttachmentMessage
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
@@ -35,6 +35,13 @@ const ACTIONS_WIDTH = 220;
 const REACTION_BAR_HEIGHT = 56;
 const ACTION_HEIGHT = 48;
 const ACTION_SEPARATOR_HEIGHT = 0.5;
+
+// 🔴 EXACT SAME dimensions as AttachmentMessage
+const IMAGE_PREVIEW_WIDTH = SCREEN_WIDTH * 0.55; // Fixed width
+const IMAGE_PREVIEW_HEIGHT = IMAGE_PREVIEW_WIDTH * 1.25; // 5:4 aspect ratio portrait
+
+// 🔴 Blurhash for image placeholder (matching AttachmentMessage)
+const PHOTO_BLURHASH = "L6PZfSi_.AyE_3t7t7R**0o#DgR4";
 
 // Waveform constants (matching ChatBubble)
 const WAVEFORM_BARS = [10, 18, 14, 22, 10, 16, 12];
@@ -91,6 +98,202 @@ const isValidReply = (reply?: ReplyTo): boolean => {
   );
 };
 
+const isImageMessage = (message: Message): boolean => {
+  return message.type === "image" && !!message.mediaUrl;
+};
+
+const isVideoMessage = (message: Message): boolean => {
+  return message.type === "video" && !!message.mediaUrl;
+};
+
+const isAudioMessage = (message: Message): boolean => {
+  return message.type === "audio";
+};
+
+const isFileMessage = (message: Message): boolean => {
+  return message.type === "file";
+};
+
+const isLocationMessage = (message: Message): boolean => {
+  return message.type === "location";
+};
+
+// ─── Image Preview Component (EXACTLY like AttachmentMessage ImageBubble) ─────
+
+const ImagePreview = ({ uri }: { uri: string; isOwnMessage: boolean }) => {
+  const [loading, setLoading] = useState(true);
+
+  // 🔴 EXACT SAME structure as AttachmentMessage ImageBubble
+  return (
+    <View style={styles.imagePreviewWrapper}>
+      {loading && (
+        <View style={styles.imageLoadingOverlay}>
+          <ActivityIndicator size="small" color="#007AFF" />
+        </View>
+      )}
+      <Image
+        source={{ uri }}
+        style={styles.imagePreview}
+        placeholder={{ blurhash: PHOTO_BLURHASH }}
+        placeholderContentFit="cover"
+        transition={400}
+        contentFit="cover"
+        cachePolicy="memory-disk"
+        recyclingKey={uri}
+        onLoadEnd={() => setLoading(false)}
+      />
+    </View>
+  );
+};
+
+// ─── Video Preview Component ───────────────────────────────────────────────────
+
+const VideoPreview = ({ isOwnMessage }: { isOwnMessage: boolean }) => {
+  return (
+    <View style={styles.videoPreviewWrapper}>
+      <View
+        style={[
+          styles.videoPreviewContainer,
+          {
+            backgroundColor: isOwnMessage
+              ? "rgba(0,0,0,0.15)"
+              : "rgba(0,0,0,0.05)",
+          },
+        ]}
+      >
+        <View style={styles.videoPlayButton}>
+          <Ionicons name="play-circle" size={44} color="#fff" />
+        </View>
+        <View style={styles.videoInfo}>
+          <Ionicons
+            name="videocam"
+            size={16}
+            color={isOwnMessage ? "rgba(255,255,255,0.8)" : "#666"}
+          />
+          <Text style={[styles.videoText, isOwnMessage && { color: "#fff" }]}>
+            Video
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+};
+
+// ─── Audio Preview Component ───────────────────────────────────────────────────
+
+const AudioPreview = ({
+  message,
+  isOwnMessage,
+}: {
+  message: Message;
+  isOwnMessage: boolean;
+}) => {
+  if (!message.mediaUrl) {
+    return (
+      <View style={styles.audioLoadingContainer}>
+        <View style={styles.audioLoadingIconWrap}>
+          <ActivityIndicator
+            size="small"
+            color={isOwnMessage ? "#fff" : "#585858"}
+          />
+        </View>
+        <View style={styles.waveformContainer}>
+          {WAVEFORM_BARS.map((h, i) => (
+            <View
+              key={i}
+              style={[
+                styles.waveBar,
+                {
+                  height: h,
+                  opacity: 0.3,
+                  backgroundColor: isOwnMessage
+                    ? "rgba(255, 255, 255, 0.5)"
+                    : "#8B5CF6",
+                },
+              ]}
+            />
+          ))}
+        </View>
+        <Text style={[styles.audioLabel, isOwnMessage && { color: "#fff" }]}>
+          Sending...
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.audioMessageContainer}>
+      <AudioPlayer
+        audioUrl={message.mediaUrl}
+        duration={message.duration || 0}
+        isOwnMessage={isOwnMessage}
+        messageId={message._id}
+        onPlayed={() => {}}
+      />
+    </View>
+  );
+};
+
+// ─── File Preview Component ────────────────────────────────────────────────────
+
+const FilePreview = ({
+  message,
+  isOwnMessage,
+}: {
+  message: Message;
+  isOwnMessage: boolean;
+}) => {
+  const fileColor = "#8B5CF6";
+  const fileName = message.message || "Document";
+
+  return (
+    <View
+      style={[
+        styles.filePreviewContainer,
+        isOwnMessage
+          ? { backgroundColor: "rgba(0,0,0,0.15)" }
+          : { backgroundColor: "rgba(0,0,0,0.05)" },
+      ]}
+    >
+      <View style={[styles.fileIcon, { backgroundColor: `${fileColor}20` }]}>
+        <Ionicons name="document-outline" size={24} color={fileColor} />
+      </View>
+      <View style={styles.fileInfo}>
+        <Text
+          style={[styles.fileName, isOwnMessage && { color: "#fff" }]}
+          numberOfLines={2}
+        >
+          {fileName}
+        </Text>
+      </View>
+    </View>
+  );
+};
+
+// ─── Location Preview Component ────────────────────────────────────────────────
+
+const LocationPreview = ({ isOwnMessage }: { isOwnMessage: boolean }) => {
+  return (
+    <View
+      style={[
+        styles.locationPreviewContainer,
+        isOwnMessage
+          ? { backgroundColor: "rgba(0,0,0,0.15)" }
+          : { backgroundColor: "rgba(0,0,0,0.05)" },
+      ]}
+    >
+      <Ionicons
+        name="location-sharp"
+        size={22}
+        color={isOwnMessage ? "rgba(255,255,255,0.9)" : "#FF3B30"}
+      />
+      <Text style={[styles.locationTitle, isOwnMessage && { color: "#fff" }]}>
+        Location
+      </Text>
+    </View>
+  );
+};
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function ChatMessageOptionsModal({
@@ -114,9 +317,7 @@ export default function ChatMessageOptionsModal({
     if (!visible) {
       AudioManager.stopCurrentSound();
     }
-
     return () => {
-      // Stop audio when modal unmounts
       AudioManager.stopCurrentSound();
     };
   }, [visible]);
@@ -159,7 +360,6 @@ export default function ChatMessageOptionsModal({
   // ─── Check if message has a valid reply preview ──────────────────────────
   const hasValidReply = isValidReply(message.replyTo);
 
-  // Check if reply is voice message
   const isReplyVoiceMessage = useMemo(() => {
     if (!message.replyTo) return false;
     const replyType = message.replyTo.type;
@@ -172,20 +372,59 @@ export default function ChatMessageOptionsModal({
     );
   }, [message.replyTo]);
 
-  // ─── Total modal height (dynamic based on content) ───────────────────────
-  const getEstimatedBubbleHeight = (): number => {
-    if (message.type === "image") return 150;
-    if (message.type === "audio") return 70;
+  // ─── 🔴 STRICTLY FIXED preview heights (matching AttachmentMessage) ──────
+  const getPreviewHeight = (): number => {
+    // 🔴 Image: EXACTLY the same height as AttachmentMessage
+    if (isImageMessage(message)) {
+      return IMAGE_PREVIEW_HEIGHT; // No extra padding, exact match
+    }
+
+    // Video: Same width, fixed height
+    if (isVideoMessage(message)) {
+      return 160;
+    }
+
+    // Audio
+    if (isAudioMessage(message)) {
+      return 70;
+    }
+
+    // File
+    if (isFileMessage(message)) {
+      return 76;
+    }
+
+    // Location
+    if (isLocationMessage(message)) {
+      return 56;
+    }
+
+    // Text with reply
     if (hasValidReply) {
       if (isReplyVoiceMessage) return 130;
       return 100;
     }
+
+    // Plain text
     return 56;
   };
 
-  const estimatedBubbleHeight = getEstimatedBubbleHeight();
+  const previewHeight = getPreviewHeight();
+  const isMediaMessage =
+    isImageMessage(message) ||
+    isVideoMessage(message) ||
+    isFileMessage(message) ||
+    isLocationMessage(message);
+
+  // 🔴 Consistent spacing
+  const mediaExtraSpacing = isMediaMessage ? 32 : 0;
+
   const totalHeight =
-    REACTION_BAR_HEIGHT + estimatedBubbleHeight + actionsHeight + 20;
+    REACTION_BAR_HEIGHT +
+    previewHeight +
+    actionsHeight +
+    20 +
+    mediaExtraSpacing;
 
   // ─── 1. HORIZONTAL POSITIONING ───────────────────────────────────────────
   const actionsLeft = isOwnMessage
@@ -214,7 +453,7 @@ export default function ChatMessageOptionsModal({
 
   let modalTop = getModalTop();
 
-  // Final safety clamps
+  // Safety clamps
   modalTop = Math.max(
     SAFE_TOP,
     Math.min(modalTop, SCREEN_HEIGHT - totalHeight - SAFE_BOTTOM),
@@ -224,19 +463,19 @@ export default function ChatMessageOptionsModal({
   const reactionBarTop = modalTop;
   const messagePreviewTop = modalTop + REACTION_BAR_HEIGHT;
   const replyOffset = hasValidReply ? 60 : 0;
-  const actionsTop = messagePreviewTop + estimatedBubbleHeight + replyOffset;
+  const mediaOffset = isMediaMessage ? 28 : 0;
+  const actionsTop =
+    messagePreviewTop + previewHeight + replyOffset + mediaOffset;
 
   // ─── Handle reaction press ────────────────────────────────────────────────
   const handleReactionPress = useCallback(
     (reaction: string) => {
       const shouldRemove = selectedReaction === reaction;
-
       if (shouldRemove) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } else {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       }
-
       onReaction(reaction, shouldRemove);
       handleClose();
     },
@@ -257,10 +496,9 @@ export default function ChatMessageOptionsModal({
     [handleClose],
   );
 
-  // ─── Prepare reply data for ReplyPreview component ───────────────────────
+  // ─── Prepare reply data ──────────────────────────────────────────────
   const getReplyData = (): ReplyTo | null => {
     if (!hasValidReply) return null;
-
     return {
       messageId: message.replyTo!.messageId,
       message: message.replyTo!.message,
@@ -272,13 +510,12 @@ export default function ChatMessageOptionsModal({
     };
   };
 
-  // ─── Format time function ────────────────────────────────────────────────
+  // ─── Format time ─────────────────────────────────────────────────────
   const getFormattedTime = (): string => {
     if (message.createdAt && formatTime) {
       return formatTime(message.createdAt);
     }
     if (message.createdAt) {
-      // Fallback formatting
       const date = new Date(message.createdAt);
       return date.toLocaleTimeString([], {
         hour: "2-digit",
@@ -288,65 +525,29 @@ export default function ChatMessageOptionsModal({
     return "";
   };
 
-  // ─── Render main message content (matches ChatBubble exactly) ────────────
+  // ─── Render message content ──────────────────────────────────────────
   const renderMessageContent = () => {
-    if (message.type === "image" && message.mediaUrl && getFullImageUrl) {
-      return (
-        <Image
-          source={{ uri: getFullImageUrl(message.mediaUrl) }}
-          style={styles.messageImage}
-          resizeMode="cover"
-        />
-      );
+    if (isImageMessage(message) && message.mediaUrl) {
+      const fullUrl = getFullImageUrl
+        ? getFullImageUrl(message.mediaUrl)
+        : message.mediaUrl;
+      return <ImagePreview uri={fullUrl} isOwnMessage={isOwnMessage} />;
     }
 
-    if (message.type === "audio") {
-      if (!message.mediaUrl) {
-        return (
-          <View style={styles.audioLoadingContainer}>
-            <View style={styles.audioLoadingIconWrap}>
-              <ActivityIndicator
-                size="small"
-                color={isOwnMessage ? "#fff" : "#585858"}
-              />
-            </View>
-            <View style={styles.waveformContainer}>
-              {WAVEFORM_BARS.map((h, i) => (
-                <View
-                  key={i}
-                  style={[
-                    styles.waveBar,
-                    {
-                      height: h,
-                      opacity: 0.3,
-                      backgroundColor: isOwnMessage
-                        ? "rgba(255, 255, 255, 0.5)"
-                        : "#8B5CF6",
-                    },
-                  ]}
-                />
-              ))}
-            </View>
-            <Text
-              style={[styles.audioLabel, isOwnMessage && styles.ownAudioLabel]}
-            >
-              Sending...
-            </Text>
-          </View>
-        );
-      }
+    if (isVideoMessage(message)) {
+      return <VideoPreview isOwnMessage={isOwnMessage} />;
+    }
 
-      return (
-        <View style={styles.audioMessageContainer}>
-          <AudioPlayer
-            audioUrl={message.mediaUrl}
-            duration={message.duration || 0}
-            isOwnMessage={isOwnMessage}
-            messageId={message._id}
-            onPlayed={() => {}}
-          />
-        </View>
-      );
+    if (isAudioMessage(message)) {
+      return <AudioPreview message={message} isOwnMessage={isOwnMessage} />;
+    }
+
+    if (isFileMessage(message)) {
+      return <FilePreview message={message} isOwnMessage={isOwnMessage} />;
+    }
+
+    if (isLocationMessage(message)) {
+      return <LocationPreview isOwnMessage={isOwnMessage} />;
     }
 
     return (
@@ -361,7 +562,7 @@ export default function ChatMessageOptionsModal({
     );
   };
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  // ─── Render ──────────────────────────────────────────────────────────
   const replyData = getReplyData();
 
   return (
@@ -402,39 +603,24 @@ export default function ChatMessageOptionsModal({
         ))}
       </View>
 
-      {/* 2. MESSAGE PREVIEW - Align based on message owner */}
+      {/* 2. MESSAGE PREVIEW */}
       <View
         style={[
           styles.messageWrapper,
           {
             top: messagePreviewTop,
-            left: isOwnMessage ? undefined : SIDE_MARGIN,
-            right: isOwnMessage ? SIDE_MARGIN : undefined,
+            left: 0,
+            right: 0,
+            // 🔴 Always center media messages
+            alignItems: "center" as const,
           },
         ]}
       >
-        <View
-          style={[
-            styles.messageRow,
-            isOwnMessage ? styles.ownMessageRow : styles.otherMessageRow,
-          ]}
-        >
-          {/* Avatar spacer - show on left for other messages */}
-          {!isOwnMessage && <View style={styles.avatarSpacer} />}
-
-          {/* For own messages, avatar spacer goes on the right side */}
-          {isOwnMessage && <View style={styles.avatarSpacerRight} />}
-
-          {/* Message Content */}
-          <View style={styles.messageContent}>
+        {/* 🔴 Media messages centered */}
+        {isMediaMessage ? (
+          <View style={styles.mediaPreviewContainer}>
             {replyData && (
-              <View
-                style={[
-                  isOwnMessage
-                    ? styles.replyPreviewWrapperOwn
-                    : styles.replyPreviewWrapperOther,
-                ]}
-              >
+              <View style={styles.replyPreviewWrapperCenter}>
                 <ReplyPreview
                   replyTo={replyData}
                   isOwnMessage={isOwnMessage}
@@ -443,35 +629,68 @@ export default function ChatMessageOptionsModal({
                 />
               </View>
             )}
-
-            {/* Message Bubble */}
-            <View
-              style={[
-                styles.bubble,
-                isOwnMessage ? styles.ownBubble : styles.otherBubble,
-                message.type !== "audio" && styles.bubbleAutoWidth,
-                isOwnMessage
-                  ? styles.ownBubbleAlignment
-                  : { alignSelf: "flex-start" },
-              ]}
-            >
+            <View style={styles.mediaContentWrapper}>
               {renderMessageContent()}
             </View>
-
-            {/* Time and Status */}
-            <View
-              style={[
-                styles.messageFooter,
-                isOwnMessage && styles.ownMessageFooter,
-              ]}
-            >
+            <View style={styles.mediaTimeFooter}>
               <Text style={styles.timeText}>{getFormattedTime()}</Text>
             </View>
           </View>
+        ) : (
+          /* 🔴 Text messages keep bubble alignment */
+          <View
+            style={[
+              styles.messageRow,
+              isOwnMessage ? styles.ownMessageRow : styles.otherMessageRow,
+            ]}
+          >
+            {!isOwnMessage && <View style={styles.avatarSpacer} />}
+            {isOwnMessage && <View style={styles.avatarSpacerRight} />}
 
-          {/* For own messages, add spacer on the right side after content */}
-          {isOwnMessage && <View style={styles.avatarSpacer} />}
-        </View>
+            <View style={styles.messageContent}>
+              {replyData && (
+                <View
+                  style={[
+                    isOwnMessage
+                      ? styles.replyPreviewWrapperOwn
+                      : styles.replyPreviewWrapperOther,
+                  ]}
+                >
+                  <ReplyPreview
+                    replyTo={replyData}
+                    isOwnMessage={isOwnMessage}
+                    currentUserId={currentUserId}
+                    onScrollToMessage={undefined}
+                  />
+                </View>
+              )}
+
+              <View
+                style={[
+                  styles.bubble,
+                  isOwnMessage ? styles.ownBubble : styles.otherBubble,
+                  styles.bubbleAutoWidth,
+                  isOwnMessage
+                    ? styles.ownBubbleAlignment
+                    : { alignSelf: "flex-start" },
+                ]}
+              >
+                {renderMessageContent()}
+              </View>
+
+              <View
+                style={[
+                  styles.messageFooter,
+                  isOwnMessage && styles.ownMessageFooter,
+                ]}
+              >
+                <Text style={styles.timeText}>{getFormattedTime()}</Text>
+              </View>
+            </View>
+
+            {isOwnMessage && <View style={styles.avatarSpacer} />}
+          </View>
+        )}
       </View>
 
       {/* 3. ACTIONS LIST */}
@@ -585,6 +804,24 @@ const styles = StyleSheet.create({
     maxWidth: MAX_BUBBLE_WIDTH,
   },
 
+  // 🔴 Media Preview Container (centered)
+  mediaPreviewContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  replyPreviewWrapperCenter: {
+    alignSelf: "center",
+    marginBottom: 8,
+  },
+  mediaContentWrapper: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mediaTimeFooter: {
+    alignItems: "center",
+    marginTop: 8,
+  },
+
   // Reply Preview Wrappers
   replyPreviewWrapperOwn: {
     alignSelf: "flex-end",
@@ -594,21 +831,8 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     marginBottom: 8,
   },
-  replyPreviewInner: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 10,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-    paddingLeft: 8,
-    paddingTop: 5,
-    paddingRight: 60,
-  },
 
-  // Bubble Styles
+  // Bubble Styles (for text messages)
   bubble: {
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -642,11 +866,55 @@ const styles = StyleSheet.create({
     color: "#000",
   },
 
-  // Image Preview
-  messageImage: {
-    width: 200,
-    height: 150,
+  // 🔴 Image Preview - EXACT SAME as AttachmentMessage imageWrapper
+  imagePreviewWrapper: {
+    width: IMAGE_PREVIEW_WIDTH, // SCREEN_WIDTH * 0.55
+    height: IMAGE_PREVIEW_HEIGHT, // IMAGE_WIDTH * 1.25
     borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "#E5E5EA",
+  },
+  imagePreview: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 12,
+  },
+  imageLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#E5E5EA",
+    borderRadius: 12,
+    zIndex: 1,
+  },
+
+  // 🔴 Video Preview - EXACT SAME width as AttachmentMessage videoContainer
+  videoPreviewWrapper: {
+    width: IMAGE_PREVIEW_WIDTH, // Same as image width
+  },
+  videoPreviewContainer: {
+    borderRadius: 16,
+    overflow: "hidden",
+    width: "100%",
+    minHeight: 160,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  videoPlayButton: {
+    marginBottom: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  videoInfo: { flexDirection: "row", alignItems: "center", gap: 6 },
+  videoText: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#666",
+    fontFamily: "SofiaSans-Medium",
   },
 
   // Audio Preview
@@ -683,8 +951,46 @@ const styles = StyleSheet.create({
     opacity: 0.7,
     fontFamily: "SofiaSans-Regular",
   },
-  ownAudioLabel: {
-    color: "#fff",
+
+  // File Preview
+  filePreviewContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 14,
+    borderRadius: 14,
+    gap: 12,
+    minWidth: IMAGE_PREVIEW_WIDTH * 0.8,
+  },
+  fileIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  fileInfo: { flex: 1 },
+  fileName: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#000",
+    fontFamily: "SofiaSans-Medium",
+    marginBottom: 3,
+  },
+
+  // Location Preview
+  locationPreviewContainer: {
+    borderRadius: 16,
+    padding: 16,
+    minWidth: IMAGE_PREVIEW_WIDTH * 0.8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  locationTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#000",
+    fontFamily: "SofiaSans-Bold",
   },
 
   // Message Footer
