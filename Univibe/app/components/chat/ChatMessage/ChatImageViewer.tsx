@@ -1,26 +1,35 @@
-// app/components/chat/ChatMessage/ChatImageViewer.tsx
+/**
+ * app/components/chat/ChatMessage/ChatImageViewer.tsx
+ * ChatImageViewer - Full-screen image viewer modal
+ *
+ * Features:
+ * - Blur background overlay
+ * - Tap anywhere to close
+ * - Single image display
+ * - Proper image fitting with aspect ratio preservation
+ * - Close button with hit slop for easy tapping
+ */
 
-import React, { useState, useRef, useCallback } from "react";
+import React from "react";
 import {
   View,
   Modal,
   TouchableOpacity,
-  FlatList,
   StyleSheet,
   Dimensions,
-  ActivityIndicator,
   StatusBar,
-  Text,
+  TouchableWithoutFeedback,
 } from "react-native";
 import { Image } from "expo-image";
+import { BlurView } from "expo-blur";
 import { Ionicons } from "@expo/vector-icons";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 interface ChatImageViewerProps {
   visible: boolean;
-  images: string[]; // ✅ Array of images
-  initialIndex?: number; // ✅ Which image to show first
+  images: string[];
+  initialIndex?: number;
   onClose: () => void;
 }
 
@@ -32,112 +41,62 @@ export default function ChatImageViewer({
   initialIndex = 0,
   onClose,
 }: ChatImageViewerProps) {
-  const [currentIndex, setCurrentIndex] = useState(initialIndex);
-  const flatListRef = useRef<FlatList>(null);
+  const currentImage = images[initialIndex] || images[0];
 
-  // ✅ Scroll to initial index when opened
-  const onLayout = useCallback(() => {
-    if (initialIndex > 0 && flatListRef.current) {
-      setTimeout(() => {
-        flatListRef.current?.scrollToIndex({
-          index: initialIndex,
-          animated: false,
-        });
-      }, 50);
-    }
-  }, [initialIndex]);
-
-  // ✅ Track which image is visible
-  const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
-    if (viewableItems.length > 0) {
-      setCurrentIndex(viewableItems[0].index ?? 0);
-    }
-  }).current;
-
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 50,
-  }).current;
-
-  const getItemLayout = useCallback(
-    (_: any, index: number) => ({
-      length: SCREEN_WIDTH,
-      offset: SCREEN_WIDTH * index,
-      index,
-    }),
-    [],
-  );
-
-  const keyExtractor = useCallback(
-    (_: string, index: number) => `img-${index}`,
-    [],
-  );
-
-  const renderItem = useCallback(({ item: uri }: { item: string }) => {
-    return (
-      <View style={styles.imageContainer}>
-        <Image
-          source={{ uri }}
-          style={styles.image}
-          placeholder={{ blurhash: PHOTO_BLURHASH }}
-          placeholderContentFit="contain"
-          transition={500}
-          contentFit="contain"
-          cachePolicy="memory-disk"
-          recyclingKey={uri}
-        />
-      </View>
-    );
-  }, []);
+  if (!currentImage) return null;
 
   return (
     <Modal
       visible={visible}
-      transparent={false}
+      transparent={true}
       animationType="fade"
       statusBarTranslucent
       onRequestClose={onClose}
     >
-      <StatusBar barStyle="light-content" backgroundColor="#000" />
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor="transparent"
+        translucent
+      />
 
-      <View style={styles.container}>
-        {/* Close Button */}
-        <TouchableOpacity
-          style={styles.closeButton}
-          onPress={onClose}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="close" size={28} color="#fff" />
-        </TouchableOpacity>
+      {/* Tap anywhere to close */}
+      <TouchableWithoutFeedback onPress={onClose}>
+        <View style={styles.container}>
+          {/* Blur background */}
+          <BlurView
+            intensity={90}
+            tint="dark"
+            style={StyleSheet.absoluteFill}
+          />
 
-        {/* Image Counter */}
-        {images.length > 1 && (
-          <View style={styles.counterBadge}>
-            <Text style={styles.counterText}>
-              {currentIndex + 1} / {images.length}
-            </Text>
+          {/* Dark overlay for better contrast */}
+          <View style={styles.overlay} />
+
+          {/* Image centered in available space */}
+          <View style={styles.imageWrapper}>
+            <Image
+              source={{ uri: currentImage }}
+              style={styles.image}
+              placeholder={{ blurhash: PHOTO_BLURHASH }}
+              placeholderContentFit="contain"
+              transition={500}
+              contentFit="contain"
+              cachePolicy="memory-disk"
+              recyclingKey={currentImage}
+            />
           </View>
-        )}
+        </View>
+      </TouchableWithoutFeedback>
 
-        {/* Swipeable Image List */}
-        <FlatList
-          ref={flatListRef}
-          data={images}
-          renderItem={renderItem}
-          keyExtractor={keyExtractor}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          bounces={false}
-          onLayout={onLayout}
-          onViewableItemsChanged={onViewableItemsChanged}
-          viewabilityConfig={viewabilityConfig}
-          getItemLayout={getItemLayout}
-          removeClippedSubviews={true}
-          maxToRenderPerBatch={3}
-          windowSize={3}
-          initialNumToRender={3}
-        />
-      </View>
+      {/* Close button */}
+      <TouchableOpacity
+        style={styles.closeButton}
+        onPress={onClose}
+        activeOpacity={0.8}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      >
+        <Ionicons name="close" size={28} color="#fff" />
+      </TouchableOpacity>
     </Modal>
   );
 }
@@ -145,44 +104,33 @@ export default function ChatImageViewer({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#000",
-    justifyContent: "center",
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
   },
   closeButton: {
     position: "absolute",
     top: 60,
     right: 20,
-    zIndex: 10,
+    zIndex: 999,
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
     justifyContent: "center",
     alignItems: "center",
   },
-  counterBadge: {
-    position: "absolute",
-    top: 68,
-    alignSelf: "center",
-    zIndex: 10,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  counterText: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  imageContainer: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
+  imageWrapper: {
+    flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    paddingHorizontal: 12,
+    paddingTop: 100, // Space for close button
+    paddingBottom: 50, // Bottom spacing
   },
   image: {
     width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT * 0.85,
+    height: SCREEN_HEIGHT,
   },
 });

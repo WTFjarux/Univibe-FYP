@@ -6,7 +6,6 @@ import {
   Text,
   Image,
   StyleSheet,
-  Alert,
   Share,
   Pressable,
   ActivityIndicator,
@@ -20,6 +19,8 @@ import AttachmentMessage from "./AttachmentMessage";
 import ChatImageViewer from "./ChatImageViewer";
 import ChatMessageOptionsModal from "./ChatMessageOptionsModal";
 import ReplyPreview from "./ReplyPreview";
+
+// ─── Types ──────────────────────────────────────────────────────
 
 interface Message {
   _id: string;
@@ -74,6 +75,8 @@ interface ChatBubbleProps {
   onScrollToMessage?: (messageId: string) => void;
 }
 
+// ─── Component ──────────────────────────────────────────────────
+
 export default function ChatBubble({
   message,
   isOwnMessage,
@@ -91,16 +94,18 @@ export default function ChatBubble({
   highlightedMessageId,
   onScrollToMessage,
 }: ChatBubbleProps) {
+  // Modal & interaction state
   const [showOptions, setShowOptions] = useState(false);
   const [optionsPosition, setOptionsPosition] = useState({ x: 0, y: 0 });
   const [selectedReaction, setSelectedReaction] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState(false);
 
+  // Image viewer state
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   const [viewerImages, setViewerImages] = useState<string[]>([]);
   const [viewerIndex, setViewerIndex] = useState(0);
 
-  // 🔴 Highlight animation
+  // Highlight animation when message is navigated to
   const isHighlighted = highlightedMessageId === message._id;
   const highlightAnim = useRef(new Animated.Value(0)).current;
 
@@ -125,9 +130,12 @@ export default function ChatBubble({
     }
   }, [isHighlighted]);
 
+  // Check if message contains media
   const isMediaType = ["image", "video", "file", "location"].includes(
     message.type || "",
   );
+
+  // ─── Avatar ──────────────────────────────────────────────────
 
   const getAvatarSource = () => {
     if (avatarError) return DEFAULT_AVATAR;
@@ -138,10 +146,13 @@ export default function ChatBubble({
     return DEFAULT_AVATAR;
   };
 
+  // ─── Reactions ───────────────────────────────────────────────
+
   const currentUserReaction = message.reactions?.find(
     (r) => r.userId === currentUserId,
   )?.reaction;
 
+  // Group reactions by emoji for display
   const reactionGroups = message.reactions?.reduce(
     (acc, r) => {
       acc[r.reaction] = (acc[r.reaction] || 0) + 1;
@@ -150,17 +161,18 @@ export default function ChatBubble({
     {} as Record<string, number>,
   );
 
+  // ─── Message Status Helpers ──────────────────────────────────
+
   const getSenderId = (): string => {
     return typeof message.sender === "string"
       ? message.sender
       : message.sender?._id || "";
   };
 
-  // 🔴 Check if message was read by other user
+  // Check if message was read by someone other than sender
   const isMessageRead = (): boolean => {
     if (!isOwnMessage || !message.readBy || message.readBy.length === 0)
       return false;
-
     const senderId = getSenderId();
     return message.readBy.some((r: any) => {
       const readUserId = typeof r === "string" ? r : r.user || r.userId;
@@ -168,6 +180,7 @@ export default function ChatBubble({
     });
   };
 
+  // Check if message was delivered to someone other than sender
   const isMessageDelivered = (): boolean => {
     if (
       !isOwnMessage ||
@@ -175,7 +188,6 @@ export default function ChatBubble({
       message.deliveredTo.length === 0
     )
       return false;
-
     const senderId = getSenderId();
     return message.deliveredTo.some((r: any) => {
       const deliveredUserId = typeof r === "string" ? r : r.user || r.userId;
@@ -183,16 +195,14 @@ export default function ChatBubble({
     });
   };
 
-  // 🔴 Get the appropriate status icon
+  // Status icon based on message state
   const getMessageStatusIcon = () => {
     if (!isOwnMessage) return null;
 
-    // If message is still sending
     if (message.status === "sending") {
       return <ActivityIndicator size={10} color="#8E8E93" />;
     }
 
-    // If message has been read
     if (isMessageRead() || message.status === "read") {
       return (
         <View style={styles.statusIconContainer}>
@@ -201,7 +211,6 @@ export default function ChatBubble({
       );
     }
 
-    // If message has been delivered
     if (isMessageDelivered() || message.status === "delivered") {
       return (
         <View style={styles.statusIconContainer}>
@@ -210,7 +219,6 @@ export default function ChatBubble({
       );
     }
 
-    // Default: sent
     return (
       <View style={styles.statusIconContainer}>
         <Ionicons name="checkmark" size={14} color="#8E8E93" />
@@ -218,16 +226,19 @@ export default function ChatBubble({
     );
   };
 
-  // 🔴 Get text description of status for accessibility
+  // Status text for accessibility
   const getStatusText = (): string => {
     if (!isOwnMessage) return "";
-
     if (message.status === "sending") return "Sending...";
+    if (isMessageRead() || message.status === "read") return "Read";
     if (isMessageDelivered() || message.status === "delivered")
       return "Delivered";
     return "Sent";
   };
 
+  // ─── Action Handlers ─────────────────────────────────────────
+
+  // Long press opens options modal
   const handleLongPress = (event: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const { pageX, pageY } = event.nativeEvent;
@@ -235,24 +246,28 @@ export default function ChatBubble({
     setShowOptions(true);
   };
 
+  // Copy message text to clipboard
   const handleCopy = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await Clipboard.setStringAsync(message.message);
     setShowOptions(false);
   };
 
+  // Reply to this message
   const handleReply = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (onReply) onReply(message);
     setShowOptions(false);
   };
 
+  // Delete this message
   const handleDelete = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setShowOptions(false);
     if (onDelete) onDelete(message._id);
   };
 
+  // Forward this message
   const handleForward = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (onForward) onForward(message);
@@ -260,22 +275,29 @@ export default function ChatBubble({
     setShowOptions(false);
   };
 
+  // React to this message
   const handleReaction = (reaction: string, shouldRemove?: boolean) => {
-    if (shouldRemove)
+    if (shouldRemove) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    else Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
     setSelectedReaction(shouldRemove ? null : reaction);
     if (onReaction) onReaction(message._id, reaction, shouldRemove);
     setShowOptions(false);
   };
 
+  // Open image in full-screen viewer
   const handleImagePress = (url: string) => {
     setViewerImages([url]);
     setViewerIndex(0);
     setImageViewerVisible(true);
   };
 
+  // ─── Render Message Content ──────────────────────────────────
+
   const renderMessageContent = () => {
+    // Media messages (image, video, file, location)
     if (isMediaType) {
       return (
         <AttachmentMessage
@@ -300,45 +322,51 @@ export default function ChatBubble({
       );
     }
 
-    if (message.type === "audio") {
-      if (message.status === "sending" || !message.mediaUrl) {
-        return (
-          <View style={styles.audioLoadingContainer}>
-            <View style={styles.audioLoadingIconWrap}>
-              <ActivityIndicator
-                size="small"
-                color={isOwnMessage ? "#fff" : "#585858"}
-              />
-            </View>
-            <View style={styles.waveformContainer}>
-              {[10, 18, 14, 22, 10, 16, 12].map((h, i) => (
-                <View
-                  key={i}
-                  style={[
-                    styles.waveBar,
-                    {
-                      height: h,
-                      opacity: 0.3,
-                      backgroundColor: isOwnMessage
-                        ? "rgba(255, 255, 255, 0.5)"
-                        : "#8B5CF6",
-                    },
-                  ]}
-                />
-              ))}
-            </View>
-            <Text
-              style={[styles.audioLabel, isOwnMessage && styles.ownAudioLabel]}
-            >
-              Sending...
-            </Text>
+    // Audio message - loading state
+    if (
+      message.type === "audio" &&
+      (message.status === "sending" || !message.mediaUrl)
+    ) {
+      return (
+        <View style={styles.audioLoadingContainer}>
+          <View style={styles.audioLoadingIconWrap}>
+            <ActivityIndicator
+              size="small"
+              color={isOwnMessage ? "#fff" : "#585858"}
+            />
           </View>
-        );
-      }
+          <View style={styles.waveformContainer}>
+            {[10, 18, 14, 22, 10, 16, 12].map((h, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.waveBar,
+                  {
+                    height: h,
+                    opacity: 0.3,
+                    backgroundColor: isOwnMessage
+                      ? "rgba(255, 255, 255, 0.5)"
+                      : "#8B5CF6",
+                  },
+                ]}
+              />
+            ))}
+          </View>
+          <Text
+            style={[styles.audioLabel, isOwnMessage && styles.ownAudioLabel]}
+          >
+            Sending...
+          </Text>
+        </View>
+      );
+    }
+
+    // Audio message - ready
+    if (message.type === "audio") {
       return (
         <View style={styles.audioMessageContainer}>
           <AudioPlayer
-            audioUrl={message.mediaUrl}
+            audioUrl={message.mediaUrl || ""}
             duration={message.duration || 0}
             isOwnMessage={isOwnMessage}
             messageId={message._id}
@@ -348,6 +376,7 @@ export default function ChatBubble({
       );
     }
 
+    // Text message
     return (
       <Text
         style={[
@@ -359,6 +388,8 @@ export default function ChatBubble({
       </Text>
     );
   };
+
+  // ─── Reply Data for Modal ────────────────────────────────────
 
   const getReplyDataForModal = () => {
     if (!message.replyTo) return undefined;
@@ -373,17 +404,13 @@ export default function ChatBubble({
     };
   };
 
+  // ─── Render ──────────────────────────────────────────────────
+
   return (
     <>
-      <Pressable
-        onLongPress={handleLongPress}
-        delayLongPress={300}
-        style={({ pressed }) => [
-          styles.messageWrapper,
-          pressed && styles.messagePressed,
-        ]}
-      >
-        {/* 🔴 Highlight background */}
+      {/* Message row with avatar and content */}
+      <View style={styles.messageWrapper}>
+        {/* Highlight animation background */}
         <Animated.View
           style={[
             styles.highlightBackground,
@@ -402,6 +429,7 @@ export default function ChatBubble({
             isOwnMessage ? styles.ownMessageRow : styles.otherMessageRow,
           ]}
         >
+          {/* Avatar - shown only for other people's messages */}
           {!isOwnMessage && showAvatar && (
             <View style={styles.avatarContainer}>
               <Image
@@ -411,10 +439,14 @@ export default function ChatBubble({
               />
             </View>
           )}
+
+          {/* Avatar spacer - maintains alignment when no avatar */}
           {!isOwnMessage && !showAvatar && <View style={styles.avatarSpacer} />}
           {isOwnMessage && <View style={styles.avatarSpacer} />}
 
+          {/* Message content container */}
           <View style={styles.messageContent}>
+            {/* Reply preview */}
             {message.replyTo && (
               <ReplyPreview
                 replyTo={{
@@ -432,27 +464,34 @@ export default function ChatBubble({
               />
             )}
 
-            <View
-              style={[
+            {/* Message bubble - only this area is long-pressable */}
+            <Pressable
+              onLongPress={handleLongPress}
+              delayLongPress={300}
+              style={({ pressed }) => [
                 styles.bubble,
+                // Text/audio messages get auto-width and colored background
                 (!isMediaType || message.type === "audio") &&
                   styles.bubbleAutoWidth,
                 (!isMediaType || message.type === "audio") &&
                   (isOwnMessage ? styles.ownBubble : styles.otherBubble),
-                (!isMediaType || message.type === "audio") &&
-                  isOwnMessage &&
-                  styles.ownBubbleAlignment,
-                isMediaType && styles.mediaBubble,
+                // Media messages get transparent background
+                isMediaType && message.type !== "audio" && styles.mediaBubble,
+                // Alignment based on message owner
+                isOwnMessage ? styles.bubbleAlignRight : styles.bubbleAlignLeft,
+                // Press feedback
+                pressed && styles.bubblePressed,
               ]}
             >
               {renderMessageContent()}
-            </View>
+            </Pressable>
 
+            {/* Reaction badges */}
             {reactionGroups && Object.keys(reactionGroups).length > 0 && (
               <View
                 style={[
                   styles.reactionsRow,
-                  isOwnMessage && styles.ownReactionsRow,
+                  isOwnMessage && styles.reactionsRowOwn,
                 ]}
               >
                 {Object.entries(reactionGroups).map(([reaction, count]) => (
@@ -466,11 +505,12 @@ export default function ChatBubble({
               </View>
             )}
 
+            {/* Time and status indicators */}
             {showTime && (
               <View
                 style={[
                   styles.messageFooter,
-                  isOwnMessage && styles.ownMessageFooter,
+                  isOwnMessage && styles.messageFooterOwn,
                 ]}
               >
                 <Text style={styles.timeText}>
@@ -482,8 +522,9 @@ export default function ChatBubble({
             )}
           </View>
         </View>
-      </Pressable>
+      </View>
 
+      {/* Modals remain the same */}
       <ChatMessageOptionsModal
         visible={showOptions}
         onClose={() => setShowOptions(false)}
@@ -520,13 +561,18 @@ export default function ChatBubble({
   );
 }
 
+// ─── Styles ──────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
+  // Message wrapper - contains highlight and row
   messageWrapper: {
     marginVertical: 4,
     borderRadius: 16,
     overflow: "hidden",
     position: "relative",
   },
+
+  // Highlight animation overlay
   highlightBackground: {
     position: "absolute",
     top: 0,
@@ -537,15 +583,25 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     zIndex: 0,
   },
-  messagePressed: { opacity: 0.9 },
+
+
+  // Press feedback on bubble only
+  bubblePressed: { opacity: 0.9 },
+
+  // Message row - avatar + content
   messageRow: {
     flexDirection: "row",
     alignItems: "flex-end",
     zIndex: 1,
     padding: 4,
+    width: "100%",
   },
+
+  // Row alignment
   ownMessageRow: { justifyContent: "flex-end" },
   otherMessageRow: { justifyContent: "flex-start" },
+
+  // Avatar
   avatarContainer: { marginRight: 8, marginBottom: 4 },
   avatar: {
     width: 32,
@@ -553,19 +609,55 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: "#f0f0f0",
   },
+
+  // Avatar spacer for alignment when no avatar shown
   avatarSpacer: { width: 40 },
-  messageContent: { maxWidth: "75%" },
-  bubble: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18 },
-  bubbleAutoWidth: { alignSelf: "flex-start" },
-  ownBubbleAlignment: { alignSelf: "flex-end" },
-  ownBubble: { backgroundColor: "#8b5cf6", borderBottomRightRadius: 4 },
-  otherBubble: { backgroundColor: "#E5E5EA", borderBottomLeftRadius: 4 },
+
+  // Message content - limits width to 75% of screen
+  messageContent: {
+    maxWidth: "75%",
+    flexShrink: 1,
+  },
+
+  // Bubble base styles
+  bubble: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+  },
+
+  // Auto-width for text messages (wraps content)
+  bubbleAutoWidth: {
+    alignSelf: "flex-start",
+  },
+
+  // Bubble alignment
+  bubbleAlignRight: {
+    alignSelf: "flex-end",
+  },
+  bubbleAlignLeft: {
+    alignSelf: "flex-start",
+  },
+
+  // Bubble colors
+  ownBubble: {
+    backgroundColor: "#8b5cf6",
+    borderBottomRightRadius: 4,
+  },
+  otherBubble: {
+    backgroundColor: "#E5E5EA",
+    borderBottomLeftRadius: 4,
+  },
+
+  // Transparent bubble for media messages
   mediaBubble: {
     backgroundColor: "transparent",
     paddingHorizontal: 0,
     paddingVertical: 0,
     borderRadius: 0,
   },
+
+  // Message text
   messageText: {
     fontSize: 15,
     lineHeight: 20,
@@ -573,7 +665,11 @@ const styles = StyleSheet.create({
   },
   ownMessageText: { color: "#fff" },
   otherMessageText: { color: "#000" },
+
+  // Audio message container
   audioMessageContainer: { minWidth: 200, maxWidth: 250 },
+
+  // Audio loading state
   audioLoadingContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -588,8 +684,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+
+  // Audio waveform placeholder
   waveformContainer: { flexDirection: "row", alignItems: "center", gap: 3 },
   waveBar: { width: 3, borderRadius: 2 },
+
+  // Audio label
   audioLabel: {
     fontSize: 12,
     color: "#000",
@@ -597,8 +697,10 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
   },
   ownAudioLabel: { color: "#fff" },
+
+  // Reaction badges
   reactionsRow: { flexDirection: "row", marginTop: 4, marginLeft: 8 },
-  ownReactionsRow: {
+  reactionsRowOwn: {
     justifyContent: "flex-end",
     marginLeft: 0,
     marginRight: 8,
@@ -620,6 +722,8 @@ const styles = StyleSheet.create({
   },
   reactionEmoji: { fontSize: 12 },
   reactionCount: { fontSize: 10, color: "#666", marginLeft: 2 },
+
+  // Message footer - time and status
   messageFooter: {
     flexDirection: "row",
     alignItems: "center",
@@ -628,13 +732,14 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
     gap: 4,
   },
-  ownMessageFooter: { justifyContent: "flex-end" },
+  messageFooterOwn: { justifyContent: "flex-end" },
   timeText: {
     fontSize: 10,
     color: "#8E8E93",
     fontFamily: "SofiaSans-Regular",
   },
-  // 🔴 Status icon styles
+
+  // Status icon
   statusIconContainer: {
     marginLeft: 2,
     justifyContent: "center",
