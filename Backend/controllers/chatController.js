@@ -338,6 +338,18 @@ exports.uploadAudio = async (req, res) => {
     }
 
     const msg = await Message.create(data);
+
+    // 🔴 BROADCAST TO ROOM VIA SOCKET
+    const io = req.app.get("io");
+    if (io) {
+      const formattedMsg = formatMessage(msg, req.user.id);
+      // Broadcast to everyone EXCEPT sender (sender already has optimistic message)
+      socket.to(roomId).emit("receive_message", formattedMsg);
+      // Or broadcast to everyone including sender:
+      // io.to(roomId).emit('receive_message', formattedMsg);
+      console.log(`📡 Audio broadcast to room: ${roomId}`);
+    }
+
     await ChatRoom.findOneAndUpdate(
       { roomId },
       {
@@ -354,6 +366,7 @@ exports.uploadAudio = async (req, res) => {
       },
       { upsert: true },
     );
+
     res.json({
       success: true,
       url: audioUrl,
@@ -386,6 +399,15 @@ exports.uploadAttachments = async (req, res) => {
         readBy: [{ user: req.user.id }],
         deliveredTo: [{ user: req.user.id }],
       });
+
+      // 🔴 BROADCAST LOCATION
+      const io = req.app.get("io");
+      if (io) {
+        const formattedMsg = formatMessage(msg, req.user.id);
+        io.to(roomId).emit("receive_message", formattedMsg);
+        console.log(`📡 Location broadcast to room: ${roomId}`);
+      }
+
       await ChatRoom.findOneAndUpdate(
         { roomId },
         {
@@ -437,6 +459,21 @@ exports.uploadAttachments = async (req, res) => {
       }),
     );
 
+    // 🔴 BROADCAST ALL ATTACHMENTS TO ROOM
+    const io = req.app.get("io");
+    const formattedMessages = messages.map((m) =>
+      formatMessage(m, req.user.id),
+    );
+
+    if (io) {
+      formattedMessages.forEach((msg) => {
+        io.to(roomId).emit("receive_message", msg);
+        console.log(
+          `📡 Attachment broadcast to room: ${roomId}, msg: ${msg._id}`,
+        );
+      });
+    }
+
     const lastMsg = messages[messages.length - 1];
     await ChatRoom.findOneAndUpdate(
       { roomId },
@@ -457,9 +494,10 @@ exports.uploadAttachments = async (req, res) => {
       },
       { upsert: true },
     );
+
     res.json({
       success: true,
-      data: messages.map((m) => formatMessage(m, req.user.id)),
+      data: formattedMessages,
     });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });

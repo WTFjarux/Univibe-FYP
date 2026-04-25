@@ -1,6 +1,6 @@
 // app/components/chat/ChatMessage/ChatMessageOptionsModal.tsx
 
-import React, { useMemo } from "react";
+import React, { useMemo, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import AudioPlayer from "./AudioPlayer";
 import ReplyPreview from "./ReplyPreview";
+import AudioManager from "../../../../lib/utils/AudioManager";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -108,6 +109,24 @@ export default function ChatMessageOptionsModal({
   formatTime,
   currentUserId,
 }: ChatMessageOptionsModalProps) {
+  // 🔴 Stop audio when modal closes or becomes invisible
+  useEffect(() => {
+    if (!visible) {
+      AudioManager.stopCurrentSound();
+    }
+
+    return () => {
+      // Stop audio when modal unmounts
+      AudioManager.stopCurrentSound();
+    };
+  }, [visible]);
+
+  // 🔴 Handle close with audio cleanup
+  const handleClose = useCallback(() => {
+    AudioManager.stopCurrentSound();
+    onClose();
+  }, [onClose]);
+
   // ─── Calculate number of actions ─────────────────────────────────────────
   const actions = useMemo(() => {
     const items: {
@@ -204,21 +223,39 @@ export default function ChatMessageOptionsModal({
   // ─── 3. SECTION POSITIONS ─────────────────────────────────────────────────
   const reactionBarTop = modalTop;
   const messagePreviewTop = modalTop + REACTION_BAR_HEIGHT;
-  const actionsTop = messagePreviewTop + estimatedBubbleHeight + 15;
+  const replyOffset = hasValidReply ? 60 : 0;
+  const actionsTop = messagePreviewTop + estimatedBubbleHeight + replyOffset;
 
   // ─── Handle reaction press ────────────────────────────────────────────────
-  const handleReactionPress = (reaction: string) => {
-    const shouldRemove = selectedReaction === reaction;
+  const handleReactionPress = useCallback(
+    (reaction: string) => {
+      const shouldRemove = selectedReaction === reaction;
 
-    if (shouldRemove) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } else {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
+      if (shouldRemove) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
 
-    onReaction(reaction, shouldRemove);
-    onClose();
-  };
+      onReaction(reaction, shouldRemove);
+      handleClose();
+    },
+    [selectedReaction, onReaction, handleClose],
+  );
+
+  // ─── Handle action press ────────────────────────────────────────────────
+  const handleActionPress = useCallback(
+    (handler: () => void, destructive?: boolean) => {
+      if (destructive) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      } else {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+      handler();
+      handleClose();
+    },
+    [handleClose],
+  );
 
   // ─── Prepare reply data for ReplyPreview component ───────────────────────
   const getReplyData = (): ReplyTo | null => {
@@ -332,12 +369,12 @@ export default function ChatMessageOptionsModal({
       visible={visible}
       transparent
       animationType="fade"
-      onRequestClose={onClose}
+      onRequestClose={handleClose}
     >
       <TouchableOpacity
         style={StyleSheet.absoluteFill}
         activeOpacity={1}
-        onPress={onClose}
+        onPress={handleClose}
       >
         <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
         <View style={[StyleSheet.absoluteFill, styles.dimLayer]} />
@@ -398,14 +435,12 @@ export default function ChatMessageOptionsModal({
                     : styles.replyPreviewWrapperOther,
                 ]}
               >
-                <View style={styles.replyPreviewInner}>
-                  <ReplyPreview
-                    replyTo={replyData}
-                    isOwnMessage={isOwnMessage}
-                    currentUserId={currentUserId}
-                    onScrollToMessage={undefined}
-                  />
-                </View>
+                <ReplyPreview
+                  replyTo={replyData}
+                  isOwnMessage={isOwnMessage}
+                  currentUserId={currentUserId}
+                  onScrollToMessage={undefined}
+                />
               </View>
             )}
 
@@ -450,17 +485,9 @@ export default function ChatMessageOptionsModal({
           <React.Fragment key={action.label}>
             <TouchableOpacity
               style={styles.actionItem}
-              onPress={() => {
-                if (action.destructive) {
-                  Haptics.notificationAsync(
-                    Haptics.NotificationFeedbackType.Warning,
-                  );
-                } else {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                }
-                action.handler();
-                onClose();
-              }}
+              onPress={() =>
+                handleActionPress(action.handler, action.destructive)
+              }
               activeOpacity={0.65}
             >
               <Ionicons
@@ -492,7 +519,7 @@ export default function ChatMessageOptionsModal({
 const styles = StyleSheet.create({
   dimLayer: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.3)",
+    backgroundColor: "rgba(255, 255, 255, 0.58)",
   },
 
   // Reaction Bar
@@ -674,7 +701,7 @@ const styles = StyleSheet.create({
   },
   timeText: {
     fontSize: 10,
-    color: "#e6e4e4",
+    color: "#4b4b4b",
     fontFamily: "SofiaSans-Regular",
   },
 

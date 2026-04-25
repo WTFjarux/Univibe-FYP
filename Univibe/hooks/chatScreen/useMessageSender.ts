@@ -10,7 +10,6 @@ import type {
   ReplyToState,
   ReplyToData,
   AttachmentData,
-  PendingMessage,
 } from "../../lib/types/chat.types";
 
 const SEND_TIMEOUT_MS = 10000;
@@ -22,9 +21,20 @@ interface UseMessageSenderProps {
   userName?: string;
   socketConnected: boolean;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
-  addPendingMessage: (tempId: string, pending: PendingMessage) => void;
-  removePendingMessage: (tempId: string) => void;
-  setPendingTimeout: (tempId: string, timeout: number) => void;
+  addOptimisticMessage: (
+    tempId: string,
+    messageData: Partial<Message>,
+  ) => Message;
+  removeOptimisticMessage: (tempId: string) => void;
+  confirmOptimisticMessage: (
+    tempId: string,
+    messageId: string,
+    serverData?: Partial<Message>,
+  ) => void;
+  setPendingTimeout: (
+    tempId: string,
+    timeout: ReturnType<typeof setTimeout>,
+  ) => void;
   scrollToEnd: () => void;
   emitEvent: (event: string, data: any) => void;
 }
@@ -36,8 +46,9 @@ export const useMessageSender = ({
   userName,
   socketConnected,
   setMessages,
-  addPendingMessage,
-  removePendingMessage,
+  addOptimisticMessage,
+  removeOptimisticMessage,
+  confirmOptimisticMessage,
   setPendingTimeout,
   scrollToEnd,
   emitEvent,
@@ -73,28 +84,14 @@ export const useMessageSender = ({
       const tempId = generateTempId();
       const replyToData = buildReplyData(replyTo);
 
-      const tempMessage: Message = {
-        _id: tempId,
-        tempId,
-        sender: userId || "",
-        senderName: userName || "You",
+      // ✅ Add optimistic message to both state and cache
+      addOptimisticMessage(tempId, {
         message: text,
-        roomId,
+        type: "text",
+        replyTo: replyToData,
         createdAt: new Date().toISOString(),
-        status: "sending",
-        type: "text",
-        replyTo: replyToData,
-        reactions: [],
-      };
-
-      addPendingMessage(tempId, {
-        tempId,
-        message: text,
-        timestamp: Date.now(),
-        type: "text",
-        replyTo: replyToData,
       });
-      setMessages((prev) => [...prev, tempMessage]);
+
       scrollToEnd();
       onSent();
 
@@ -107,7 +104,7 @@ export const useMessageSender = ({
       });
 
       const timeout = setTimeout(() => {
-        removePendingMessage(tempId);
+        removeOptimisticMessage(tempId);
         Alert.alert("Error", "Message failed to send. Please try again.");
       }, SEND_TIMEOUT_MS);
       setPendingTimeout(tempId, timeout);
@@ -118,11 +115,10 @@ export const useMessageSender = ({
       userName,
       roomId,
       buildReplyData,
-      addPendingMessage,
-      setMessages,
+      addOptimisticMessage,
+      removeOptimisticMessage,
       scrollToEnd,
       emitEvent,
-      removePendingMessage,
       setPendingTimeout,
     ],
   );
@@ -144,30 +140,16 @@ export const useMessageSender = ({
       const tempId = generateTempId();
       const replyToData = buildReplyData(replyTo);
 
-      const tempMessage: Message = {
-        _id: tempId,
-        tempId,
-        sender: userId || "",
-        senderName: userName || "You",
+      // ✅ Add optimistic message with local URI as fallback
+      addOptimisticMessage(tempId, {
         message: "🎤 Voice message",
-        roomId,
+        type: "audio",
+        mediaUrl: uri,
+        duration,
+        replyTo: replyToData,
         createdAt: new Date().toISOString(),
-        status: "sending",
-        type: "audio",
-        duration,
-        replyTo: replyToData,
-        reactions: [],
-      };
-
-      addPendingMessage(tempId, {
-        tempId,
-        message: "🎤 Voice message",
-        timestamp: Date.now(),
-        type: "audio",
-        duration,
-        replyTo: replyToData,
       });
-      setMessages((prev) => [...prev, tempMessage]);
+
       scrollToEnd();
       setUploading(true);
       onSent();
@@ -198,24 +180,18 @@ export const useMessageSender = ({
             formData.append("replyToDuration", replyTo.duration.toString());
         }
 
-        const data = await chatApi.uploadAudio(token, formData);
+        const data = await chatApi.uploadAudio(formData);
 
         if (data.success) {
-          emitEvent("send_message", {
-            roomId,
-            message: "🎤 Voice message",
-            type: "audio",
-            replyTo: replyToData,
-            mediaUrl: data.url,
-            duration,
-            tempId,
-          });
+          if (data.data && data.data._id) {
+            confirmOptimisticMessage(tempId, data.data._id, data.data);
+          }
         } else {
-          removePendingMessage(tempId);
+          removeOptimisticMessage(tempId);
           Alert.alert("Error", data.message || "Failed to send voice message");
         }
-      } catch {
-        removePendingMessage(tempId);
+      } catch (error) {
+        removeOptimisticMessage(tempId);
         Alert.alert("Error", "Failed to send voice message");
       } finally {
         setUploading(false);
@@ -223,15 +199,12 @@ export const useMessageSender = ({
     },
     [
       token,
-      userId,
-      userName,
       roomId,
       buildReplyData,
-      addPendingMessage,
-      setMessages,
+      addOptimisticMessage,
+      removeOptimisticMessage,
+      confirmOptimisticMessage,
       scrollToEnd,
-      emitEvent,
-      removePendingMessage,
     ],
   );
 
@@ -256,36 +229,34 @@ export const useMessageSender = ({
             ? `group_${Date.now()}`
             : undefined;
 
-        const tempMessages: Message[] = attachments.map(
-          (attachment, index) => ({
-            _id: generateTempId(),
-            tempId: generateTempId(),
-            sender: userId || "",
-            senderName: userName || "You",
-            message:
-              attachment.type === "image"
-                ? "📷 Photo"
-                : attachment.type === "video"
-                  ? "🎥 Video"
-                  : `📎 ${attachment.name || "File"}`,
-            roomId,
-            createdAt: new Date().toISOString(),
-            status: "sending" as const,
-            type: (attachment.type === "document"
-              ? "file"
-              : attachment.type) as Message["type"],
+        // Add optimistic messages for each attachment
+        const tempIds: string[] = [];
+
+        attachments.forEach((attachment, index) => {
+          const tempId = generateTempId();
+          tempIds.push(tempId);
+
+          const messageText =
+            attachment.type === "image"
+              ? "📷 Photo"
+              : attachment.type === "video"
+                ? "🎥 Video"
+                : `📎 ${attachment.name || "File"}`;
+
+          addOptimisticMessage(tempId, {
+            message: messageText,
+            type: attachment.type === "document" ? "file" : attachment.type,
             mediaUrl: attachment.uri,
             mediaName: attachment.name,
             mediaSize: attachment.size,
             groupId,
             groupIndex: groupId ? index : undefined,
             groupTotal: groupId ? attachments.length : undefined,
-            reactions: [],
-          }),
-        );
+            createdAt: new Date().toISOString(),
+          });
+        });
 
-        setMessages((prev) => [...prev, ...tempMessages]);
-
+        // Upload to server
         const formData = new FormData();
         attachments.forEach((attachment, index) => {
           formData.append("attachments", {
@@ -296,39 +267,35 @@ export const useMessageSender = ({
         });
         formData.append("roomId", roomId);
 
-        const data = await chatApi.uploadAttachments(token, formData);
+        const data = await chatApi.uploadAttachments(formData);
 
         if (data.success && data.data) {
-          setMessages((prev) =>
-            prev.map((msg) => {
-              if (msg.status === "sending") {
-                const serverMsg = data.data!.find(
-                  (m: any) => m.mediaName === msg.mediaName,
-                );
-                if (serverMsg) {
-                  return {
-                    ...msg,
-                    ...serverMsg,
-                    status: "sent" as const,
-                    _id: serverMsg._id,
-                  };
-                }
-              }
-              return msg;
-            }),
-          );
+          // Confirm each optimistic message with server data
+          data.data.forEach((serverMsg: any, index: number) => {
+            const tempId = tempIds[index];
+            if (tempId && serverMsg._id) {
+              confirmOptimisticMessage(tempId, serverMsg._id, serverMsg);
+            }
+          });
         } else {
-          setMessages((prev) => prev.filter((msg) => msg.status !== "sending"));
+          tempIds.forEach((id) => removeOptimisticMessage(id));
           Alert.alert("Error", "Failed to send attachments");
         }
       } catch {
-        setMessages((prev) => prev.filter((msg) => msg.status !== "sending"));
         Alert.alert("Error", "Failed to send attachments");
       } finally {
         setUploading(false);
       }
     },
-    [token, userId, userName, roomId, setMessages, scrollToEnd],
+    [
+      token,
+      roomId,
+      addOptimisticMessage,
+      removeOptimisticMessage,
+      confirmOptimisticMessage,
+      scrollToEnd,
+      emitEvent,
+    ],
   );
 
   // ============================================
@@ -338,33 +305,44 @@ export const useMessageSender = ({
   const sendLocation = useCallback(
     (location: AttachmentData) => {
       const tempId = generateTempId();
-      const tempMessage: Message = {
-        _id: tempId,
-        tempId,
-        sender: userId || "",
-        senderName: userName || "You",
-        message: `📍 ${location.locationName || "Location"}`,
-        roomId,
-        createdAt: new Date().toISOString(),
-        status: "sending",
-        type: "location",
-        reactions: [],
-      };
+      const messageText = `📍 ${location.locationName || "Location"}`;
 
-      setMessages((prev) => [...prev, tempMessage]);
+      // ✅ Add optimistic message
+      addOptimisticMessage(tempId, {
+        message: messageText,
+        type: "location",
+        createdAt: new Date().toISOString(),
+      });
+
       scrollToEnd();
 
       emitEvent("send_message", {
         roomId,
-        message: `📍 ${location.locationName}`,
+        message: messageText,
         type: "location",
         latitude: location.latitude,
         longitude: location.longitude,
         locationName: location.locationName,
         tempId,
       });
+
+      const timeout = setTimeout(() => {
+        removeOptimisticMessage(tempId);
+        Alert.alert(
+          "Error",
+          "Location message failed to send. Please try again.",
+        );
+      }, SEND_TIMEOUT_MS);
+      setPendingTimeout(tempId, timeout);
     },
-    [userId, userName, roomId, setMessages, scrollToEnd, emitEvent],
+    [
+      roomId,
+      addOptimisticMessage,
+      removeOptimisticMessage,
+      scrollToEnd,
+      emitEvent,
+      setPendingTimeout,
+    ],
   );
 
   return { sendTextMessage, sendAudioMessage, sendAttachments, sendLocation };

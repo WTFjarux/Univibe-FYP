@@ -1,6 +1,6 @@
 // app/components/chat/ChatMessage/ChatBubble.tsx
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Share,
   Pressable,
   ActivityIndicator,
+  Animated,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
@@ -38,6 +39,8 @@ interface Message {
   duration?: number;
   locationData?: { latitude: number; longitude: number; locationName?: string };
   reactions?: Array<{ userId: string; reaction: string; createdAt: string }>;
+  readBy?: Array<{ user: string; readAt: string }>;
+  deliveredTo?: Array<{ user: string; deliveredAt: string }>;
   replyTo?: {
     messageId: string;
     message: string;
@@ -67,6 +70,7 @@ interface ChatBubbleProps {
   onDelete?: (messageId: string) => void;
   onForward?: (message: Message) => void;
   currentUserId?: string;
+  highlightedMessageId?: string;
   onScrollToMessage?: (messageId: string) => void;
 }
 
@@ -84,6 +88,7 @@ export default function ChatBubble({
   onDelete,
   onForward,
   currentUserId,
+  highlightedMessageId,
   onScrollToMessage,
 }: ChatBubbleProps) {
   const [showOptions, setShowOptions] = useState(false);
@@ -94,6 +99,31 @@ export default function ChatBubble({
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   const [viewerImages, setViewerImages] = useState<string[]>([]);
   const [viewerIndex, setViewerIndex] = useState(0);
+
+  // 🔴 Highlight animation
+  const isHighlighted = highlightedMessageId === message._id;
+  const highlightAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (isHighlighted) {
+      highlightAnim.setValue(0);
+      Animated.sequence([
+        Animated.timing(highlightAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: false,
+        }),
+        Animated.delay(2000),
+        Animated.timing(highlightAnim, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: false,
+        }),
+      ]).start();
+    } else {
+      highlightAnim.setValue(0);
+    }
+  }, [isHighlighted]);
 
   const isMediaType = ["image", "video", "file", "location"].includes(
     message.type || "",
@@ -124,6 +154,79 @@ export default function ChatBubble({
     return typeof message.sender === "string"
       ? message.sender
       : message.sender?._id || "";
+  };
+
+  // 🔴 Check if message was read by other user
+  const isMessageRead = (): boolean => {
+    if (!isOwnMessage || !message.readBy || message.readBy.length === 0)
+      return false;
+
+    const senderId = getSenderId();
+    return message.readBy.some((r: any) => {
+      const readUserId = typeof r === "string" ? r : r.user || r.userId;
+      return readUserId?.toString() !== senderId?.toString();
+    });
+  };
+
+  const isMessageDelivered = (): boolean => {
+    if (
+      !isOwnMessage ||
+      !message.deliveredTo ||
+      message.deliveredTo.length === 0
+    )
+      return false;
+
+    const senderId = getSenderId();
+    return message.deliveredTo.some((r: any) => {
+      const deliveredUserId = typeof r === "string" ? r : r.user || r.userId;
+      return deliveredUserId?.toString() !== senderId?.toString();
+    });
+  };
+
+  // 🔴 Get the appropriate status icon
+  const getMessageStatusIcon = () => {
+    if (!isOwnMessage) return null;
+
+    // If message is still sending
+    if (message.status === "sending") {
+      return <ActivityIndicator size={10} color="#8E8E93" />;
+    }
+
+    // If message has been read
+    if (isMessageRead() || message.status === "read") {
+      return (
+        <View style={styles.statusIconContainer}>
+          <Ionicons name="checkmark-done" size={14} color="#34C759" />
+        </View>
+      );
+    }
+
+    // If message has been delivered
+    if (isMessageDelivered() || message.status === "delivered") {
+      return (
+        <View style={styles.statusIconContainer}>
+          <Ionicons name="checkmark-done" size={14} color="#8E8E93" />
+        </View>
+      );
+    }
+
+    // Default: sent
+    return (
+      <View style={styles.statusIconContainer}>
+        <Ionicons name="checkmark" size={14} color="#8E8E93" />
+      </View>
+    );
+  };
+
+  // 🔴 Get text description of status for accessibility
+  const getStatusText = (): string => {
+    if (!isOwnMessage) return "";
+
+    if (message.status === "sending") return "Sending...";
+    if (isMessageRead() || message.status === "read") return "Read";
+    if (isMessageDelivered() || message.status === "delivered")
+      return "Delivered";
+    return "Sent";
   };
 
   const handleLongPress = (event: any) => {
@@ -257,22 +360,6 @@ export default function ChatBubble({
     );
   };
 
-  const getMessageStatusIcon = () => {
-    if (!isOwnMessage) return null;
-    switch (message.status) {
-      case "sending":
-        return <ActivityIndicator size={10} color="#8E8E93" />;
-      case "sent":
-        return <Ionicons name="checkmark" size={14} color="#8E8E93" />;
-      case "delivered":
-        return <Ionicons name="checkmark-done" size={14} color="#8E8E93" />;
-      case "read":
-        return <Ionicons name="checkmark-done" size={14} color="#34C759" />;
-      default:
-        return null;
-    }
-  };
-
   const getReplyDataForModal = () => {
     if (!message.replyTo) return undefined;
     return {
@@ -296,6 +383,19 @@ export default function ChatBubble({
           pressed && styles.messagePressed,
         ]}
       >
+        {/* 🔴 Highlight background */}
+        <Animated.View
+          style={[
+            styles.highlightBackground,
+            {
+              opacity: highlightAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, 0.15],
+              }),
+            },
+          ]}
+        />
+
         <View
           style={[
             styles.messageRow,
@@ -375,6 +475,7 @@ export default function ChatBubble({
               >
                 <Text style={styles.timeText}>
                   {formatTime(message.createdAt)}
+                  {isOwnMessage && ` · ${getStatusText()}`}
                 </Text>
                 {getMessageStatusIcon()}
               </View>
@@ -420,9 +521,29 @@ export default function ChatBubble({
 }
 
 const styles = StyleSheet.create({
-  messageWrapper: { marginVertical: 4 },
-  messagePressed: { opacity: 0.7 },
-  messageRow: { flexDirection: "row", alignItems: "flex-end" },
+  messageWrapper: {
+    marginVertical: 4,
+    borderRadius: 16,
+    overflow: "hidden",
+    position: "relative",
+  },
+  highlightBackground: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#8B5CF6",
+    borderRadius: 16,
+    zIndex: 0,
+  },
+  messagePressed: { opacity: 0.9 },
+  messageRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    zIndex: 1,
+    padding: 4,
+  },
   ownMessageRow: { justifyContent: "flex-end" },
   otherMessageRow: { justifyContent: "flex-start" },
   avatarContainer: { marginRight: 8, marginBottom: 4 },
@@ -508,5 +629,15 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   ownMessageFooter: { justifyContent: "flex-end" },
-  timeText: { fontSize: 10, color: "#8E8E93", fontFamily: "SofiaSans-Regular" },
+  timeText: {
+    fontSize: 10,
+    color: "#8E8E93",
+    fontFamily: "SofiaSans-Regular",
+  },
+  // 🔴 Status icon styles
+  statusIconContainer: {
+    marginLeft: 2,
+    justifyContent: "center",
+    alignItems: "center",
+  },
 });

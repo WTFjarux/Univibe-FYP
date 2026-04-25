@@ -1,13 +1,12 @@
 // hooks/chatScreen/useChatMessages.ts
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import chatApi from "../../lib/services/chatApi";
 import { isTempId } from "../../lib/utils/messageIdGenerator";
-import { getSenderId } from "../../lib/utils/chatUtils";
-import type { Message, PendingMessage } from "../../lib/types/chat.types";
+import type { Message } from "../../lib/types/chat.types";
 
 // ============================================
-// IN-MEMORY CACHE (survives screen navigation)
+// PERSISTENT MESSAGE CACHE
 // ============================================
 
 interface CacheEntry {
@@ -17,7 +16,7 @@ interface CacheEntry {
 }
 
 const messageCache = new Map<string, CacheEntry>();
-const CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 const INITIAL_LIMIT = 30;
 const PAGINATION_LIMIT = 30;
 
@@ -38,176 +37,231 @@ export const useChatMessages = ({
   userId,
   userName,
 }: UseChatMessagesProps) => {
+  // Messages are stored in chronological order (oldest first)
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
 
-  const pendingMessagesRef = useRef<Map<string, PendingMessage>>(new Map());
-  const pendingTimeoutsRef = useRef<Map<string, number>>(new Map());
-  const processedMessageIds = useRef<Set<string>>(new Set());
+  const pendingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+  const processedIdsRef = useRef<Set<string>>(new Set());
+  const isMountedRef = useRef(true);
 
-  // ============================================
-  // HELPERS
-  // ============================================
-
-  const isValidMessage = useCallback((msg: Message): boolean => {
-    if (isTempId(msg._id) || msg.status === "sending") return false;
-    if (msg.type === "audio" && !msg.mediaUrl) return false;
-    return !!msg._id;
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      pendingTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
+      pendingTimeoutsRef.current.clear();
+    };
   }, []);
 
-  const mergePendingMessages = useCallback((): Message[] => {
-    const pendingList = Array.from(pendingMessagesRef.current.values());
-    return pendingList.map((pending) => ({
-      _id: pending.tempId,
-      tempId: pending.tempId,
-      sender: userId || "",
-      senderName: userName || "You",
-      message: pending.type === "audio" ? "🎤 Voice message" : pending.message,
-      roomId,
-      createdAt: new Date(pending.timestamp).toISOString(),
-      status: "sending" as const,
-      type: pending.type as Message["type"],
-      mediaUrl: pending.mediaUrl,
-      duration: pending.duration,
-      replyTo: pending.replyTo,
-      reactions: [],
-    }));
-  }, [roomId, userId, userName]);
+  // ============================================
+  // CACHE HELPERS
+  // ============================================
 
-  // ✅ Deduplicate messages by _id or tempId
+  const getCache = useCallback((): CacheEntry | undefined => {
+    return messageCache.get(roomId);
+  }, [roomId]);
+
+  const updateCache = useCallback(
+    (msgs: Message[], hasMoreFlag: boolean) => {
+      const validMessages = msgs.filter((msg) => {
+        if (msg.tempId && msg.status === "sending") return true;
+        if (msg._id && !isTempId(msg._id) && msg.status !== "sending")
+          return true;
+        if (msg._id && msg.tempId) return true;
+        return false;
+      });
+
+      messageCache.set(roomId, {
+        messages: validMessages,
+        hasMore: hasMoreFlag,
+        timestamp: Date.now(),
+      });
+
+      console.log(
+        `💾 Cache updated: ${validMessages.length} messages for room ${roomId}`,
+      );
+    },
+    [roomId],
+  );
+
+  const getOptimisticFromCache = useCallback((): Message[] => {
+    const cached = getCache();
+    if (!cached) return [];
+    return cached.messages.filter(
+      (msg) => msg.status === "sending" || isTempId(msg._id),
+    );
+  }, [getCache]);
+
+  // ============================================
+  // MESSAGE VALIDATION & DEDUP
+  // ============================================
+
   const deduplicateMessages = useCallback((msgs: Message[]): Message[] => {
     const seen = new Set<string>();
-    return msgs.filter((msg) => {
-      const key = msg._id || msg.tempId;
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    const result: Message[] = [];
+
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const msg = msgs[i];
+
+      let key: string;
+      if (!isTempId(msg._id) && msg._id) {
+        key = msg._id;
+      } else if (msg.tempId) {
+        key = msg.tempId;
+      } else {
+        key = `unknown-${i}-${msg.createdAt}`;
+      }
+
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.unshift(msg);
+      } else {
+        console.log(`🔄 Removing duplicate: ${key}`);
+      }
+    }
+
+    return result;
   }, []);
 
   // ============================================
-  // LOAD MESSAGES (with cache)
+  // LOAD MESSAGES
   // ============================================
 
   const loadMessages = useCallback(
     async (forceRefresh = false) => {
-      if (!token) return;
+      if (!token || !isMountedRef.current) return;
 
-      const cached = messageCache.get(roomId);
+      const cached = getCache();
       const now = Date.now();
 
-      // ✅ Return cached data if fresh
       if (!forceRefresh && cached && now - cached.timestamp < CACHE_TTL) {
-        const deduped = deduplicateMessages(cached.messages);
-        setMessages(deduped);
-        setHasMore(cached.hasMore);
+        console.log(
+          `📦 Loading from cache: ${cached.messages.length} messages`,
+        );
 
-        processedMessageIds.current.clear();
-        deduped.forEach((msg) => {
-          if (!isTempId(msg._id)) processedMessageIds.current.add(msg._id);
-        });
+        if (isMountedRef.current) {
+          setMessages(cached.messages);
+          setHasMore(cached.hasMore);
 
-        setLoading(false);
+          processedIdsRef.current.clear();
+          cached.messages.forEach((msg) => {
+            if (msg._id && !isTempId(msg._id)) {
+              processedIdsRef.current.add(msg._id);
+            }
+          });
+
+          setLoading(false);
+        }
         return;
       }
 
       try {
-        const response = await chatApi.getMessagesLight(
-          token,
-          roomId,
-          INITIAL_LIMIT,
-        );
+        console.log(`🌐 Fetching messages from server for room ${roomId}`);
 
-        if (response.success) {
+        const response = await chatApi.getMessagesLight(roomId, INITIAL_LIMIT);
+
+        if (response.success && isMountedRef.current) {
           const serverMessages: Message[] = response.data.messages || [];
-          const cleanMessages = serverMessages.filter(isValidMessage);
+          const optimisticMessages = forceRefresh
+            ? []
+            : getOptimisticFromCache();
 
-          processedMessageIds.current.clear();
-          cleanMessages.forEach((msg) =>
-            processedMessageIds.current.add(msg._id),
+          const combined = [...serverMessages, ...optimisticMessages];
+          const finalMessages = deduplicateMessages(combined);
+
+          console.log(
+            `🌐 Loaded: ${serverMessages.length} server + ${optimisticMessages.length} optimistic = ${finalMessages.length} total`,
           );
 
-          const pendingMessages = mergePendingMessages();
-          const combined = [
-            ...cleanMessages.filter((msg) => !isTempId(msg._id)),
-            ...pendingMessages,
-          ];
-
-          // ✅ Deduplicate before setting state
-          const finalMessages = deduplicateMessages(combined);
+          processedIdsRef.current.clear();
+          finalMessages.forEach((msg) => {
+            if (msg._id && !isTempId(msg._id)) {
+              processedIdsRef.current.add(msg._id);
+            }
+          });
 
           setMessages(finalMessages);
           setHasMore(response.data.hasMore);
-
-          // ✅ Update cache with deduped messages
-          messageCache.set(roomId, {
-            messages: finalMessages,
-            hasMore: response.data.hasMore,
-            timestamp: Date.now(),
-          });
+          updateCache(finalMessages, response.data.hasMore);
         }
       } catch (error) {
         console.error("Error loading messages:", error);
-        if (cached) {
-          const deduped = deduplicateMessages(cached.messages);
-          setMessages(deduped);
+        if (cached && isMountedRef.current) {
+          setMessages(cached.messages);
           setHasMore(cached.hasMore);
         }
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (isMountedRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
-    [token, roomId, isValidMessage, mergePendingMessages, deduplicateMessages],
+    [
+      token,
+      roomId,
+      getCache,
+      getOptimisticFromCache,
+      updateCache,
+      deduplicateMessages,
+    ],
   );
 
   // ============================================
-  // LOAD OLDER MESSAGES (pagination)
+  // LOAD OLDER MESSAGES (Pagination)
   // ============================================
 
   const loadOlderMessages = useCallback(async () => {
-    if (!token || !hasMore || loadingMore || messages.length === 0) return;
+    if (
+      !token ||
+      !hasMore ||
+      loadingMore ||
+      messages.length === 0 ||
+      !isMountedRef.current
+    )
+      return;
 
     setLoadingMore(true);
     const oldestMessage = messages[0];
 
     try {
       const response = await chatApi.getMessagesLight(
-        token,
         roomId,
         PAGINATION_LIMIT,
         oldestMessage.createdAt,
       );
 
-      if (response.success) {
+      if (response.success && isMountedRef.current) {
         const olderMessages: Message[] = response.data.messages || [];
-        const cleanOlder = olderMessages.filter(isValidMessage);
 
-        cleanOlder.forEach((msg) => processedMessageIds.current.add(msg._id));
+        olderMessages.forEach((msg) => {
+          if (msg._id) processedIdsRef.current.add(msg._id);
+        });
 
         setMessages((prev) => {
-          const combined = [...cleanOlder.reverse(), ...prev];
-          return deduplicateMessages(combined);
-        });
-        setHasMore(response.data.hasMore);
+          const optimisticMessages = prev.filter(
+            (msg) => msg.status === "sending" || isTempId(msg._id),
+          );
 
-        // Update cache
-        const cached = messageCache.get(roomId);
-        if (cached) {
-          messageCache.set(roomId, {
-            messages: deduplicateMessages([...cleanOlder, ...cached.messages]),
-            hasMore: response.data.hasMore,
-            timestamp: Date.now(),
-          });
-        }
+          const combined = [...olderMessages.reverse(), ...prev];
+          const finalMessages = deduplicateMessages(combined);
+          updateCache(finalMessages, response.data.hasMore);
+          return finalMessages;
+        });
+
+        setHasMore(response.data.hasMore);
       }
     } catch (error) {
-      // Silent fail - user can pull to refresh
+      console.error("Error loading older messages:", error);
     } finally {
-      setLoadingMore(false);
+      if (isMountedRef.current) {
+        setLoadingMore(false);
+      }
     }
   }, [
     token,
@@ -215,7 +269,7 @@ export const useChatMessages = ({
     hasMore,
     loadingMore,
     messages,
-    isValidMessage,
+    updateCache,
     deduplicateMessages,
   ]);
 
@@ -229,79 +283,55 @@ export const useChatMessages = ({
   }, [loadMessages]);
 
   // ============================================
-  // PENDING MESSAGE MANAGEMENT
+  // OPTIMISTIC MESSAGE MANAGEMENT
   // ============================================
 
-  const addPendingMessage = useCallback(
-    (tempId: string, pending: PendingMessage) => {
-      pendingMessagesRef.current.set(tempId, pending);
-    },
-    [],
-  );
+  const addOptimisticMessage = useCallback(
+    (tempId: string, messageData: Partial<Message>) => {
+      const optimisticMessage: Message = {
+        _id: tempId,
+        tempId: tempId,
+        sender: userId || "",
+        senderName: userName || "You",
+        message: messageData.message || "",
+        roomId,
+        createdAt: messageData.createdAt || new Date().toISOString(),
+        status: "sending",
+        type: messageData.type || "text",
+        mediaUrl: messageData.mediaUrl,
+        mediaName: messageData.mediaName,
+        mediaSize: messageData.mediaSize,
+        duration: messageData.duration,
+        replyTo: messageData.replyTo,
+        reactions: [],
+        groupId: messageData.groupId,
+        groupIndex: messageData.groupIndex,
+        groupTotal: messageData.groupTotal,
+        readBy: [{ user: userId || "", readAt: new Date().toISOString() }],
+        deliveredTo: [
+          { user: userId || "", deliveredAt: new Date().toISOString() },
+        ],
+      };
 
-  const removePendingMessage = useCallback((tempId: string) => {
-    pendingMessagesRef.current.delete(tempId);
-    const timeout = pendingTimeoutsRef.current.get(tempId);
-    if (timeout) {
-      clearTimeout(timeout);
-      pendingTimeoutsRef.current.delete(tempId);
-    }
-    setMessages((prev) =>
-      prev.filter((msg) => msg._id !== tempId && msg.tempId !== tempId),
-    );
-  }, []);
-
-  const setPendingTimeout = useCallback((tempId: string, timeout: number) => {
-    pendingTimeoutsRef.current.set(tempId, timeout);
-  }, []);
-
-  // ============================================
-  // REAL-TIME MESSAGE HANDLERS
-  // ============================================
-
-  const addMessage = useCallback(
-    (message: Message) => {
-      // Skip if already processed
-      if (processedMessageIds.current.has(message._id)) return;
+      console.log(
+        `✨ Adding optimistic message: ${tempId}, type: ${optimisticMessage.type}, hasMedia: ${!!optimisticMessage.mediaUrl}`,
+      );
 
       setMessages((prev) => {
-        // Check by _id
-        if (prev.some((msg) => msg._id === message._id)) return prev;
-
-        // ✅ Check if a temp/sending message matches this incoming real message
-        // This prevents the "temp + real" duplicate
-        const filtered = prev.filter((msg) => {
-          if (msg.status === "sending" || isTempId(msg._id)) {
-            // If this temp message matches the incoming one, remove it
-            const isMatch =
-              msg.message === message.message &&
-              msg.type === message.type &&
-              msg.sender === message.sender;
-            return !isMatch;
-          }
-          return true;
-        });
-
-        processedMessageIds.current.add(message._id);
-
-        const updated = [...filtered, { ...message, status: "sent" as const }];
-
-        // Update cache
-        messageCache.set(roomId, {
-          messages: deduplicateMessages(updated),
-          hasMore,
-          timestamp: Date.now(),
-        });
-
+        const updated = [...prev, optimisticMessage];
+        updateCache(updated, hasMore);
         return updated;
       });
+
+      return optimisticMessage;
     },
-    [roomId, hasMore, deduplicateMessages],
+    [userId, userName, roomId, hasMore, updateCache],
   );
 
-  const replaceTempMessage = useCallback(
-    (tempId: string, messageId: string, messageData?: Partial<Message>) => {
-      pendingMessagesRef.current.delete(tempId);
+  const removeOptimisticMessage = useCallback(
+    (tempId: string) => {
+      console.log(`❌ Removing failed optimistic message: ${tempId}`);
+
       const timeout = pendingTimeoutsRef.current.get(tempId);
       if (timeout) {
         clearTimeout(timeout);
@@ -309,68 +339,206 @@ export const useChatMessages = ({
       }
 
       setMessages((prev) => {
-        const tempIndex = prev.findIndex(
-          (msg) => msg.tempId === tempId || msg._id === tempId,
+        const filtered = prev.filter(
+          (msg) => msg._id !== tempId && msg.tempId !== tempId,
         );
-        if (tempIndex === -1) return prev;
+        updateCache(filtered, hasMore);
+        return filtered;
+      });
 
-        // ✅ Check if the real message already exists (from socket)
-        const alreadyExists = prev.some((msg) => msg._id === messageId);
-        if (alreadyExists) {
-          // Remove temp, real message is already there
-          return prev.filter(
+      processedIdsRef.current.delete(tempId);
+    },
+    [hasMore, updateCache],
+  );
+
+  const confirmOptimisticMessage = useCallback(
+    (tempId: string, messageId: string, serverData?: Partial<Message>) => {
+      console.log(`✅ Confirming message: ${tempId} → ${messageId}`);
+
+      const timeout = pendingTimeoutsRef.current.get(tempId);
+      if (timeout) {
+        clearTimeout(timeout);
+        pendingTimeoutsRef.current.delete(tempId);
+      }
+
+      setMessages((prev) => {
+        if (messageId && prev.some((msg) => msg._id === messageId)) {
+          console.log(`⏭️ Message ${messageId} already exists, removing temp`);
+          const updated = prev.filter(
             (msg) => msg._id !== tempId && msg.tempId !== tempId,
           );
+          updateCache(updated, hasMore);
+          return updated;
         }
 
-        const newMessages = [...prev];
-        newMessages[tempIndex] = {
-          ...(messageData || {}),
-          _id: messageId || newMessages[tempIndex]._id,
+        const tempIndex = prev.findIndex(
+          (msg) => msg._id === tempId || msg.tempId === tempId,
+        );
+
+        if (tempIndex === -1) {
+          console.log(`⚠️ Temp message ${tempId} not found in state`);
+          if (
+            serverData &&
+            messageId &&
+            !prev.some((msg) => msg._id === messageId)
+          ) {
+            const newMessage = {
+              ...serverData,
+              _id: messageId,
+              status: "sent" as const,
+              readBy: [
+                { user: userId || "", readAt: new Date().toISOString() },
+              ],
+              deliveredTo: [
+                { user: userId || "", deliveredAt: new Date().toISOString() },
+              ],
+            } as Message;
+            const updated = [...prev, newMessage];
+            updateCache(updated, hasMore);
+            processedIdsRef.current.add(messageId);
+            return updated;
+          }
+          return prev;
+        }
+
+        const existingMsg = prev[tempIndex];
+        const confirmedMessage: Message = {
+          ...existingMsg,
+          ...serverData,
+          _id: messageId,
+          tempId: undefined,
           status: "sent" as const,
-          reactions: newMessages[tempIndex].reactions || [],
-        } as Message;
-        processedMessageIds.current.add(messageId);
+          mediaUrl: serverData?.mediaUrl || existingMsg.mediaUrl,
+          mediaName: serverData?.mediaName || existingMsg.mediaName,
+          mediaSize: serverData?.mediaSize || existingMsg.mediaSize,
+          reactions: existingMsg.reactions || [],
+          groupId: serverData?.groupId || existingMsg.groupId,
+          groupIndex: serverData?.groupIndex ?? existingMsg.groupIndex,
+          groupTotal: serverData?.groupTotal ?? existingMsg.groupTotal,
+          readBy: existingMsg.readBy || [
+            { user: userId || "", readAt: new Date().toISOString() },
+          ],
+          deliveredTo: existingMsg.deliveredTo || [
+            { user: userId || "", deliveredAt: new Date().toISOString() },
+          ],
+        };
 
-        // Update cache
-        messageCache.set(roomId, {
-          messages: newMessages,
-          hasMore,
-          timestamp: Date.now(),
-        });
+        const updated = [...prev];
+        updated[tempIndex] = confirmedMessage;
 
-        return newMessages;
+        updateCache(updated, hasMore);
+        if (messageId) processedIdsRef.current.add(messageId);
+
+        return updated;
       });
     },
-    [roomId, hasMore],
+    [hasMore, updateCache, userId],
+  );
+
+  // ============================================
+  // REAL-TIME MESSAGE HANDLERS
+  // ============================================
+
+  const addMessage = useCallback(
+    (message: Message) => {
+      if (!message._id) return;
+
+      if (processedIdsRef.current.has(message._id)) {
+        console.log(`⏭️ Skipping duplicate message: ${message._id}`);
+        return;
+      }
+
+      setMessages((prev) => {
+        const exists = prev.some((msg) => msg._id === message._id);
+        if (exists) {
+          console.log(`⏭️ Message already in state: ${message._id}`);
+          return prev;
+        }
+
+        const filtered = prev.filter((msg) => {
+          if (msg.status === "sending" || isTempId(msg._id)) {
+            const isMatch =
+              msg.message === message.message &&
+              msg.type === message.type &&
+              (typeof msg.sender === "string"
+                ? msg.sender
+                : msg.sender?._id) ===
+                (typeof message.sender === "string"
+                  ? message.sender
+                  : message.sender?._id);
+
+            if (isMatch) {
+              console.log(
+                `🔄 Removing temp message matching incoming: ${msg._id || msg.tempId}`,
+              );
+            }
+            return !isMatch;
+          }
+          return true;
+        });
+
+        processedIdsRef.current.add(message._id);
+
+        const updated = [...filtered, { ...message, status: "sent" as const }];
+        updateCache(updated, hasMore);
+
+        return updated;
+      });
+    },
+    [hasMore, updateCache],
   );
 
   const updateMessageReactions = useCallback(
     (messageId: string, reactions: Message["reactions"]) => {
-      setMessages((prev) =>
-        prev.map((msg) =>
+      setMessages((prev) => {
+        const updated = prev.map((msg) =>
           msg._id === messageId ? { ...msg, reactions } : msg,
-        ),
-      );
+        );
+        updateCache(updated, hasMore);
+        return updated;
+      });
+    },
+    [hasMore, updateCache],
+  );
+
+  const deleteMessage = useCallback(
+    (messageId: string) => {
+      setMessages((prev) => {
+        const updated = prev.filter((msg) => msg._id !== messageId);
+        updateCache(updated, hasMore);
+        return updated;
+      });
+
+      if (messageId) {
+        processedIdsRef.current.delete(messageId);
+      }
+    },
+    [hasMore, updateCache],
+  );
+
+  // ============================================
+  // PENDING TIMEOUT MANAGEMENT
+  // ============================================
+
+  const setPendingTimeout = useCallback(
+    (tempId: string, timeout: ReturnType<typeof setTimeout>) => {
+      pendingTimeoutsRef.current.set(tempId, timeout);
     },
     [],
   );
-
-  const deleteMessage = useCallback((messageId: string) => {
-    setMessages((prev) => prev.filter((msg) => msg._id !== messageId));
-  }, []);
 
   // ============================================
   // CLEANUP
   // ============================================
 
   const clearAllPending = useCallback(() => {
+    console.log("🧹 Clearing pending timeouts");
     pendingTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
     pendingTimeoutsRef.current.clear();
-    pendingMessagesRef.current.clear();
   }, []);
 
   const clearCache = useCallback(() => {
+    console.log(`🗑️ Clearing cache for room: ${roomId}`);
     messageCache.delete(roomId);
   }, [roomId]);
 
@@ -388,15 +556,15 @@ export const useChatMessages = ({
     loadMessages,
     loadOlderMessages,
     onRefresh,
-    addPendingMessage,
-    removePendingMessage,
+    addOptimisticMessage,
+    removeOptimisticMessage,
+    confirmOptimisticMessage,
     addMessage,
-    replaceTempMessage,
     updateMessageReactions,
     deleteMessage,
     setPendingTimeout,
     clearAllPending,
     clearCache,
-    processedMessageIds,
+    processedIdsRef,
   };
 };

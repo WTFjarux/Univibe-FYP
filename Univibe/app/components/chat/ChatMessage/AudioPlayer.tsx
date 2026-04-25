@@ -45,12 +45,25 @@ export default function AudioPlayer({
   ).current;
   const waveLoopRef = useRef<Animated.CompositeAnimation | null>(null);
 
+  // Refs that shouldn't trigger re-renders
   const playbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
     null,
   );
   const isResettingRef = useRef(false);
   const isFinishedRef = useRef(false);
   const isUnloadingRef = useRef(false);
+  const soundRef = useRef<Audio.Sound | null>(null);
+  const messageIdRef = useRef(messageId);
+
+  // Keep messageId ref updated
+  useEffect(() => {
+    messageIdRef.current = messageId;
+  }, [messageId]);
+
+  // Keep sound ref updated
+  useEffect(() => {
+    soundRef.current = sound;
+  }, [sound]);
 
   // Fade-in animation on mount
   useEffect(() => {
@@ -103,23 +116,23 @@ export default function AudioPlayer({
       playbackIntervalRef.current = null;
     }
 
-    if (sound && !isUnloadingRef.current) {
+    if (soundRef.current && !isUnloadingRef.current) {
       try {
-        const status = await sound.getStatusAsync();
+        const status = await soundRef.current.getStatusAsync();
         if (status.isLoaded && status.isPlaying) {
-          await sound.pauseAsync();
+          await soundRef.current.pauseAsync();
         }
       } catch (error) {
         // Ignore
       }
     }
-  }, [sound, stopWaveAnimation]);
+  }, [stopWaveAnimation]);
 
   // 🔴 Listen for other audio playing - stop this one immediately
   useEffect(() => {
     const unsubscribe = AudioManager.registerPlayCallback(
       (playingMessageId: string) => {
-        if (playingMessageId !== messageId) {
+        if (playingMessageId !== messageIdRef.current) {
           // Immediately stop animations and update state
           setIsPlaying(false);
           stopWaveAnimation();
@@ -128,8 +141,8 @@ export default function AudioPlayer({
             playbackIntervalRef.current = null;
           }
           // Try to pause the actual sound (don't await)
-          if (sound && !isUnloadingRef.current) {
-            sound.pauseAsync().catch(() => {});
+          if (soundRef.current && !isUnloadingRef.current) {
+            soundRef.current.pauseAsync().catch(() => {});
           }
         }
       },
@@ -138,7 +151,7 @@ export default function AudioPlayer({
     return () => {
       unsubscribe();
     };
-  }, [messageId, sound, stopWaveAnimation]);
+  }, [stopWaveAnimation]); // Only depends on stopWaveAnimation
 
   // 🔴 Control wave animation based on isPlaying state
   useEffect(() => {
@@ -166,21 +179,25 @@ export default function AudioPlayer({
     }, 100);
   };
 
-  // Clean up on unmount
+  // 🔴 Cleanup on unmount - only runs once
   useEffect(() => {
     return () => {
       isUnloadingRef.current = true;
       stopWaveAnimation();
+
       if (playbackIntervalRef.current) {
         clearInterval(playbackIntervalRef.current);
         playbackIntervalRef.current = null;
       }
-      if (sound) {
-        AudioManager.clearCurrentSound(messageId);
-        sound.unloadAsync().catch(() => {});
+
+      if (soundRef.current) {
+        // Stop and unload sound on unmount
+        soundRef.current.stopAsync().catch(() => {});
+        soundRef.current.unloadAsync().catch(() => {});
+        AudioManager.clearCurrentSound(messageIdRef.current);
       }
     };
-  }, []);
+  }, []); // Empty dependency array - runs only on unmount
 
   // Construct full URL safely
   const getFullAudioUrl = (url: string): string => {
@@ -198,8 +215,8 @@ export default function AudioPlayer({
       loadSound();
     }
     return () => {
-      if (sound && !isUnloadingRef.current) {
-        sound.unloadAsync().catch(() => {});
+      if (soundRef.current && !isUnloadingRef.current) {
+        soundRef.current.unloadAsync().catch(() => {});
       }
       if (playbackIntervalRef.current) {
         clearInterval(playbackIntervalRef.current);
@@ -218,8 +235,9 @@ export default function AudioPlayer({
       setIsLoading(true);
       setError(null);
 
-      if (sound) {
-        await sound.unloadAsync().catch(() => {});
+      if (soundRef.current) {
+        await soundRef.current.unloadAsync().catch(() => {});
+        soundRef.current = null;
         setSound(null);
       }
 
@@ -236,6 +254,7 @@ export default function AudioPlayer({
         { shouldPlay: false },
       );
 
+      soundRef.current = newSound;
       setSound(newSound);
       isUnloadingRef.current = false;
 
@@ -280,9 +299,13 @@ export default function AudioPlayer({
     }
 
     playbackIntervalRef.current = setInterval(async () => {
-      if (sound && !isResettingRef.current && !isUnloadingRef.current) {
+      if (
+        soundRef.current &&
+        !isResettingRef.current &&
+        !isUnloadingRef.current
+      ) {
         try {
-          const status = await sound.getStatusAsync();
+          const status = await soundRef.current.getStatusAsync();
           if (status.isLoaded && status.isPlaying) {
             const newTime = status.positionMillis / 1000;
             setCurrentTime(newTime);
@@ -313,14 +336,14 @@ export default function AudioPlayer({
     isResettingRef.current = true;
 
     try {
-      if (sound) {
-        const status = await sound.getStatusAsync();
+      if (soundRef.current) {
+        const status = await soundRef.current.getStatusAsync();
         if (status.isLoaded) {
           if (status.isPlaying) {
-            await sound.stopAsync().catch(() => {});
+            await soundRef.current.stopAsync().catch(() => {});
           }
           if (!isUnloadingRef.current) {
-            await sound.setPositionAsync(0).catch(() => {});
+            await soundRef.current.setPositionAsync(0).catch(() => {});
           }
         }
       }
@@ -328,7 +351,7 @@ export default function AudioPlayer({
       setIsPlaying(false);
       setCurrentTime(0);
       stopWaveAnimation();
-      AudioManager.clearCurrentSound(messageId);
+      AudioManager.clearCurrentSound(messageIdRef.current);
 
       if (playbackIntervalRef.current) {
         clearInterval(playbackIntervalRef.current);
@@ -353,7 +376,7 @@ export default function AudioPlayer({
       return;
     }
 
-    if (!sound) {
+    if (!soundRef.current) {
       await loadSound();
       return;
     }
@@ -366,17 +389,21 @@ export default function AudioPlayer({
       await pauseAudio();
     } else {
       try {
-        const status = await sound.getStatusAsync();
+        const status = await soundRef.current.getStatusAsync();
         if (status.isLoaded) {
           if (
             status.durationMillis &&
             status.positionMillis >= status.durationMillis - 100
           ) {
-            await sound.setPositionAsync(0).catch(() => {});
+            await soundRef.current.setPositionAsync(0).catch(() => {});
             setCurrentTime(0);
           }
 
-          await AudioManager.playSound(sound, messageId, onPlayed);
+          await AudioManager.playSound(
+            soundRef.current,
+            messageIdRef.current,
+            onPlayed,
+          );
           setIsPlaying(true);
           startProgressTracking();
 
@@ -386,9 +413,13 @@ export default function AudioPlayer({
         }
       } catch (err) {
         await loadSound();
-        if (sound && !isUnloadingRef.current) {
+        if (soundRef.current && !isUnloadingRef.current) {
           try {
-            await AudioManager.playSound(sound, messageId, onPlayed);
+            await AudioManager.playSound(
+              soundRef.current,
+              messageIdRef.current,
+              onPlayed,
+            );
             setIsPlaying(true);
             startProgressTracking();
           } catch (playError) {

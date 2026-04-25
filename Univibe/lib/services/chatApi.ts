@@ -1,5 +1,6 @@
 // lib/services/chatApi.ts
-import { API_BASE_URL } from '../../constants/ipConstants';
+
+import api from "./api"; // Your axios instance
 import type {
   ChatRoomsResponse,
   SingleRoomResponse,
@@ -7,90 +8,57 @@ import type {
   MessagesResponse,
   MarkReadResponse,
   Reaction,
-} from '../types/chat.types';
+} from "../types/chat.types";
 
 class ChatApiService {
-  private baseUrl: string;
-
-  constructor() {
-    this.baseUrl = `${API_BASE_URL}/api/chat`;
-  }
-
-  private getHeaders(token: string): HeadersInit {
-    return {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    };
-  }
-
-  private async handleResponse<T>(response: Response): Promise<T> {
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status} ${response.statusText}`);
-    }
-    return response.json();
-  }
-
   // ============================================
   // CHAT ROOMS
   // ============================================
 
-  async getChatRooms(token: string): Promise<ChatRoomsResponse> {
-    const response = await fetch(`${this.baseUrl}/rooms`, {
-      headers: this.getHeaders(token),
-    });
-    return this.handleResponse<ChatRoomsResponse>(response);
+  async getChatRooms(): Promise<ChatRoomsResponse> {
+    const response = await api.get("/chat/rooms");
+    return response.data;
   }
 
-  async getSingleRoom(token: string, roomId: string): Promise<SingleRoomResponse> {
-    const response = await fetch(`${this.baseUrl}/room/${roomId}`, {
-      headers: this.getHeaders(token),
-    });
-    return this.handleResponse<SingleRoomResponse>(response);
+  async getSingleRoom(roomId: string): Promise<SingleRoomResponse> {
+    const response = await api.get(`/chat/room/${roomId}`);
+    return response.data;
   }
 
   // ============================================
   // ROOM ACTIONS
   // ============================================
 
-  async markRoomAsRead(token: string, roomId: string): Promise<MarkReadResponse> {
-    const response = await fetch(`${this.baseUrl}/room/${roomId}/read`, {
-      method: 'POST',
-      headers: this.getHeaders(token),
-    });
-    return this.handleResponse<MarkReadResponse>(response);
+  async markRoomAsRead(roomId: string): Promise<MarkReadResponse> {
+    const response = await api.post(`/chat/room/${roomId}/read`);
+    return response.data;
   }
 
-  async markRoomAsUnread(token: string, roomId: string): Promise<{ success: boolean; message: string }> {
-    const response = await fetch(`${this.baseUrl}/room/${roomId}/unread`, {
-      method: 'POST',
-      headers: this.getHeaders(token),
-    });
-    return this.handleResponse(response);
+  async markRoomAsUnread(
+    roomId: string,
+  ): Promise<{ success: boolean; message: string }> {
+    const response = await api.post(`/chat/room/${roomId}/unread`);
+    return response.data;
   }
 
-  async togglePin(token: string, roomId: string): Promise<{ success: boolean }> {
-    const response = await fetch(`${this.baseUrl}/room/${roomId}/pin`, {
-      method: 'PUT',
-      headers: this.getHeaders(token),
-    });
-    return this.handleResponse(response);
+  async togglePin(roomId: string): Promise<{ success: boolean }> {
+    const response = await api.put(`/chat/room/${roomId}/pin`);
+    return response.data;
   }
 
-  async toggleMute(token: string, roomId: string, duration?: number): Promise<{ success: boolean }> {
-    const response = await fetch(`${this.baseUrl}/room/${roomId}/mute`, {
-      method: 'PUT',
-      headers: this.getHeaders(token),
-      body: JSON.stringify({ duration }),
-    });
-    return this.handleResponse(response);
+  async toggleMute(
+    roomId: string,
+    duration?: number,
+  ): Promise<{ success: boolean }> {
+    const response = await api.put(`/chat/room/${roomId}/mute`, { duration });
+    return response.data;
   }
 
-  async deleteRoom(token: string, roomId: string): Promise<{ success: boolean; message?: string }> {
-    const response = await fetch(`${this.baseUrl}/room/${roomId}`, {
-      method: 'DELETE',
-      headers: this.getHeaders(token),
-    });
-    return this.handleResponse(response);
+  async deleteRoom(
+    roomId: string,
+  ): Promise<{ success: boolean; message?: string }> {
+    const response = await api.delete(`/chat/room/${roomId}`);
+    return response.data;
   }
 
   // ============================================
@@ -99,57 +67,58 @@ class ChatApiService {
 
   /** Full message fetch (for refresh/sync) */
   async getMessages(
-    token: string,
     roomId: string,
     limit: number = 50,
-    before?: string
+    before?: string,
   ): Promise<MessagesResponse> {
-    let url = `${this.baseUrl}/messages/${roomId}?limit=${limit}`;
-    if (before) url += `&before=${before}`;
-    const response = await fetch(url, { headers: this.getHeaders(token) });
-    return this.handleResponse<MessagesResponse>(response);
+    let url = `/chat/messages/${roomId}?limit=${limit}`;
+    if (before) url += `&before=${encodeURIComponent(before)}`;
+    const response = await api.get(url);
+    return response.data;
   }
 
-  /** ✅ NEW: Lightweight message fetch (for initial load + pagination) */
+  /** Lightweight message fetch (for initial load + pagination) */
   async getMessagesLight(
-    token: string,
     roomId: string,
     limit: number = 30,
-    before?: string
+    before?: string,
   ): Promise<MessagesResponse> {
-    let url = `${this.baseUrl}/messages/${roomId}/light?limit=${limit}`;
-    if (before) url += `&before=${before}`;
-    const response = await fetch(url, { headers: this.getHeaders(token) });
-    return this.handleResponse<MessagesResponse>(response);
+    let url = `/chat/messages/${roomId}/light?limit=${limit}`;
+    if (before) url += `&before=${encodeURIComponent(before)}`;
+    const response = await api.get(url);
+    return response.data;
   }
 
-  async sendMessage(
-    token: string,
-    data: {
-      roomId: string;
-      message: string;
-      type?: string;
-      replyTo?: any;
-      tempId?: string;
-    }
-  ): Promise<{ success: boolean; data?: Message; message?: string }> {
-    const response = await fetch(`${this.baseUrl}/messages`, {
-      method: 'POST',
-      headers: this.getHeaders(token),
-      body: JSON.stringify(data),
-    });
-    return this.handleResponse(response);
+  async sendMessage(data: {
+    roomId: string;
+    message: string;
+    type?: string;
+    replyTo?: any;
+    tempId?: string;
+  }): Promise<{ success: boolean; data?: Message; message?: string }> {
+    const response = await api.post("/chat/messages", data);
+    return response.data;
   }
 
   async deleteMessage(
-    token: string,
-    messageId: string
+    messageId: string,
   ): Promise<{ success: boolean; message?: string }> {
-    const response = await fetch(`${this.baseUrl}/message/${messageId}`, {
-      method: 'DELETE',
-      headers: this.getHeaders(token),
-    });
-    return this.handleResponse(response);
+    const response = await api.delete(`/chat/message/${messageId}`);
+    return response.data;
+  }
+
+  async markMessageAsRead(
+    messageId: string,
+  ): Promise<{ success: boolean; data?: Message }> {
+    const response = await api.post(`/chat/message/${messageId}/read`);
+    return response.data;
+  }
+
+  async markMessageAsDelivered(
+    messageId: string,
+  ): Promise<{ success: boolean; data?: Message }> {
+    const response = await api.post(`/chat/message/${messageId}/delivered`);
+    return response.data;
   }
 
   // ============================================
@@ -157,82 +126,75 @@ class ChatApiService {
   // ============================================
 
   async toggleReaction(
-    token: string,
     messageId: string,
     reaction: string,
-    remove?: boolean
+    remove?: boolean,
   ): Promise<{ success: boolean; reactions: Reaction[] }> {
-    const response = await fetch(`${this.baseUrl}/message/${messageId}/react`, {
-      method: 'POST',
-      headers: this.getHeaders(token),
-      body: JSON.stringify({ reaction, remove: remove || false }),
+    const response = await api.post(`/chat/message/${messageId}/react`, {
+      reaction,
+      remove: remove || false,
     });
-    return this.handleResponse(response);
+    return response.data;
   }
 
   async addReaction(
-    token: string,
     messageId: string,
-    reaction: string
+    reaction: string,
   ): Promise<{ success: boolean; reactions: Reaction[] }> {
-    return this.toggleReaction(token, messageId, reaction, false);
+    return this.toggleReaction(messageId, reaction, false);
   }
 
   async removeReaction(
-    token: string,
-    messageId: string
+    messageId: string,
   ): Promise<{ success: boolean; reactions: Reaction[] }> {
-    return this.toggleReaction(token, messageId, '', true);
+    return this.toggleReaction(messageId, "", true);
   }
 
   // ============================================
   // AUDIO
   // ============================================
 
-  async markAudioPlayed(token: string, messageId: string): Promise<{ success: boolean }> {
-    const response = await fetch(`${this.baseUrl}/audio/${messageId}/played`, {
-      method: 'PUT',
-      headers: this.getHeaders(token),
-    });
-    return this.handleResponse(response);
+  async markAudioPlayed(messageId: string): Promise<{ success: boolean }> {
+    const response = await api.put(`/chat/audio/${messageId}/played`);
+    return response.data;
   }
 
   // ============================================
   // UPLOADS
   // ============================================
 
-  async uploadAudio(
-    token: string,
-    formData: FormData
-  ): Promise<{ success: boolean; url?: string; message?: string; data?: Message }> {
-    const response = await fetch(`${this.baseUrl}/upload-audio`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
+  async uploadAudio(formData: FormData): Promise<{
+    success: boolean;
+    url?: string;
+    message?: string;
+    data?: Message;
+  }> {
+    const response = await api.post("/chat/upload-audio", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+      timeout: 30000, // 30 second timeout for uploads
     });
-    return this.handleResponse(response);
+    return response.data;
   }
 
   async uploadAttachments(
-    token: string,
-    formData: FormData
+    formData: FormData,
   ): Promise<{ success: boolean; data?: Message[]; message?: string }> {
-    const response = await fetch(`${this.baseUrl}/upload-attachments`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
+    const response = await api.post("/chat/upload-attachments", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+      timeout: 60000, // 60 second timeout for multiple attachments
     });
-    return this.handleResponse(response);
+    return response.data;
   }
 
   // ============================================
   // USER PROFILE
   // ============================================
 
-  async getUserProfile(
-    token: string,
-    userId: string
-  ): Promise<{
+  async getUserProfile(userId: string): Promise<{
     success: boolean;
     data: {
       userId: string;
@@ -242,10 +204,8 @@ class ChatApiService {
       bio?: string;
     };
   }> {
-    const response = await fetch(`${this.baseUrl}/user-profile/${userId}`, {
-      headers: this.getHeaders(token),
-    });
-    return this.handleResponse(response);
+    const response = await api.get(`/chat/user-profile/${userId}`);
+    return response.data;
   }
 }
 

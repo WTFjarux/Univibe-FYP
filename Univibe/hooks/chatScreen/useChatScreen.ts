@@ -7,10 +7,12 @@ import { useChatMessages } from "./useChatMessages";
 import { useAudioRecorder } from "./useAudioRecorder";
 import { useMessageSender } from "./useMessageSender";
 import { useChatSocket } from "./useChatSocket";
+import { useChatReadReceipts } from "./useChatReadReceipts";
 import { useChatScroll } from "./useChatScroll";
 import { useMessageScroll } from "../useMessageScroll";
 import socketService from "../../lib/services/socketService";
 import chatApi from "../../lib/services/chatApi";
+import AudioManager from "../../lib/utils/AudioManager";
 import { extractOtherUserIdFromRoomId } from "../../lib/utils/chatUtils";
 import type {
   Message,
@@ -50,10 +52,10 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     loadMessages,
     loadOlderMessages,
     onRefresh,
-    addPendingMessage,
-    removePendingMessage,
+    addOptimisticMessage,
+    removeOptimisticMessage,
+    confirmOptimisticMessage,
     addMessage,
-    replaceTempMessage,
     updateMessageReactions,
     deleteMessage,
     setPendingTimeout,
@@ -66,7 +68,15 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     userName: user?.name,
   });
 
-  // Scroll
+  // Read receipts - marks messages as read when viewing
+  useChatReadReceipts({
+    token,
+    roomId,
+    userId: user?.id,
+    messages,
+  });
+
+  // Scroll management
   const {
     highlightedMessageId,
     registerMessageRef,
@@ -75,14 +85,14 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   } = useMessageScroll(flatListRef);
 
   const {
-    scrollToEnd,
+    scrollToMessage: scrollToMessageIndex,
+    initialScrollToBottom,
     handleContentSizeChange,
     handleLayout,
     handleScroll,
-    setManualScroll,
-    resetManualScroll,
     enableAutoScroll,
     cleanup: cleanupScroll,
+    isAutoScrollEnabledRef,
   } = useChatScroll(flatListRef);
 
   // Message actions
@@ -98,10 +108,16 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
       userName: user?.name,
       socketConnected,
       setMessages,
-      addPendingMessage,
-      removePendingMessage,
+      addOptimisticMessage,
+      removeOptimisticMessage,
+      confirmOptimisticMessage,
       setPendingTimeout,
-      scrollToEnd,
+      scrollToEnd: useCallback(() => {
+        enableAutoScroll();
+        requestAnimationFrame(() => {
+          flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+        });
+      }, [enableAutoScroll, flatListRef]),
       emitEvent,
     });
 
@@ -121,21 +137,149 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
 
   const audioRecorder = useAudioRecorder(handleAudioReady);
 
-  // Socket
+  // Socket with read receipt handling
   useChatSocket({
     roomId,
     otherUserId,
     isMountedRef,
     onMessageDelivered: useCallback(
       (data: any) => {
-        const { tempId, messageId, message: messageData, success } = data;
-        if (success === false) {
-          if (tempId) removePendingMessage(tempId);
+        const { tempId, messageId, message: messageData, success, type } = data;
+
+        // ── Handle Read Receipts ──────────────────────────
+
+        // Bulk read - other user read all messages in room
+        if (type === "messages_read") {
+          console.log(
+            `📖 Updating all messages to read for user ${data.userId}`,
+          );
+
+          setMessages((prev) => {
+            const updated = prev.map((msg) => {
+              // Only update messages sent by current user
+              const senderId =
+                typeof msg.sender === "string" ? msg.sender : msg.sender?._id;
+
+              if (senderId === user?.id && msg.status !== "read") {
+                const existingReadBy = msg.readBy || [];
+                const alreadyRead = existingReadBy.some((r: any) => {
+                  const readUserId =
+                    typeof r === "string" ? r : r.user || r.userId;
+                  return readUserId?.toString() === data.userId?.toString();
+                });
+
+                if (!alreadyRead) {
+                  console.log(`  📖 Marking message ${msg._id} as read`);
+                  return {
+                    ...msg,
+                    status: "read" as const,
+                    readBy: [
+                      ...existingReadBy,
+                      {
+                        user: data.userId,
+                        readAt: data.readAt || new Date().toISOString(),
+                      },
+                    ],
+                  };
+                }
+              }
+              return msg;
+            });
+
+            // Log the update
+            const readCount = updated.filter((m) => m.status === "read").length;
+            console.log(`  ✅ ${readCount} messages now marked as read`);
+
+            return updated;
+          });
           return;
         }
-        if (tempId) replaceTempMessage(tempId, messageId, messageData);
+
+        // Single message read
+        if (type === "message_read") {
+          console.log(`📖 Updating single message ${data.messageId} to read`);
+
+          setMessages((prev) =>
+            prev.map((msg) => {
+              if (msg._id === data.messageId && msg.status !== "read") {
+                const existingReadBy = msg.readBy || [];
+                const alreadyRead = existingReadBy.some((r: any) => {
+                  const readUserId =
+                    typeof r === "string" ? r : r.user || r.userId;
+                  return readUserId?.toString() === data.userId?.toString();
+                });
+
+                if (!alreadyRead) {
+                  console.log(`  ✅ Message ${msg._id} marked as read`);
+                  return {
+                    ...msg,
+                    status: "read" as const,
+                    readBy: [
+                      ...existingReadBy,
+                      {
+                        user: data.userId,
+                        readAt: data.readAt || new Date().toISOString(),
+                      },
+                    ],
+                  };
+                }
+              }
+              return msg;
+            }),
+          );
+          return;
+        }
+
+        // Message delivered to recipient
+        if (type === "message_delivered_to_recipient") {
+          console.log(`📬 Updating message ${data.messageId} to delivered`);
+
+          setMessages((prev) =>
+            prev.map((msg) => {
+              if (msg._id === data.messageId && msg.status === "sent") {
+                const existingDelivered = msg.deliveredTo || [];
+                const alreadyDelivered = existingDelivered.some((r: any) => {
+                  const dUserId =
+                    typeof r === "string" ? r : r.user || r.userId;
+                  return dUserId?.toString() === data.recipientId?.toString();
+                });
+
+                if (!alreadyDelivered) {
+                  console.log(`  ✅ Message ${msg._id} marked as delivered`);
+                  return {
+                    ...msg,
+                    status: "delivered" as const,
+                    deliveredTo: [
+                      ...existingDelivered,
+                      {
+                        user: data.recipientId,
+                        deliveredAt: new Date().toISOString(),
+                      },
+                    ],
+                  };
+                }
+              }
+              return msg;
+            }),
+          );
+          return;
+        }
+
+        // ── Original Message Delivery Logic ───────────────
+        if (success === false) {
+          if (tempId) removeOptimisticMessage(tempId);
+          return;
+        }
+        if (tempId) {
+          confirmOptimisticMessage(tempId, messageId, messageData);
+        }
       },
-      [removePendingMessage, replaceTempMessage],
+      [
+        removeOptimisticMessage,
+        confirmOptimisticMessage,
+        setMessages,
+        user?.id,
+      ],
     ),
     onReceiveMessage: useCallback(
       (message: Message) => {
@@ -191,14 +335,18 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     clearHighlight();
   }, [clearHighlight]);
 
-  // Scroll to message
+  // Scroll to message (for reply navigation)
   const handleScrollToMessage = useCallback(
     (messageId: string) => {
-      setManualScroll();
-      scrollToMessage(messageId);
-      resetManualScroll();
+      // Find message index in the messages array
+      const messageIndex = messages.findIndex((m) => m._id === messageId);
+      if (messageIndex !== -1 && flatListRef.current) {
+        // In inverted FlatList, we need to calculate the reversed index
+        const reversedIndex = messages.length - 1 - messageIndex;
+        scrollToMessage(messageId);
+      }
     },
-    [scrollToMessage, setManualScroll, resetManualScroll],
+    [messages, scrollToMessage],
   );
 
   // Reactions
@@ -244,7 +392,6 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
 
       try {
         const data = await chatApi.toggleReaction(
-          token,
           messageId,
           reaction,
           shouldRemove,
@@ -267,7 +414,7 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
       if (!token) return;
 
       try {
-        const data = await chatApi.deleteMessage(token, messageId);
+        const data = await chatApi.deleteMessage(messageId);
         if (data.success) {
           deleteMessage(messageId);
           socketService.emit("delete_message", { messageId, roomId });
@@ -283,7 +430,7 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   const markAudioAsPlayed = useCallback(
     async (messageId: string) => {
       if (!token) return;
-      await chatApi.markAudioPlayed(token, messageId);
+      await chatApi.markAudioPlayed(messageId);
     },
     [token],
   );
@@ -300,7 +447,13 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
+      AudioManager.stopAllSounds();
     };
+  }, []);
+
+  // Audio cleanup function
+  const audioCleanup = useCallback(() => {
+    AudioManager.stopAllSounds();
   }, []);
 
   return {
@@ -320,6 +473,7 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     otherUserAvatar,
     user,
     token,
+    roomId,
 
     // Actions
     loadMessages,
@@ -344,12 +498,10 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     cancelRecording: audioRecorder.cancelRecording,
 
     // Scroll
+    initialScrollToBottom,
     handleContentSizeChange,
     handleLayout,
     handleScroll,
-
-    // Input
-    scrollToEnd,
     enableAutoScroll,
 
     // Cleanup
@@ -357,7 +509,7 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     clearCache,
     clearHighlight,
     cleanupScroll,
-    audioCleanup: audioRecorder.cleanup,
+    audioCleanup,
     isMountedRef,
   };
 };

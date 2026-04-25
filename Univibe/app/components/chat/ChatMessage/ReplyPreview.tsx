@@ -1,9 +1,17 @@
 // app/components/chat/ChatMessage/ReplyPreview.tsx
 
-import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import React, { useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
+} from "react-native";
+import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { getFullImageUrl } from "../../../../lib/utils/chatUtils";
 
 interface ReplyPreviewProps {
   replyTo: {
@@ -20,12 +28,18 @@ interface ReplyPreviewProps {
   onScrollToMessage?: (messageId: string) => void;
 }
 
+const IMAGE_PREVIEW_SIZE = 46;
+const BLUR_HASH = "L6PZfSi_.AyE_3t7t7R**0o#DgR4";
+
 export default function ReplyPreview({
   replyTo,
   isOwnMessage,
   currentUserId,
   onScrollToMessage,
 }: ReplyPreviewProps) {
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageError, setImageError] = useState(false);
+
   // Check if this is a valid reply
   const isValidReply = (): boolean => {
     return !!(
@@ -71,6 +85,19 @@ export default function ReplyPreview({
     }
 
     return "text";
+  };
+
+  // Get the image URL for preview
+  const getImageUrl = (): string | null => {
+    if (!replyTo.mediaUrl) return null;
+
+    // If it's already a full URL, return it
+    if (replyTo.mediaUrl.startsWith("http")) {
+      return replyTo.mediaUrl;
+    }
+
+    // Otherwise, use getFullImageUrl to construct the full URL
+    return getFullImageUrl(replyTo.mediaUrl);
   };
 
   const getReplyPreviewText = (): string => {
@@ -124,7 +151,7 @@ export default function ReplyPreview({
       return (
         <View style={styles.voicePreview}>
           <View style={styles.voiceIconWrap}>
-            <Ionicons name="mic" size={14} color="#8B5CF6" />
+            <Ionicons name="mic" size={12} color="#8B5CF6" />
           </View>
           <View style={styles.voiceWaveform}>
             {[8, 14, 10, 18, 12, 16, 10, 14, 8].map((h, i) => (
@@ -145,9 +172,37 @@ export default function ReplyPreview({
     }
 
     if (replyType === "image") {
+      const imageUrl = getImageUrl();
+
       return (
-        <View style={styles.imagePreview}>
-          <Ionicons name="image-outline" size={14} color="#8E8E93" />
+        <View style={styles.imagePreviewContainer}>
+          {imageUrl && !imageError ? (
+            <View style={styles.imageThumbnailWrapper}>
+              <Image
+                source={{ uri: imageUrl }}
+                style={styles.imageThumbnail}
+                contentFit="cover"
+                transition={200}
+                cachePolicy="memory-disk"
+                placeholder={{ blurhash: BLUR_HASH }}
+                onLoad={() => setImageLoaded(true)}
+                onError={() => setImageError(true)}
+                recyclingKey={imageUrl}
+              />
+              {!imageLoaded && (
+                <View style={styles.imageLoadingOverlay}>
+                  <ActivityIndicator size="small" color="#8B5CF6" />
+                </View>
+              )}
+              <View style={styles.imageIconOverlay}>
+                <Ionicons name="camera" size={8} color="#fff" />
+              </View>
+            </View>
+          ) : (
+            <View style={styles.imageFallback}>
+              <Ionicons name="image-outline" size={16} color="#8E8E93" />
+            </View>
+          )}
           <Text style={styles.messagePreview} numberOfLines={1}>
             Photo
           </Text>
@@ -197,10 +252,10 @@ const styles = StyleSheet.create({
   replyPreviewContainer: {
     flexDirection: "row",
     paddingBottom: 6,
-    paddingHorizontal: 8,
+    paddingHorizontal: 15,
     paddingTop: 6,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 12,
+    backgroundColor: "rgba(124, 58, 237, 0.06)",
+    borderRadius: 18,
     borderBottomWidth: 0.5,
     borderBottomColor: "rgba(0,0,0,0.1)",
     alignSelf: "flex-start",
@@ -230,6 +285,7 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     textAlign: "left",
   },
+  // Voice styles
   voicePreview: {
     flexDirection: "row",
     alignItems: "center",
@@ -259,10 +315,54 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
     marginLeft: 2,
   },
-  imagePreview: {
+  // Image preview styles
+  imagePreviewContainer: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: 6,
     marginTop: 2,
+  },
+  imageThumbnailWrapper: {
+    width: IMAGE_PREVIEW_SIZE,
+    height: IMAGE_PREVIEW_SIZE,
+    borderRadius: 6,
+    overflow: "hidden",
+    position: "relative",
+    backgroundColor: "#F0F0F5",
+    borderWidth: 0.5,
+    borderColor: "rgba(0,0,0,0.08)",
+  },
+  imageThumbnail: {
+    width: IMAGE_PREVIEW_SIZE,
+    height: IMAGE_PREVIEW_SIZE,
+    borderRadius: 6,
+  },
+  imageLoadingOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(240, 240, 245, 0.5)",
+  },
+  imageIconOverlay: {
+    position: "absolute",
+    bottom: 2,
+    right: 2,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    borderRadius: 3,
+    padding: 1.5,
+  },
+  imageFallback: {
+    width: IMAGE_PREVIEW_SIZE,
+    height: IMAGE_PREVIEW_SIZE,
+    borderRadius: 6,
+    backgroundColor: "#F0F0F5",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 0.5,
+    borderColor: "rgba(0,0,0,0.05)",
   },
 });

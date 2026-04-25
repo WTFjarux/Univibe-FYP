@@ -1,11 +1,5 @@
 /**
  * socket/handlers/chatHandler.js — Real-time Chat Event Handlers
- *
- * Handles all chat-related socket events including:
- * - WhatsApp-level read receipts (readBy array)
- * - Text, images, audio, and replies
- * - Real-time delivery and read status
- * - Optimistic message updates via tempId tracking
  */
 
 const Message = require("../../models/Message");
@@ -19,54 +13,33 @@ const {
   isUserOnline,
 } = require("../utils/roomManager");
 
-// Socket event constants
 const EVENTS = {
-  // Room management
   JOIN_ROOM: "join_room",
   LEAVE_ROOM: "leave_room",
-
-  // Messaging
   SEND_MESSAGE: "send_message",
   RECEIVE_MESSAGE: "receive_message",
   MESSAGE_DELIVERED: "message_delivered",
   MESSAGE_DELIVERED_TO_RECIPIENT: "message_delivered_to_recipient",
-
-  // 🔴 Read Receipts (WhatsApp-level)
   MARK_READ: "mark_read",
   MESSAGES_READ: "messages_read",
   MESSAGES_MARKED_READ: "messages_marked_read",
   MARK_MESSAGE_READ: "mark_message_read",
   MESSAGE_READ: "message_read",
-
-  // Typing indicators
   TYPING: "typing",
   STOP_TYPING: "stop_typing",
-
-  // History
   GET_MESSAGES: "get_messages",
   MESSAGES_HISTORY: "messages_history",
-
-  // Audio
   AUDIO_PLAYED: "audio_played",
-
-  // Deletion
   DELETE_MESSAGE: "delete_message",
   MESSAGE_DELETED: "message_deleted",
-
-  // Reactions
   ADD_REACTION: "add_reaction",
   REMOVE_REACTION: "remove_reaction",
   REACTION_ADDED: "reaction_added",
   REACTION_REMOVED: "reaction_removed",
-
-  // Errors
   ERROR: "error",
   MESSAGE_ERROR: "message_error",
 };
 
-/**
- * Setup chat event handlers
- */
 const setupChatHandlers = (io, socket) => {
   const userId = socket.userId;
   const user = socket.user;
@@ -87,11 +60,9 @@ const setupChatHandlers = (io, socket) => {
         return;
       }
 
-      // Join socket room
       socket.join(finalRoomId);
       addUserToRoom(userId, finalRoomId);
 
-      // Create or get chat room in database
       let chatRoom = await ChatRoom.findOne({ roomId: finalRoomId });
       if (!chatRoom) {
         const otherId =
@@ -108,6 +79,12 @@ const setupChatHandlers = (io, socket) => {
       socket.emit("room_joined", {
         roomId: finalRoomId,
         success: true,
+      });
+
+      // 🔴 Notify others in the room that this user joined
+      socket.to(finalRoomId).emit("user_joined_room", {
+        userId,
+        roomId: finalRoomId,
       });
 
       console.log(
@@ -134,7 +111,7 @@ const setupChatHandlers = (io, socket) => {
   });
 
   /**
-   * 🔴 Send a message with full read receipt support
+   * Send a message with full read receipt support
    */
   socket.on(
     EVENTS.SEND_MESSAGE,
@@ -162,7 +139,6 @@ const setupChatHandlers = (io, socket) => {
 
         const profile = await Profile.findOne({ user: userId });
 
-        // 🔴 Create message with sender already marked as read
         const messageData = {
           sender: userId,
           senderName: user?.name || "Unknown",
@@ -190,7 +166,6 @@ const setupChatHandlers = (io, socket) => {
           messageData.duration = duration || 0;
         }
 
-        // Add replyTo data
         if (replyTo?.messageId) {
           messageData.replyTo = {
             messageId: replyTo.messageId,
@@ -203,23 +178,18 @@ const setupChatHandlers = (io, socket) => {
           };
         }
 
-        // Save to database
         const savedMessage = new Message(messageData);
         await savedMessage.save();
 
-        // Populate sender info
         const populatedMessage = await Message.findById(savedMessage._id)
-
           .populate("sender", "name email avatar")
-
           .populate("readBy.user", "name avatar")
-
           .lean();
 
         if (tempId) {
           populatedMessage.tempId = tempId;
         }
-        // Update chat room last message with readBy array
+
         const lastMessageText =
           type === "audio" ? "🎤 Voice message" : message?.substring(0, 100);
 
@@ -240,33 +210,31 @@ const setupChatHandlers = (io, socket) => {
           { upsert: true },
         );
 
-        // 🔴 Send delivery confirmation to sender
-        const deliveryConfirmation = {
+        // Delivery confirmation to sender
+        socket.emit(EVENTS.MESSAGE_DELIVERED, {
           success: true,
           messageId: savedMessage._id,
           message: populatedMessage,
           tempId,
-        };
-        socket.emit(EVENTS.MESSAGE_DELIVERED, deliveryConfirmation);
+        });
 
-        // 🔴 Broadcast to room
+        // 🔴 Broadcast to room (all other users in the room)
         socket.to(roomId).emit(EVENTS.RECEIVE_MESSAGE, populatedMessage);
 
-        // 🔴 Get room participants and mark as delivered for online users
+        // Mark as delivered for online users
         const room = await ChatRoom.findOne({ roomId });
         const otherUserId = room?.participants.find(
           (p) => p.toString() !== userId.toString(),
         );
 
         if (otherUserId && isUserOnline(otherUserId.toString())) {
-          // Mark as delivered in database
           await Message.findByIdAndUpdate(savedMessage._id, {
             $addToSet: {
               deliveredTo: { user: otherUserId, deliveredAt: new Date() },
             },
           });
 
-          // Notify sender that message was delivered
+          // Notify sender that message was delivered to recipient
           socket.emit(EVENTS.MESSAGE_DELIVERED_TO_RECIPIENT, {
             messageId: savedMessage._id,
             recipientId: otherUserId.toString(),
@@ -315,19 +283,32 @@ const setupChatHandlers = (io, socket) => {
         }
       }
 
-      // 🔴 Get other participant and notify them
+      // 🔴 FIX: Broadcast to the ROOM (not specific socket)
+      // This sends to ALL other users in the room
+      socket.to(roomId).emit(EVENTS.MESSAGES_READ, {
+        roomId,
+        userId,
+        readAt: new Date(),
+      });
+
+      console.log(
+        `📡 Broadcast messages_read to room ${roomId} (except sender)`,
+      );
+
+      // Also try direct notification to specific user as fallback
       const otherUserId = room?.participants.find(
         (p) => p.toString() !== userId.toString(),
       );
-
       if (otherUserId) {
         const otherUserSocketId = getUserSocketId(otherUserId.toString());
         if (otherUserSocketId) {
+          // Direct notification as backup
           io.to(otherUserSocketId).emit(EVENTS.MESSAGES_READ, {
             roomId,
             userId,
             readAt: new Date(),
           });
+          console.log(`📡 Direct notification to user ${otherUserId}`);
         }
       }
 
@@ -354,9 +335,17 @@ const setupChatHandlers = (io, socket) => {
       const message = await Message.markMessageAsRead(messageId, userId);
 
       if (message) {
-        // Notify sender
         const senderId = message.sender.toString();
         if (senderId !== userId) {
+          // 🔴 FIX: Broadcast to room AND direct notification
+          io.to(message.roomId).emit(EVENTS.MESSAGE_READ, {
+            messageId,
+            roomId: message.roomId,
+            userId,
+            readAt: new Date(),
+          });
+
+          // Direct notification as fallback
           const senderSocketId = getUserSocketId(senderId);
           if (senderSocketId) {
             io.to(senderSocketId).emit(EVENTS.MESSAGE_READ, {
@@ -432,7 +421,7 @@ const setupChatHandlers = (io, socket) => {
   });
 
   /**
-   * 🔴 Add reaction to a message
+   * Add reaction to a message
    */
   socket.on(EVENTS.ADD_REACTION, async ({ messageId, reaction }) => {
     try {
@@ -468,7 +457,7 @@ const setupChatHandlers = (io, socket) => {
   });
 
   /**
-   * 🔴 Remove reaction from a message
+   * Remove reaction from a message
    */
   socket.on(EVENTS.REMOVE_REACTION, async ({ messageId }) => {
     try {

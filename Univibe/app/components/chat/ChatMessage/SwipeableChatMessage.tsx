@@ -161,7 +161,7 @@ export default function SwipeableChatMessage({
   };
 
   const renderReplyIndicator = () => {
-    const iconColor = "#007AFF";
+    const iconColor = "#8B5CF6";
 
     if (isOwnMessage) {
       return (
@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   highlightedMessage: {
-    backgroundColor: "rgba(0, 122, 255, 0.08)",
+    backgroundColor: "rgba(139, 92, 246, 0.2)'",
     borderRadius: 12,
     marginVertical: 2,
   },

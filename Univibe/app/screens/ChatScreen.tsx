@@ -1,6 +1,6 @@
 // app/screens/ChatScreen.tsx
 
-import React, { useRef, useCallback, useEffect } from "react";
+import React, { useRef, useCallback, useEffect, useMemo } from "react";
 import {
   View,
   FlatList,
@@ -22,6 +22,7 @@ import ChatInput from "../components/chat/ChatMessage/ChatInput";
 import ReplyIndicator from "../components/chat/ChatMessage/ReplyIndicator";
 import MessageItem from "../components/chat/ChatMessage/MessageItem";
 import DateSeparator from "../components/chat/ChatMessage/DateSeparator";
+import AudioManager from "../../lib/utils/AudioManager";
 import {
   formatMessageTime,
   formatDateSeparator,
@@ -36,11 +37,23 @@ import type { Message } from "../../lib/types/chat.types";
 const DEFAULT_AVATAR = require("../../assets/images/default-avatar.png");
 const MESSAGE_TIME_GAP_MINUTES = 5;
 
+// 🔴 Memoized MessageItem wrapper
+const MemoizedMessageItem = React.memo(MessageItem, (prev, next) => {
+  return (
+    prev.item._id === next.item._id &&
+    prev.item.status === next.item.status &&
+    prev.item.reactions === next.item.reactions &&
+    prev.isOwnMessage === next.isOwnMessage &&
+    prev.showAvatar === next.showAvatar &&
+    prev.showTime === next.showTime &&
+    prev.highlightedMessageId === next.highlightedMessageId
+  );
+});
+
 export default function ChatScreen() {
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<any>(null);
   const hasLoadedRef = useRef(false);
-  const initialScrollDoneRef = useRef(false);
 
   const {
     messages,
@@ -82,42 +95,54 @@ export default function ChatScreen() {
     handleContentSizeChange,
     handleLayout,
     handleScroll,
+    initialScrollToBottom,
+    enableAutoScroll,
   } = useChatScreen(flatListRef);
 
+  // Cleanup on unmount
   useEffect(() => {
-    if (!hasLoadedRef.current) {
-      loadMessages(false);
-      hasLoadedRef.current = true;
-    }
-
     return () => {
       clearAllPending();
       clearHighlight();
       cleanupScroll();
       audioCleanup();
+      AudioManager.stopAllSounds();
     };
   }, []);
 
+  // Load messages on mount
   useEffect(() => {
-    if (!loading && messages.length > 0 && !initialScrollDoneRef.current) {
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: false });
-        initialScrollDoneRef.current = true;
-      }, 300);
+    if (!hasLoadedRef.current) {
+      loadMessages(false);
+      hasLoadedRef.current = true;
     }
-  }, [loading, messages.length]);
-
-  useEffect(() => {
-    const showListener = Keyboard.addListener(
-      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
-      () => {
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-      },
-    );
-    return () => showListener.remove();
   }, []);
+
+  // Initial scroll to bottom when messages load
+  useEffect(() => {
+    if (!loading && messages.length > 0) {
+      // Small delay to ensure FlatList is ready
+      const timer = setTimeout(() => {
+        initialScrollToBottom();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [loading, messages.length, initialScrollToBottom]);
+
+  // Focus input when replying
+  useEffect(() => {
+    if (replyToMessage) {
+      const timer = setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [replyToMessage]);
+
+  // Reverse messages for inverted FlatList (newest first)
+  const reversedMessages = useMemo(() => {
+    return [...messages].reverse();
+  }, [messages]);
 
   const handleEndReached = useCallback(() => {
     if (hasMore && !loadingMore) loadOlderMessages();
@@ -132,32 +157,37 @@ export default function ChatScreen() {
     [user?.id],
   );
 
+  // 🔴 Memoized renderItem for inverted FlatList
   const renderItem = useCallback(
     ({ item, index }: { item: Message; index: number }) => {
+      // Since messages are reversed, we need to calculate the actual index
+      const actualIndex = messages.length - 1 - index;
       const ownMessage = isOwnMessage(item);
-      const prevMessage = index > 0 ? messages[index - 1] : null;
+      const prevMessage = actualIndex > 0 ? messages[actualIndex - 1] : null;
       const showDateSeparator =
-        index === 0 || isNewDay(item.createdAt, messages[index - 1].createdAt);
+        actualIndex === 0 ||
+        isNewDay(item.createdAt, messages[actualIndex - 1]?.createdAt);
       const showAvatar =
         !ownMessage &&
-        (index === 0 || getSenderId(messages[index - 1]) !== getSenderId(item));
+        (actualIndex === 0 ||
+          getSenderId(messages[actualIndex - 1]) !== getSenderId(item));
       const showTime =
-        index === messages.length - 1 ||
+        actualIndex === messages.length - 1 ||
         getTimeDifferenceInMinutes(
           item.createdAt,
-          messages[index + 1]?.createdAt || item.createdAt,
+          messages[actualIndex + 1]?.createdAt || item.createdAt,
         ) > MESSAGE_TIME_GAP_MINUTES ||
-        (messages[index + 1] &&
-          getSenderId(messages[index + 1]) !== getSenderId(item));
+        (messages[actualIndex + 1] &&
+          getSenderId(messages[actualIndex + 1]) !== getSenderId(item));
 
       return (
-        <View key={item._id || item.tempId || `msg-${index}`}>
+        <View>
           {showDateSeparator && (
             <DateSeparator date={formatDateSeparator(item.createdAt)} />
           )}
-          <MessageItem
+          <MemoizedMessageItem
             item={item}
-            index={index}
+            index={actualIndex}
             messages={messages}
             isOwnMessage={ownMessage}
             showAvatar={showAvatar}
@@ -195,11 +225,13 @@ export default function ChatScreen() {
   );
 
   const keyExtractor = useCallback((item: Message, index: number) => {
-    // ✅ Use _id + tempId combo to guarantee uniqueness
-    return item._id || item.tempId || `msg-${index}-${item.createdAt}`;
+    if (item._id && !isTempId(item._id)) return item._id;
+    if (item.tempId) return item.tempId;
+    return `msg-${index}-${item.createdAt || Date.now()}`;
   }, []);
 
-  const ListHeaderComponent = useCallback(() => {
+  // Footer component shows loading indicator for older messages
+  const ListFooterComponent = useCallback(() => {
     if (!loadingMore) return null;
     return (
       <View style={styles.loadingMore}>
@@ -207,6 +239,20 @@ export default function ChatScreen() {
       </View>
     );
   }, [loadingMore]);
+
+  // 🔴 Memoized empty component
+  const ListEmptyComponent = useMemo(
+    () => (
+      <View style={styles.emptyView}>
+        <Ionicons name="chatbubbles-outline" size={60} color="#C7C7CC" />
+        <Text style={styles.emptyTitle}>No messages yet</Text>
+        <Text style={styles.emptySubtitle}>
+          Send a message to start the conversation
+        </Text>
+      </View>
+    ),
+    [],
+  );
 
   if (loading) {
     return (
@@ -234,36 +280,33 @@ export default function ChatScreen() {
       >
         <FlatList
           ref={flatListRef}
-          data={messages}
+          data={reversedMessages}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
+          inverted
           onEndReached={handleEndReached}
           onEndReachedThreshold={0.3}
-          removeClippedSubviews={Platform.OS === "android"}
-          maxToRenderPerBatch={10}
-          windowSize={11}
-          initialNumToRender={15}
-          ListHeaderComponent={ListHeaderComponent}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          initialNumToRender={12}
+          updateCellsBatchingPeriod={50}
+          ListFooterComponent={ListFooterComponent}
           onContentSizeChange={handleContentSizeChange}
           onLayout={handleLayout}
           onScroll={handleScroll}
           scrollEventThrottle={16}
-          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          maintainVisibleContentPosition={{
+            minIndexForVisible: 0,
+            autoscrollToTopThreshold: 10,
+          }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
           contentContainerStyle={
             messages.length === 0 ? styles.emptyList : styles.listContent
           }
-          ListEmptyComponent={
-            <View style={styles.emptyView}>
-              <Ionicons name="chatbubbles-outline" size={60} color="#C7C7CC" />
-              <Text style={styles.emptyTitle}>No messages yet</Text>
-              <Text style={styles.emptySubtitle}>
-                Send a message to start the conversation
-              </Text>
-            </View>
-          }
+          ListEmptyComponent={ListEmptyComponent}
         />
         <ReplyIndicator
           replyToMessage={replyToMessage}
@@ -296,9 +339,20 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   kav: { flex: 1, backgroundColor: "#f8f9fa" },
-  listContent: { paddingHorizontal: 12, paddingTop: 16, paddingBottom: 8 },
-  emptyList: { flex: 1, paddingHorizontal: 12, paddingVertical: 16 },
-  loadingMore: { paddingVertical: 10, alignItems: "center" },
+  listContent: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
+  emptyList: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 16,
+  },
+  loadingMore: {
+    paddingVertical: 10,
+    alignItems: "center",
+  },
   emptyView: {
     alignItems: "center",
     justifyContent: "center",

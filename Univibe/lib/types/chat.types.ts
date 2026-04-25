@@ -9,7 +9,7 @@
 
 export interface ChatRoom {
   roomId: string;
-  type: 'direct' | 'group';
+  type: "direct" | "group";
   name: string;
   avatar?: string | null;
   otherUserId?: string | null;
@@ -28,7 +28,7 @@ export interface LastMessagePreview {
   sentAt: string;
   senderId: string;
   senderName: string;
-  type: 'text' | 'image' | 'audio' | 'video' | 'file' | 'location';
+  type: "text" | "image" | "audio" | "video" | "file" | "location";
   readBy: string[];
 }
 
@@ -39,9 +39,11 @@ export interface Message {
   senderAvatar?: string;
   roomId: string;
   message: string;
-  type: 'text' | 'image' | 'audio' | 'video' | 'file' | 'location';
+  type: "text" | "image" | "audio" | "video" | "file" | "location";
   createdAt: string;
-  status: 'sent' | 'delivered' | 'read' | 'sending';
+  status: "sent" | "delivered" | "read" | "sending";
+  readBy?: Array<{ user: string; readAt: string } | string>;
+  deliveredTo?: Array<{ user: string; deliveredAt: string } | string>;
   mediaUrl?: string;
   mediaSize?: number;
   mediaName?: string;
@@ -52,6 +54,9 @@ export interface Message {
   replyTo?: ReplyToData | null;
   reactions: Reaction[];
   tempId?: string;
+  groupId?: string;
+  groupIndex?: number;
+  groupTotal?: number;
 }
 
 export interface ReplyToData {
@@ -90,12 +95,17 @@ export interface PendingMessage {
   timestamp: number;
   type?: string;
   mediaUrl?: string;
+  mediaName?: string; // ✅ Added: File name for attachments
+  mediaSize?: number; // ✅ Added: File size for attachments
   duration?: number;
   replyTo?: ReplyToData;
+  groupId?: string; // ✅ Added: For grouping multiple images
+  groupIndex?: number; // ✅ Added: Position in image group
+  groupTotal?: number; // ✅ Added: Total images in group
 }
 
 export interface AttachmentData {
-  type: 'image' | 'video' | 'document' | 'location';
+  type: "image" | "video" | "document" | "location";
   uri?: string;
   name?: string;
   size?: number;
@@ -200,7 +210,7 @@ export interface ChatItemProps {
   onPress: () => void;
   onLongPress: (
     item: ChatRoom,
-    layout: { y: number; height: number; pageX: number; pageY: number }
+    layout: { y: number; height: number; pageX: number; pageY: number },
   ) => void;
   isUnread?: boolean;
   currentUserId?: string;
@@ -242,7 +252,7 @@ export interface UseChatRoomsReturn {
     sentAt: string,
     senderId?: string,
     senderName?: string,
-    type?: string
+    type?: string,
   ) => void;
   handleMessagesRead: (roomId: string, userId: string) => void;
   markRoomAsReadLocally: (roomId: string) => void;

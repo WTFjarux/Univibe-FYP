@@ -1,6 +1,6 @@
 // lib/utils/AudioManager.ts
 
-import { Audio } from 'expo-av';
+import { Audio } from "expo-av";
 
 class AudioManager {
   private currentSound: Audio.Sound | null = null;
@@ -12,10 +12,10 @@ class AudioManager {
    */
   registerPlayCallback(callback: (messageId: string) => void) {
     this.listeners.push(callback);
-    
+
     // Return unsubscribe function
     return () => {
-      this.listeners = this.listeners.filter(cb => cb !== callback);
+      this.listeners = this.listeners.filter((cb) => cb !== callback);
     };
   }
 
@@ -23,7 +23,7 @@ class AudioManager {
    * Notify all listeners that a new audio is playing
    */
   private notifyListeners(messageId: string) {
-    this.listeners.forEach(callback => {
+    this.listeners.forEach((callback) => {
       try {
         callback(messageId);
       } catch (error) {
@@ -38,7 +38,7 @@ class AudioManager {
   async playSound(
     sound: Audio.Sound,
     messageId: string,
-    onPlayed?: (messageId: string) => void
+    onPlayed?: (messageId: string) => void,
   ): Promise<void> {
     // 🔴 Notify all other players to pause BEFORE playing new audio
     this.notifyListeners(messageId);
@@ -49,6 +49,7 @@ class AudioManager {
         const status = await this.currentSound.getStatusAsync();
         if (status.isLoaded && status.isPlaying) {
           await this.currentSound.stopAsync().catch(() => {});
+          await this.currentSound.setPositionAsync(0).catch(() => {});
         }
       } catch (error) {
         // Ignore errors when stopping
@@ -69,12 +70,18 @@ class AudioManager {
   }
 
   /**
-   * Stop current sound
+   * Stop current sound and reset position
    */
   async stopCurrentSound(): Promise<void> {
     if (this.currentSound) {
       try {
-        await this.currentSound.stopAsync().catch(() => {});
+        const status = await this.currentSound.getStatusAsync();
+        if (status.isLoaded) {
+          if (status.isPlaying) {
+            await this.currentSound.stopAsync().catch(() => {});
+          }
+          await this.currentSound.setPositionAsync(0).catch(() => {});
+        }
       } catch (error) {
         // Ignore errors
       }
@@ -84,10 +91,54 @@ class AudioManager {
   }
 
   /**
+   * 🔴 Stop ALL sounds and unload them
+   */
+  async stopAllSounds(): Promise<void> {
+    if (this.currentSound) {
+      try {
+        const status = await this.currentSound.getStatusAsync();
+        if (status.isLoaded) {
+          if (status.isPlaying) {
+            await this.currentSound.stopAsync().catch(() => {});
+          }
+          await this.currentSound.unloadAsync().catch(() => {});
+        }
+      } catch (error) {
+        // Ignore errors
+      }
+      this.currentSound = null;
+      this.currentMessageId = null;
+    }
+  }
+
+  /**
+   * Pause current sound without resetting position
+   */
+  async pauseCurrentSound(): Promise<void> {
+    if (this.currentSound) {
+      try {
+        const status = await this.currentSound.getStatusAsync();
+        if (status.isLoaded && status.isPlaying) {
+          await this.currentSound.pauseAsync().catch(() => {});
+        }
+      } catch (error) {
+        // Ignore errors
+      }
+    }
+  }
+
+  /**
    * Check if a specific message is currently playing
    */
   isPlaying(messageId: string): boolean {
     return this.currentMessageId === messageId;
+  }
+
+  /**
+   * Get current playing message ID
+   */
+  getCurrentMessageId(): string | null {
+    return this.currentMessageId;
   }
 
   /**
