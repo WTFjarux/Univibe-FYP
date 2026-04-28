@@ -1,201 +1,367 @@
-import { useState, useCallback, useMemo } from 'react';
-import type { ChatRoom } from '../../lib/types/chat.types';
-import { useChatRoomsQuery } from './useChatRoomsQuery';
-import { useChatActions } from './useChatActions';
-import { useReadStatus } from './useReadStatus';
-import { useChatListSocket } from './useChatListSocket';
-import { chatApi } from '../../lib/services/chatApi';
-import  socketService  from '../../lib/services/socketService';
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import type { ChatRoom } from "../../lib/types/chat.types";
+import { useChatRoomsQuery } from "./useChatRoomsQuery";
+import { useChatActions } from "./useChatActions";
+import { useReadStatus } from "./useReadStatus";
+import { useChatListSocket } from "./useChatListSocket";
+import { chatApi } from "../../lib/services/chatApi";
+import socketService from "../../lib/services/socketService";
 
+// -----------------------------------------------------------------------------
+// Hook
+// -----------------------------------------------------------------------------
+
+/**
+ * Central hook for the ChatList screen.
+ *
+ * Orchestrates:
+ * - Room data fetching and caching
+ * - Real-time socket updates for last messages, read receipts, and deletions
+ * - Read/unread status management
+ * - Room actions (pin, mute, delete, mark read/unread)
+ * - Search filtering
+ *
+ * Uses ref-based socket handlers to prevent stale closures without
+ * re-registering listeners on every render.
+ */
 export const useChatList = (token: string | null, currentUserId?: string) => {
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
 
-  // Data fetching
-  const { rooms, loading, refreshing, error, fetchRooms, onRefresh, refreshSingleRoom, setRooms } = 
-    useChatRoomsQuery({ token });
+  // ─── Data fetching (API + cache) ──────────────────────────────────────────
 
-  // Read/unread status
-  const { isRoomUnread, addManualUnread, removeManualUnread } = useReadStatus(currentUserId);
+  const {
+    rooms,
+    loading,
+    refreshing,
+    error,
+    fetchRooms,
+    onRefresh,
+    refreshSingleRoom,
+    setRooms,
+    roomsRef,
+    joinAllRooms,
+  } = useChatRoomsQuery({ token });
 
-  // Chat actions (pin/mute/delete)
+  // ─── Read/unread status ───────────────────────────────────────────────────
+
+  const { isRoomUnread, addManualUnread, removeManualUnread } =
+    useReadStatus(currentUserId);
+
+  // ─── Room actions (pin / mute / delete) ───────────────────────────────────
+
   const { pinChat, toggleMute, deleteChat } = useChatActions(token, setRooms);
 
-  // Update last message in room list
-  const updateRoomLastMessage = useCallback((
-    roomId: string,
-    message: string,
-    sentAt: string,
-    senderId?: string,
-    senderName?: string,
-    type: string = 'text'
-  ) => {
-    setRooms(prev => {
-      const updated = prev.map(room => {
-        if (room.roomId !== roomId) return room;
-        
-        const isFromCurrentUser = senderId === currentUserId;
-        
-        return {
-          ...room,
-          lastMessage: {
-            message,
-            sentAt,
-            senderId: senderId || '',
-            senderName: senderName || '',
-            type: type as any,
-            readBy: isFromCurrentUser ? [currentUserId || ''] : [],
-          },
-          updatedAt: sentAt,
-        };
-      });
-      
-      // Re-sort
-      return [...updated].sort((a, b) => {
-        if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
-        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-      });
-    });
-  }, [currentUserId, setRooms]);
+  // ─── Keep roomsRef in sync with state ─────────────────────────────────────
 
-  // Handle messages_read from other users
-  const handleMessagesRead = useCallback((roomId: string, userId: string) => {
-    if (userId === currentUserId) return;
-    
-    setRooms(prev =>
-      prev.map(room => {
-        if (room.roomId === roomId && room.lastMessage) {
-          const readBy = room.lastMessage.readBy || [];
-          if (!readBy.includes(userId)) {
-            return {
-              ...room,
-              lastMessage: {
-                ...room.lastMessage,
-                readBy: [...readBy, userId],
-              },
-            };
-          }
-        }
-        return room;
-      })
-    );
-  }, [currentUserId, setRooms]);
+  useEffect(() => {
+    roomsRef.current = rooms;
+  }, [rooms, roomsRef]);
 
-  // Socket event handlers
-  const socketHandlers = useMemo(() => ({
-    onNewMessage: (data: any) => {
-      if (!data.roomId) return;
-      
-      const senderId = typeof data.sender === 'string' ? data.sender : data.sender?._id;
-      const senderName = typeof data.sender === 'string' ? data.senderName : data.sender?.name;
-      
-      updateRoomLastMessage(
-        data.roomId,
-        data.message,
-        data.createdAt || new Date().toISOString(),
-        senderId,
-        senderName,
-        data.type
-      );
-    },
-    onMessagesRead: (data: any) => {
-      if (data.roomId && data.userId) {
-        handleMessagesRead(data.roomId, data.userId);
-      }
-    },
-    onMessageDeleted: (data: any) => {
-      if (data.roomId) refreshSingleRoom(data.roomId);
-    },
-    onReactionUpdated: () => {
-      // Could refresh specific room if needed
-    },
-  }), [updateRoomLastMessage, handleMessagesRead, refreshSingleRoom]);
+  // ─── Room subscription management ─────────────────────────────────────────
 
-  useChatListSocket(socketHandlers);
-
-  // Mark room as read
-  const markRoomAsRead = useCallback(async (roomId: string) => {
-    if (!token) return;
-    
-    // Optimistic local update
-    setRooms(prev =>
-      prev.map(room => {
-        if (room.roomId === roomId && room.lastMessage && currentUserId) {
-          const readBy = room.lastMessage.readBy || [];
-          if (!readBy.includes(currentUserId)) {
-            return {
-              ...room,
-              lastMessage: {
-                ...room.lastMessage,
-                readBy: [...readBy, currentUserId],
-              },
-            };
-          }
-        }
-        return room;
-      })
-    );
-    
-    // Remove manual unread if exists
-    await removeManualUnread(roomId);
-    
-    // Server sync
-    try {
-      const response = await chatApi.markRoomAsRead(token, roomId);
-      if (response.success && socketService.getConnectionStatus()) {
-        socketService.emit('mark_read', { roomId });
-      }
-    } catch {
-      refreshSingleRoom(roomId);
+  /** Join all rooms when the list changes (new chats added or removed) */
+  useEffect(() => {
+    if (socketService.getConnectionStatus() && rooms.length > 0) {
+      joinAllRooms(rooms);
     }
-  }, [token, currentUserId, setRooms, removeManualUnread, refreshSingleRoom]);
+  }, [rooms.length, joinAllRooms]);
 
-  // Toggle read/unread manually
-  const toggleRead = useCallback(async (room: ChatRoom | null) => {
-    if (!room || !token) return;
-    
-    const currentlyUnread = isRoomUnread(room);
-    
-    if (currentlyUnread) {
-      // Mark as read
-      await markRoomAsRead(room.roomId);
-    } else {
-      // Mark as unread
-      await addManualUnread(room.roomId);
-      
-      // Optimistic UI update
-      setRooms(prev =>
-        prev.map(r => {
-          if (r.roomId === room.roomId && r.lastMessage && currentUserId) {
-            const readBy = r.lastMessage.readBy || [];
-            return {
-              ...r,
-              lastMessage: {
-                ...r.lastMessage,
-                readBy: readBy.filter(id => id !== currentUserId),
-              },
-            };
+  /** Rejoin all rooms when the socket reconnects */
+  useEffect(() => {
+    const handleConnected = () => {
+      if (roomsRef.current.length > 0) {
+        joinAllRooms(roomsRef.current);
+      }
+    };
+
+    socketService.on("socket_connected", handleConnected);
+    socketService.on("socket_reconnected", handleConnected);
+
+    return () => {
+      socketService.off("socket_connected", handleConnected);
+      socketService.off("socket_reconnected", handleConnected);
+    };
+  }, [joinAllRooms]);
+
+  // ---------------------------------------------------------------------------
+  // Room List Update Helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Updates the last message for a room and re-sorts the list.
+   * Pinned rooms always appear first, then sorted by most recent.
+   */
+  const updateRoomLastMessage = useCallback(
+    (
+      roomId: string,
+      message: string,
+      sentAt: string,
+      senderId?: string,
+      senderName?: string,
+      type: string = "text",
+    ) => {
+      setRooms((prev) => {
+        const updated = prev.map((room) => {
+          if (room.roomId !== roomId) return room;
+
+          const isFromCurrentUser = senderId === currentUserId;
+
+          return {
+            ...room,
+            lastMessage: {
+              message,
+              sentAt,
+              senderId: senderId || "",
+              senderName: senderName || "",
+              type: type as any,
+              readBy: isFromCurrentUser ? [currentUserId || ""] : [],
+            },
+            updatedAt: sentAt,
+          };
+        });
+
+        return [...updated].sort((a, b) => {
+          if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+          return (
+            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+          );
+        });
+      });
+    },
+    [currentUserId, setRooms],
+  );
+
+  /**
+   * Updates read receipts when another user reads messages in a room.
+   * Adds the user to the readBy array if not already present.
+   */
+  const handleMessagesRead = useCallback(
+    (roomId: string, userId: string) => {
+      if (userId === currentUserId) return;
+
+      setRooms((prev) =>
+        prev.map((room) => {
+          if (room.roomId === roomId && room.lastMessage) {
+            const readBy = room.lastMessage.readBy || [];
+            if (!readBy.includes(userId)) {
+              return {
+                ...room,
+                lastMessage: {
+                  ...room.lastMessage,
+                  readBy: [...readBy, userId],
+                },
+              };
+            }
           }
-          return r;
-        })
+          return room;
+        }),
       );
-      
-      // Server sync
+    },
+    [currentUserId, setRooms],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Socket Event Handlers (Ref-Based for Stale Closure Prevention)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Handles incoming real-time messages.
+   * If the room doesn't exist in the current list, triggers a full refresh
+   * to pick up the new chat. Otherwise, updates the last message inline.
+   */
+  const handleNewMessageRef = useRef<(data: any) => void>(undefined);
+
+  handleNewMessageRef.current = (data: any) => {
+    if (!data.roomId) return;
+
+    const senderId =
+      typeof data.sender === "string" ? data.sender : data.sender?._id;
+    const senderName =
+      typeof data.sender === "string" ? data.senderName : data.sender?.name;
+
+    const roomExists = roomsRef.current.some(
+      (room) => room.roomId === data.roomId,
+    );
+
+    if (!roomExists) {
+      fetchRooms();
+      return;
+    }
+
+    updateRoomLastMessage(
+      data.roomId,
+      data.message,
+      data.createdAt || new Date().toISOString(),
+      senderId,
+      senderName,
+      data.type,
+    );
+  };
+
+  /** Handles bulk read receipt events from the socket */
+  const handleMessagesReadRef = useRef<(data: any) => void>(undefined);
+
+  handleMessagesReadRef.current = (data: any) => {
+    if (data.roomId && data.userId && data.userId !== currentUserId) {
+      handleMessagesRead(data.roomId, data.userId);
+    }
+  };
+
+  /** Handles message deletion events by refreshing the affected room */
+  const handleMessageDeletedRef = useRef<(data: any) => void>(undefined);
+
+  handleMessageDeletedRef.current = (data: any) => {
+    if (data.roomId) {
+      refreshSingleRoom(data.roomId);
+    }
+  };
+
+  /** Handles reaction update events */
+  const handleReactionUpdatedRef = useRef<(data: any) => void>(undefined);
+
+  handleReactionUpdatedRef.current = (data: any) => {
+    if (data.messageId) {
+      // Room refresh could be triggered here if needed
+    }
+  };
+
+  /**
+   * Stable wrapper callbacks that delegate to the ref-based handlers.
+   * These references never change, so useChatListSocket registers listeners once.
+   */
+  const stableSocketHandlers = useMemo(
+    () => ({
+      onNewMessage: (data: any) => {
+        handleNewMessageRef.current?.(data);
+      },
+      onMessagesRead: (data: any) => {
+        handleMessagesReadRef.current?.(data);
+      },
+      onMessageDeleted: (data: any) => {
+        handleMessageDeletedRef.current?.(data);
+      },
+      onReactionUpdated: (data: any) => {
+        handleReactionUpdatedRef.current?.(data);
+      },
+    }),
+    [],
+  );
+
+  useChatListSocket(stableSocketHandlers);
+
+  // ---------------------------------------------------------------------------
+  // Mark Room as Read
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Marks all messages in a room as read.
+   * Applies optimistic update, removes manual unread flag, and syncs with server.
+   */
+  const markRoomAsRead = useCallback(
+    async (roomId: string) => {
+      if (!token) return;
+
+      setRooms((prev) =>
+        prev.map((room) => {
+          if (room.roomId === roomId && room.lastMessage && currentUserId) {
+            const readBy = room.lastMessage.readBy || [];
+            if (!readBy.includes(currentUserId)) {
+              return {
+                ...room,
+                lastMessage: {
+                  ...room.lastMessage,
+                  readBy: [...readBy, currentUserId],
+                },
+              };
+            }
+          }
+          return room;
+        }),
+      );
+
+      await removeManualUnread(roomId);
+
       try {
-        await chatApi.markRoomAsUnread(token, room.roomId);
+        const response = await chatApi.markRoomAsRead(token);
+        if (response.success && socketService.getConnectionStatus()) {
+          socketService.emit("mark_read", { roomId });
+        }
       } catch {
-        // Revert
-        await removeManualUnread(room.roomId);
-        refreshSingleRoom(room.roomId);
+        refreshSingleRoom(roomId);
       }
-    }
-  }, [token, isRoomUnread, markRoomAsRead, addManualUnread, removeManualUnread, currentUserId, setRooms, refreshSingleRoom]);
+    },
+    [token, currentUserId, setRooms, removeManualUnread, refreshSingleRoom],
+  );
 
-  // Filter rooms by search query
+  // ---------------------------------------------------------------------------
+  // Toggle Read / Unread
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Toggles the read/unread state of a room manually.
+   * If unread, marks as read. If read, marks as unread manually.
+   */
+  const toggleRead = useCallback(
+    async (room: ChatRoom | null) => {
+      if (!room || !token) return;
+
+      const currentlyUnread = isRoomUnread(room);
+
+      if (currentlyUnread) {
+        await markRoomAsRead(room.roomId);
+      } else {
+        await addManualUnread(room.roomId);
+
+        setRooms((prev) =>
+          prev.map((r) => {
+            if (r.roomId === room.roomId && r.lastMessage && currentUserId) {
+              const readBy = r.lastMessage.readBy || [];
+              return {
+                ...r,
+                lastMessage: {
+                  ...r.lastMessage,
+                  readBy: readBy.filter((id) => id !== currentUserId),
+                },
+              };
+            }
+            return r;
+          }),
+        );
+
+        try {
+          await chatApi.markRoomAsUnread(token);
+        } catch {
+          await removeManualUnread(room.roomId);
+          refreshSingleRoom(room.roomId);
+        }
+      }
+    },
+    [
+      token,
+      isRoomUnread,
+      markRoomAsRead,
+      addManualUnread,
+      removeManualUnread,
+      currentUserId,
+      setRooms,
+      refreshSingleRoom,
+    ],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Search Filtering
+  // ---------------------------------------------------------------------------
+
+  /** Filters rooms by the current search query (case-insensitive name match) */
   const filteredRooms = useMemo(() => {
     if (!searchQuery.trim()) return rooms;
     const query = searchQuery.toLowerCase();
-    return rooms.filter(room => room.name.toLowerCase().includes(query));
+    return rooms.filter((room) => room.name.toLowerCase().includes(query));
   }, [rooms, searchQuery]);
+
+  // ---------------------------------------------------------------------------
+  // Return
+  // ---------------------------------------------------------------------------
 
   return {
     rooms,

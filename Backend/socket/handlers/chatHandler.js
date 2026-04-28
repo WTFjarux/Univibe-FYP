@@ -283,8 +283,7 @@ const setupChatHandlers = (io, socket) => {
         }
       }
 
-      // 🔴 FIX: Broadcast to the ROOM (not specific socket)
-      // This sends to ALL other users in the room
+      // ✅ BROADCAST TO ROOM - This sends to ALL other users in the room
       socket.to(roomId).emit(EVENTS.MESSAGES_READ, {
         roomId,
         userId,
@@ -294,23 +293,6 @@ const setupChatHandlers = (io, socket) => {
       console.log(
         `📡 Broadcast messages_read to room ${roomId} (except sender)`,
       );
-
-      // Also try direct notification to specific user as fallback
-      const otherUserId = room?.participants.find(
-        (p) => p.toString() !== userId.toString(),
-      );
-      if (otherUserId) {
-        const otherUserSocketId = getUserSocketId(otherUserId.toString());
-        if (otherUserSocketId) {
-          // Direct notification as backup
-          io.to(otherUserSocketId).emit(EVENTS.MESSAGES_READ, {
-            roomId,
-            userId,
-            readAt: new Date(),
-          });
-          console.log(`📡 Direct notification to user ${otherUserId}`);
-        }
-      }
 
       // Acknowledge to reader
       socket.emit(EVENTS.MESSAGES_MARKED_READ, {

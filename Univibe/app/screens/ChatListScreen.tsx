@@ -1,3 +1,5 @@
+// app/screens/ChatListScreen.tsx
+
 import React, { useState, useCallback } from "react";
 import {
   View,
@@ -21,11 +23,16 @@ import ChatItem from "../components/chat/ChatList/ChatItem";
 import ChatListOptionsModal from "../components/chat/ChatList/ChatListOptionsModal";
 import type { ChatRoom, ItemLayout } from "../../lib/types/chat.types";
 
+// -----------------------------------------------------------------------------
+// ChatListScreen Component
+// -----------------------------------------------------------------------------
+
 export default function ChatListScreen() {
   const router = useRouter();
   const { token, user } = useAuth();
 
-  // Main chat list logic
+  // ─── Core chat list logic ────────────────────────────────────────────────
+
   const {
     filteredRooms,
     loading,
@@ -42,7 +49,8 @@ export default function ChatListScreen() {
     deleteChat,
   } = useChatList(token, user?.id);
 
-  // UI state
+  // ─── UI state ────────────────────────────────────────────────────────────
+
   const [selectedRoom, setSelectedRoom] = useState<ChatRoom | null>(null);
   const [selectedItemLayout, setSelectedItemLayout] = useState<ItemLayout>({
     y: 0,
@@ -51,7 +59,8 @@ export default function ChatListScreen() {
   const [showOptionsModal, setShowOptionsModal] = useState(false);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
 
-  // Animations
+  // ─── Animations ──────────────────────────────────────────────────────────
+
   const {
     itemScaleAnim,
     itemTranslateYAnim,
@@ -61,8 +70,14 @@ export default function ChatListScreen() {
     resetItemAnimation,
   } = useChatItemAnimations();
 
-  // ─── Handlers ────────────────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // Handlers
+  // ---------------------------------------------------------------------------
 
+  /**
+   * Opens the options modal when a user long-presses a chat row.
+   * Captures the item layout for animation positioning.
+   */
   const handleLongPress = useCallback(
     (
       item: ChatRoom,
@@ -76,12 +91,17 @@ export default function ChatListScreen() {
     [animateItemPop],
   );
 
+  /** Closes the options modal and resets animations */
   const handleCloseModal = useCallback(() => {
     resetItemAnimation();
     setShowOptionsModal(false);
     setSelectedRoom(null);
   }, [resetItemAnimation]);
 
+  /**
+   * Navigates to the ChatScreen for a given room.
+   * Marks the room as read before navigating if it has unread messages.
+   */
   const navigateToChat = useCallback(
     (room: ChatRoom) => {
       if (showOptionsModal) return;
@@ -103,6 +123,10 @@ export default function ChatListScreen() {
     [showOptionsModal, router, isRoomUnread, markRoomAsRead],
   );
 
+  /**
+   * Handles starting a new chat with a selected user.
+   * Navigates directly to ChatScreen with the target user's info.
+   */
   const handleStartNewChat = useCallback(
     (userId: string, userName: string, userAvatar?: string) => {
       setShowNewChatModal(false);
@@ -119,8 +143,14 @@ export default function ChatListScreen() {
     [router],
   );
 
-  // ─── Render Item ─────────────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // Render Helpers
+  // ---------------------------------------------------------------------------
 
+  /**
+   * Renders a single chat row item.
+   * Determines unread status, selection state, and passes animation values.
+   */
   const renderItem = useCallback(
     ({ item }: { item: ChatRoom }) => {
       const isUnread = isRoomUnread(item);
@@ -154,15 +184,20 @@ export default function ChatListScreen() {
     ],
   );
 
-  // ─── Effects ─────────────────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // Effects
+  // ---------------------------------------------------------------------------
 
+  /** Fetch rooms every time the screen gains focus to ensure fresh data */
   useFocusEffect(
     useCallback(() => {
       fetchRooms();
     }, [fetchRooms]),
   );
 
-  // ─── Loading State ───────────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // Loading State
+  // ---------------------------------------------------------------------------
 
   if (loading) {
     return (
@@ -172,7 +207,9 @@ export default function ChatListScreen() {
     );
   }
 
-  // ─── Main Render ─────────────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // Main Render
+  // ---------------------------------------------------------------------------
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -197,6 +234,12 @@ export default function ChatListScreen() {
           maxToRenderPerBatch={10}
           windowSize={10}
           initialNumToRender={8}
+          extraData={{
+            rooms: filteredRooms,
+            isRoomUnread,
+            selectedRoomId: selectedRoom?.roomId,
+            showOptionsModal,
+          }}
         />
       </View>
 
@@ -225,16 +268,26 @@ export default function ChatListScreen() {
   );
 }
 
-// ─── Styles ────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// Styles
+// -----------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#fff" },
-  container: { flex: 1, backgroundColor: "#fff" },
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#fff",
+  },
+  container: {
+    flex: 1,
+    backgroundColor: "#fff",
+  },
   centered: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#fff",
   },
-  emptyList: { flex: 1 },
+  emptyList: {
+    flex: 1,
+  },
 });

@@ -12,10 +12,10 @@ import {
   Alert,
   Text,
   StyleSheet,
-  Keyboard,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "expo-router";
 import { useChatScreen } from "../../hooks/chatScreen/useChatScreen";
 import ChatHeader from "../components/chat/ChatMessage/ChatHeader";
 import ChatInput from "../components/chat/ChatMessage/ChatInput";
@@ -34,10 +34,23 @@ import {
 import { isTempId } from "../../lib/utils/messageIdGenerator";
 import type { Message } from "../../lib/types/chat.types";
 
+// -----------------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------------
+
 const DEFAULT_AVATAR = require("../../assets/images/default-avatar.png");
+
+/** Maximum time gap between messages before showing a new timestamp */
 const MESSAGE_TIME_GAP_MINUTES = 5;
 
-// 🔴 Memoized MessageItem wrapper
+// -----------------------------------------------------------------------------
+// Memoized Components
+// -----------------------------------------------------------------------------
+
+/**
+ * Memoized wrapper around MessageItem to prevent unnecessary re-renders.
+ * Only re-renders when critical message properties change.
+ */
 const MemoizedMessageItem = React.memo(MessageItem, (prev, next) => {
   return (
     prev.item._id === next.item._id &&
@@ -50,10 +63,15 @@ const MemoizedMessageItem = React.memo(MessageItem, (prev, next) => {
   );
 });
 
+// -----------------------------------------------------------------------------
+// ChatScreen Component
+// -----------------------------------------------------------------------------
+
 export default function ChatScreen() {
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<any>(null);
-  const hasLoadedRef = useRef(false);
+
+  // ─── State & Handlers from custom hook ──────────────────────────────────────
 
   const {
     messages,
@@ -99,7 +117,11 @@ export default function ChatScreen() {
     enableAutoScroll,
   } = useChatScreen(flatListRef);
 
-  // Cleanup on unmount
+  // ---------------------------------------------------------------------------
+  // Lifecycle Effects
+  // ---------------------------------------------------------------------------
+
+  /** Cleanup all resources on unmount */
   useEffect(() => {
     return () => {
       clearAllPending();
@@ -110,18 +132,28 @@ export default function ChatScreen() {
     };
   }, []);
 
-  // Load messages on mount
+  /** Fetch latest messages on initial mount, bypassing cache */
   useEffect(() => {
-    if (!hasLoadedRef.current) {
-      loadMessages(false);
-      hasLoadedRef.current = true;
-    }
+    loadMessages(true);
   }, []);
 
-  // Initial scroll to bottom when messages load
+  /** Fetch latest messages every time the screen gains focus */
+  useFocusEffect(
+    useCallback(() => {
+      loadMessages(true);
+    }, [loadMessages]),
+  );
+
+  /** Fetch latest messages when socket reconnects to catch missed messages */
+  useEffect(() => {
+    if (socketConnected) {
+      loadMessages(true);
+    }
+  }, [socketConnected, loadMessages]);
+
+  /** Scroll to bottom once messages finish loading */
   useEffect(() => {
     if (!loading && messages.length > 0) {
-      // Small delay to ensure FlatList is ready
       const timer = setTimeout(() => {
         initialScrollToBottom();
       }, 100);
@@ -129,7 +161,7 @@ export default function ChatScreen() {
     }
   }, [loading, messages.length, initialScrollToBottom]);
 
-  // Focus input when replying
+  /** Auto-focus the input field when replying to a message */
   useEffect(() => {
     if (replyToMessage) {
       const timer = setTimeout(() => {
@@ -139,15 +171,25 @@ export default function ChatScreen() {
     }
   }, [replyToMessage]);
 
-  // Reverse messages for inverted FlatList (newest first)
+  // ---------------------------------------------------------------------------
+  // Derived Data
+  // ---------------------------------------------------------------------------
+
+  /** Reverse messages for inverted FlatList display (newest at bottom visually) */
   const reversedMessages = useMemo(() => {
     return [...messages].reverse();
   }, [messages]);
 
+  // ---------------------------------------------------------------------------
+  // Callbacks
+  // ---------------------------------------------------------------------------
+
+  /** Load older messages when user scrolls to the top (inverted: bottom) */
   const handleEndReached = useCallback(() => {
     if (hasMore && !loadingMore) loadOlderMessages();
   }, [hasMore, loadingMore, loadOlderMessages]);
 
+  /** Determine if a message was sent by the current user */
   const isOwnMessage = useCallback(
     (message: Message): boolean => {
       if (!user?.id) return false;
@@ -157,20 +199,24 @@ export default function ChatScreen() {
     [user?.id],
   );
 
-  // 🔴 Memoized renderItem for inverted FlatList
+  /**
+   * Render a single message item within the FlatList.
+   * Handles date separators, avatar visibility, and timestamps.
+   */
   const renderItem = useCallback(
     ({ item, index }: { item: Message; index: number }) => {
-      // Since messages are reversed, we need to calculate the actual index
       const actualIndex = messages.length - 1 - index;
       const ownMessage = isOwnMessage(item);
-      const prevMessage = actualIndex > 0 ? messages[actualIndex - 1] : null;
+
       const showDateSeparator =
         actualIndex === 0 ||
         isNewDay(item.createdAt, messages[actualIndex - 1]?.createdAt);
+
       const showAvatar =
         !ownMessage &&
         (actualIndex === 0 ||
           getSenderId(messages[actualIndex - 1]) !== getSenderId(item));
+
       const showTime =
         actualIndex === messages.length - 1 ||
         getTimeDifferenceInMinutes(
@@ -224,13 +270,14 @@ export default function ChatScreen() {
     ],
   );
 
+  /** Extract a unique key for each message in the FlatList */
   const keyExtractor = useCallback((item: Message, index: number) => {
     if (item._id && !isTempId(item._id)) return item._id;
     if (item.tempId) return item.tempId;
     return `msg-${index}-${item.createdAt || Date.now()}`;
   }, []);
 
-  // Footer component shows loading indicator for older messages
+  /** Loading indicator shown while fetching older messages */
   const ListFooterComponent = useCallback(() => {
     if (!loadingMore) return null;
     return (
@@ -240,7 +287,7 @@ export default function ChatScreen() {
     );
   }, [loadingMore]);
 
-  // 🔴 Memoized empty component
+  /** Empty state shown when there are no messages */
   const ListEmptyComponent = useMemo(
     () => (
       <View style={styles.emptyView}>
@@ -254,6 +301,11 @@ export default function ChatScreen() {
     [],
   );
 
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+
+  /** Full-screen loading spinner while messages are being fetched */
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -330,15 +382,25 @@ export default function ChatScreen() {
   );
 }
 
+// -----------------------------------------------------------------------------
+// Styles
+// -----------------------------------------------------------------------------
+
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#fff" },
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#fff",
+  },
   centered: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#fff",
   },
-  kav: { flex: 1, backgroundColor: "#f8f9fa" },
+  kav: {
+    flex: 1,
+    backgroundColor: "#f8f9fa",
+  },
   listContent: {
     paddingHorizontal: 12,
     paddingTop: 8,

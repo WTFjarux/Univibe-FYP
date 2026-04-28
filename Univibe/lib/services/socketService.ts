@@ -1,29 +1,12 @@
-/**
- * services/socketService.ts
- * 
- * Manages real-time WebSocket connections for chat, typing indicators,
- * user presence, and WebRTC signaling.
- * 
- * Features:
- * - Automatic reconnection with retry logic
- * - Authentication via JWT token
- * - Room-based message isolation
- * - Real-time typing indicators
- * - User online/offline presence
- * - WhatsApp-level read receipts
- * - Message reactions
- * - WebRTC signaling for future calls
- */
+import io from "socket.io-client";
+import type { Socket } from "socket.io-client";
+import * as SecureStore from "expo-secure-store";
+import { Platform } from "react-native";
+import { API_BASE_URL } from "../../constants/ipConstants";
 
-import io from 'socket.io-client';
-import type { Socket } from 'socket.io-client';
-import * as SecureStore from 'expo-secure-store';
-import { Platform } from 'react-native';
-import { API_BASE_URL } from '../../constants/ipConstants';
-
-// ============================================
-// TYPE DEFINITIONS
-// ============================================
+// -----------------------------------------------------------------------------
+// Type Definitions
+// -----------------------------------------------------------------------------
 
 interface Message {
   _id?: string;
@@ -118,48 +101,61 @@ interface DeleteMessageData {
 
 type EventCallback = (data: any) => void;
 
-// ============================================
-// SOCKET URL CONFIGURATION
-// ============================================
+// -----------------------------------------------------------------------------
+// Socket URL Configuration
+// -----------------------------------------------------------------------------
 
+/** Resolves the socket server URL, handling Android emulator localhost */
 const getSocketUrl = (): string => {
-  let baseUrl = API_BASE_URL.replace(/\/api$/, '').replace(/\/$/, '');
+  let baseUrl = API_BASE_URL.replace(/\/api$/, "").replace(/\/$/, "");
 
-  if (Platform.OS === 'android' && baseUrl.includes('localhost')) {
-    baseUrl = baseUrl.replace('localhost', '10.0.2.2');
+  if (Platform.OS === "android" && baseUrl.includes("localhost")) {
+    baseUrl = baseUrl.replace("localhost", "10.0.2.2");
   }
 
-  console.log('🔌 Socket URL:', baseUrl);
   return baseUrl;
 };
 
 const SOCKET_URL = getSocketUrl();
 
-// ============================================
-// SOCKET SERVICE CLASS
-// ============================================
+// -----------------------------------------------------------------------------
+// SocketService Class
+// -----------------------------------------------------------------------------
 
+/**
+ * Singleton service that manages a Socket.IO connection.
+ *
+ * Responsibilities:
+ * - Establishes authenticated WebSocket connections
+ * - Manages room subscriptions (join/leave)
+ * - Routes server events to registered client listeners
+ * - Handles automatic reconnection with retry logic
+ * - Tracks pending rooms for rejoin after reconnect
+ */
 class SocketService {
   private socket: Socket | null = null;
   private isConnected: boolean = false;
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 5;
   private eventListeners: Map<string, EventCallback[]> = new Map();
-  private pendingRooms: Array<{ roomId: string; otherUserId: string | null; type: string }> = [];
+  private pendingRooms: Array<{
+    roomId: string;
+    otherUserId: string | null;
+    type: string;
+  }> = [];
   private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  constructor() {}
-
-  // ============================================
-  // CONNECTION MANAGEMENT
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Connection Management
+  // ---------------------------------------------------------------------------
 
   /**
-   * Establish socket connection with authentication
+   * Establishes a socket connection using the stored auth token.
+   * Retries if token is not yet available.
    */
   async connect(): Promise<Socket | null> {
     try {
-      const token = await SecureStore.getItemAsync('authToken');
+      const token = await SecureStore.getItemAsync("authToken");
 
       if (!token) {
         if (this.connectionRetryTimeout) {
@@ -180,11 +176,9 @@ class SocketService {
         this.socket = null;
       }
 
-      console.log('🔌 Connecting to Socket.IO at:', SOCKET_URL);
-
       this.socket = io(SOCKET_URL, {
         auth: { token },
-        transports: ['websocket'],
+        transports: ["websocket"],
         reconnection: true,
         reconnectionAttempts: this.maxReconnectAttempts,
         reconnectionDelay: 1000,
@@ -195,232 +189,198 @@ class SocketService {
       this.setupEventListeners();
       return this.socket;
     } catch (error) {
-      console.error('Socket connection error:', error);
       return null;
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Room Reconnection
+  // ---------------------------------------------------------------------------
+
   /**
-   * Set up all socket event listeners
+   * Rejoins all previously joined rooms after a reconnection.
+   * Clears the pending list to avoid duplicate joins.
+   */
+  rejoinRooms(): void {
+    if (this.pendingRooms.length === 0) return;
+
+    const roomsToJoin = [...this.pendingRooms];
+    this.pendingRooms = [];
+
+    roomsToJoin.forEach((room) => {
+      this.joinRoom(room.roomId, room.otherUserId, room.type);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Socket Event Forwarding
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Sets up all socket.io event listeners.
+   * Server events are forwarded to registered client listeners via emitEvent.
    */
   private setupEventListeners(): void {
     if (!this.socket) return;
 
-    // ============================================
-    // CONNECTION EVENTS
-    // ============================================
-
-    this.socket.on('connect', () => {
-      console.log('✅ Socket connected successfully! ID:', this.socket?.id);
+    // Connection events
+    this.socket.on("connect", () => {
       this.isConnected = true;
       this.reconnectAttempts = 0;
-      this.emitEvent('socket_connected', {});
-
-      if (this.pendingRooms.length > 0) {
-        console.log(`📦 Joining ${this.pendingRooms.length} pending rooms`);
-        this.pendingRooms.forEach(room => {
-          this.socket?.emit('join_room', {
-            roomId: room.roomId,
-            type: room.type,
-            otherUserId: room.otherUserId
-          });
-        });
-        this.pendingRooms = [];
-      }
+      this.emitEvent("socket_connected", {});
+      this.rejoinRooms();
     });
 
-    this.socket.on('disconnect', (reason: string) => {
-      console.log('❌ Socket disconnected. Reason:', reason);
+    this.socket.on("disconnect", (reason: string) => {
       this.isConnected = false;
-      this.emitEvent('socket_disconnected', { reason });
+      this.emitEvent("socket_disconnected", { reason });
 
-      if (reason === 'io server disconnect' || reason === 'transport close') {
-        console.log('🔄 Attempting to reconnect...');
+      if (reason === "io server disconnect" || reason === "transport close") {
         setTimeout(() => this.connect(), 1000);
       }
     });
 
-    this.socket.on('connect_error', (error: Error) => {
-      console.error('❌ Socket connection error:', error.message);
+    this.socket.on("connect_error", (error: Error) => {
       this.reconnectAttempts++;
-      console.log(`🔄 Reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
-      this.emitEvent('socket_error', error);
+      this.emitEvent("socket_error", error);
     });
 
-    this.socket.on('reconnect', (attemptNumber: number) => {
-      console.log('🔄 Socket reconnected after', attemptNumber, 'attempts');
+    this.socket.on("reconnect", (_attemptNumber: number) => {
       this.isConnected = true;
-      this.emitEvent('socket_reconnected', {});
+      this.emitEvent("socket_reconnected", {});
+      this.rejoinRooms();
     });
 
-    this.socket.on('reconnect_failed', () => {
-      console.error('❌ Socket reconnection failed after maximum attempts');
-      this.emitEvent('socket_reconnect_failed', {});
+    this.socket.on("reconnect_failed", () => {
+      this.emitEvent("socket_reconnect_failed", {});
     });
 
-    // ============================================
-    // CHAT EVENTS
-    // ============================================
-
-    this.socket.on('receive_message', (message: Message) => {
-      console.log('📨 Received message:', message.message?.substring(0, 50));
-      this.emitEvent('receive_message', message);
-      this.emitEvent('new_message', message);
+    // Chat events
+    this.socket.on("receive_message", (message: Message) => {
+      this.emitEvent("receive_message", message);
+      this.emitEvent("new_message", message);
     });
 
-    this.socket.on('message_delivered', (message: Message) => {
-      console.log('✅ Message delivered:', message._id);
-      this.emitEvent('message_delivered', message);
+    this.socket.on("message_delivered", (message: Message) => {
+      this.emitEvent("message_delivered", message);
     });
 
-    this.socket.on('room_joined', (data: RoomData) => {
-      console.log('🏠 Room joined:', data.roomId);
-      this.emitEvent('room_joined', data);
+    this.socket.on("room_joined", (data: RoomData) => {
+      this.emitEvent("room_joined", data);
     });
 
-    // ============================================
-    // 🔴 READ RECEIPT EVENTS (WHATSAPP-LEVEL)
-    // ============================================
-
-    this.socket.on('messages_read', (data: ReadReceiptData) => {
-      console.log(`📖 Messages read in room ${data.roomId} by ${data.userId}`);
-      this.emitEvent('messages_read', data);
+    // Read receipts
+    this.socket.on("messages_read", (data: ReadReceiptData) => {
+      this.emitEvent("messages_read", data);
     });
 
-    this.socket.on('message_read', (data: MessageReadData) => {
-      console.log(`📖 Message ${data.messageId} read by ${data.userId}`);
-      this.emitEvent('message_read', data);
+    this.socket.on("message_read", (data: MessageReadData) => {
+      this.emitEvent("message_read", data);
     });
 
-    this.socket.on('messages_marked_read', (data: { roomId: string; modifiedCount: number }) => {
-      console.log(`✅ Marked ${data.modifiedCount} messages as read in room ${data.roomId}`);
-      this.emitEvent('messages_marked_read', data);
+    this.socket.on(
+      "messages_marked_read",
+      (data: { roomId: string; modifiedCount: number }) => {
+        this.emitEvent("messages_marked_read", data);
+      },
+    );
+
+    this.socket.on(
+      "message_delivered_to_recipient",
+      (data: { messageId: string; recipientId: string }) => {
+        this.emitEvent("message_delivered_to_recipient", data);
+      },
+    );
+
+    // Message deletion
+    this.socket.on("message_deleted", (data: DeleteMessageData) => {
+      this.emitEvent("message_deleted", data);
     });
 
-    this.socket.on('message_delivered_to_recipient', (data: { messageId: string; recipientId: string }) => {
-      console.log(`✅ Message ${data.messageId} delivered to ${data.recipientId}`);
-      this.emitEvent('message_delivered_to_recipient', data);
+    // Reactions
+    this.socket.on("reaction_added", (data: ReactionData) => {
+      this.emitEvent("reaction_added", data);
     });
 
-    // ============================================
-    // 🔴 MESSAGE DELETION EVENTS
-    // ============================================
-
-    this.socket.on('message_deleted', (data: DeleteMessageData) => {
-      console.log(`🗑️ Message ${data.messageId} deleted in room ${data.roomId}`);
-      this.emitEvent('message_deleted', data);
+    this.socket.on("reaction_removed", (data: ReactionData) => {
+      this.emitEvent("reaction_removed", data);
     });
 
-    // ============================================
-    // 🔴 REACTION EVENTS
-    // ============================================
-
-    this.socket.on('reaction_added', (data: ReactionData) => {
-      console.log(`👍 Reaction added to ${data.messageId}: ${data.reaction}`);
-      this.emitEvent('reaction_added', data);
+    // Typing indicators
+    this.socket.on("typing", (data: TypingData) => {
+      this.emitEvent("typing", data);
+      this.emitEvent("user_typing", data);
     });
 
-    this.socket.on('reaction_removed', (data: ReactionData) => {
-      console.log(`👎 Reaction removed from ${data.messageId}`);
-      this.emitEvent('reaction_removed', data);
+    this.socket.on("stop_typing", (data: TypingData) => {
+      this.emitEvent("stop_typing", data);
+      this.emitEvent("user_stop_typing", data);
     });
 
-    // ============================================
-    // TYPING EVENTS
-    // ============================================
-
-    this.socket.on('typing', (data: TypingData) => {
-      this.emitEvent('typing', data);
-      this.emitEvent('user_typing', data);
+    // User presence
+    this.socket.on("user_online", (data: UserStatus) => {
+      this.emitEvent("user_online", data);
     });
 
-    this.socket.on('stop_typing', (data: TypingData) => {
-      this.emitEvent('stop_typing', data);
-      this.emitEvent('user_stop_typing', data);
+    this.socket.on("user_offline", (data: UserStatus) => {
+      this.emitEvent("user_offline", data);
     });
 
-    // ============================================
-    // USER PRESENCE EVENTS
-    // ============================================
+    this.socket.on(
+      "user_joined_room",
+      (data: { userId: string; roomId: string }) => {
+        this.emitEvent("user_joined_room", data);
+      },
+    );
 
-    this.socket.on('user_online', (data: UserStatus) => {
-      console.log('👤 User online:', data.userId);
-      this.emitEvent('user_online', data);
+    // WebRTC signaling
+    this.socket.on("call_user", (data: CallData) => {
+      this.emitEvent("incoming_call", data);
     });
 
-    this.socket.on('user_offline', (data: UserStatus) => {
-      console.log('👤 User offline:', data.userId);
-      this.emitEvent('user_offline', data);
+    this.socket.on("call_accepted", (data: CallData) => {
+      this.emitEvent("call_accepted", data);
     });
 
-    this.socket.on('user_joined_room', (data: { userId: string; roomId: string }) => {
-      console.log(`👤 User ${data.userId} joined room ${data.roomId}`);
-      this.emitEvent('user_joined_room', data);
+    this.socket.on("call_rejected", (data: CallData) => {
+      this.emitEvent("call_rejected", data);
     });
 
-    // ============================================
-    // WEBRTC SIGNALING EVENTS
-    // ============================================
-
-    this.socket.on('call_user', (data: CallData) => {
-      console.log('📞 Incoming call from:', data.fromUserId);
-      this.emitEvent('incoming_call', data);
+    this.socket.on("offer", (data: CallData) => {
+      this.emitEvent("call_offer", data);
     });
 
-    this.socket.on('call_accepted', (data: CallData) => {
-      console.log('✅ Call accepted from:', data.fromUserId);
-      this.emitEvent('call_accepted', data);
+    this.socket.on("answer", (data: CallData) => {
+      this.emitEvent("call_answer", data);
     });
 
-    this.socket.on('call_rejected', (data: CallData) => {
-      console.log('❌ Call rejected from:', data.fromUserId);
-      this.emitEvent('call_rejected', data);
+    this.socket.on("ice_candidate", (data: CallData) => {
+      this.emitEvent("ice_candidate", data);
     });
 
-    this.socket.on('offer', (data: CallData) => {
-      this.emitEvent('call_offer', data);
+    this.socket.on("end_call", (data: CallData) => {
+      this.emitEvent("call_ended", data);
     });
 
-    this.socket.on('answer', (data: CallData) => {
-      this.emitEvent('call_answer', data);
+    // Error handling
+    this.socket.on("error", (error: Error) => {
+      this.emitEvent("socket_error", error);
     });
 
-    this.socket.on('ice_candidate', (data: CallData) => {
-      this.emitEvent('ice_candidate', data);
-    });
-
-    this.socket.on('end_call', (data: CallData) => {
-      console.log('📞 Call ended with:', data.fromUserId);
-      this.emitEvent('call_ended', data);
-    });
-
-    // ============================================
-    // ERROR HANDLING
-    // ============================================
-
-    this.socket.on('error', (error: Error) => {
-      console.error('❌ Socket error:', error);
-      this.emitEvent('socket_error', error);
-    });
-
-this.socket.on('message_error', (error: any) => {
-  if (!error) {
-    console.error('❌ Message error: Unknown server error');
-    this.emitEvent('message_error', { message: 'Unknown server error' });
-    return;
-  }
-  console.error('❌ Message error:', error.message || error.error || 'Unknown error');
-  this.emitEvent('message_error', error);
+    this.socket.on("message_error", (error: any) => {
+      if (!error) {
+        this.emitEvent("message_error", { message: "Unknown server error" });
+        return;
+      }
+      this.emitEvent("message_error", error);
     });
   }
 
-  // ============================================
-  // EVENT MANAGEMENT
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Event Management (Client-Side Listeners)
+  // ---------------------------------------------------------------------------
 
-  /**
-   * Register event listener
-   */
+  /** Registers a listener for a custom event */
   on(event: string, callback: EventCallback): void {
     if (!this.eventListeners.has(event)) {
       this.eventListeners.set(event, []);
@@ -428,9 +388,7 @@ this.socket.on('message_error', (error: any) => {
     this.eventListeners.get(event)?.push(callback);
   }
 
-  /**
-   * Remove event listener
-   */
+  /** Removes a specific listener for a custom event */
   off(event: string, callback: EventCallback): void {
     const listeners = this.eventListeners.get(event);
     if (listeners) {
@@ -439,9 +397,7 @@ this.socket.on('message_error', (error: any) => {
     }
   }
 
-  /**
-   * Remove all listeners for an event or all events
-   */
+  /** Removes all listeners for an event, or all listeners entirely */
   removeAllListeners(event?: string): void {
     if (event) {
       this.eventListeners.delete(event);
@@ -450,53 +406,58 @@ this.socket.on('message_error', (error: any) => {
     }
   }
 
-  /**
-   * Emit event to all registered listeners
-   */
+  /** Calls all registered listeners for a given event */
   private emitEvent(event: string, data: any): void {
     const listeners = this.eventListeners.get(event);
     if (listeners) {
-      listeners.forEach(callback => {
+      listeners.forEach((callback) => {
         try {
           callback(data);
         } catch (error) {
-          console.error(`Error in event listener for ${event}:`, error);
+          // Prevent one failing listener from breaking others
         }
       });
     }
   }
 
-  // ============================================
-  // CHAT ACTIONS
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Chat Actions
+  // ---------------------------------------------------------------------------
 
   /**
-   * Join a chat room
+   * Joins a chat room so the server routes relevant events to this socket.
+   * If not connected, queues the room for joining when connection is established.
    */
-  joinRoom(roomId: string, otherUserId: string | null = null, type: string = 'direct'): void {
+  joinRoom(
+    roomId: string,
+    otherUserId: string | null = null,
+    type: string = "direct",
+  ): void {
     if (this.socket && this.isConnected) {
-      console.log(`🏠 Joining room: ${roomId}`);
-      this.socket.emit('join_room', { roomId, type, otherUserId });
+      this.socket.emit("join_room", { roomId, type, otherUserId });
+
+      const alreadyPending = this.pendingRooms.some((r) => r.roomId === roomId);
+      if (!alreadyPending) {
+        this.pendingRooms.push({ roomId, otherUserId, type });
+      }
     } else {
-      console.log(`⏳ Socket not connected, queueing room join: ${roomId}`);
-      this.pendingRooms.push({ roomId, otherUserId, type });
+      const alreadyPending = this.pendingRooms.some((r) => r.roomId === roomId);
+      if (!alreadyPending) {
+        this.pendingRooms.push({ roomId, otherUserId, type });
+      }
       this.connect();
     }
   }
 
-  /**
-   * Leave a chat room
-   */
+  /** Leaves a chat room and removes it from pending rejoin tracking */
   leaveRoom(roomId: string): void {
     if (this.socket && this.isConnected) {
-      console.log(`👋 Leaving room: ${roomId}`);
-      this.socket.emit('leave_room', { roomId });
+      this.socket.emit("leave_room", { roomId });
+      this.pendingRooms = this.pendingRooms.filter((r) => r.roomId !== roomId);
     }
   }
 
-  /**
-   * Send a message to a room
-   */
+  /** Sends a message to a room via the socket */
   sendMessage(
     roomId: string,
     message: string,
@@ -504,172 +465,150 @@ this.socket.on('message_error', (error: any) => {
     replyTo?: ReplyToData,
     tempId?: string,
     mediaUrl?: string,
-    duration?: number
+    duration?: number,
   ): void {
     if (this.socket && this.isConnected) {
-      console.log(`📤 Sending ${type} message to room ${roomId}`);
-      
       const data: any = { roomId, message, type, replyTo };
       if (tempId) data.tempId = tempId;
       if (mediaUrl) data.mediaUrl = mediaUrl;
       if (duration) data.duration = duration;
-      
+
       this.socket.emit("send_message", data);
     } else {
-      console.error("❌ Cannot send message - socket not connected");
-      this.emitEvent("message_error", { 
-        tempId, 
-        error: "Socket not connected" 
+      this.emitEvent("message_error", {
+        tempId,
+        error: "Socket not connected",
       });
       this.connect();
     }
   }
 
-  /**
-   * 🔴 Mark all messages in a room as read (WhatsApp-level)
-   */
+  /** Marks all messages in a room as read */
   markRoomAsRead(roomId: string): void {
     if (this.socket && this.isConnected) {
-      console.log(`📖 Marking room as read: ${roomId}`);
-      this.socket.emit('mark_read', { roomId });
+      this.socket.emit("mark_read", { roomId });
     } else {
-      console.error(`❌ Cannot mark room as read - socket not connected`);
       this.connect();
     }
   }
 
-  /**
-   * 🔴 Mark a single message as read
-   */
+  /** Marks a single message as read */
   markMessageAsRead(messageId: string): void {
     if (this.socket && this.isConnected) {
-      this.socket.emit('mark_message_read', { messageId });
+      this.socket.emit("mark_message_read", { messageId });
     }
   }
 
-  /**
-   * 🔴 Add reaction to a message
-   */
+  /** Adds a reaction to a message */
   addReaction(messageId: string, reaction: string): void {
     if (this.socket && this.isConnected) {
-      this.socket.emit('add_reaction', { messageId, reaction });
+      this.socket.emit("add_reaction", { messageId, reaction });
     }
   }
 
-  /**
-   * 🔴 Remove reaction from a message
-   */
+  /** Removes a reaction from a message */
   removeReaction(messageId: string): void {
     if (this.socket && this.isConnected) {
-      this.socket.emit('remove_reaction', { messageId });
+      this.socket.emit("remove_reaction", { messageId });
     }
   }
 
-  /**
-   * Delete a message
-   */
+  /** Emits a delete event for a message */
   deleteMessage(messageId: string, roomId: string): void {
     if (this.socket && this.isConnected) {
-      console.log(`🗑️ Deleting message: ${messageId}`);
-      this.socket.emit('delete_message', { messageId, roomId });
+      this.socket.emit("delete_message", { messageId, roomId });
     }
   }
 
-  /**
-   * Send typing indicator
-   */
+  /** Sends a typing indicator for a room */
   sendTyping(roomId: string): void {
     if (this.socket && this.isConnected) {
-      this.socket.emit('typing', { roomId });
+      this.socket.emit("typing", { roomId });
     }
   }
 
-  /**
-   * Stop typing indicator
-   */
+  /** Stops the typing indicator for a room */
   stopTyping(roomId: string): void {
     if (this.socket && this.isConnected) {
-      this.socket.emit('stop_typing', { roomId });
+      this.socket.emit("stop_typing", { roomId });
     }
   }
 
-  /**
-   * Request message history
-   */
-  getMessageHistory(roomId: string, limit: number = 50, before: string | null = null): void {
+  /** Requests message history from the server */
+  getMessageHistory(
+    roomId: string,
+    limit: number = 50,
+    before: string | null = null,
+  ): void {
     if (this.socket && this.isConnected) {
-      this.socket.emit('get_messages', { roomId, limit, before });
+      this.socket.emit("get_messages", { roomId, limit, before });
     }
   }
 
-  // ============================================
-  // WEBRTC SIGNALING
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // WebRTC Signaling
+  // ---------------------------------------------------------------------------
 
-  callUser(targetUserId: string, callType: string = 'video', offer: any = null): void {
+  callUser(
+    targetUserId: string,
+    callType: string = "video",
+    offer: any = null,
+  ): void {
     if (this.socket && this.isConnected) {
-      console.log(`📞 Calling user: ${targetUserId}`);
-      this.socket.emit('call_user', { targetUserId, callType, offer });
+      this.socket.emit("call_user", { targetUserId, callType, offer });
     }
   }
 
   acceptCall(targetUserId: string): void {
     if (this.socket && this.isConnected) {
-      this.socket.emit('call_accepted', { targetUserId });
+      this.socket.emit("call_accepted", { targetUserId });
     }
   }
 
   rejectCall(targetUserId: string): void {
     if (this.socket && this.isConnected) {
-      this.socket.emit('call_rejected', { targetUserId });
+      this.socket.emit("call_rejected", { targetUserId });
     }
   }
 
   sendOffer(targetUserId: string, offer: any): void {
     if (this.socket && this.isConnected) {
-      this.socket.emit('offer', { targetUserId, offer });
+      this.socket.emit("offer", { targetUserId, offer });
     }
   }
 
   sendAnswer(targetUserId: string, answer: any): void {
     if (this.socket && this.isConnected) {
-      this.socket.emit('answer', { targetUserId, answer });
+      this.socket.emit("answer", { targetUserId, answer });
     }
   }
 
   sendICECandidate(targetUserId: string, candidate: any): void {
     if (this.socket && this.isConnected) {
-      this.socket.emit('ice_candidate', { targetUserId, candidate });
+      this.socket.emit("ice_candidate", { targetUserId, candidate });
     }
   }
 
   endCall(targetUserId: string): void {
     if (this.socket && this.isConnected) {
-      console.log(`📞 Ending call with: ${targetUserId}`);
-      this.socket.emit('end_call', { targetUserId });
+      this.socket.emit("end_call", { targetUserId });
     }
   }
 
-  // ============================================
-  // UTILITY METHODS
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Utility Methods
+  // ---------------------------------------------------------------------------
 
-  /**
-   * Emit a custom event to the server
-   */
+  /** Emits a custom event to the server */
   emit(event: string, data: any): void {
     if (this.socket && this.isConnected) {
-      console.log(`📡 Emitting event: ${event}`);
       this.socket.emit(event, data);
     } else {
-      console.error(`❌ Cannot emit ${event} - socket not connected`);
-      this.emitEvent('socket_error', { message: 'Socket not connected' });
+      this.emitEvent("socket_error", { message: "Socket not connected" });
     }
   }
 
-  /**
-   * Disconnect the socket
-   */
+  /** Disconnects the socket and clears all state */
   disconnect(): void {
     if (this.connectionRetryTimeout) {
       clearTimeout(this.connectionRetryTimeout);
@@ -677,7 +616,6 @@ this.socket.on('message_error', (error: any) => {
     }
 
     if (this.socket) {
-      console.log('🔌 Disconnecting socket...');
       this.socket.disconnect();
       this.socket = null;
       this.isConnected = false;
@@ -685,29 +623,26 @@ this.socket.on('message_error', (error: any) => {
     }
   }
 
-  /**
-   * Manually reconnect
-   */
+  /** Forces a full disconnect and reconnect cycle */
   reconnect(): void {
-    console.log('🔄 Manual reconnect requested');
     this.disconnect();
     this.connect();
   }
 
-  /**
-   * Get connection status
-   */
+  /** Returns whether the socket is currently connected */
   getConnectionStatus(): boolean {
     return this.isConnected;
   }
 
-  /**
-   * Get socket ID
-   */
+  /** Returns the socket ID if connected */
   getSocketId(): string | null {
     return this.socket?.id || null;
   }
 }
+
+// -----------------------------------------------------------------------------
+// Singleton Export
+// -----------------------------------------------------------------------------
 
 export default new SocketService();
 export { SocketService };

@@ -20,10 +20,21 @@ import type {
   AttachmentData,
 } from "../../lib/types/chat.types";
 
+// -----------------------------------------------------------------------------
+// Hook
+// -----------------------------------------------------------------------------
+
+/**
+ * Central hook for the ChatScreen.
+ * Orchestrates messages, socket events, read receipts, audio recording,
+ * message sending, reactions, and scroll management.
+ */
 export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   const params = useLocalSearchParams();
   const { token, user } = useAuth();
   const isMountedRef = useRef(true);
+
+  // ─── Route params ────────────────────────────────────────────────────────
 
   const roomId = params.roomId as string;
   const otherUserName = params.otherUserName as string;
@@ -32,7 +43,8 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     (params.otherUserId as string) ||
     (roomId && user?.id ? extractOtherUserIdFromRoomId(roomId, user.id) : "");
 
-  // Connection state
+  // ─── UI state ────────────────────────────────────────────────────────────
+
   const [socketConnected, setSocketConnected] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -41,7 +53,8 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     null,
   );
 
-  // Messages (now with pagination + caching)
+  // ─── Messages (with pagination + caching) ────────────────────────────────
+
   const {
     messages,
     setMessages,
@@ -68,7 +81,8 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     userName: user?.name,
   });
 
-  // Read receipts - marks messages as read when viewing
+  // ─── Read receipts (marks messages as read when viewing) ─────────────────
+
   useChatReadReceipts({
     token,
     roomId,
@@ -76,7 +90,8 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     messages,
   });
 
-  // Scroll management
+  // ─── Scroll management ───────────────────────────────────────────────────
+
   const {
     highlightedMessageId,
     registerMessageRef,
@@ -85,20 +100,26 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   } = useMessageScroll(flatListRef);
 
   const {
-    scrollToMessage: scrollToMessageIndex,
     initialScrollToBottom,
     handleContentSizeChange,
     handleLayout,
     handleScroll,
     enableAutoScroll,
     cleanup: cleanupScroll,
-    isAutoScrollEnabledRef,
   } = useChatScroll(flatListRef);
 
-  // Message actions
+  // ─── Message sending setup ───────────────────────────────────────────────
+
   const emitEvent = useCallback((event: string, data: any) => {
     socketService.emit(event, data);
   }, []);
+
+  const scrollToEnd = useCallback(() => {
+    enableAutoScroll();
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    });
+  }, [enableAutoScroll, flatListRef]);
 
   const { sendTextMessage, sendAudioMessage, sendAttachments, sendLocation } =
     useMessageSender({
@@ -112,16 +133,13 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
       removeOptimisticMessage,
       confirmOptimisticMessage,
       setPendingTimeout,
-      scrollToEnd: useCallback(() => {
-        enableAutoScroll();
-        requestAnimationFrame(() => {
-          flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
-        });
-      }, [enableAutoScroll, flatListRef]),
+      scrollToEnd,
       emitEvent,
     });
 
-  // Audio recorder
+  // ─── Audio recorder ──────────────────────────────────────────────────────
+
+  /** Called when an audio recording is complete and ready to send */
   const handleAudioReady = useCallback(
     async (uri: string, duration: number) => {
       await sendAudioMessage(
@@ -137,161 +155,177 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
 
   const audioRecorder = useAudioRecorder(handleAudioReady);
 
-  // Socket with read receipt handling
+  // ---------------------------------------------------------------------------
+  // Socket Event Handlers
+  // ---------------------------------------------------------------------------
+
+  // Store frequently changing values in refs to prevent stale closures
+  const userRef = useRef(user);
+  userRef.current = user;
+
+  const setMessagesRef = useRef(setMessages);
+  setMessagesRef.current = setMessages;
+
+  const removeOptimisticMessageRef = useRef(removeOptimisticMessage);
+  removeOptimisticMessageRef.current = removeOptimisticMessage;
+
+  const confirmOptimisticMessageRef = useRef(confirmOptimisticMessage);
+  confirmOptimisticMessageRef.current = confirmOptimisticMessage;
+
+  const addMessageRef = useRef(addMessage);
+  addMessageRef.current = addMessage;
+
+  /**
+   * Handles message delivery confirmations and read receipts from the socket.
+   * Updates message statuses (sent → delivered → read) based on server events.
+   */
+  const onMessageDeliveredRef = useRef<(data: any) => void>(undefined);
+
+  onMessageDeliveredRef.current = (data: any) => {
+    const { tempId, messageId, message: messageData, success, type } = data;
+
+    // Bulk read receipt — other user read all messages in the room
+    if (type === "messages_read") {
+      setMessagesRef.current((prev: Message[]) => {
+        const updated = prev.map((msg) => {
+          const senderId =
+            typeof msg.sender === "string" ? msg.sender : msg.sender?._id;
+
+          if (senderId === userRef.current?.id && msg.status !== "read") {
+            const existingReadBy = msg.readBy || [];
+            const alreadyRead = existingReadBy.some((r: any) => {
+              const readUserId = typeof r === "string" ? r : r.user || r.userId;
+              return readUserId?.toString() === data.userId?.toString();
+            });
+
+            if (!alreadyRead) {
+              return {
+                ...msg,
+                status: "read" as const,
+                readBy: [
+                  ...existingReadBy,
+                  {
+                    user: data.userId,
+                    readAt: data.readAt || new Date().toISOString(),
+                  },
+                ],
+              };
+            }
+          }
+          return msg;
+        });
+
+        return updated;
+      });
+      return;
+    }
+
+    // Single message read receipt
+    if (type === "message_read") {
+      setMessagesRef.current((prev: Message[]) =>
+        prev.map((msg) => {
+          if (msg._id === data.messageId && msg.status !== "read") {
+            const existingReadBy = msg.readBy || [];
+            const alreadyRead = existingReadBy.some((r: any) => {
+              const readUserId = typeof r === "string" ? r : r.user || r.userId;
+              return readUserId?.toString() === data.userId?.toString();
+            });
+
+            if (!alreadyRead) {
+              return {
+                ...msg,
+                status: "read" as const,
+                readBy: [
+                  ...existingReadBy,
+                  {
+                    user: data.userId,
+                    readAt: data.readAt || new Date().toISOString(),
+                  },
+                ],
+              };
+            }
+          }
+          return msg;
+        }),
+      );
+      return;
+    }
+
+    // Delivery confirmation — message reached the recipient's device
+    if (type === "message_delivered_to_recipient") {
+      setMessagesRef.current((prev: Message[]) =>
+        prev.map((msg) => {
+          if (msg._id === data.messageId && msg.status === "sent") {
+            const existingDelivered = msg.deliveredTo || [];
+            const alreadyDelivered = existingDelivered.some((r: any) => {
+              const dUserId = typeof r === "string" ? r : r.user || r.userId;
+              return dUserId?.toString() === data.recipientId?.toString();
+            });
+
+            if (!alreadyDelivered) {
+              return {
+                ...msg,
+                status: "delivered" as const,
+                deliveredTo: [
+                  ...existingDelivered,
+                  {
+                    user: data.recipientId,
+                    deliveredAt: new Date().toISOString(),
+                  },
+                ],
+              };
+            }
+          }
+          return msg;
+        }),
+      );
+      return;
+    }
+
+    // Optimistic message confirmation
+    if (success === false) {
+      if (tempId) removeOptimisticMessageRef.current(tempId);
+      return;
+    }
+    if (tempId) {
+      confirmOptimisticMessageRef.current(tempId, messageId, messageData);
+    }
+  };
+
+  /** Handles incoming real-time messages from the socket */
+  const onReceiveMessageRef = useRef<(message: Message) => void>(undefined);
+
+  onReceiveMessageRef.current = (message: Message) => {
+    addMessageRef.current(message);
+  };
+
+  // Stable wrapper objects so socket listeners are never re-registered
+  const stableCallbacks = useRef({
+    onMessageDelivered: (data: any) => {
+      onMessageDeliveredRef.current?.(data);
+    },
+    onReceiveMessage: (message: Message) => {
+      onReceiveMessageRef.current?.(message);
+    },
+    onUserOnline: () => setIsOnline(true),
+    onUserOffline: () => setIsOnline(false),
+  }).current;
+
   useChatSocket({
     roomId,
     otherUserId,
     isMountedRef,
-    onMessageDelivered: useCallback(
-      (data: any) => {
-        const { tempId, messageId, message: messageData, success, type } = data;
-
-        // ── Handle Read Receipts ──────────────────────────
-
-        // Bulk read - other user read all messages in room
-        if (type === "messages_read") {
-          console.log(
-            `📖 Updating all messages to read for user ${data.userId}`,
-          );
-
-          setMessages((prev) => {
-            const updated = prev.map((msg) => {
-              // Only update messages sent by current user
-              const senderId =
-                typeof msg.sender === "string" ? msg.sender : msg.sender?._id;
-
-              if (senderId === user?.id && msg.status !== "read") {
-                const existingReadBy = msg.readBy || [];
-                const alreadyRead = existingReadBy.some((r: any) => {
-                  const readUserId =
-                    typeof r === "string" ? r : r.user || r.userId;
-                  return readUserId?.toString() === data.userId?.toString();
-                });
-
-                if (!alreadyRead) {
-                  console.log(`  📖 Marking message ${msg._id} as read`);
-                  return {
-                    ...msg,
-                    status: "read" as const,
-                    readBy: [
-                      ...existingReadBy,
-                      {
-                        user: data.userId,
-                        readAt: data.readAt || new Date().toISOString(),
-                      },
-                    ],
-                  };
-                }
-              }
-              return msg;
-            });
-
-            // Log the update
-            const readCount = updated.filter((m) => m.status === "read").length;
-            console.log(`  ✅ ${readCount} messages now marked as read`);
-
-            return updated;
-          });
-          return;
-        }
-
-        // Single message read
-        if (type === "message_read") {
-          console.log(`📖 Updating single message ${data.messageId} to read`);
-
-          setMessages((prev) =>
-            prev.map((msg) => {
-              if (msg._id === data.messageId && msg.status !== "read") {
-                const existingReadBy = msg.readBy || [];
-                const alreadyRead = existingReadBy.some((r: any) => {
-                  const readUserId =
-                    typeof r === "string" ? r : r.user || r.userId;
-                  return readUserId?.toString() === data.userId?.toString();
-                });
-
-                if (!alreadyRead) {
-                  console.log(`  ✅ Message ${msg._id} marked as read`);
-                  return {
-                    ...msg,
-                    status: "read" as const,
-                    readBy: [
-                      ...existingReadBy,
-                      {
-                        user: data.userId,
-                        readAt: data.readAt || new Date().toISOString(),
-                      },
-                    ],
-                  };
-                }
-              }
-              return msg;
-            }),
-          );
-          return;
-        }
-
-        // Message delivered to recipient
-        if (type === "message_delivered_to_recipient") {
-          console.log(`📬 Updating message ${data.messageId} to delivered`);
-
-          setMessages((prev) =>
-            prev.map((msg) => {
-              if (msg._id === data.messageId && msg.status === "sent") {
-                const existingDelivered = msg.deliveredTo || [];
-                const alreadyDelivered = existingDelivered.some((r: any) => {
-                  const dUserId =
-                    typeof r === "string" ? r : r.user || r.userId;
-                  return dUserId?.toString() === data.recipientId?.toString();
-                });
-
-                if (!alreadyDelivered) {
-                  console.log(`  ✅ Message ${msg._id} marked as delivered`);
-                  return {
-                    ...msg,
-                    status: "delivered" as const,
-                    deliveredTo: [
-                      ...existingDelivered,
-                      {
-                        user: data.recipientId,
-                        deliveredAt: new Date().toISOString(),
-                      },
-                    ],
-                  };
-                }
-              }
-              return msg;
-            }),
-          );
-          return;
-        }
-
-        // ── Original Message Delivery Logic ───────────────
-        if (success === false) {
-          if (tempId) removeOptimisticMessage(tempId);
-          return;
-        }
-        if (tempId) {
-          confirmOptimisticMessage(tempId, messageId, messageData);
-        }
-      },
-      [
-        removeOptimisticMessage,
-        confirmOptimisticMessage,
-        setMessages,
-        user?.id,
-      ],
-    ),
-    onReceiveMessage: useCallback(
-      (message: Message) => {
-        addMessage(message);
-      },
-      [addMessage],
-    ),
-    onUserOnline: useCallback(() => setIsOnline(true), []),
-    onUserOffline: useCallback(() => setIsOnline(false), []),
+    onMessageDelivered: stableCallbacks.onMessageDelivered,
+    onReceiveMessage: stableCallbacks.onReceiveMessage,
+    onUserOnline: stableCallbacks.onUserOnline,
+    onUserOffline: stableCallbacks.onUserOffline,
   });
 
-  // Send handlers
+  // ---------------------------------------------------------------------------
+  // Send Handlers
+  // ---------------------------------------------------------------------------
+
+  /** Sends a text message and clears the reply state */
   const handleSendMessage = useCallback(
     (text: string) => {
       sendTextMessage(text, replyToMessage, () => setReplyToMessage(null));
@@ -299,6 +333,7 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     [sendTextMessage, replyToMessage],
   );
 
+  /** Uploads and sends selected attachments */
   const handleAttachmentsSelected = useCallback(
     async (attachments: AttachmentData[]) => {
       setAttachmentUploading(true);
@@ -307,6 +342,7 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     [sendAttachments],
   );
 
+  /** Sends a shared location message */
   const handleLocationShared = useCallback(
     (location: AttachmentData) => {
       sendLocation(location);
@@ -314,7 +350,11 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     [sendLocation],
   );
 
-  // Reply
+  // ---------------------------------------------------------------------------
+  // Reply Handling
+  // ---------------------------------------------------------------------------
+
+  /** Sets a message as the reply target for the input bar */
   const handleReply = useCallback((message: Message) => {
     setReplyToMessage({
       _id: message._id,
@@ -330,30 +370,41 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     });
   }, []);
 
+  /** Cancels the current reply and clears highlights */
   const cancelReply = useCallback(() => {
     setReplyToMessage(null);
     clearHighlight();
   }, [clearHighlight]);
 
-  // Scroll to message (for reply navigation)
+  // ---------------------------------------------------------------------------
+  // Scroll to Message
+  // ---------------------------------------------------------------------------
+
+  /** Scrolls to a specific message (used for reply navigation) */
   const handleScrollToMessage = useCallback(
     (messageId: string) => {
-      // Find message index in the messages array
       const messageIndex = messages.findIndex((m) => m._id === messageId);
       if (messageIndex !== -1 && flatListRef.current) {
-        // In inverted FlatList, we need to calculate the reversed index
-        const reversedIndex = messages.length - 1 - messageIndex;
         scrollToMessage(messageId);
       }
     },
     [messages, scrollToMessage],
   );
 
+  // ---------------------------------------------------------------------------
   // Reactions
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Toggles a reaction on a message.
+   * Applies optimistic update first, then syncs with the server.
+   * Falls back to full reload on failure.
+   */
   const handleReaction = useCallback(
     async (messageId: string, reaction: string, shouldRemove?: boolean) => {
       if (!token) return;
 
+      // Optimistic update
       setMessages((prev) =>
         prev.map((msg) => {
           if (msg._id !== messageId) return msg;
@@ -390,6 +441,7 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
         }),
       );
 
+      // Server sync
       try {
         const data = await chatApi.toggleReaction(
           messageId,
@@ -408,7 +460,11 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     [token, user?.id, setMessages, updateMessageReactions, loadMessages],
   );
 
-  // Delete
+  // ---------------------------------------------------------------------------
+  // Delete Message
+  // ---------------------------------------------------------------------------
+
+  /** Deletes a message locally and emits a socket event for the other user */
   const handleDelete = useCallback(
     async (messageId: string) => {
       if (!token) return;
@@ -420,13 +476,17 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
           socketService.emit("delete_message", { messageId, roomId });
         }
       } catch {
-        // Silent
+        // Silently fail — user can retry
       }
     },
     [token, roomId, deleteMessage],
   );
 
-  // Audio played
+  // ---------------------------------------------------------------------------
+  // Audio Played
+  // ---------------------------------------------------------------------------
+
+  /** Marks an audio message as played on the server */
   const markAudioAsPlayed = useCallback(
     async (messageId: string) => {
       if (!token) return;
@@ -435,15 +495,33 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     [token],
   );
 
-  // Connection status check
+  // ---------------------------------------------------------------------------
+  // Connection Status (Event-Driven)
+  // ---------------------------------------------------------------------------
+
+  /** Monitors socket connection status in real-time via events */
   useEffect(() => {
-    const check = () => setSocketConnected(socketService.getConnectionStatus());
-    check();
-    const interval = setInterval(check, 5000);
-    return () => clearInterval(interval);
+    setSocketConnected(socketService.getConnectionStatus());
+
+    const handleConnected = () => setSocketConnected(true);
+    const handleDisconnected = () => setSocketConnected(false);
+
+    socketService.on("socket_connected", handleConnected);
+    socketService.on("socket_reconnected", handleConnected);
+    socketService.on("socket_disconnected", handleDisconnected);
+
+    return () => {
+      socketService.off("socket_connected", handleConnected);
+      socketService.off("socket_reconnected", handleConnected);
+      socketService.off("socket_disconnected", handleDisconnected);
+    };
   }, []);
 
-  // Cleanup on unmount
+  // ---------------------------------------------------------------------------
+  // Cleanup
+  // ---------------------------------------------------------------------------
+
+  /** Cleanup on unmount: stop audio and mark component as unmounted */
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
@@ -451,13 +529,16 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     };
   }, []);
 
-  // Audio cleanup function
+  /** Stops all playing audio */
   const audioCleanup = useCallback(() => {
     AudioManager.stopAllSounds();
   }, []);
 
+  // ---------------------------------------------------------------------------
+  // Return
+  // ---------------------------------------------------------------------------
+
   return {
-    // Data
     messages,
     loading,
     refreshing,
@@ -475,7 +556,6 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     token,
     roomId,
 
-    // Actions
     loadMessages,
     loadOlderMessages,
     onRefresh,
@@ -490,21 +570,18 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     handleScrollToMessage,
     registerMessageRef,
 
-    // Audio
     isRecording: audioRecorder.isRecording,
     recordingDuration: audioRecorder.recordingDuration,
     startRecording: audioRecorder.startRecording,
     stopRecording: audioRecorder.stopRecording,
     cancelRecording: audioRecorder.cancelRecording,
 
-    // Scroll
     initialScrollToBottom,
     handleContentSizeChange,
     handleLayout,
     handleScroll,
     enableAutoScroll,
 
-    // Cleanup
     clearAllPending,
     clearCache,
     clearHighlight,

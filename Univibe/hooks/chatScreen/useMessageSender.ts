@@ -12,7 +12,16 @@ import type {
   AttachmentData,
 } from "../../lib/types/chat.types";
 
+// -----------------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------------
+
+/** Maximum time to wait for server confirmation before showing failure */
 const SEND_TIMEOUT_MS = 10000;
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
 
 interface UseMessageSenderProps {
   token: string | null;
@@ -39,13 +48,22 @@ interface UseMessageSenderProps {
   emitEvent: (event: string, data: any) => void;
 }
 
+// -----------------------------------------------------------------------------
+// Hook
+// -----------------------------------------------------------------------------
+
+/**
+ * Manages sending messages of all types: text, audio, attachments, and location.
+ *
+ * Each send operation follows the same pattern:
+ * 1. Create an optimistic message (shown immediately in the UI)
+ * 2. Send via socket or upload API
+ * 3. Confirm and update on success, or remove on failure
+ */
 export const useMessageSender = ({
   token,
   roomId,
-  userId,
-  userName,
   socketConnected,
-  setMessages,
   addOptimisticMessage,
   removeOptimisticMessage,
   confirmOptimisticMessage,
@@ -53,6 +71,10 @@ export const useMessageSender = ({
   scrollToEnd,
   emitEvent,
 }: UseMessageSenderProps) => {
+  /**
+   * Builds a ReplyToData object from the current reply state.
+   * Returns undefined if no message is being replied to.
+   */
   const buildReplyData = useCallback(
     (replyTo: ReplyToState | null): ReplyToData | undefined => {
       if (!replyTo) return undefined;
@@ -69,10 +91,30 @@ export const useMessageSender = ({
     [],
   );
 
-  // ============================================
-  // SEND TEXT
-  // ============================================
+  /**
+   * Sets a failure timeout for an optimistic message.
+   * If the server doesn't confirm within SEND_TIMEOUT_MS, the message is
+   * removed and an error is shown.
+   */
+  const scheduleTimeout = useCallback(
+    (tempId: string) => {
+      const timeout = setTimeout(() => {
+        removeOptimisticMessage(tempId);
+        Alert.alert("Error", "Message failed to send. Please try again.");
+      }, SEND_TIMEOUT_MS);
+      setPendingTimeout(tempId, timeout);
+    },
+    [removeOptimisticMessage, setPendingTimeout],
+  );
 
+  // ---------------------------------------------------------------------------
+  // Send Text Message
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Sends a text message optimistically via the socket.
+   * The message appears immediately and is confirmed when the server responds.
+   */
   const sendTextMessage = useCallback(
     (text: string, replyTo: ReplyToState | null, onSent: () => void) => {
       if (!text.trim() || !socketConnected) {
@@ -84,7 +126,6 @@ export const useMessageSender = ({
       const tempId = generateTempId();
       const replyToData = buildReplyData(replyTo);
 
-      // ✅ Add optimistic message to both state and cache
       addOptimisticMessage(tempId, {
         message: text,
         type: "text",
@@ -103,30 +144,28 @@ export const useMessageSender = ({
         tempId,
       });
 
-      const timeout = setTimeout(() => {
-        removeOptimisticMessage(tempId);
-        Alert.alert("Error", "Message failed to send. Please try again.");
-      }, SEND_TIMEOUT_MS);
-      setPendingTimeout(tempId, timeout);
+      scheduleTimeout(tempId);
     },
     [
       socketConnected,
-      userId,
-      userName,
       roomId,
       buildReplyData,
       addOptimisticMessage,
-      removeOptimisticMessage,
       scrollToEnd,
       emitEvent,
-      setPendingTimeout,
+      scheduleTimeout,
     ],
   );
 
-  // ============================================
-  // SEND AUDIO
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Send Audio Message
+  // ---------------------------------------------------------------------------
 
+  /**
+   * Uploads and sends an audio message.
+   * The audio file is uploaded via FormData, and the message is confirmed
+   * once the server returns the permanent message ID.
+   */
   const sendAudioMessage = useCallback(
     async (
       uri: string,
@@ -140,7 +179,6 @@ export const useMessageSender = ({
       const tempId = generateTempId();
       const replyToData = buildReplyData(replyTo);
 
-      // ✅ Add optimistic message with local URI as fallback
       addOptimisticMessage(tempId, {
         message: "🎤 Voice message",
         type: "audio",
@@ -208,10 +246,15 @@ export const useMessageSender = ({
     ],
   );
 
-  // ============================================
-  // SEND ATTACHMENTS
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Send Attachments
+  // ---------------------------------------------------------------------------
 
+  /**
+   * Uploads and sends one or more attachments (images, videos, files).
+   * Multiple images are grouped together with a shared groupId for UI layout.
+   * Each attachment gets its own optimistic message and server confirmation.
+   */
   const sendAttachments = useCallback(
     async (
       attachments: AttachmentData[],
@@ -229,7 +272,6 @@ export const useMessageSender = ({
             ? `group_${Date.now()}`
             : undefined;
 
-        // Add optimistic messages for each attachment
         const tempIds: string[] = [];
 
         attachments.forEach((attachment, index) => {
@@ -256,7 +298,6 @@ export const useMessageSender = ({
           });
         });
 
-        // Upload to server
         const formData = new FormData();
         attachments.forEach((attachment, index) => {
           formData.append("attachments", {
@@ -270,7 +311,6 @@ export const useMessageSender = ({
         const data = await chatApi.uploadAttachments(formData);
 
         if (data.success && data.data) {
-          // Confirm each optimistic message with server data
           data.data.forEach((serverMsg: any, index: number) => {
             const tempId = tempIds[index];
             if (tempId && serverMsg._id) {
@@ -294,20 +334,22 @@ export const useMessageSender = ({
       removeOptimisticMessage,
       confirmOptimisticMessage,
       scrollToEnd,
-      emitEvent,
     ],
   );
 
-  // ============================================
-  // SEND LOCATION
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Send Location
+  // ---------------------------------------------------------------------------
 
+  /**
+   * Sends a shared location message optimistically via the socket.
+   * Includes latitude, longitude, and an optional location name.
+   */
   const sendLocation = useCallback(
     (location: AttachmentData) => {
       const tempId = generateTempId();
       const messageText = `📍 ${location.locationName || "Location"}`;
 
-      // ✅ Add optimistic message
       addOptimisticMessage(tempId, {
         message: messageText,
         type: "location",
@@ -326,23 +368,9 @@ export const useMessageSender = ({
         tempId,
       });
 
-      const timeout = setTimeout(() => {
-        removeOptimisticMessage(tempId);
-        Alert.alert(
-          "Error",
-          "Location message failed to send. Please try again.",
-        );
-      }, SEND_TIMEOUT_MS);
-      setPendingTimeout(tempId, timeout);
+      scheduleTimeout(tempId);
     },
-    [
-      roomId,
-      addOptimisticMessage,
-      removeOptimisticMessage,
-      scrollToEnd,
-      emitEvent,
-      setPendingTimeout,
-    ],
+    [roomId, addOptimisticMessage, scrollToEnd, emitEvent, scheduleTimeout],
   );
 
   return { sendTextMessage, sendAudioMessage, sendAttachments, sendLocation };

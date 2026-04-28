@@ -5,9 +5,9 @@ import chatApi from "../../lib/services/chatApi";
 import { isTempId } from "../../lib/utils/messageIdGenerator";
 import type { Message } from "../../lib/types/chat.types";
 
-// ============================================
-// PERSISTENT MESSAGE CACHE
-// ============================================
+// -----------------------------------------------------------------------------
+// Persistent Message Cache
+// -----------------------------------------------------------------------------
 
 interface CacheEntry {
   messages: Message[];
@@ -15,14 +15,21 @@ interface CacheEntry {
   timestamp: number;
 }
 
+/** In-memory cache shared across all room instances */
 const messageCache = new Map<string, CacheEntry>();
-const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+/** Cache expiration time in milliseconds */
+const CACHE_TTL = 10 * 60 * 1000;
+
+/** Number of messages to fetch on initial load */
 const INITIAL_LIMIT = 30;
+
+/** Number of messages to fetch when paginating */
 const PAGINATION_LIMIT = 30;
 
-// ============================================
-// HOOK
-// ============================================
+// -----------------------------------------------------------------------------
+// Hook
+// -----------------------------------------------------------------------------
 
 interface UseChatMessagesProps {
   token: string | null;
@@ -31,25 +38,36 @@ interface UseChatMessagesProps {
   userName?: string;
 }
 
+/**
+ * Core hook for managing chat messages with caching, pagination,
+ * optimistic updates, and deduplication.
+ *
+ * Messages are stored in chronological order (oldest first).
+ */
 export const useChatMessages = ({
   token,
   roomId,
   userId,
   userName,
 }: UseChatMessagesProps) => {
-  // Messages are stored in chronological order (oldest first)
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
 
+  /** Tracks send timeout handlers for optimistic messages */
   const pendingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
   );
+
+  /** Tracks already processed message IDs to prevent duplicates */
   const processedIdsRef = useRef<Set<string>>(new Set());
+
+  /** Prevents state updates after unmount */
   const isMountedRef = useRef(true);
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
@@ -58,14 +76,16 @@ export const useChatMessages = ({
     };
   }, []);
 
-  // ============================================
-  // CACHE HELPERS
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Cache Helpers
+  // ---------------------------------------------------------------------------
 
+  /** Retrieve cached messages for the current room */
   const getCache = useCallback((): CacheEntry | undefined => {
     return messageCache.get(roomId);
   }, [roomId]);
 
+  /** Update the cache with validated messages and current timestamp */
   const updateCache = useCallback(
     (msgs: Message[], hasMoreFlag: boolean) => {
       const validMessages = msgs.filter((msg) => {
@@ -81,14 +101,11 @@ export const useChatMessages = ({
         hasMore: hasMoreFlag,
         timestamp: Date.now(),
       });
-
-      console.log(
-        `💾 Cache updated: ${validMessages.length} messages for room ${roomId}`,
-      );
     },
     [roomId],
   );
 
+  /** Retrieve only optimistic (pending/sending) messages from cache */
   const getOptimisticFromCache = useCallback((): Message[] => {
     const cached = getCache();
     if (!cached) return [];
@@ -97,10 +114,14 @@ export const useChatMessages = ({
     );
   }, [getCache]);
 
-  // ============================================
-  // MESSAGE VALIDATION & DEDUP
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Message Deduplication
+  // ---------------------------------------------------------------------------
 
+  /**
+   * Removes duplicate messages from an array based on message ID.
+   * Iterates in reverse to keep the most recent occurrences.
+   */
   const deduplicateMessages = useCallback((msgs: Message[]): Message[] => {
     const seen = new Set<string>();
     const result: Message[] = [];
@@ -120,18 +141,21 @@ export const useChatMessages = ({
       if (!seen.has(key)) {
         seen.add(key);
         result.unshift(msg);
-      } else {
-        console.log(`🔄 Removing duplicate: ${key}`);
       }
     }
 
     return result;
   }, []);
 
-  // ============================================
-  // LOAD MESSAGES
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Load Messages (Initial & Refresh)
+  // ---------------------------------------------------------------------------
 
+  /**
+   * Loads messages for the current room.
+   * When `forceRefresh` is true, the cache is bypassed entirely.
+   * Falls back to cached data if the server request fails.
+   */
   const loadMessages = useCallback(
     async (forceRefresh = false) => {
       if (!token || !isMountedRef.current) return;
@@ -139,11 +163,8 @@ export const useChatMessages = ({
       const cached = getCache();
       const now = Date.now();
 
+      // Serve from cache if valid and not forcing refresh
       if (!forceRefresh && cached && now - cached.timestamp < CACHE_TTL) {
-        console.log(
-          `📦 Loading from cache: ${cached.messages.length} messages`,
-        );
-
         if (isMountedRef.current) {
           setMessages(cached.messages);
           setHasMore(cached.hasMore);
@@ -160,23 +181,20 @@ export const useChatMessages = ({
         return;
       }
 
+      // Fetch from server
       try {
-        console.log(`🌐 Fetching messages from server for room ${roomId}`);
-
         const response = await chatApi.getMessagesLight(roomId, INITIAL_LIMIT);
 
         if (response.success && isMountedRef.current) {
           const serverMessages: Message[] = response.data.messages || [];
+
+          // Discard optimistic messages when forcing refresh
           const optimisticMessages = forceRefresh
             ? []
             : getOptimisticFromCache();
 
           const combined = [...serverMessages, ...optimisticMessages];
           const finalMessages = deduplicateMessages(combined);
-
-          console.log(
-            `🌐 Loaded: ${serverMessages.length} server + ${optimisticMessages.length} optimistic = ${finalMessages.length} total`,
-          );
 
           processedIdsRef.current.clear();
           finalMessages.forEach((msg) => {
@@ -190,7 +208,7 @@ export const useChatMessages = ({
           updateCache(finalMessages, response.data.hasMore);
         }
       } catch (error) {
-        console.error("Error loading messages:", error);
+        // Fallback to cache on network failure
         if (cached && isMountedRef.current) {
           setMessages(cached.messages);
           setHasMore(cached.hasMore);
@@ -212,10 +230,14 @@ export const useChatMessages = ({
     ],
   );
 
-  // ============================================
-  // LOAD OLDER MESSAGES (Pagination)
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Load Older Messages (Pagination)
+  // ---------------------------------------------------------------------------
 
+  /**
+   * Loads older messages for pagination.
+   * Uses the timestamp of the oldest currently loaded message as the cursor.
+   */
   const loadOlderMessages = useCallback(async () => {
     if (
       !token ||
@@ -257,7 +279,7 @@ export const useChatMessages = ({
         setHasMore(response.data.hasMore);
       }
     } catch (error) {
-      console.error("Error loading older messages:", error);
+      // Silently fail - user can retry by scrolling
     } finally {
       if (isMountedRef.current) {
         setLoadingMore(false);
@@ -273,19 +295,24 @@ export const useChatMessages = ({
     deduplicateMessages,
   ]);
 
-  // ============================================
-  // REFRESH
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Refresh
+  // ---------------------------------------------------------------------------
 
+  /** Pull-to-refresh handler that bypasses cache */
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     loadMessages(true);
   }, [loadMessages]);
 
-  // ============================================
-  // OPTIMISTIC MESSAGE MANAGEMENT
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Optimistic Message Management
+  // ---------------------------------------------------------------------------
 
+  /**
+   * Adds a temporary optimistic message to the state before server confirmation.
+   * Returns the created message for reference.
+   */
   const addOptimisticMessage = useCallback(
     (tempId: string, messageData: Partial<Message>) => {
       const optimisticMessage: Message = {
@@ -313,10 +340,6 @@ export const useChatMessages = ({
         ],
       };
 
-      console.log(
-        `✨ Adding optimistic message: ${tempId}, type: ${optimisticMessage.type}, hasMedia: ${!!optimisticMessage.mediaUrl}`,
-      );
-
       setMessages((prev) => {
         const updated = [...prev, optimisticMessage];
         updateCache(updated, hasMore);
@@ -328,10 +351,11 @@ export const useChatMessages = ({
     [userId, userName, roomId, hasMore, updateCache],
   );
 
+  /**
+   * Removes a failed optimistic message and clears its timeout.
+   */
   const removeOptimisticMessage = useCallback(
     (tempId: string) => {
-      console.log(`❌ Removing failed optimistic message: ${tempId}`);
-
       const timeout = pendingTimeoutsRef.current.get(tempId);
       if (timeout) {
         clearTimeout(timeout);
@@ -351,10 +375,12 @@ export const useChatMessages = ({
     [hasMore, updateCache],
   );
 
+  /**
+   * Replaces an optimistic message with the confirmed server version.
+   * Handles edge cases where the message already exists in state.
+   */
   const confirmOptimisticMessage = useCallback(
     (tempId: string, messageId: string, serverData?: Partial<Message>) => {
-      console.log(`✅ Confirming message: ${tempId} → ${messageId}`);
-
       const timeout = pendingTimeoutsRef.current.get(tempId);
       if (timeout) {
         clearTimeout(timeout);
@@ -362,8 +388,8 @@ export const useChatMessages = ({
       }
 
       setMessages((prev) => {
+        // If confirmed message already exists, just remove the temp
         if (messageId && prev.some((msg) => msg._id === messageId)) {
-          console.log(`⏭️ Message ${messageId} already exists, removing temp`);
           const updated = prev.filter(
             (msg) => msg._id !== tempId && msg.tempId !== tempId,
           );
@@ -375,8 +401,8 @@ export const useChatMessages = ({
           (msg) => msg._id === tempId || msg.tempId === tempId,
         );
 
+        // If temp message not found in state
         if (tempIndex === -1) {
-          console.log(`⚠️ Temp message ${tempId} not found in state`);
           if (
             serverData &&
             messageId &&
@@ -401,6 +427,7 @@ export const useChatMessages = ({
           return prev;
         }
 
+        // Merge temp message with server data
         const existingMsg = prev[tempIndex];
         const confirmedMessage: Message = {
           ...existingMsg,
@@ -435,26 +462,26 @@ export const useChatMessages = ({
     [hasMore, updateCache, userId],
   );
 
-  // ============================================
-  // REAL-TIME MESSAGE HANDLERS
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Real-Time Message Handlers
+  // ---------------------------------------------------------------------------
 
+  /**
+   * Adds a real-time message received via socket.
+   * Performs deduplication against existing messages and removes
+   * matching optimistic messages.
+   */
   const addMessage = useCallback(
     (message: Message) => {
       if (!message._id) return;
 
-      if (processedIdsRef.current.has(message._id)) {
-        console.log(`⏭️ Skipping duplicate message: ${message._id}`);
-        return;
-      }
+      if (processedIdsRef.current.has(message._id)) return;
 
       setMessages((prev) => {
         const exists = prev.some((msg) => msg._id === message._id);
-        if (exists) {
-          console.log(`⏭️ Message already in state: ${message._id}`);
-          return prev;
-        }
+        if (exists) return prev;
 
+        // Remove optimistic messages that match this incoming message
         const filtered = prev.filter((msg) => {
           if (msg.status === "sending" || isTempId(msg._id)) {
             const isMatch =
@@ -467,11 +494,6 @@ export const useChatMessages = ({
                   ? message.sender
                   : message.sender?._id);
 
-            if (isMatch) {
-              console.log(
-                `🔄 Removing temp message matching incoming: ${msg._id || msg.tempId}`,
-              );
-            }
             return !isMatch;
           }
           return true;
@@ -488,6 +510,7 @@ export const useChatMessages = ({
     [hasMore, updateCache],
   );
 
+  /** Updates the reactions array for a specific message */
   const updateMessageReactions = useCallback(
     (messageId: string, reactions: Message["reactions"]) => {
       setMessages((prev) => {
@@ -501,6 +524,7 @@ export const useChatMessages = ({
     [hasMore, updateCache],
   );
 
+  /** Removes a message from state and cache by its ID */
   const deleteMessage = useCallback(
     (messageId: string) => {
       setMessages((prev) => {
@@ -516,10 +540,11 @@ export const useChatMessages = ({
     [hasMore, updateCache],
   );
 
-  // ============================================
-  // PENDING TIMEOUT MANAGEMENT
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Pending Timeout Management
+  // ---------------------------------------------------------------------------
 
+  /** Stores a send timeout for an optimistic message */
   const setPendingTimeout = useCallback(
     (tempId: string, timeout: ReturnType<typeof setTimeout>) => {
       pendingTimeoutsRef.current.set(tempId, timeout);
@@ -527,24 +552,24 @@ export const useChatMessages = ({
     [],
   );
 
-  // ============================================
-  // CLEANUP
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Cleanup
+  // ---------------------------------------------------------------------------
 
+  /** Clears all pending send timeouts */
   const clearAllPending = useCallback(() => {
-    console.log("🧹 Clearing pending timeouts");
     pendingTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
     pendingTimeoutsRef.current.clear();
   }, []);
 
+  /** Removes the cached messages for the current room */
   const clearCache = useCallback(() => {
-    console.log(`🗑️ Clearing cache for room: ${roomId}`);
     messageCache.delete(roomId);
   }, [roomId]);
 
-  // ============================================
-  // RETURN
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Return
+  // ---------------------------------------------------------------------------
 
   return {
     messages,

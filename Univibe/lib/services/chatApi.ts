@@ -1,6 +1,4 @@
-// lib/services/chatApi.ts
-
-import api from "./api"; // Your axios instance
+import api from "./api";
 import type {
   ChatRoomsResponse,
   SingleRoomResponse,
@@ -10,30 +8,45 @@ import type {
   Reaction,
 } from "../types/chat.types";
 
-class ChatApiService {
-  // ============================================
-  // CHAT ROOMS
-  // ============================================
+// -----------------------------------------------------------------------------
+// ChatApiService
+// -----------------------------------------------------------------------------
 
+/**
+ * Service layer for all chat-related API calls.
+ *
+ * Each method wraps an HTTP request to the backend and returns parsed data.
+ * This service does NOT handle socket events — it is purely for REST operations
+ * like fetching messages, toggling room settings, and uploading media.
+ */
+class ChatApiService {
+  // ---------------------------------------------------------------------------
+  // Chat Rooms
+  // ---------------------------------------------------------------------------
+
+  /** Fetches all chat rooms for the authenticated user */
   async getChatRooms(): Promise<ChatRoomsResponse> {
     const response = await api.get("/chat/rooms");
     return response.data;
   }
 
+  /** Fetches a single room by ID */
   async getSingleRoom(roomId: string): Promise<SingleRoomResponse> {
     const response = await api.get(`/chat/room/${roomId}`);
     return response.data;
   }
 
-  // ============================================
-  // ROOM ACTIONS
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Room Actions
+  // ---------------------------------------------------------------------------
 
+  /** Marks all messages in a room as read */
   async markRoomAsRead(roomId: string): Promise<MarkReadResponse> {
     const response = await api.post(`/chat/room/${roomId}/read`);
     return response.data;
   }
 
+  /** Marks a room as manually unread */
   async markRoomAsUnread(
     roomId: string,
   ): Promise<{ success: boolean; message: string }> {
@@ -41,11 +54,13 @@ class ChatApiService {
     return response.data;
   }
 
+  /** Toggles the pinned status of a room */
   async togglePin(roomId: string): Promise<{ success: boolean }> {
     const response = await api.put(`/chat/room/${roomId}/pin`);
     return response.data;
   }
 
+  /** Toggles the muted status of a room, optionally with a duration */
   async toggleMute(
     roomId: string,
     duration?: number,
@@ -54,6 +69,7 @@ class ChatApiService {
     return response.data;
   }
 
+  /** Deletes a room and all its messages */
   async deleteRoom(
     roomId: string,
   ): Promise<{ success: boolean; message?: string }> {
@@ -61,11 +77,11 @@ class ChatApiService {
     return response.data;
   }
 
-  // ============================================
-  // MESSAGES
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Messages
+  // ---------------------------------------------------------------------------
 
-  /** Full message fetch (for refresh/sync) */
+  /** Full message fetch for sync/refresh operations */
   async getMessages(
     roomId: string,
     limit: number = 50,
@@ -77,7 +93,7 @@ class ChatApiService {
     return response.data;
   }
 
-  /** Lightweight message fetch (for initial load + pagination) */
+  /** Lightweight message fetch for initial load and pagination */
   async getMessagesLight(
     roomId: string,
     limit: number = 30,
@@ -89,6 +105,7 @@ class ChatApiService {
     return response.data;
   }
 
+  /** Sends a text or location message via REST (text messages go through socket) */
   async sendMessage(data: {
     roomId: string;
     message: string;
@@ -100,6 +117,7 @@ class ChatApiService {
     return response.data;
   }
 
+  /** Deletes a message by ID */
   async deleteMessage(
     messageId: string,
   ): Promise<{ success: boolean; message?: string }> {
@@ -107,6 +125,7 @@ class ChatApiService {
     return response.data;
   }
 
+  /** Marks a single message as read */
   async markMessageAsRead(
     messageId: string,
   ): Promise<{ success: boolean; data?: Message }> {
@@ -114,6 +133,7 @@ class ChatApiService {
     return response.data;
   }
 
+  /** Marks a single message as delivered */
   async markMessageAsDelivered(
     messageId: string,
   ): Promise<{ success: boolean; data?: Message }> {
@@ -121,10 +141,11 @@ class ChatApiService {
     return response.data;
   }
 
-  // ============================================
-  // REACTIONS
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Reactions
+  // ---------------------------------------------------------------------------
 
+  /** Adds or removes a reaction on a message */
   async toggleReaction(
     messageId: string,
     reaction: string,
@@ -137,6 +158,7 @@ class ChatApiService {
     return response.data;
   }
 
+  /** Adds a reaction to a message */
   async addReaction(
     messageId: string,
     reaction: string,
@@ -144,25 +166,28 @@ class ChatApiService {
     return this.toggleReaction(messageId, reaction, false);
   }
 
+  /** Removes a reaction from a message */
   async removeReaction(
     messageId: string,
   ): Promise<{ success: boolean; reactions: Reaction[] }> {
     return this.toggleReaction(messageId, "", true);
   }
 
-  // ============================================
-  // AUDIO
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Audio
+  // ---------------------------------------------------------------------------
 
+  /** Marks an audio message as played by the current user */
   async markAudioPlayed(messageId: string): Promise<{ success: boolean }> {
     const response = await api.put(`/chat/audio/${messageId}/played`);
     return response.data;
   }
 
-  // ============================================
-  // UPLOADS
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Uploads
+  // ---------------------------------------------------------------------------
 
+  /** Uploads an audio recording and returns the message data */
   async uploadAudio(formData: FormData): Promise<{
     success: boolean;
     url?: string;
@@ -170,30 +195,28 @@ class ChatApiService {
     data?: Message;
   }> {
     const response = await api.post("/chat/upload-audio", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-      timeout: 30000, // 30 second timeout for uploads
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: 30000,
     });
     return response.data;
   }
 
+  /** Uploads images, videos, or documents and returns message data */
   async uploadAttachments(
     formData: FormData,
   ): Promise<{ success: boolean; data?: Message[]; message?: string }> {
     const response = await api.post("/chat/upload-attachments", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-      timeout: 60000, // 60 second timeout for multiple attachments
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: 60000,
     });
     return response.data;
   }
 
-  // ============================================
-  // USER PROFILE
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // User Profile
+  // ---------------------------------------------------------------------------
 
+  /** Fetches a user's public profile by ID */
   async getUserProfile(userId: string): Promise<{
     success: boolean;
     data: {
@@ -208,6 +231,10 @@ class ChatApiService {
     return response.data;
   }
 }
+
+// -----------------------------------------------------------------------------
+// Export
+// -----------------------------------------------------------------------------
 
 export const chatApi = new ChatApiService();
 export default chatApi;

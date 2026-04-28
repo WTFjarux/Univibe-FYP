@@ -1,53 +1,81 @@
-import { useState, useEffect, useCallback } from 'react';
-import type { ChatRoom } from '../../lib/types/chat.types';
-import { useActiveRoom } from '../../lib/contexts/ActiveRoomContext';
-import { chatPersistence } from '../../lib/services/chatPersistence';
+import { useState, useCallback, useRef } from "react";
+import type { ChatRoom } from "../../lib/types/chat.types";
+
+// -----------------------------------------------------------------------------
+// Hook
+// -----------------------------------------------------------------------------
+
+/**
+ * Manages read/unread status for chat rooms.
+ *
+ * Supports two types of unread status:
+ * 1. **Automatic**: A room is unread if the last message was sent by
+ *    another user and the current user hasn't read it yet.
+ * 2. **Manual**: The user explicitly marks a read room as unread.
+ *    Manual unread status overrides automatic detection.
+ *
+ * Uses a ref alongside state to prevent stale closure issues when
+ * the unread set is accessed inside socket event handlers.
+ */
 
 export const useReadStatus = (currentUserId?: string) => {
-  const [manualUnreadRooms, setManualUnreadRooms] = useState<Set<string>>(new Set());
-  const { activeRoomId } = useActiveRoom();
+  const [manualUnreadRooms, setManualUnreadRooms] = useState<Set<string>>(
+    new Set(),
+  );
 
-  // Load persisted manual unread rooms
-  useEffect(() => {
-    chatPersistence.getManualUnreadRoomIds().then(setManualUnreadRooms);
+  /** Ref kept in sync with state for non-reactive access */
+  const manualUnreadRef = useRef(manualUnreadRooms);
+  manualUnreadRef.current = manualUnreadRooms;
+
+  // ---------------------------------------------------------------------------
+  // Read Status Check
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Determines whether a room has unread messages.
+   * Manual unread takes priority, then falls back to automatic detection.
+   */
+  const isRoomUnread = useCallback(
+    (room: ChatRoom): boolean => {
+      if (manualUnreadRef.current.has(room.roomId)) {
+        return true;
+      }
+
+      if (!room.lastMessage || !currentUserId) return false;
+
+      const { senderId, readBy } = room.lastMessage;
+
+      // Own messages are always considered read
+      if (senderId === currentUserId) return false;
+
+      // Unread if current user is not in the readBy list
+      return !readBy?.includes(currentUserId);
+    },
+    [currentUserId],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Manual Unread Management
+  // ---------------------------------------------------------------------------
+
+  /** Marks a room as manually unread */
+  const addManualUnread = useCallback(async (roomId: string) => {
+    setManualUnreadRooms((prev) => new Set(prev).add(roomId));
   }, []);
 
-  // Core logic: determine if room is unread
-  const isRoomUnread = useCallback((room: ChatRoom): boolean => {
-    // 1. Manual unread overrides everything
-    if (manualUnreadRooms.has(room.roomId)) return true;
-    
-    // 2. No last message = not unread
-    if (!room.lastMessage) return false;
-    
-    // 3. If I sent the last message, it's always read
-    if (room.lastMessage.senderId === currentUserId) return false;
-    
-    // 4. If room is currently active, consider it read
-    if (room.roomId === activeRoomId) return false;
-    
-    // 5. Check read receipt
-    return !room.lastMessage.readBy.includes(currentUserId || '');
-  }, [currentUserId, activeRoomId, manualUnreadRooms]);
-
-  const addManualUnread = useCallback(async (roomId: string) => {
-    const newSet = new Set(manualUnreadRooms);
-    newSet.add(roomId);
-    setManualUnreadRooms(newSet);
-    await chatPersistence.addManualUnreadRoom(roomId);
-  }, [manualUnreadRooms]);
-
+  /** Removes the manual unread mark from a room */
   const removeManualUnread = useCallback(async (roomId: string) => {
-    const newSet = new Set(manualUnreadRooms);
-    newSet.delete(roomId);
-    setManualUnreadRooms(newSet);
-    await chatPersistence.removeManualUnreadRoom(roomId);
-  }, [manualUnreadRooms]);
+    setManualUnreadRooms((prev) => {
+      const next = new Set(prev);
+      next.delete(roomId);
+      return next;
+    });
+  }, []);
 
   return {
     isRoomUnread,
-    manualUnreadRooms,
     addManualUnread,
     removeManualUnread,
+    manualUnreadRooms,
   };
 };

@@ -13,20 +13,11 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { getAvatarUrl, formatTime } from "../../../../lib/utils/chatUtils";
-// ✅ Import centralized type instead of defining local one
 import type { ChatRoom } from "../../../../lib/types/chat.types";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-// ============================================
-// DEFAULT AVATAR
-// ============================================
-
 const DEFAULT_AVATAR = require("../../../../assets/images/default-avatar.png");
-
-// ──────────────────────────────────────────────────────────────────────────────
-// TYPES (no more ChatRoom duplicate!)
-// ──────────────────────────────────────────────────────────────────────────────
 
 export interface ChatItemProps {
   item: ChatRoom;
@@ -45,10 +36,6 @@ export interface ChatItemProps {
   disableSelectedStyle?: boolean;
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// COMPONENT (rest stays the same)
-// ──────────────────────────────────────────────────────────────────────────────
-
 const ChatItem: React.FC<ChatItemProps> = ({
   item,
   isSelected,
@@ -62,7 +49,6 @@ const ChatItem: React.FC<ChatItemProps> = ({
   currentUserId,
   disableSelectedStyle = false,
 }) => {
-  // ... rest of component code stays exactly the same ...
   const rowRef = useRef<View>(null);
   const [avatarError, setAvatarError] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
@@ -241,12 +227,26 @@ const ChatItem: React.FC<ChatItemProps> = ({
   );
 };
 
-export { ChatItem };
-export default ChatItem;
+// ✅ ADD: React.memo with custom comparison for performance
+const MemoizedChatItem = React.memo(ChatItem, (prevProps, nextProps) => {
+  // Only re-render if these critical props changed
+  return (
+    prevProps.item.roomId === nextProps.item.roomId &&
+    prevProps.item.lastMessage?.message ===
+      nextProps.item.lastMessage?.message &&
+    prevProps.item.lastMessage?.sentAt === nextProps.item.lastMessage?.sentAt &&
+    prevProps.isUnread === nextProps.isUnread &&
+    prevProps.isSelected === nextProps.isSelected &&
+    prevProps.isHighlighted === nextProps.isHighlighted &&
+    prevProps.item.isPinned === nextProps.item.isPinned &&
+    prevProps.item.isMuted === nextProps.item.isMuted
+  );
+});
 
-// ──────────────────────────────────────────────────────────────────────────────
-// STYLES (unchanged)
-// ──────────────────────────────────────────────────────────────────────────────
+export { ChatItem, MemoizedChatItem };
+export default MemoizedChatItem;
+
+// ─── Styles (unchanged) ─────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   wrapper: {

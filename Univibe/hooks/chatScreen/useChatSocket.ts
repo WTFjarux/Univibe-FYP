@@ -4,6 +4,10 @@ import { useEffect, useRef } from "react";
 import socketService from "../../lib/services/socketService";
 import type { Message } from "../../lib/types/chat.types";
 
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
+
 interface UseChatSocketProps {
   roomId: string;
   otherUserId: string;
@@ -42,6 +46,17 @@ interface UseChatSocketProps {
   onSocketError?: (error: any) => void;
 }
 
+// -----------------------------------------------------------------------------
+// Hook
+// -----------------------------------------------------------------------------
+
+/**
+ * Manages socket connection and event listeners for a single chat room.
+ * Joins the room on mount, re-joins on reconnection, and cleans up on unmount.
+ *
+ * Uses a ref-based approach for all handler callbacks to prevent stale closures
+ * without needing to re-register listeners when props change.
+ */
 export const useChatSocket = ({
   roomId,
   otherUserId,
@@ -57,6 +72,7 @@ export const useChatSocket = ({
   onReactionRemoved,
   onSocketError,
 }: UseChatSocketProps) => {
+  // Stores the latest handler references to avoid stale closures
   const handlersRef = useRef({
     onMessageDelivered,
     onReceiveMessage,
@@ -70,21 +86,8 @@ export const useChatSocket = ({
     onSocketError,
   });
 
-  // Keep refs updated
-  useEffect(() => {
-    handlersRef.current = {
-      onMessageDelivered,
-      onReceiveMessage,
-      onUserOnline,
-      onUserOffline,
-      onMessagesRead,
-      onMessageRead,
-      onMessageDeleted,
-      onReactionAdded,
-      onReactionRemoved,
-      onSocketError,
-    };
-  }, [
+  // Update ref on every render so socket callbacks always access latest handlers
+  handlersRef.current = {
     onMessageDelivered,
     onReceiveMessage,
     onUserOnline,
@@ -95,232 +98,203 @@ export const useChatSocket = ({
     onReactionAdded,
     onReactionRemoved,
     onSocketError,
-  ]);
+  };
 
   useEffect(() => {
     if (!roomId) return;
 
-    console.log(`🔌 Setting up socket listeners for room: ${roomId}`);
-
-    // Join the room
+    // Join the room so the server routes events to this socket
     socketService.joinRoom(roomId, otherUserId);
 
-    // ────────────────────────────────────────
-    // MESSAGE DELIVERY
-    // ────────────────────────────────────────
+    // -----------------------------------------------------------------------
+    // Message Delivery
+    // -----------------------------------------------------------------------
+
+    /** Handles delivery confirmation for a sent message */
     const handleMessageDelivered = (data: any) => {
-      if (isMountedRef.current) {
-        console.log(`✅ Message delivered:`, {
-          tempId: data.tempId,
-          messageId: data.messageId,
-          type: data.message?.type,
-          hasMediaUrl: !!data.message?.mediaUrl,
-          success: data.success,
-        });
-        handlersRef.current.onMessageDelivered(data);
-      }
+      if (!isMountedRef.current) return;
+      handlersRef.current.onMessageDelivered(data);
     };
 
-    // ────────────────────────────────────────
-    // RECEIVE NEW MESSAGE
-    // ────────────────────────────────────────
+    // -----------------------------------------------------------------------
+    // Receive New Message
+    // -----------------------------------------------------------------------
+
+    /** Handles incoming real-time messages; filters by room */
     const handleReceiveMessage = (message: Message) => {
-      if (message.roomId === roomId && isMountedRef.current) {
-        console.log(`📨 Received message:`, {
-          id: message._id,
-          type: message.type,
-          sender: message.senderName,
-          hasMedia: !!message.mediaUrl,
-        });
+      if (!isMountedRef.current) return;
+      if (message.roomId === roomId) {
         handlersRef.current.onReceiveMessage(message);
       }
     };
 
-    // ────────────────────────────────────────
-    // READ RECEIPTS - SINGLE MESSAGE
-    // ────────────────────────────────────────
+    // -----------------------------------------------------------------------
+    // Read Receipts — Single Message
+    // -----------------------------------------------------------------------
+
+    /** Handles a single message being read by another user */
     const handleMessageRead = (data: any) => {
-      if (isMountedRef.current) {
-        console.log(
-          `📖 Single message read - ID: ${data.messageId}, by: ${data.userId}, room: ${data.roomId}`,
-        );
+      if (!isMountedRef.current) return;
 
-        // Notify parent about the read receipt
-        if (handlersRef.current.onMessageRead) {
-          handlersRef.current.onMessageRead({
-            messageId: data.messageId,
-            roomId: data.roomId,
-            userId: data.userId,
-            readAt: data.readAt || new Date().toISOString(),
-          });
-        }
-
-        // Also forward to onMessageDelivered for updating message status
-        handlersRef.current.onMessageDelivered({
-          type: "message_read",
+      if (handlersRef.current.onMessageRead) {
+        handlersRef.current.onMessageRead({
           messageId: data.messageId,
-          userId: data.userId,
-          readAt: data.readAt || new Date().toISOString(),
-        });
-      }
-    };
-
-    // ────────────────────────────────────────
-    // READ RECEIPTS - BULK (ROOM)
-    // ────────────────────────────────────────
-    const handleMessagesRead = (data: any) => {
-      if (isMountedRef.current) {
-        console.log(
-          `📖 Messages read in room ${data.roomId} by ${data.userId}`,
-        );
-
-        // Notify parent about bulk read
-        if (handlersRef.current.onMessagesRead) {
-          handlersRef.current.onMessagesRead({
-            roomId: data.roomId,
-            userId: data.userId,
-            readAt: data.readAt || new Date().toISOString(),
-          });
-        }
-
-        // Forward to onMessageDelivered for updating all messages status
-        handlersRef.current.onMessageDelivered({
-          type: "messages_read",
           roomId: data.roomId,
           userId: data.userId,
           readAt: data.readAt || new Date().toISOString(),
         });
       }
+
+      // Forward to onMessageDelivered for status update
+      handlersRef.current.onMessageDelivered({
+        type: "message_read",
+        messageId: data.messageId,
+        userId: data.userId,
+        readAt: data.readAt || new Date().toISOString(),
+      });
     };
 
-    // ────────────────────────────────────────
-    // MESSAGE DELETED
-    // ────────────────────────────────────────
-    const handleMessageDeleted = (data: any) => {
-      if (isMountedRef.current) {
-        console.log(
-          `🗑️ Message deleted: ${data.messageId} in room ${data.roomId}`,
-        );
-        if (handlersRef.current.onMessageDeleted) {
-          handlersRef.current.onMessageDeleted(data);
-        }
-      }
-    };
+    // -----------------------------------------------------------------------
+    // Read Receipts — Bulk (Room)
+    // -----------------------------------------------------------------------
 
-    // ────────────────────────────────────────
-    // REACTIONS
-    // ────────────────────────────────────────
-    const handleReactionAdded = (data: any) => {
-      if (isMountedRef.current) {
-        console.log(
-          `👍 Reaction added to ${data.messageId}: ${data.reaction} by ${data.userId}`,
-        );
-        if (handlersRef.current.onReactionAdded) {
-          handlersRef.current.onReactionAdded(data);
-        }
-      }
-    };
+    /** Handles all messages in a room being marked as read */
+    const handleMessagesRead = (data: any) => {
+      if (!isMountedRef.current) return;
 
-    const handleReactionRemoved = (data: any) => {
-      if (isMountedRef.current) {
-        console.log(
-          `👎 Reaction removed from ${data.messageId} by ${data.userId}`,
-        );
-        if (handlersRef.current.onReactionRemoved) {
-          handlersRef.current.onReactionRemoved(data);
-        }
-      }
-    };
-
-    // ────────────────────────────────────────
-    // USER PRESENCE
-    // ────────────────────────────────────────
-    const handleUserOnline = () => {
-      if (isMountedRef.current) {
-        console.log("👤 Other user came online");
-        handlersRef.current.onUserOnline();
-      }
-    };
-
-    const handleUserOffline = () => {
-      if (isMountedRef.current) {
-        console.log("👤 Other user went offline");
-        handlersRef.current.onUserOffline();
-      }
-    };
-
-    const handleUserJoinedRoom = (data: any) => {
-      if (isMountedRef.current && data.roomId === roomId) {
-        console.log(`👤 User ${data.userId} joined room ${data.roomId}`);
-        handlersRef.current.onUserOnline();
-      }
-    };
-
-    // ────────────────────────────────────────
-    // DELIVERY TO RECIPIENT
-    // ────────────────────────────────────────
-    const handleMessageDeliveredToRecipient = (data: any) => {
-      if (isMountedRef.current) {
-        console.log(
-          `✅ Message ${data.messageId} delivered to ${data.recipientId}`,
-        );
-        handlersRef.current.onMessageDelivered({
-          type: "message_delivered_to_recipient",
-          messageId: data.messageId,
-          recipientId: data.recipientId,
+      if (handlersRef.current.onMessagesRead) {
+        handlersRef.current.onMessagesRead({
+          roomId: data.roomId,
+          userId: data.userId,
+          readAt: data.readAt || new Date().toISOString(),
         });
       }
+
+      handlersRef.current.onMessageDelivered({
+        type: "messages_read",
+        roomId: data.roomId,
+        userId: data.userId,
+        readAt: data.readAt || new Date().toISOString(),
+      });
     };
 
-    // ────────────────────────────────────────
-    // ERROR HANDLING
-    // ────────────────────────────────────────
+    // -----------------------------------------------------------------------
+    // Message Deleted
+    // -----------------------------------------------------------------------
+
+    /** Handles a message being deleted by another user */
+    const handleMessageDeleted = (data: any) => {
+      if (!isMountedRef.current) return;
+      if (handlersRef.current.onMessageDeleted) {
+        handlersRef.current.onMessageDeleted(data);
+      }
+    };
+
+    // -----------------------------------------------------------------------
+    // Reactions
+    // -----------------------------------------------------------------------
+
+    /** Handles a reaction being added to a message */
+    const handleReactionAdded = (data: any) => {
+      if (!isMountedRef.current) return;
+      if (handlersRef.current.onReactionAdded) {
+        handlersRef.current.onReactionAdded(data);
+      }
+    };
+
+    /** Handles a reaction being removed from a message */
+    const handleReactionRemoved = (data: any) => {
+      if (!isMountedRef.current) return;
+      if (handlersRef.current.onReactionRemoved) {
+        handlersRef.current.onReactionRemoved(data);
+      }
+    };
+
+    // -----------------------------------------------------------------------
+    // User Presence
+    // -----------------------------------------------------------------------
+
+    /** Handles the other user coming online */
+    const handleUserOnline = () => {
+      if (!isMountedRef.current) return;
+      handlersRef.current.onUserOnline();
+    };
+
+    /** Handles the other user going offline */
+    const handleUserOffline = () => {
+      if (!isMountedRef.current) return;
+      handlersRef.current.onUserOffline();
+    };
+
+    /** Handles a user joining the current room */
+    const handleUserJoinedRoom = (data: any) => {
+      if (!isMountedRef.current) return;
+      if (data.roomId === roomId) {
+        handlersRef.current.onUserOnline();
+      }
+    };
+
+    // -----------------------------------------------------------------------
+    // Delivery to Recipient
+    // -----------------------------------------------------------------------
+
+    /** Handles confirmation that a message reached the recipient's device */
+    const handleMessageDeliveredToRecipient = (data: any) => {
+      if (!isMountedRef.current) return;
+      handlersRef.current.onMessageDelivered({
+        type: "message_delivered_to_recipient",
+        messageId: data.messageId,
+        recipientId: data.recipientId,
+      });
+    };
+
+    // -----------------------------------------------------------------------
+    // Error Handling
+    // -----------------------------------------------------------------------
+
+    /** Handles message-specific errors from the server */
     const handleMessageError = (error: any) => {
-      if (isMountedRef.current) {
-        console.error("❌ Message error:", error);
-        if (handlersRef.current.onSocketError) {
-          handlersRef.current.onSocketError(error);
-        }
+      if (!isMountedRef.current) return;
+      if (handlersRef.current.onSocketError) {
+        handlersRef.current.onSocketError(error);
       }
     };
 
-    // ────────────────────────────────────────
-    // CONNECTION EVENTS
-    // ────────────────────────────────────────
+    // -----------------------------------------------------------------------
+    // Connection Events
+    // -----------------------------------------------------------------------
+
+    /** Re-joins the room when the socket connects or reconnects */
     const handleSocketConnected = () => {
-      if (isMountedRef.current) {
-        console.log("✅ Socket connected, re-joining room:", roomId);
-        // Re-join room on reconnection
-        socketService.joinRoom(roomId, otherUserId);
-      }
+      if (!isMountedRef.current) return;
+      socketService.joinRoom(roomId, otherUserId);
     };
 
+    /** Handles socket disconnection */
     const handleSocketDisconnected = (reason: string) => {
-      if (isMountedRef.current) {
-        console.log("❌ Socket disconnected:", reason);
-        if (handlersRef.current.onSocketError) {
-          handlersRef.current.onSocketError({ type: "disconnect", reason });
-        }
+      if (!isMountedRef.current) return;
+      if (handlersRef.current.onSocketError) {
+        handlersRef.current.onSocketError({ type: "disconnect", reason });
       }
     };
 
+    /** Handles generic socket errors */
     const handleSocketError = (error: any) => {
-      if (isMountedRef.current) {
-        console.error("❌ Socket error:", error);
-        if (handlersRef.current.onSocketError) {
-          handlersRef.current.onSocketError(error);
-        }
+      if (!isMountedRef.current) return;
+      if (handlersRef.current.onSocketError) {
+        handlersRef.current.onSocketError(error);
       }
     };
 
-    // ────────────────────────────────────────
-    // REGISTER ALL LISTENERS
-    // ────────────────────────────────────────
+    // -----------------------------------------------------------------------
+    // Register All Listeners
+    // -----------------------------------------------------------------------
+
     socketService.on("message_delivered", handleMessageDelivered);
     socketService.on("receive_message", handleReceiveMessage);
     socketService.on("message_read", handleMessageRead);
     socketService.on("messages_read", handleMessagesRead);
-    socketService.on("messages_marked_read", handleMessagesRead); // Alternative event name
+    socketService.on("messages_marked_read", handleMessagesRead);
     socketService.on("message_deleted", handleMessageDeleted);
     socketService.on(
       "message_delivered_to_recipient",
@@ -337,16 +311,13 @@ export const useChatSocket = ({
     socketService.on("socket_error", handleSocketError);
     socketService.on("socket_reconnected", handleSocketConnected);
 
-    // ────────────────────────────────────────
-    // CLEANUP
-    // ────────────────────────────────────────
-    return () => {
-      console.log(`🔌 Cleaning up socket listeners for room: ${roomId}`);
+    // -----------------------------------------------------------------------
+    // Cleanup
+    // -----------------------------------------------------------------------
 
-      // Leave the room
+    return () => {
       socketService.leaveRoom(roomId);
 
-      // Remove all event listeners
       socketService.off("message_delivered", handleMessageDelivered);
       socketService.off("receive_message", handleReceiveMessage);
       socketService.off("message_read", handleMessageRead);
@@ -368,5 +339,5 @@ export const useChatSocket = ({
       socketService.off("socket_error", handleSocketError);
       socketService.off("socket_reconnected", handleSocketConnected);
     };
-  }, [roomId, otherUserId]);
+  }, [roomId, otherUserId]); // Re-register only when room changes
 };

@@ -1,13 +1,15 @@
 // hooks/chatScreen/useMessageStore.ts
+
 import { useState, useCallback, useRef, useEffect } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { isTempId } from "../../lib/utils/messageIdGenerator";
 import type { Message } from "../../lib/types/chat.types";
 
-// ============================================
-// NORMALIZED CACHE STORE
-// ============================================
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
 
+/** Metadata tracked per chat room */
 interface RoomMetadata {
   lastMessageId?: string;
   unreadCount: number;
@@ -16,15 +18,38 @@ interface RoomMetadata {
   hasMore: boolean;
 }
 
+/** In-memory cache structure */
 interface CacheStore {
   messagesById: Map<string, Message>;
   roomMessages: Map<string, string[]>;
   roomMetadata: Map<string, RoomMetadata>;
 }
 
+// -----------------------------------------------------------------------------
+// Configuration
+// -----------------------------------------------------------------------------
+
 const STORAGE_PREFIX = "@chat_cache_";
+
+/** Maximum number of messages to keep cached per room */
 const MAX_CACHED_MESSAGES_PER_ROOM = 200;
 
+// -----------------------------------------------------------------------------
+// MessageStore Class
+// -----------------------------------------------------------------------------
+
+/**
+ * Singleton store that manages cached messages, room metadata,
+ * and AsyncStorage persistence.
+ *
+ * All messages are stored in a normalized structure:
+ * - `messagesById`:  Map of message ID → Message object
+ * - `roomMessages`:  Map of room ID → ordered array of message IDs
+ * - `roomMetadata`:  Map of room ID → RoomMetadata
+ *
+ * Subscribers (React components) are notified on any state change,
+ * and data is persisted to AsyncStorage with debouncing.
+ */
 class MessageStore {
   private store: CacheStore;
   private subscribers: Set<() => void> = new Set();
@@ -39,29 +64,39 @@ class MessageStore {
     this.loadFromAsyncStorage();
   }
 
-  // ============================================
-  // SUBSCRIPTION (React integration)
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Subscription (React Integration)
+  // ---------------------------------------------------------------------------
 
+  /**
+   * Registers a listener that is called whenever the store changes.
+   * Returns an unsubscribe function.
+   */
   subscribe(listener: () => void): () => void {
     this.subscribers.add(listener);
     return () => this.subscribers.delete(listener);
   }
 
-  private notify() {
+  /** Notifies all subscribers and schedules a persistence write */
+  private notify(): void {
     this.subscribers.forEach((listener) => listener());
     this.schedulePersist();
   }
 
-  private schedulePersist() {
+  /** Debounces persistence writes to avoid excessive I/O */
+  private schedulePersist(): void {
     if (this.persistTimer) clearTimeout(this.persistTimer);
     this.persistTimer = setTimeout(() => this.persistToAsyncStorage(), 2000);
   }
 
-  // ============================================
-  // MESSAGE OPERATIONS
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Message Operations
+  // ---------------------------------------------------------------------------
 
+  /**
+   * Returns messages for a room in chronological order.
+   * Optionally limits to the most recent N messages.
+   */
   getMessages(roomId: string, limit?: number): Message[] {
     const messageIds = this.store.roomMessages.get(roomId) || [];
     const messages = messageIds
@@ -74,30 +109,32 @@ class MessageStore {
     return messages;
   }
 
+  /** Returns a single message by its ID */
   getMessage(messageId: string): Message | undefined {
     return this.store.messagesById.get(messageId);
   }
 
+  /**
+   * Adds a single message to the store.
+   * Skips duplicates by checking message IDs.
+   * Maintains chronological ordering and enforces cache size limits.
+   */
   addMessage(roomId: string, message: Message): void {
-    // Skip if already exists
     if (!isTempId(message._id) && this.store.messagesById.has(message._id)) {
       return;
     }
 
-    // Store message
     this.store.messagesById.set(message._id, message);
 
-    // Update room message list
     let roomMessages = this.store.roomMessages.get(roomId) || [];
 
-    // Remove temp ID if this is replacing
+    // Remove temp IDs if this is the confirmed version
     if (!isTempId(message._id)) {
       roomMessages = roomMessages.filter(
         (id) => id !== message._id && !isTempId(id),
       );
     }
 
-    // Add new message (maintain order by createdAt)
     const newList = [...roomMessages, message._id];
     newList.sort((a, b) => {
       const msgA = this.store.messagesById.get(a);
@@ -108,7 +145,7 @@ class MessageStore {
       );
     });
 
-    // Limit cache size
+    // Enforce cache size limit by removing oldest messages
     while (newList.length > MAX_CACHED_MESSAGES_PER_ROOM) {
       const removed = newList.shift();
       if (removed) this.store.messagesById.delete(removed);
@@ -118,24 +155,25 @@ class MessageStore {
     this.notify();
   }
 
+  /**
+   * Adds multiple messages at once.
+   * Filters out already-cached messages to avoid duplicates.
+   */
   addMessages(roomId: string, messages: Message[]): void {
-    // Filter out existing messages to avoid duplicates
     const newMessages = messages.filter(
       (msg) => !this.store.messagesById.has(msg._id),
     );
 
     if (newMessages.length === 0) return;
 
-    // Add all messages
     newMessages.forEach((msg) => {
       this.store.messagesById.set(msg._id, msg);
     });
 
-    // Update room message list
     let existingIds = this.store.roomMessages.get(roomId) || [];
     const newIds = [...existingIds, ...newMessages.map((m) => m._id)];
 
-    // Deduplicate and sort
+    // Deduplicate and sort chronologically
     const uniqueIds = [...new Map(newIds.map((id) => [id, id])).values()];
     uniqueIds.sort((a, b) => {
       const msgA = this.store.messagesById.get(a);
@@ -146,7 +184,6 @@ class MessageStore {
       );
     });
 
-    // Limit cache size
     while (uniqueIds.length > MAX_CACHED_MESSAGES_PER_ROOM) {
       const removed = uniqueIds.shift();
       if (removed) this.store.messagesById.delete(removed);
@@ -156,6 +193,7 @@ class MessageStore {
     this.notify();
   }
 
+  /** Merges partial updates into an existing message */
   updateMessage(messageId: string, updates: Partial<Message>): void {
     const existing = this.store.messagesById.get(messageId);
     if (existing) {
@@ -164,8 +202,11 @@ class MessageStore {
     }
   }
 
+  /**
+   * Replaces a temporary (optimistic) message with the confirmed server version.
+   * Finds which room the temp message belongs to and swaps it.
+   */
   replaceTempMessage(tempId: string, realMessage: Message): void {
-    // Find which room contains this temp message
     let targetRoomId: string | null = null;
     for (const [roomId, ids] of this.store.roomMessages.entries()) {
       if (ids.includes(tempId)) {
@@ -175,17 +216,16 @@ class MessageStore {
     }
 
     if (targetRoomId) {
-      // Remove temp message
       const roomMessages = this.store.roomMessages.get(targetRoomId) || [];
       const filtered = roomMessages.filter((id) => id !== tempId);
       this.store.roomMessages.set(targetRoomId, filtered);
       this.store.messagesById.delete(tempId);
 
-      // Add real message
       this.addMessage(targetRoomId, realMessage);
     }
   }
 
+  /** Removes a message from the store by its ID */
   deleteMessage(roomId: string, messageId: string): void {
     const roomMessages = this.store.roomMessages.get(roomId) || [];
     this.store.roomMessages.set(
@@ -196,14 +236,16 @@ class MessageStore {
     this.notify();
   }
 
-  // ============================================
-  // METADATA OPERATIONS
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Metadata Operations
+  // ---------------------------------------------------------------------------
 
+  /** Returns metadata for a room (unread count, pagination status, etc.) */
   getRoomMetadata(roomId: string): RoomMetadata | undefined {
     return this.store.roomMetadata.get(roomId);
   }
 
+  /** Updates or creates metadata for a room */
   setRoomMetadata(roomId: string, metadata: Partial<RoomMetadata>): void {
     const existing = this.store.roomMetadata.get(roomId) || {
       unreadCount: 0,
@@ -214,13 +256,16 @@ class MessageStore {
     this.notify();
   }
 
-  // ============================================
-  // PERSISTENCE
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Persistence
+  // ---------------------------------------------------------------------------
 
-  private async persistToAsyncStorage() {
+  /**
+   * Persists the last 50 messages per room to AsyncStorage.
+   * Temporary (optimistic) messages are excluded.
+   */
+  private async persistToAsyncStorage(): Promise<void> {
     try {
-      // Only persist recent messages (last 50 per room)
       const toPersist: Record<string, any> = {};
 
       for (const [roomId, messageIds] of this.store.roomMessages.entries()) {
@@ -241,11 +286,12 @@ class MessageStore {
         ]),
       );
     } catch (error) {
-      console.warn("Failed to persist messages:", error);
+      // Silently fail — cache is not critical
     }
   }
 
-  private async loadFromAsyncStorage() {
+  /** Loads previously persisted messages from AsyncStorage */
+  private async loadFromAsyncStorage(): Promise<void> {
     try {
       const keys = await AsyncStorage.getAllKeys();
       const chatKeys = keys.filter((key) => key.startsWith(STORAGE_PREFIX));
@@ -259,14 +305,15 @@ class MessageStore {
         }
       }
     } catch (error) {
-      console.warn("Failed to load messages from storage:", error);
+      // Silently fail — cache is not critical
     }
   }
 
-  // ============================================
-  // CLEANUP
-  // ============================================
+  // ---------------------------------------------------------------------------
+  // Cleanup
+  // ---------------------------------------------------------------------------
 
+  /** Removes all cached data for a specific room */
   clearRoom(roomId: string): void {
     const messageIds = this.store.roomMessages.get(roomId) || [];
     messageIds.forEach((id) => this.store.messagesById.delete(id));
@@ -275,6 +322,7 @@ class MessageStore {
     this.notify();
   }
 
+  /** Removes all cached data across all rooms */
   clearAll(): void {
     this.store.messagesById.clear();
     this.store.roomMessages.clear();
@@ -283,10 +331,20 @@ class MessageStore {
   }
 }
 
-// Singleton instance
+// -----------------------------------------------------------------------------
+// Singleton Instance
+// -----------------------------------------------------------------------------
+
 export const messageStore = new MessageStore();
 
-// React hook for using the store
+// -----------------------------------------------------------------------------
+// React Hook
+// -----------------------------------------------------------------------------
+
+/**
+ * React hook that provides access to the MessageStore for a specific room.
+ * Automatically re-renders when the store data for that room changes.
+ */
 export function useMessageStore(roomId: string) {
   const [, forceUpdate] = useState({});
 
