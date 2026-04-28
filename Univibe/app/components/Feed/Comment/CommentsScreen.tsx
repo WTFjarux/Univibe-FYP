@@ -44,9 +44,6 @@ import {
 
 const { width: screenWidth } = Dimensions.get("window");
 
-/**
- * Ensures comments are properly typed by handling the replies union type
- */
 const assertComments = (comments: any[]): Comment[] => {
   return comments.map((comment) => ({
     ...comment,
@@ -59,38 +56,48 @@ const assertComments = (comments: any[]): Comment[] => {
   })) as Comment[];
 };
 
-/**
- * Main comments screen component
- * Displays a post and its threaded comments with full CRUD functionality
- */
+const countAllComments = (comments: Comment[]): number => {
+  let count = 0;
+  for (const comment of comments) {
+    count++;
+    if (Array.isArray(comment.replies) && comment.replies.length > 0) {
+      const firstReply = comment.replies[0];
+      if (typeof firstReply === "object") {
+        count += countAllComments(comment.replies as Comment[]);
+      } else {
+        count += comment.replies.length;
+      }
+    }
+  }
+  return count;
+};
+
 export default function CommentScreen() {
   const { postId } = useLocalSearchParams<{ postId: string }>();
   const router = useRouter();
   const { user, token } = useAuth();
 
-  // ===== State =====
   const [post, setPost] = useState<Post | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [totalComments, setTotalComments] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
-  const [totalComments, setTotalComments] = useState(0);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [imageModalVisible, setImageModalVisible] = useState(false);
   const [isAnyCommentEditing, setIsAnyCommentEditing] = useState(false);
-
-  // Post like state
   const [isPostLiked, setIsPostLiked] = useState(false);
   const [postLikesCount, setPostLikesCount] = useState(0);
 
-  // ===== Refs =====
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<any>(null);
 
-  // ===== Custom Hooks =====
+  // Prevent duplicate fetches
+  const isFetchingRef = useRef(false);
+
   const {
     submitting,
     replyingTo,
@@ -109,45 +116,63 @@ export default function CommentScreen() {
     user,
   );
 
-  // ===== Data Fetching =====
   const fetchPostDetails = async () => {
     try {
       const response = await getPostById(postId);
       setPost(response.post);
       setIsPostLiked(response.post.isLiked || false);
       setPostLikesCount(response.post.likes?.length || 0);
+      // DON'T set totalComments here - let fetchComments handle it
     } catch (error) {
       console.error("Error fetching post:", error);
-      Alert.alert("Error", "Failed to load post details");
     }
   };
 
   const fetchComments = async (pageNum = 1, refresh = false) => {
+    if (isFetchingRef.current && pageNum > 1) return;
+    
+    if (refresh || pageNum === 1) {
+      isFetchingRef.current = true;
+    }
+
     try {
       const response = await getPostComments(postId, pageNum, 20);
       const typedComments = assertComments(response.comments);
+      const actualCount = countAllComments(typedComments);
 
       if (refresh || pageNum === 1) {
         setComments(typedComments);
+        // Use the count from our tree calculation - most accurate
+        setTotalComments(actualCount);
       } else {
         setComments((prev) => [...prev, ...typedComments]);
       }
 
       setHasMore(response.pagination?.pages > pageNum);
-      setTotalComments(response.totalComments);
     } catch (error: any) {
       console.error("Error fetching comments:", error);
-      Alert.alert("Error", error.message || "Failed to load comments");
+      if (pageNum === 1) {
+        Alert.alert("Error", error.message || "Failed to load comments");
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
+      if (refresh || pageNum === 1) {
+        isFetchingRef.current = false;
+      }
     }
   };
 
-  // ===== Effects =====
   useEffect(() => {
     if (postId && token) {
-      Promise.all([fetchPostDetails(), fetchComments(1, true)]);
+      setLoading(true);
+      setComments([]);
+      setTotalComments(0);
+      
+      // Fetch post details first, then comments (sequential, not parallel)
+      fetchPostDetails().then(() => {
+        fetchComments(1, true);
+      });
     } else if (!token) {
       setLoading(false);
       Alert.alert("Login Required", "Please login to view comments", [
@@ -156,11 +181,9 @@ export default function CommentScreen() {
     }
   }, [postId, token]);
 
-  // ===== Handlers =====
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     setPage(1);
-    fetchPostDetails();
     fetchComments(1, true);
   }, []);
 
@@ -176,38 +199,16 @@ export default function CommentScreen() {
     if (!token || !post) return;
 
     try {
-      // Optimistically update UI
       const newLikedState = !isPostLiked;
       setIsPostLiked(newLikedState);
       setPostLikesCount((prev) => (newLikedState ? prev + 1 : prev - 1));
 
-      // Call API to toggle like
       const response = await toggleLike(postId);
-
-      // Update with actual response
       setIsPostLiked(response.isLiked);
       setPostLikesCount(response.likes);
-
-      // Update the post object
-      setPost((prev) =>
-        prev
-          ? {
-              ...prev,
-              isLiked: response.isLiked,
-              likes: response.isLiked
-                ? [...(prev.likes || []), { _id: user?.id }]
-                : (prev.likes || []).filter(
-                    (like: any) => like._id !== user?.id,
-                  ),
-            }
-          : null,
-      );
     } catch (error: any) {
-      console.error("Error liking post:", error);
-      // Revert on error
       setIsPostLiked(!isPostLiked);
       setPostLikesCount((prev) => (isPostLiked ? prev + 1 : prev - 1));
-      Alert.alert("Error", error.message || "Failed to like post");
     }
   };
 
@@ -224,10 +225,7 @@ export default function CommentScreen() {
     });
     setCommentText(`@${username} `);
     setIsAnonymous(false);
-
-    setTimeout(() => {
-      inputRef.current?.focus();
-    }, 100);
+    setTimeout(() => inputRef.current?.focus(), 100);
   };
 
   const handleCancelReply = () => {
@@ -255,7 +253,6 @@ export default function CommentScreen() {
     setSelectedImageIndex(index);
   };
 
-  // ===== Render Helpers =====
   const renderPostHeader = useMemo(() => {
     if (!post) return null;
     return (
@@ -313,7 +310,6 @@ export default function CommentScreen() {
     return <ActivityIndicator style={styles.footerLoader} color="#8b5cf6" />;
   }, [loading, comments.length]);
 
-  // ===== Loading State =====
   if (loading && !post) {
     return (
       <SafeAreaView style={styles.container}>
@@ -324,7 +320,6 @@ export default function CommentScreen() {
     );
   }
 
-  // ===== Main Render =====
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
@@ -358,20 +353,9 @@ export default function CommentScreen() {
           maxToRenderPerBatch={10}
           windowSize={5}
           onScrollBeginDrag={() => Keyboard.dismiss()}
-          onScrollToIndexFailed={(info) => {
-            const wait = new Promise((resolve) => setTimeout(resolve, 500));
-            wait.then(() => {
-              flatListRef.current?.scrollToIndex({
-                index: info.index,
-                viewPosition: 0.5,
-                animated: true,
-              });
-            });
-          }}
-          extraData={comments}
+          extraData={totalComments}
         />
 
-        {/* Hide main input when any comment is being edited */}
         {!isAnyCommentEditing && (
           <CommentInput
             ref={inputRef}
@@ -403,41 +387,17 @@ export default function CommentScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#fff",
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  listContent: {
-    flexGrow: 1,
-  },
-  emptyContainer: {
-    paddingVertical: 48,
-    alignItems: "center",
-  },
+  container: { flex: 1, backgroundColor: "#fff" },
+  keyboardView: { flex: 1 },
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  listContent: { flexGrow: 1 },
+  emptyContainer: { paddingVertical: 48, alignItems: "center" },
   emptyTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#111827",
-    fontFamily: "SofiaSans-Bold",
-    marginTop: 12,
-    marginBottom: 4,
+    fontSize: 16, fontWeight: "600", color: "#111827",
+    fontFamily: "SofiaSans-Bold", marginTop: 12, marginBottom: 4,
   },
   emptyText: {
-    fontSize: 14,
-    fontFamily: "SofiaSans-Regular",
-
-    color: "#6b7280",
+    fontSize: 14, fontFamily: "SofiaSans-Regular", color: "#6b7280",
   },
-  footerLoader: {
-    paddingVertical: 20,
-    alignItems: "center",
-  },
+  footerLoader: { paddingVertical: 20, alignItems: "center" },
 });

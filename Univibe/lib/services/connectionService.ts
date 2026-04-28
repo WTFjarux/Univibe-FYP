@@ -1,9 +1,13 @@
 // lib/connectionService.ts
-import api from './api';
-import { API_BASE_URL } from '@/constants/ipConstants';
-import { notificationService } from './notificationService';
+import api from "./api";
+import { API_BASE_URL } from "@/constants/ipConstants";
+import { notificationService } from "./notificationService";
 
-export type ConnectionStatusType = 'connected' | 'pending_sent' | 'pending_received' | 'not_connected';
+export type ConnectionStatusType =
+  | "connected"
+  | "pending_sent"
+  | "pending_received"
+  | "not_connected";
 
 export interface ConnectionStatusResponse {
   success: boolean;
@@ -78,26 +82,33 @@ export const connectionService = {
   /**
    * Send a connection request to another user
    */
-  sendConnectionRequest: async (userId: string): Promise<ConnectionResponse> => {
+  sendConnectionRequest: async (
+    userId: string,
+  ): Promise<ConnectionResponse> => {
     try {
-      const response = await api.post(`${API_BASE_URL}/api/connections/request/${userId}`);
-      console.log('Send connection response:', response.data);
-      
+      const response = await api.post(
+        `${API_BASE_URL}/api/connections/request/${userId}`,
+      );
+      console.log("Send connection response:", response.data);
+
       return {
         success: true,
         message: response.data.message,
         data: {
-          status: response.data.status || (response.data.autoAccepted ? 'connected' : 'pending_sent'),
+          status:
+            response.data.status ||
+            (response.data.autoAccepted ? "connected" : "pending_sent"),
           autoAccepted: response.data.autoAccepted || false,
           senderConnectionCount: response.data.data?.senderConnectionCount,
           receiverConnectionCount: response.data.data?.receiverConnectionCount,
-        }
+        },
       };
     } catch (error: any) {
-      console.error('Send connection request error:', error);
+      console.error("Send connection request error:", error);
       return {
         success: false,
-        message: error.response?.data?.message || 'Failed to send connection request',
+        message:
+          error.response?.data?.message || "Failed to send connection request",
       };
     }
   },
@@ -105,24 +116,31 @@ export const connectionService = {
   /**
    * Accept a connection request
    */
-  acceptConnectionRequest: async (requestId: string): Promise<ConnectionResponse> => {
+  acceptConnectionRequest: async (
+    requestId: string,
+  ): Promise<ConnectionResponse> => {
     try {
-      const response = await api.post(`${API_BASE_URL}/api/connections/accept/${requestId}`);
-      console.log('Accept connection response:', response.data);
-      
+      const response = await api.post(
+        `${API_BASE_URL}/api/connections/accept/${requestId}`,
+      );
+      console.log("Accept connection response:", response.data);
+
       return {
         success: true,
         message: response.data.message,
         data: {
           userConnectionCount: response.data.data?.userConnectionCount,
-          requesterConnectionCount: response.data.data?.requesterConnectionCount,
-        }
+          requesterConnectionCount:
+            response.data.data?.requesterConnectionCount,
+        },
       };
     } catch (error: any) {
-      console.error('Accept connection request error:', error);
+      console.error("Accept connection request error:", error);
       return {
         success: false,
-        message: error.response?.data?.message || 'Failed to accept connection request',
+        message:
+          error.response?.data?.message ||
+          "Failed to accept connection request",
       };
     }
   },
@@ -130,18 +148,24 @@ export const connectionService = {
   /**
    * Reject a connection request
    */
-  rejectConnectionRequest: async (requestId: string): Promise<ConnectionResponse> => {
+  rejectConnectionRequest: async (
+    requestId: string,
+  ): Promise<ConnectionResponse> => {
     try {
-      const response = await api.post(`${API_BASE_URL}/api/connections/reject/${requestId}`);
+      const response = await api.post(
+        `${API_BASE_URL}/api/connections/reject/${requestId}`,
+      );
       return {
         success: true,
         message: response.data.message,
       };
     } catch (error: any) {
-      console.error('Reject connection request error:', error);
+      console.error("Reject connection request error:", error);
       return {
         success: false,
-        message: error.response?.data?.message || 'Failed to reject connection request',
+        message:
+          error.response?.data?.message ||
+          "Failed to reject connection request",
       };
     }
   },
@@ -149,52 +173,62 @@ export const connectionService = {
   /**
    * Cancel a sent connection request - FIXED
    */
-cancelConnectionRequest: async (userId: string): Promise<ConnectionResponse> => {
-  try {
-    // First, delete any pending notifications
-    await notificationService.deletePendingConnectionNotifications(userId);
-    
-    // Then cancel the request
-    const response = await api.delete(`${API_BASE_URL}/api/connections/cancel/${userId}`);
-    console.log('Cancel connection response:', response.data);
-    
-    return {
-      success: true,
-      message: response.data.message,
-      data: {
-        userConnectionCount: response.data.data?.userConnectionCount,
-      }
-    };
-  } catch (error: any) {
-    console.error('Cancel connection request error:', error);
-    return {
-      success: false,
-      message: error.response?.data?.message || 'Failed to cancel connection request',
-    };
-  }
-},
+  cancelConnectionRequest: async (
+    userId: string,
+  ): Promise<ConnectionResponse> => {
+    try {
+      // First, delete any pending notifications
+      await notificationService.deletePendingConnectionNotifications(userId);
+
+      // Then cancel the request
+      const response = await api.delete(
+        `${API_BASE_URL}/api/connections/cancel/${userId}`,
+      );
+      console.log("Cancel connection response:", response.data);
+
+      return {
+        success: true,
+        message: response.data.message,
+        data: {
+          userConnectionCount: response.data.data?.userConnectionCount,
+        },
+      };
+    } catch (error: any) {
+      console.error("Cancel connection request error:", error);
+      return {
+        success: false,
+        message:
+          error.response?.data?.message ||
+          "Failed to cancel connection request",
+      };
+    }
+  },
 
   /**
    * Remove an existing connection
    */
-  removeConnection: async (connectionId: string): Promise<ConnectionResponse> => {
+  removeConnection: async (
+    connectionId: string,
+  ): Promise<ConnectionResponse> => {
     try {
-      const response = await api.delete(`${API_BASE_URL}/api/connections/remove/${connectionId}`);
-      console.log('Remove connection response:', response.data);
-      
+      const response = await api.delete(
+        `${API_BASE_URL}/api/connections/remove/${connectionId}`,
+      );
+      console.log("Remove connection response:", response.data);
+
       return {
         success: true,
         message: response.data.message,
         data: {
           userConnectionCount: response.data.data?.userConnectionCount,
           connectionUserCount: response.data.data?.removedUserConnectionCount,
-        }
+        },
       };
     } catch (error: any) {
-      console.error('Remove connection error:', error);
+      console.error("Remove connection error:", error);
       return {
         success: false,
-        message: error.response?.data?.message || 'Failed to remove connection',
+        message: error.response?.data?.message || "Failed to remove connection",
       };
     }
   },
@@ -202,15 +236,19 @@ cancelConnectionRequest: async (userId: string): Promise<ConnectionResponse> => 
   /**
    * Get connection status with another user
    */
-  getConnectionStatus: async (userId: string): Promise<ConnectionStatusResponse> => {
+  getConnectionStatus: async (
+    userId: string,
+  ): Promise<ConnectionStatusResponse> => {
     try {
-      const response = await api.get(`${API_BASE_URL}/api/connections/status/${userId}`);
+      const response = await api.get(
+        `${API_BASE_URL}/api/connections/status/${userId}`,
+      );
       return response.data;
     } catch (error: any) {
-      console.error('Get connection status error:', error);
+      console.error("Get connection status error:", error);
       return {
         success: false,
-        data: { status: 'not_connected' },
+        data: { status: "not_connected" },
       };
     }
   },
@@ -218,15 +256,21 @@ cancelConnectionRequest: async (userId: string): Promise<ConnectionResponse> => 
   /**
    * Get user's connections list with pagination
    */
-  getConnections: async (userId: string, page = 1, limit = 20): Promise<ConnectionsResponse> => {
+  getConnections: async (
+    userId: string,
+    page = 1,
+    limit = 20,
+  ): Promise<ConnectionsResponse> => {
     try {
-      const response = await api.get(`${API_BASE_URL}/api/connections/${userId}/connections?page=${page}&limit=${limit}`);
+      const response = await api.get(
+        `${API_BASE_URL}/api/connections/${userId}/connections?page=${page}&limit=${limit}`,
+      );
       return response.data;
     } catch (error: any) {
-      console.error('Get connections error:', error);
+      console.error("Get connections error:", error);
       return {
         success: false,
-        message: error.response?.data?.message || 'Failed to get connections',
+        message: error.response?.data?.message || "Failed to get connections",
       };
     }
   },
@@ -234,15 +278,21 @@ cancelConnectionRequest: async (userId: string): Promise<ConnectionResponse> => 
   /**
    * Get pending connection requests with pagination
    */
-  getPendingRequests: async (page = 1, limit = 20): Promise<PendingRequestsResponse> => {
+  getPendingRequests: async (
+    page = 1,
+    limit = 20,
+  ): Promise<PendingRequestsResponse> => {
     try {
-      const response = await api.get(`${API_BASE_URL}/api/connections/requests/pending?page=${page}&limit=${limit}`);
+      const response = await api.get(
+        `${API_BASE_URL}/api/connections/requests/pending?page=${page}&limit=${limit}`,
+      );
       return response.data;
     } catch (error: any) {
-      console.error('Get pending requests error:', error);
+      console.error("Get pending requests error:", error);
       return {
         success: false,
-        message: error.response?.data?.message || 'Failed to get pending requests',
+        message:
+          error.response?.data?.message || "Failed to get pending requests",
       };
     }
   },
@@ -250,15 +300,22 @@ cancelConnectionRequest: async (userId: string): Promise<ConnectionResponse> => 
   /**
    * Get mutual connections with another user
    */
-  getMutualConnections: async (userId: string, page = 1, limit = 20): Promise<ConnectionsResponse> => {
+  getMutualConnections: async (
+    userId: string,
+    page = 1,
+    limit = 20,
+  ): Promise<ConnectionsResponse> => {
     try {
-      const response = await api.get(`${API_BASE_URL}/api/connections/mutual/${userId}?page=${page}&limit=${limit}`);
+      const response = await api.get(
+        `${API_BASE_URL}/api/connections/mutual/${userId}?page=${page}&limit=${limit}`,
+      );
       return response.data;
     } catch (error: any) {
-      console.error('Get mutual connections error:', error);
+      console.error("Get mutual connections error:", error);
       return {
         success: false,
-        message: error.response?.data?.message || 'Failed to get mutual connections',
+        message:
+          error.response?.data?.message || "Failed to get mutual connections",
       };
     }
   },
@@ -268,13 +325,15 @@ cancelConnectionRequest: async (userId: string): Promise<ConnectionResponse> => 
    */
   getConnectionSuggestions: async (limit = 10) => {
     try {
-      const response = await api.get(`${API_BASE_URL}/api/connections/suggestions?limit=${limit}`);
+      const response = await api.get(
+        `${API_BASE_URL}/api/connections/suggestions?limit=${limit}`,
+      );
       return response.data;
     } catch (error: any) {
-      console.error('Get connection suggestions error:', error);
+      console.error("Get connection suggestions error:", error);
       return {
         success: false,
-        message: error.response?.data?.message || 'Failed to get suggestions',
+        message: error.response?.data?.message || "Failed to get suggestions",
       };
     }
   },
@@ -282,15 +341,20 @@ cancelConnectionRequest: async (userId: string): Promise<ConnectionResponse> => 
   /**
    * Get connection count for a user
    */
-  getConnectionCount: async (userId: string): Promise<ConnectionCountResponse> => {
+  getConnectionCount: async (
+    userId: string,
+  ): Promise<ConnectionCountResponse> => {
     try {
-      const response = await api.get(`${API_BASE_URL}/api/connections/count/${userId}`);
+      const response = await api.get(
+        `${API_BASE_URL}/api/connections/count/${userId}`,
+      );
       return response.data;
     } catch (error: any) {
-      console.error('Get connection count error:', error);
+      console.error("Get connection count error:", error);
       return {
         success: false,
-        message: error.response?.data?.message || 'Failed to get connection count',
+        message:
+          error.response?.data?.message || "Failed to get connection count",
       };
     }
   },

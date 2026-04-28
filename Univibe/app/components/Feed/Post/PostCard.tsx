@@ -1,4 +1,4 @@
-// app/components/Feed/Post/PostCard.tsx - Fixed for consistent rendering
+// app/components/Feed/Post/PostCard.tsx - Complete Fixed Version
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
@@ -7,7 +7,6 @@ import {
   Image,
   TouchableOpacity,
   StyleSheet,
-  Dimensions,
   ScrollView,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -20,6 +19,7 @@ import { Post, getFullImageUrl } from "@/lib/services/postService";
 import { formatTimeAgo } from "@/lib/utils/formatTime";
 import PostOptionsModal from "./PostOptionsModal";
 import { useAuth } from "@/lib/contexts/AuthContext";
+import { commentEvents, EVENTS } from "@/lib/utils/eventEmitter";
 
 const DEFAULT_AVATAR: ImageSourcePropType = require("../../../../assets/images/default-avatar.png");
 
@@ -59,6 +59,9 @@ const PostCard: React.FC<PostCardProps> = ({
   onProfilePress,
 }) => {
   const router = useRouter();
+  const { user, profile } = useAuth();
+
+  // ===== State Management =====
   const [optionsVisible, setOptionsVisible] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [isReported, setIsReported] = useState(false);
@@ -68,92 +71,112 @@ const PostCard: React.FC<PostCardProps> = ({
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
 
-  const scrollViewRef = useRef<ScrollView>(null);
-  const { user, profile } = useAuth();
+  // Track comment count locally with state for real-time updates
+  const [displayCommentCount, setDisplayCommentCount] = useState(
+    post.commentCount || post.comments?.length || 0,
+  );
 
-  // Early return if post is missing
+  // Track like state locally for optimistic updates
+  const [isLiked, setIsLiked] = useState(post.isLiked || false);
+  const [likesCount, setLikesCount] = useState(post.likes?.length || 0);
+
+  const scrollViewRef = useRef<ScrollView>(null);
+  const imageHeight = 400;
+
+  // ===== Early Return for Invalid Post =====
   if (!post) {
     console.warn("PostCard: post is null or undefined");
     return null;
   }
 
-  const imageHeight = 400;
+  // ===== Sync with Post Props =====
+  useEffect(() => {
+    setDisplayCommentCount(post.commentCount || post.comments?.length || 0);
+  }, [post.commentCount, post.comments?.length]);
 
-  const getCurrentUserId = (): string | null => {
+  useEffect(() => {
+    setIsLiked(post.isLiked || false);
+    setLikesCount(post.likes?.length || 0);
+  }, [post.isLiked, post.likes?.length]);
+
+  // ===== Event Listeners for Real-time Updates =====
+  useEffect(() => {
+    // Listen for comment count changes from CommentsScreen
+    const unsubComments = commentEvents.on(
+      EVENTS.COMMENT_COUNT_CHANGED,
+      (data: { postId: string; count: number }) => {
+        if (data.postId === post._id) {
+          setDisplayCommentCount(data.count);
+        }
+      },
+    );
+
+    return () => {
+      unsubComments();
+    };
+  }, [post._id]);
+
+  // ===== Image Error Handling =====
+  useEffect(() => {
+    if (post.images?.length > 0) {
+      setPostImageError(new Array(post.images.length).fill(false));
+    }
+  }, [post.images?.length]);
+
+  const handleImageError = useCallback((index: number) => {
+    setPostImageError((prev) => {
+      const newErrors = [...prev];
+      newErrors[index] = true;
+      return newErrors;
+    });
+  }, []);
+
+  // ===== User Identification =====
+  const getCurrentUserId = useCallback((): string | null => {
     if (user?.id) return user.id.toString();
     if (profile?.user?._id) return profile.user._id.toString();
     if (profile?._id) return profile._id.toString();
     return null;
-  };
+  }, [user, profile]);
 
   const currentUserId = getCurrentUserId();
 
-  const isOwnPost = (): boolean => {
+  const isOwnPost = useCallback((): boolean => {
     if (post.isAnonymous && post.originalUser) {
       return currentUserId === post.originalUser._id?.toString();
     }
     return currentUserId === post.user?._id?.toString();
-  };
+  }, [currentUserId, post.isAnonymous, post.originalUser, post.user]);
 
   const ownPost = isOwnPost();
 
-  // Get the actual user ID for navigation (original user if anonymous)
-  const getUserIdForNavigation = (): string | null => {
+  const getUserIdForNavigation = useCallback((): string | null => {
     if (post.isAnonymous && post.originalUser) {
       return post.originalUser._id?.toString();
     }
     return post.user?._id?.toString();
-  };
+  }, [post.isAnonymous, post.originalUser, post.user]);
 
-  const getProfileImage = (): ImageSourcePropType => {
+  // ===== Image Handling =====
+  const getProfileImage = useCallback((): ImageSourcePropType => {
     if (post.isAnonymous) return DEFAULT_AVATAR;
-
     if (!avatarError && post.user?.profilePicture?.trim()) {
       return { uri: getFullImageUrl(post.user.profilePicture) };
     }
-
     return DEFAULT_AVATAR;
-  };
+  }, [post.isAnonymous, avatarError, post.user?.profilePicture]);
 
-  const getPostImages = () => {
+  const getPostImages = useCallback(() => {
     if (!post.images?.length) return [];
     return post.images.map((image) => ({
       ...image,
       url: getFullImageUrl(image.url),
     }));
-  };
+  }, [post.images]);
 
   const postImages = getPostImages();
 
-  useEffect(() => {
-    if (postImages.length > 0) {
-      setPostImageError(new Array(postImages.length).fill(false));
-    }
-  }, [postImages.length]);
-
-  const handleImageError = (index: number) => {
-    const newErrors = [...postImageError];
-    newErrors[index] = true;
-    setPostImageError(newErrors);
-  };
-
-  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const scrollPosition = event.nativeEvent.contentOffset.x;
-    const index = Math.round(scrollPosition / containerWidth);
-    setCurrentImageIndex(index);
-  };
-
-  const goToImage = (index: number) => {
-    setCurrentImageIndex(index);
-    if (scrollViewRef.current && containerWidth > 0) {
-      scrollViewRef.current.scrollTo({
-        x: index * containerWidth,
-        animated: true,
-      });
-    }
-  };
-
-  // Navigate to user profile - with error handling and onProfilePress support
+  // ===== Navigation =====
   const handleUserPress = useCallback(() => {
     try {
       const userId = getUserIdForNavigation();
@@ -162,11 +185,9 @@ const PostCard: React.FC<PostCardProps> = ({
         return;
       }
 
-      // Use the onProfilePress callback if provided (from parent)
       if (onProfilePress) {
         onProfilePress(userId);
       } else {
-        // Fallback logic
         if (userId === currentUserId) {
           router.push("/(tabs)/profile");
         } else {
@@ -177,9 +198,33 @@ const PostCard: React.FC<PostCardProps> = ({
       console.error("Navigation error in PostCard:", error);
       Alert.alert("Error", "Could not navigate to profile");
     }
-  }, [currentUserId, router, onProfilePress]);
+  }, [currentUserId, getUserIdForNavigation, onProfilePress, router]);
 
-  const getVisibilityIconName = (): IconName => {
+  // ===== Image Carousel =====
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const scrollPosition = event.nativeEvent.contentOffset.x;
+      const index = Math.round(scrollPosition / containerWidth);
+      setCurrentImageIndex(index);
+    },
+    [containerWidth],
+  );
+
+  const goToImage = useCallback(
+    (index: number) => {
+      setCurrentImageIndex(index);
+      if (scrollViewRef.current && containerWidth > 0) {
+        scrollViewRef.current.scrollTo({
+          x: index * containerWidth,
+          animated: true,
+        });
+      }
+    },
+    [containerWidth],
+  );
+
+  // ===== Visibility Helpers =====
+  const getVisibilityIconName = useCallback((): IconName => {
     const icons: Record<string, IconName> = {
       campus: "school-outline",
       connections: "people-outline",
@@ -187,9 +232,9 @@ const PostCard: React.FC<PostCardProps> = ({
       private: "lock-closed-outline",
     };
     return icons[post.visibility] || "globe-outline";
-  };
+  }, [post.visibility]);
 
-  const getVisibilityDisplayName = (): string => {
+  const getVisibilityDisplayName = useCallback((): string => {
     const names: Record<string, string> = {
       campus: "Campus",
       connections: "Connections",
@@ -197,9 +242,9 @@ const PostCard: React.FC<PostCardProps> = ({
       private: "Only Me",
     };
     return names[post.visibility] || "Public";
-  };
+  }, [post.visibility]);
 
-  const getVisibilityBadgeColor = (): string => {
+  const getVisibilityBadgeColor = useCallback((): string => {
     const colors: Record<string, string> = {
       campus: "#3b82f6",
       connections: "#8b5cf6",
@@ -207,30 +252,55 @@ const PostCard: React.FC<PostCardProps> = ({
       private: "#6b7280",
     };
     return colors[post.visibility] || "#9ca3af";
-  };
+  }, [post.visibility]);
 
-  const handleMorePress = () => setOptionsVisible(true);
+  // ===== Action Handlers =====
+  const handleMorePress = useCallback(() => setOptionsVisible(true), []);
 
-  const handleSave = (postId: string) => {
-    setIsSaved(!isSaved);
-    if (onSave) onSave(postId);
-  };
+  const handleSave = useCallback(
+    (postId: string) => {
+      setIsSaved((prev) => !prev);
+      if (onSave) onSave(postId);
+    },
+    [onSave],
+  );
 
-  const handleReport = (postId: string) => {
-    setIsReported(true);
-    if (onReport) onReport(postId);
-  };
+  const handleReport = useCallback(
+    (postId: string) => {
+      setIsReported(true);
+      if (onReport) onReport(postId);
+    },
+    [onReport],
+  );
 
-  const handleHide = (postId: string) => {
-    setIsHidden(true);
-    if (onHide) onHide(postId);
-  };
+  const handleHide = useCallback(
+    (postId: string) => {
+      setIsHidden(true);
+      if (onHide) onHide(postId);
+    },
+    [onHide],
+  );
 
-  const handleCopyLink = (postId: string) => {
-    if (onCopyLink) onCopyLink(postId);
-  };
+  const handleCopyLink = useCallback(
+    (postId: string) => {
+      if (onCopyLink) onCopyLink(postId);
+    },
+    [onCopyLink],
+  );
 
-  const renderIndicators = () => {
+  // ===== Display Helpers =====
+  const getUserDisplayName = useCallback(() => {
+    if (post.isAnonymous) return "Anonymous";
+    return post.user?.name || "User";
+  }, [post.isAnonymous, post.user?.name]);
+
+  const getUserDisplayHandle = useCallback(() => {
+    if (post.isAnonymous) return "anonymous";
+    return post.user?.username || "user";
+  }, [post.isAnonymous, post.user?.username]);
+
+  // ===== Render Functions =====
+  const renderIndicators = useCallback(() => {
     if (postImages.length <= 1) return null;
 
     return (
@@ -247,9 +317,9 @@ const PostCard: React.FC<PostCardProps> = ({
         ))}
       </View>
     );
-  };
+  }, [postImages, currentImageIndex, goToImage]);
 
-  const renderSingleImage = () => {
+  const renderSingleImage = useCallback(() => {
     if (containerWidth === 0) return null;
 
     const image = postImages[0];
@@ -279,9 +349,15 @@ const PostCard: React.FC<PostCardProps> = ({
         onError={() => handleImageError(0)}
       />
     );
-  };
+  }, [
+    containerWidth,
+    postImages,
+    postImageError,
+    imageHeight,
+    handleImageError,
+  ]);
 
-  const renderMultipleImages = () => {
+  const renderMultipleImages = useCallback(() => {
     if (containerWidth === 0) return null;
 
     return (
@@ -293,6 +369,7 @@ const PostCard: React.FC<PostCardProps> = ({
           showsHorizontalScrollIndicator={false}
           onScroll={handleScroll}
           scrollEventThrottle={16}
+          decelerationRate="fast"
           style={{ width: containerWidth }}
         >
           {postImages.map((image, index) => {
@@ -330,19 +407,17 @@ const PostCard: React.FC<PostCardProps> = ({
         {renderIndicators()}
       </View>
     );
-  };
+  }, [
+    containerWidth,
+    postImages,
+    postImageError,
+    imageHeight,
+    handleScroll,
+    handleImageError,
+    renderIndicators,
+  ]);
 
-  const getUserDisplayName = () => {
-    if (post.isAnonymous) return "Anonymous";
-    return post.user?.name || "User";
-  };
-
-  const getUserDisplayHandle = () => {
-    if (post.isAnonymous) return "anonymous";
-    return post.user?.username || "user";
-  };
-
-  const renderAvatar = () => {
+  const renderAvatar = useCallback(() => {
     if (post.isAnonymous) {
       return (
         <View style={[styles.postAvatar, styles.anonymousAvatar]}>
@@ -368,17 +443,17 @@ const PostCard: React.FC<PostCardProps> = ({
         <Image source={DEFAULT_AVATAR} style={styles.postAvatar} />
       </TouchableOpacity>
     );
-  };
+  }, [
+    post.isAnonymous,
+    avatarError,
+    post.user?.profilePicture,
+    handleUserPress,
+  ]);
 
-  const visibilityIconName = getVisibilityIconName();
-  const visibilityBadgeColor = getVisibilityBadgeColor();
-
-  // Render edited indicator based on who is viewing
-  const renderEditedIndicator = () => {
+  const renderEditedIndicator = useCallback(() => {
     if (!post.isEdited) return null;
 
     if (ownPost) {
-      // For the post owner: show "Edited X time ago"
       return (
         <View style={styles.editedIndicator}>
           <Ionicons name="create-outline" size={12} color="#9ca3af" />
@@ -387,17 +462,21 @@ const PostCard: React.FC<PostCardProps> = ({
           </Text>
         </View>
       );
-    } else {
-      // For other users: just show "Edited" tag without time
-      return (
-        <View style={styles.editedIndicator}>
-          <Ionicons name="create-outline" size={12} color="#9ca3af" />
-          <Text style={styles.editedText}>Edited</Text>
-        </View>
-      );
     }
-  };
 
+    return (
+      <View style={styles.editedIndicator}>
+        <Ionicons name="create-outline" size={12} color="#9ca3af" />
+        <Text style={styles.editedText}>Edited</Text>
+      </View>
+    );
+  }, [post.isEdited, post.editedAt, ownPost]);
+
+  // ===== Constants =====
+  const visibilityIconName = getVisibilityIconName();
+  const visibilityBadgeColor = getVisibilityBadgeColor();
+
+  // ===== Main Render =====
   return (
     <View
       style={styles.postCard}
@@ -406,6 +485,7 @@ const PostCard: React.FC<PostCardProps> = ({
         setContainerWidth(width);
       }}
     >
+      {/* Post Header */}
       <View style={styles.postHeader}>
         {renderAvatar()}
 
@@ -478,11 +558,13 @@ const PostCard: React.FC<PostCardProps> = ({
         </TouchableOpacity>
       </View>
 
+      {/* Post Content */}
       <Text style={styles.postContent}>{post.content}</Text>
 
-      {/* Edited indicator - shows differently for owner vs others */}
+      {/* Edited Indicator */}
       {renderEditedIndicator()}
 
+      {/* Post Images */}
       {postImages.length > 0 && containerWidth > 0 && (
         <View style={styles.imagesContainer}>
           {postImages.length === 1
@@ -500,20 +582,19 @@ const PostCard: React.FC<PostCardProps> = ({
         </View>
       )}
 
+      {/* Post Actions */}
       <View style={styles.postActions}>
         <TouchableOpacity
           style={styles.postAction}
           onPress={() => onLikePress(post._id)}
         >
           <Ionicons
-            name={post.isLiked ? "heart" : "heart-outline"}
+            name={isLiked ? "heart" : "heart-outline"}
             size={20}
-            color={post.isLiked ? "#ef4444" : "#6b7280"}
+            color={isLiked ? "#ef4444" : "#6b7280"}
           />
-          <Text
-            style={[styles.postActionText, post.isLiked && styles.likedText]}
-          >
-            {post.likes?.length || 0}
+          <Text style={[styles.postActionText, isLiked && styles.likedText]}>
+            {likesCount}
           </Text>
         </TouchableOpacity>
 
@@ -522,9 +603,7 @@ const PostCard: React.FC<PostCardProps> = ({
           onPress={() => onCommentPress(post._id)}
         >
           <Ionicons name="chatbubble-outline" size={20} color="#6b7280" />
-          <Text style={styles.postActionText}>
-            {post.commentCount || post.comments?.length || 0}
-          </Text>
+          <Text style={styles.postActionText}>{displayCommentCount}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -547,6 +626,7 @@ const PostCard: React.FC<PostCardProps> = ({
         </TouchableOpacity>
       </View>
 
+      {/* Post Options Modal */}
       <PostOptionsModal
         visible={optionsVisible}
         onClose={() => setOptionsVisible(false)}
@@ -569,12 +649,18 @@ const PostCard: React.FC<PostCardProps> = ({
   );
 };
 
+// ===== Styles =====
 const styles = StyleSheet.create({
   postCard: {
     backgroundColor: "white",
     marginBottom: 16,
     borderRadius: 16,
     overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
   },
   postHeader: {
     flexDirection: "row",
@@ -627,11 +713,11 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 10,
     marginLeft: 4,
-    fontFamily: "SofiaSans-Regular",
   },
   visibilityBadgeText: {
     fontSize: 10,
     fontWeight: "500",
+    fontFamily: "SofiaSans-Regular",
   },
   postContent: {
     fontSize: 15,
@@ -738,4 +824,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default PostCard;
+export default React.memo(PostCard);

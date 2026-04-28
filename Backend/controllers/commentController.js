@@ -10,29 +10,29 @@ const Notification = require("../models/Notification");
  * Check if user can view a post based on visibility settings
  */
 async function canUserViewPost(userId, post) {
+  // Post author can always view their own posts
   if (post.user.toString() === userId.toString()) {
     return true;
   }
 
-  const user = await User.findById(userId);
-  const userProfile = await Profile.findOne({ user: userId });
+  // Get user's connections and campus
+  const user = await User.findById(userId).select("connections");
+  const userProfile = await Profile.findOne({ user: userId }).select("campus");
   const userCampus = userProfile?.campus || "Unknown Campus";
-  const followingIds = user.following || [];
 
-  const connectionsQuery = await User.find({
-    $or: [{ _id: { $in: followingIds } }, { following: userId }],
-  }).select("_id");
-  const connectionIds = connectionsQuery.map((u) => u._id);
+  // Get connection IDs as strings for comparison
+  const connectionIds = (user.connections || []).map((id) => id.toString());
 
   switch (post.visibility) {
     case "campus":
+      // Check if user is in same campus as post
       return post.campus === userCampus;
-    case "following":
-      return followingIds.includes(post.user.toString());
+
     case "connections":
+      // Check if post author is in user's connections
+      // OR if user is in post author's connections (mutual)
       return connectionIds.includes(post.user.toString());
-    case "private":
-      return false;
+
     default:
       return false;
   }
@@ -42,6 +42,7 @@ async function canUserViewPost(userId, post) {
  * Check if user can comment on a post
  */
 async function canUserCommentOnPost(userId, post) {
+  // Same permission check as viewing - if they can see it, they can comment
   return await canUserViewPost(userId, post);
 }
 
@@ -470,13 +471,11 @@ exports.getPostComments = async (req, res) => {
       });
     }
 
-    const canView = await canUserViewPost(userId, post);
-    if (!canView) {
-      return res.status(403).json({
-        success: false,
-        error: "You don't have permission to view comments on this post",
-      });
-    }
+    // Get total count of ALL non-deleted comments (including nested)
+    const totalComments = await Comment.countDocuments({
+      post: postId,
+      isDeleted: false,
+    });
 
     const profiles = await Profile.find().select("user profilePicture").lean();
     const profilePictureMap = {};
@@ -530,10 +529,8 @@ exports.getPostComments = async (req, res) => {
       );
     }
 
-    const totalComments = await Comment.countDocuments({
-      post: postId,
-      isDeleted: false,
-    });
+    // Update post's commentCount to ensure it's accurate
+    await Post.findByIdAndUpdate(postId, { commentCount: totalComments });
 
     res.json({
       success: true,
@@ -544,7 +541,7 @@ exports.getPostComments = async (req, res) => {
         total: totalTopLevel,
         pages: Math.ceil(totalTopLevel / limit),
       },
-      totalComments: totalComments,
+      totalComments: totalComments, // This is the accurate total
     });
   } catch (error) {
     console.error("Error fetching comments:", error);
