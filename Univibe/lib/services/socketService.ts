@@ -306,6 +306,20 @@ class SocketService {
       this.emitEvent("reaction_removed", data);
     });
 
+    this.socket.on(
+      "chat_cleared",
+      (data: { roomId: string; clearedAt: string }) => {
+        this.emitEvent("chat_cleared", data);
+      },
+    );
+
+    this.socket.on(
+      "chat_restored",
+      (data: { roomId: string; userId: string }) => {
+        this.emitEvent("chat_restored", data);
+      },
+    );
+
     // Typing indicators
     this.socket.on("typing", (data: TypingData) => {
       this.emitEvent("typing", data);
@@ -517,6 +531,15 @@ class SocketService {
   deleteMessage(messageId: string, roomId: string): void {
     if (this.socket && this.isConnected) {
       this.socket.emit("delete_message", { messageId, roomId });
+    }
+  }
+
+  /**
+   * Clears chat history for current user
+   */
+  clearChat(roomId: string): void {
+    if (this.socket && this.isConnected) {
+      this.socket.emit("clear_chat", { roomId });
     }
   }
 

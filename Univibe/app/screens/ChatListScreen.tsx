@@ -22,6 +22,7 @@ import NewChatModal from "../components/chat/ChatList/NewChatModal";
 import ChatItem from "../components/chat/ChatList/ChatItem";
 import ChatListOptionsModal from "../components/chat/ChatList/ChatListOptionsModal";
 import type { ChatRoom, ItemLayout } from "../../lib/types/chat.types";
+import { getDirectRoomId } from "../../lib/utils/chatUtils";
 
 // -----------------------------------------------------------------------------
 // ChatListScreen Component
@@ -130,17 +131,24 @@ export default function ChatListScreen() {
   const handleStartNewChat = useCallback(
     (userId: string, userName: string, userAvatar?: string) => {
       setShowNewChatModal(false);
+
+      const currentUserId = user?.id;
+      if (!currentUserId) return;
+
+      // Generate proper direct room ID
+      const roomId = getDirectRoomId(currentUserId, userId);
+
       router.push({
         pathname: "/screens/ChatScreen",
         params: {
-          roomId: userId,
+          roomId: roomId,
           otherUserName: userName,
           otherUserId: userId,
           otherUserAvatar: userAvatar ?? "",
         },
       });
     },
-    [router],
+    [router, user?.id],
   );
 
   // ---------------------------------------------------------------------------

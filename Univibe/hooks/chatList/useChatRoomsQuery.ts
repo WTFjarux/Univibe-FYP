@@ -63,6 +63,8 @@ export const useChatRoomsQuery = ({ token }: UseChatRoomsQueryProps) => {
       isPinned: room.isPinned || false,
       isMuted: room.isMuted || false,
       muteUntil: room.muteUntil || null,
+      isCleared: room.isCleared || false,
+      clearedAt: room.clearedAt || null,
     }),
     [],
   );
@@ -108,7 +110,18 @@ export const useChatRoomsQuery = ({ token }: UseChatRoomsQueryProps) => {
       const response = await chatApi.getChatRooms();
 
       if (response.success) {
-        const normalized = response.data.map(normalizeRoom);
+        const normalized = response.data
+          .map(normalizeRoom)
+          // Filter out cleared rooms with no new messages after clearing
+          .filter((room: ChatRoom) => {
+            // Keep room if it has a lastMessage (not cleared, or has new messages)
+            if (room.lastMessage) return true;
+
+            // If no lastMessage, check if it's cleared - if so, hide it
+            // Only show if the room is NOT cleared (isCleared flag from API)
+            return !room.isCleared;
+          });
+
         const sorted = sortRooms(normalized);
 
         setRooms(sorted);

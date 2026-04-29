@@ -4,6 +4,20 @@ import { profileService } from "../services/profileService";
 import { API_BASE_URL } from "../../constants/ipConstants";
 
 // ============================================
+// ROOM ID GENERATION
+// ============================================
+
+/**
+ * Generate a deterministic direct message room ID from two user IDs.
+ * Format: direct_<smaller_id>_<larger_id>
+ * Always produces the same ID for the same pair of users.
+ */
+export const getDirectRoomId = (id1: string, id2: string): string => {
+  const ids = [id1.toString(), id2.toString()].sort();
+  return `direct_${ids[0]}_${ids[1]}`;
+};
+
+// ============================================
 // TIME FORMATTING
 // ============================================
 
@@ -149,7 +163,7 @@ export const getAvatarUrl = (avatar: string | null | undefined): string => {
 
 /**
  * Extract the other user's ID from a direct-message room ID
- * Room ID format: dm_user1_user2 or user1_user2
+ * Room ID format: direct_user1_user2
  */
 export const extractOtherUserIdFromRoomId = (
   roomId: string,
@@ -188,14 +202,14 @@ export const detectReplyType = (replyTo: {
 }): string => {
   if (replyTo.type) return replyTo.type;
   if (
-    replyTo.message === "🎤 Voice message" ||
+    replyTo.message === "Voice message" ||
     replyTo.mediaUrl?.includes("audio")
   )
     return "audio";
   if (replyTo.message === "Photo" || replyTo.mediaUrl?.includes("image"))
     return "image";
-  if (replyTo.message?.startsWith("📍")) return "location";
-  if (replyTo.message === "🎥 Video" || replyTo.mediaUrl?.includes("video"))
+  if (replyTo.message?.startsWith("Location")) return "location";
+  if (replyTo.message === "Video" || replyTo.mediaUrl?.includes("video"))
     return "video";
   return "text";
 };
@@ -213,15 +227,15 @@ export const getMessageDisplayText = (
 ): string => {
   switch (type) {
     case "audio":
-      return "🎤 Voice message";
+      return "Voice message";
     case "image":
       return "Photo";
     case "video":
-      return "🎥 Video";
+      return "Video";
     case "file":
-      return " File";
+      return "File";
     case "location":
-      return "📍 Location";
+      return "Location";
     default:
       return message || "";
   }

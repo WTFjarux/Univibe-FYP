@@ -28,6 +28,9 @@ router.get("/room/:roomId", ctrl.getRoomDetails);
 router.post("/room/:roomId/read", ctrl.markRoomAsRead);
 router.post("/room/:roomId/unread", ctrl.markRoomAsUnread);
 
+// Delete chat history for current user
+router.delete("/room/:roomId/history", ctrl.deleteChatHistory);
+
 // -----------------------------------------------------------------------------
 // Messages
 // -----------------------------------------------------------------------------

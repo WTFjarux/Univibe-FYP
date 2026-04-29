@@ -4,6 +4,7 @@ import { useCallback } from "react";
 import { Alert } from "react-native";
 import type { ChatRoom } from "../../lib/types/chat.types";
 import { chatApi } from "../../lib/services/chatApi";
+import socketService from "../../lib/services/socketService";
 
 // -----------------------------------------------------------------------------
 // Hook
@@ -84,16 +85,17 @@ export const useChatActions = (
   // ---------------------------------------------------------------------------
 
   /**
-   * Deletes a chat conversation after user confirmation.
-   * Removes the room from the list and calls onSuccess callback if provided.
+   * Deletes chat history for current user after confirmation.
+   * The chat disappears from the list.
+   * It will reappear if a new message arrives from the other participant.
    */
   const deleteChat = useCallback(
     async (room: ChatRoom | null, onSuccess?: () => void) => {
       if (!room || !token) return;
 
       Alert.alert(
-        "Delete Conversation",
-        `Are you sure you want to delete the conversation with ${room.name}?`,
+        "Delete Chat",
+        `Chat history with ${room.name} will be cleared. New messages will restore this chat.`,
         [
           { text: "Cancel", style: "cancel" },
           {
@@ -101,20 +103,27 @@ export const useChatActions = (
             style: "destructive",
             onPress: async () => {
               try {
-                const response = await chatApi.deleteRoom(token);
+                const response = await chatApi.deleteChatHistory(room.roomId);
                 if (response.success) {
+                  // Remove from list immediately
                   setRooms((prev) =>
                     prev.filter((r) => r.roomId !== room.roomId),
                   );
+
+                  // Also emit via socket for real-time
+                  if (socketService.getConnectionStatus()) {
+                    socketService.clearChat(room.roomId);
+                  }
+
                   onSuccess?.();
                 } else {
                   Alert.alert(
                     "Error",
-                    response.message || "Failed to delete conversation",
+                    response.message || "Failed to delete chat history",
                   );
                 }
               } catch {
-                Alert.alert("Error", "Failed to delete conversation");
+                Alert.alert("Error", "Failed to delete chat history");
               }
             },
           },

@@ -1,5 +1,6 @@
 /**
  * socket/handlers/chatHandler.js — Real-time Chat Event Handlers
+ * Updated: Added clear_chat event and clearedAt filtering for message history
  */
 
 const Message = require("../../models/Message");
@@ -36,6 +37,9 @@ const EVENTS = {
   REMOVE_REACTION: "remove_reaction",
   REACTION_ADDED: "reaction_added",
   REACTION_REMOVED: "reaction_removed",
+  CLEAR_CHAT: "clear_chat",
+  CHAT_CLEARED: "chat_cleared",
+  CHAT_RESTORED: "chat_restored",
   ERROR: "error",
   MESSAGE_ERROR: "message_error",
 };
@@ -70,26 +74,44 @@ const setupChatHandlers = (io, socket) => {
         chatRoom = new ChatRoom({
           roomId: finalRoomId,
           type: "direct",
-          participants: [userId, otherId].filter(Boolean),
+          participants: [
+            {
+              userId,
+              joinedAt: new Date(),
+              role: "member",
+              lastReadAt: new Date(),
+            },
+            {
+              userId: otherId,
+              joinedAt: new Date(),
+              role: "member",
+              lastReadAt: new Date(),
+            },
+          ],
           createdBy: userId,
         });
         await chatRoom.save();
       }
 
+      // Send cleared status along with room_joined
+      const clearedAt = chatRoom.getClearTimestamp
+        ? chatRoom.getClearTimestamp(userId)
+        : null;
+
       socket.emit("room_joined", {
         roomId: finalRoomId,
         success: true,
+        clearedAt: clearedAt,
+        isCleared: !!clearedAt,
       });
 
-      // 🔴 Notify others in the room that this user joined
+      // Notify others in the room that this user joined
       socket.to(finalRoomId).emit("user_joined_room", {
         userId,
         roomId: finalRoomId,
       });
 
-      console.log(
-        `✅ User ${user?.name || userId} joined room: ${finalRoomId}`,
-      );
+      console.log(`User ${user?.name || userId} joined room: ${finalRoomId}`);
     } catch (error) {
       console.error("Error joining room:", error);
       socket.emit(EVENTS.ERROR, { message: "Failed to join room" });
@@ -104,14 +126,71 @@ const setupChatHandlers = (io, socket) => {
       socket.leave(roomId);
       removeUserFromRoom(userId, roomId);
       socket.emit("room_left", { roomId, success: true });
-      console.log(`👋 User ${user?.name || userId} left room: ${roomId}`);
+      console.log(`User ${user?.name || userId} left room: ${roomId}`);
     } catch (error) {
       console.error("Error leaving room:", error);
     }
   });
 
   /**
-   * Send a message with full read receipt support
+   * Clear chat history for current user
+   * Sets clearedAt timestamp - old messages stay hidden
+   * Other participant sees all messages as normal
+   */
+  socket.on(EVENTS.CLEAR_CHAT, async ({ roomId }) => {
+    try {
+      if (!roomId) {
+        socket.emit(EVENTS.ERROR, { message: "Room ID is required" });
+        return;
+      }
+
+      const room = await ChatRoom.findOne({ roomId });
+      if (!room) {
+        socket.emit(EVENTS.ERROR, { message: "Chat room not found" });
+        return;
+      }
+
+      // Verify user is a participant
+      const isParticipant = room.participants.some(
+        (p) => p.userId.toString() === userId,
+      );
+      if (!isParticipant) {
+        socket.emit(EVENTS.ERROR, { message: "Not authorized" });
+        return;
+      }
+
+      const clearedAt = new Date();
+
+      // Remove any existing clearedBy entry for this user
+      room.clearedBy = room.clearedBy.filter(
+        (entry) => entry.user.toString() !== userId,
+      );
+
+      // Add new clearedBy entry
+      room.clearedBy.push({
+        user: userId,
+        clearedAt,
+        restoreOnNewMessage: true,
+      });
+
+      await room.save();
+
+      // Notify the clearing user
+      socket.emit(EVENTS.CHAT_CLEARED, {
+        roomId,
+        success: true,
+        clearedAt,
+      });
+
+      console.log(`Chat ${roomId} cleared for user ${userId}`);
+    } catch (error) {
+      console.error("Clear chat error:", error);
+      socket.emit(EVENTS.ERROR, { message: "Failed to clear chat" });
+    }
+  });
+
+  /**
+   * Send a message with auto-restore for cleared chats
    */
   socket.on(
     EVENTS.SEND_MESSAGE,
@@ -135,7 +214,18 @@ const setupChatHandlers = (io, socket) => {
           return;
         }
 
-        console.log(`📤 Sending ${type} message to room: ${roomId}`);
+        console.log(`Sending ${type} message to room: ${roomId}`);
+
+        // Check if sender had cleared this chat
+        const room = await ChatRoom.findOne({ roomId });
+        let wasCleared = false;
+
+        if (room) {
+          const clearedEntry = room.clearedBy.find(
+            (entry) => entry.user.toString() === userId,
+          );
+          wasCleared = !!clearedEntry;
+        }
 
         const profile = await Profile.findOne({ user: userId });
 
@@ -144,7 +234,7 @@ const setupChatHandlers = (io, socket) => {
           senderName: user?.name || "Unknown",
           senderAvatar: profile?.profilePicture || "",
           roomId,
-          message: type === "audio" ? "🎤 Voice message" : message,
+          message: type === "audio" ? "Voice message" : message,
           type,
           readBy: [{ user: userId, readAt: new Date() }],
           deliveredTo: [{ user: userId, deliveredAt: new Date() }],
@@ -198,8 +288,9 @@ const setupChatHandlers = (io, socket) => {
         }
 
         const lastMessageText =
-          type === "audio" ? "🎤 Voice message" : message?.substring(0, 100);
+          type === "audio" ? "Voice message" : message?.substring(0, 100);
 
+        // Update room AND auto-restore if sender had cleared chat
         await ChatRoom.findOneAndUpdate(
           { roomId },
           {
@@ -213,6 +304,10 @@ const setupChatHandlers = (io, socket) => {
             },
             updatedAt: new Date(),
             $inc: { messageCount: 1 },
+            // Auto-restore: Remove sender from clearedBy when they send a message
+            ...(wasCleared && {
+              $pull: { clearedBy: { user: userId } },
+            }),
           },
           { upsert: true },
         );
@@ -223,33 +318,46 @@ const setupChatHandlers = (io, socket) => {
           messageId: savedMessage._id,
           message: populatedMessage,
           tempId,
+          wasCleared, // Frontend can use this to know chat was auto-restored
         });
 
-        // 🔴 Broadcast to room (all other users in the room)
+        // If chat was auto-restored, notify the sender
+        if (wasCleared) {
+          socket.emit(EVENTS.CHAT_RESTORED, {
+            roomId,
+            userId,
+          });
+        }
+
+        // Broadcast to room (all other users in the room)
         socket.to(roomId).emit(EVENTS.RECEIVE_MESSAGE, populatedMessage);
 
         // Mark as delivered for online users
-        const room = await ChatRoom.findOne({ roomId });
-        const otherUserId = room?.participants.find(
-          (p) => p.toString() !== userId.toString(),
+        const otherUserId = room?.participants?.find(
+          (p) => p.userId.toString() !== userId.toString(),
         );
 
-        if (otherUserId && isUserOnline(otherUserId.toString())) {
+        if (otherUserId && isUserOnline(otherUserId.userId.toString())) {
           await Message.findByIdAndUpdate(savedMessage._id, {
             $addToSet: {
-              deliveredTo: { user: otherUserId, deliveredAt: new Date() },
+              deliveredTo: {
+                user: otherUserId.userId,
+                deliveredAt: new Date(),
+              },
             },
           });
 
           // Notify sender that message was delivered to recipient
           socket.emit(EVENTS.MESSAGE_DELIVERED_TO_RECIPIENT, {
             messageId: savedMessage._id,
-            recipientId: otherUserId.toString(),
+            recipientId: otherUserId.userId.toString(),
           });
         }
 
         console.log(
-          `✅ Message sent - Room: ${roomId}, ID: ${savedMessage._id}`,
+          `Message sent - Room: ${roomId}, ID: ${savedMessage._id}${
+            wasCleared ? " (chat auto-restored)" : ""
+          }`,
         );
       } catch (error) {
         console.error("Send message error:", error);
@@ -263,15 +371,16 @@ const setupChatHandlers = (io, socket) => {
   );
 
   /**
-   * 🔴 Mark all messages in a room as read (WhatsApp-level)
+   * Mark all messages in a room as read
+   * Only marks messages after user's clearedAt timestamp
    */
   socket.on(EVENTS.MARK_READ, async ({ roomId }) => {
     try {
       if (!roomId) return;
 
-      console.log(`📖 User ${userId} marking room ${roomId} as read`);
+      console.log(`User ${userId} marking room ${roomId} as read`);
 
-      // Mark all messages as read in database
+      // Mark all messages as read in database (respects clearedAt internally)
       const modifiedCount = await Message.markRoomAsRead(roomId, userId);
 
       // Update room's lastMessage.readBy
@@ -290,16 +399,14 @@ const setupChatHandlers = (io, socket) => {
         }
       }
 
-      // ✅ BROADCAST TO ROOM - This sends to ALL other users in the room
+      // Broadcast to room
       socket.to(roomId).emit(EVENTS.MESSAGES_READ, {
         roomId,
         userId,
         readAt: new Date(),
       });
 
-      console.log(
-        `📡 Broadcast messages_read to room ${roomId} (except sender)`,
-      );
+      console.log(`Broadcast messages_read to room ${roomId} (except sender)`);
 
       // Acknowledge to reader
       socket.emit(EVENTS.MESSAGES_MARKED_READ, {
@@ -308,7 +415,7 @@ const setupChatHandlers = (io, socket) => {
       });
 
       console.log(
-        `✅ User ${userId} read ${modifiedCount} messages in room ${roomId}`,
+        `User ${userId} read ${modifiedCount} messages in room ${roomId}`,
       );
     } catch (error) {
       console.error("Mark read error:", error);
@@ -317,7 +424,7 @@ const setupChatHandlers = (io, socket) => {
   });
 
   /**
-   * 🔴 Mark a single message as read
+   * Mark a single message as read
    */
   socket.on(EVENTS.MARK_MESSAGE_READ, async ({ messageId }) => {
     try {
@@ -326,7 +433,7 @@ const setupChatHandlers = (io, socket) => {
       if (message) {
         const senderId = message.sender.toString();
         if (senderId !== userId) {
-          // 🔴 FIX: Broadcast to room AND direct notification
+          // Broadcast to room AND direct notification
           io.to(message.roomId).emit(EVENTS.MESSAGE_READ, {
             messageId,
             roomId: message.roomId,
@@ -367,7 +474,7 @@ const setupChatHandlers = (io, socket) => {
         playedAt: new Date(),
       });
 
-      console.log(`🎧 Audio ${messageId} played by user ${userId}`);
+      console.log(`Audio ${messageId} played by user ${userId}`);
     } catch (error) {
       console.error("Error marking audio as played:", error);
     }
@@ -402,7 +509,7 @@ const setupChatHandlers = (io, socket) => {
         timestamp: new Date(),
       });
 
-      console.log(`🗑️ Message ${messageId} deleted in room ${roomId}`);
+      console.log(`Message ${messageId} deleted in room ${roomId}`);
     } catch (error) {
       console.error("Error deleting message:", error);
       socket.emit(EVENTS.ERROR, { message: "Failed to delete message" });
@@ -485,14 +592,40 @@ const setupChatHandlers = (io, socket) => {
   });
 
   /**
-   * Get message history
+   * Get message history with clearedAt filtering
+   * Messages created before user's clearedAt are not returned
    */
   socket.on(
     EVENTS.GET_MESSAGES,
     async ({ roomId, limit = 50, before = null }) => {
       try {
-        let query = { roomId, isDeleted: false, deletedFor: { $ne: userId } };
-        if (before) query.createdAt = { $lt: new Date(before) };
+        // Get user's clearedAt timestamp for this room
+        const room = await ChatRoom.findOne({ roomId })
+          .select("clearedBy")
+          .lean();
+        const clearedEntry = (room?.clearedBy || []).find(
+          (c) => c.user.toString() === userId,
+        );
+        const clearedAt = clearedEntry ? clearedEntry.clearedAt : null;
+
+        let query = {
+          roomId,
+          isDeleted: false,
+          deletedFor: { $ne: userId },
+        };
+
+        // Apply clearedAt filter - only show messages after clear timestamp
+        if (clearedAt) {
+          query.createdAt = { $gt: clearedAt };
+          if (before) {
+            const beforeDate = new Date(before);
+            if (beforeDate > clearedAt) {
+              query.createdAt.$lt = beforeDate;
+            }
+          }
+        } else if (before) {
+          query.createdAt = { $lt: new Date(before) };
+        }
 
         const messages = await Message.find(query)
           .sort({ createdAt: -1 })
@@ -504,7 +637,9 @@ const setupChatHandlers = (io, socket) => {
         const formattedMessages = messages.map((msg) => ({
           ...msg,
           formattedDuration: msg.duration
-            ? `${Math.floor(msg.duration / 60)}:${(msg.duration % 60).toString().padStart(2, "0")}`
+            ? `${Math.floor(msg.duration / 60)}:${(msg.duration % 60)
+                .toString()
+                .padStart(2, "0")}`
             : null,
         }));
 
@@ -512,6 +647,8 @@ const setupChatHandlers = (io, socket) => {
           roomId,
           messages: formattedMessages.reverse(),
           hasMore: messages.length === limit,
+          clearedAt: clearedAt,
+          isCleared: !!clearedAt,
         });
       } catch (error) {
         console.error("Error getting message history:", error);

@@ -88,6 +88,8 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     setPendingTimeout,
     clearAllPending,
     clearCache,
+    isCleared, // NEW
+    clearedAt,
   } = useChatMessages({
     token,
     roomId,
@@ -639,5 +641,8 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     cleanupScroll,
     audioCleanup,
     isMountedRef,
+
+    isCleared, // NEW
+    clearedAt,
   };
 };

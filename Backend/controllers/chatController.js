@@ -61,6 +61,7 @@ exports.getOrCreateDirectRoom = async (req, res) => {
   try {
     const roomId = getDirectRoomId(req.user.id, req.params.otherUserId);
     let room = await ChatRoom.findOne({ roomId });
+
     if (!room) {
       room = await ChatRoom.create({
         roomId,
@@ -82,7 +83,24 @@ exports.getOrCreateDirectRoom = async (req, res) => {
         createdBy: req.user.id,
       });
     }
-    res.json({ success: true, data: { roomId: room.roomId, type: room.type } });
+
+    // Include cleared status in response
+    const clearedAt = room.getClearTimestamp
+      ? room.getClearTimestamp(req.user.id)
+      : null;
+    const isCleared = room.isClearedByUser
+      ? room.isClearedByUser(req.user.id)
+      : false;
+
+    res.json({
+      success: true,
+      data: {
+        roomId: room.roomId,
+        type: room.type,
+        isCleared,
+        clearedAt,
+      },
+    });
   } catch (e) {
     res.status(500).json({ success: false, message: "Server error" });
   }
@@ -93,34 +111,55 @@ exports.getUserChatRooms = async (req, res) => {
     const rooms = await ChatRoom.find({ "participants.userId": req.user.id })
       .sort({ updatedAt: -1 })
       .lean();
+
     const formatted = await Promise.all(
       rooms.map(async (room) => {
-        const lastMsg = await Message.findOne({
+        // Get user's clearedAt for this room
+        const clearedEntry = (room.clearedBy || []).find(
+          (c) => c.user.toString() === req.user.id,
+        );
+        const clearedAt = clearedEntry ? clearedEntry.clearedAt : null;
+
+        // Build message query respecting clearedAt
+        const messageQuery = {
           roomId: room.roomId,
           isDeleted: false,
           deletedFor: { $ne: req.user.id },
-        })
+        };
+
+        // Only fetch messages after clearedAt if user has cleared the chat
+        if (clearedAt) {
+          messageQuery.createdAt = { $gt: clearedAt };
+        }
+
+        const lastMsg = await Message.findOne(messageQuery)
           .sort({ createdAt: -1 })
           .select("message type createdAt sender senderName readBy")
           .lean();
+
         const other =
           room.type === "direct"
             ? room.participants.find((p) => p.userId.toString() !== req.user.id)
             : null;
+
         const otherUser = other
           ? await User.findById(other.userId).select("name").lean()
           : null;
+
         const otherProfile = other
           ? await Profile.findOne({ user: other.userId })
               .select("profilePicture")
               .lean()
           : null;
+
         return {
           roomId: room.roomId,
           type: room.type,
           name: otherUser?.name || room.name || "Unknown",
           otherUserId: other?.userId?.toString() || null,
           otherUserAvatar: otherProfile?.profilePicture || null,
+          isCleared: !!clearedAt,
+          clearedAt: clearedAt,
           lastMessage: lastMsg
             ? {
                 message:
@@ -139,6 +178,7 @@ exports.getUserChatRooms = async (req, res) => {
         };
       }),
     );
+
     res.json({ success: true, data: formatted });
   } catch (e) {
     res.status(500).json({ success: false, message: "Server error" });
@@ -152,22 +192,103 @@ exports.getRoomDetails = async (req, res) => {
       return res
         .status(404)
         .json({ success: false, message: "Room not found" });
+
+    // Get cleared status for requesting user
+    const clearedEntry = (room.clearedBy || []).find(
+      (c) => c.user.toString() === req.user.id,
+    );
+
     let otherUser = null;
     if (room.type === "direct") {
       const otherId = room.participants.find(
-        (p) => p.toString() !== req.user.id,
+        (p) => p.userId.toString() !== req.user.id,
       );
       if (otherId) {
-        const user = await User.findById(otherId).select("name").lean();
-        const profile = await Profile.findOne({ user: otherId })
+        const user = await User.findById(otherId.userId).select("name").lean();
+        const profile = await Profile.findOne({ user: otherId.userId })
           .select("profilePicture")
           .lean();
         otherUser = { ...user, avatar: profile?.profilePicture || "" };
       }
     }
-    res.json({ success: true, data: { ...room, otherUser } });
+
+    res.json({
+      success: true,
+      data: {
+        ...room,
+        otherUser,
+        isCleared: !!clearedEntry,
+        clearedAt: clearedEntry ? clearedEntry.clearedAt : null,
+      },
+    });
   } catch (e) {
     res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// -----------------------------------------------------------------------------
+// Delete Chat History (NEW)
+// -----------------------------------------------------------------------------
+
+/**
+ * Delete chat history for current user only.
+ * Sets a clearedAt timestamp so old messages are filtered out.
+ * Other participant's messages remain unaffected.
+ * When a new message arrives, chat becomes visible again automatically.
+ */
+exports.deleteChatHistory = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const userId = req.user.id;
+
+    // Find the room
+    const room = await ChatRoom.findOne({ roomId });
+    if (!room) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat room not found",
+      });
+    }
+
+    // Verify user is a participant
+    const isParticipant = room.participants.some(
+      (p) => p.userId.toString() === userId,
+    );
+    if (!isParticipant) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not a participant in this chat",
+      });
+    }
+
+    const clearedAt = new Date();
+
+    // Remove any existing clearedBy entry for this user
+    room.clearedBy = room.clearedBy.filter(
+      (entry) => entry.user.toString() !== userId,
+    );
+
+    // Add new clearedBy entry
+    room.clearedBy.push({
+      user: userId,
+      clearedAt,
+      restoreOnNewMessage: true,
+    });
+
+    await room.save();
+
+    res.json({
+      success: true,
+      message: "Chat history deleted successfully",
+      roomId,
+      clearedAt,
+    });
+  } catch (e) {
+    console.error("deleteChatHistory error:", e);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 };
 
@@ -179,18 +300,29 @@ exports.getMessageHistory = async (req, res) => {
   try {
     const { roomId } = req.params;
     const { limit = 50, before } = req.query;
+
+    // Get clearedAt for this user
+    const room = await ChatRoom.findOne({ roomId }).select("clearedBy").lean();
+    const clearedEntry = (room?.clearedBy || []).find(
+      (c) => c.user.toString() === req.user.id,
+    );
+    const clearedAt = clearedEntry ? clearedEntry.clearedAt : null;
+
     const messages = await Message.getMessages(
       roomId,
       parseInt(limit),
       before,
       req.user.id,
     );
+
     res.json({
       success: true,
       data: {
         roomId,
         messages: messages.reverse().map((m) => formatMessage(m, req.user.id)),
         hasMore: messages.length === parseInt(limit),
+        clearedAt,
+        isCleared: !!clearedAt,
       },
     });
   } catch (e) {
@@ -202,18 +334,29 @@ exports.getMessagesLight = async (req, res) => {
   try {
     const { roomId } = req.params;
     const { limit = 30, before } = req.query;
+
+    // Get clearedAt for this user
+    const room = await ChatRoom.findOne({ roomId }).select("clearedBy").lean();
+    const clearedEntry = (room?.clearedBy || []).find(
+      (c) => c.user.toString() === req.user.id,
+    );
+    const clearedAt = clearedEntry ? clearedEntry.clearedAt : null;
+
     const messages = await Message.getMessagesLight(
       roomId,
       parseInt(limit),
       before,
       req.user.id,
     );
+
     res.json({
       success: true,
       data: {
         roomId,
         messages: messages.reverse().map((m) => formatMessage(m, req.user.id)),
         hasMore: messages.length === parseInt(limit),
+        clearedAt,
+        isCleared: !!clearedAt,
       },
     });
   } catch (e) {
@@ -354,6 +497,7 @@ exports.uploadAudio = async (req, res) => {
       console.log(`Audio broadcast to room: ${roomId}`);
     }
 
+    // Update room and auto-restore for sender
     await ChatRoom.findOneAndUpdate(
       { roomId },
       {
@@ -367,6 +511,8 @@ exports.uploadAudio = async (req, res) => {
         },
         updatedAt: new Date(),
         $inc: { messageCount: 1 },
+        // Auto-restore: Remove sender from clearedBy when they send a message
+        $pull: { clearedBy: { user: req.user.id } },
       },
       { upsert: true },
     );
@@ -398,7 +544,7 @@ exports.uploadAttachments = async (req, res) => {
         senderName: user.name,
         senderAvatar: profile?.profilePicture || "",
         roomId,
-        message: `📍 ${loc?.locationName || "Location"}`,
+        message: `Location: ${loc?.locationName || "Unknown"}`,
         type: "location",
         locationData: loc,
         readBy: [{ user: req.user.id }],
@@ -425,6 +571,7 @@ exports.uploadAttachments = async (req, res) => {
           },
           updatedAt: new Date(),
           $inc: { messageCount: 1 },
+          $pull: { clearedBy: { user: req.user.id } },
         },
         { upsert: true },
       );
@@ -445,14 +592,14 @@ exports.uploadAttachments = async (req, res) => {
         const isImage = file.mimetype?.startsWith("image/");
         const isVideo = file.mimetype?.startsWith("video/");
 
-        let messageText = ` ${file.originalname}`;
+        let messageText = `File: ${file.originalname}`;
         let messageType = "file";
 
         if (isImage) {
-          messageText = " Photo";
+          messageText = "Photo";
           messageType = "image";
         } else if (isVideo) {
-          messageText = "🎥 Video";
+          messageText = "Video";
           messageType = "video";
         }
 
@@ -472,7 +619,6 @@ exports.uploadAttachments = async (req, res) => {
           deliveredTo: [{ user: req.user.id }],
         };
 
-        // Preserve video duration from metadata extracted during upload
         if (isVideo && file.metadata?.duration) {
           messageData.duration = Math.round(file.metadata.duration);
         }
@@ -496,7 +642,6 @@ exports.uploadAttachments = async (req, res) => {
       });
     }
 
-    // Update room with smart last message summary
     const lastMsg = messages[messages.length - 1];
 
     let lastMessageText;
@@ -516,7 +661,7 @@ exports.uploadAttachments = async (req, res) => {
       if (typeCount.file)
         parts.push(`${typeCount.file} file${typeCount.file > 1 ? "s" : ""}`);
 
-      lastMessageText = ` ${parts.join(", ")}`;
+      lastMessageText = `Sent ${parts.join(", ")}`;
     }
 
     await ChatRoom.findOneAndUpdate(
@@ -532,6 +677,7 @@ exports.uploadAttachments = async (req, res) => {
         },
         updatedAt: new Date(),
         $inc: { messageCount: messages.length },
+        $pull: { clearedBy: { user: req.user.id } },
       },
       { upsert: true },
     );

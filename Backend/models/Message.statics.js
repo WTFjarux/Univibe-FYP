@@ -3,8 +3,26 @@
 /**
  * All static methods for Message model.
  * Loaded into the schema to keep Message.js clean.
+ * Updated: Added clearedAt support for per-user chat history deletion.
  */
 module.exports = function (messageSchema) {
+  // ── HELPER ────────────────────────────────────────────────
+
+  /**
+   * Fetch the clearedAt timestamp for a user in a room.
+   * Returns null if user has not cleared the chat.
+   */
+  const getClearedAt = async (roomId, userId) => {
+    if (!userId || !roomId) return null;
+    const ChatRoom = require("mongoose").model("ChatRoom");
+    const room = await ChatRoom.findOne({ roomId }).select("clearedBy").lean();
+    if (!room || !room.clearedBy) return null;
+    const entry = room.clearedBy.find(
+      (c) => c.user.toString() === userId.toString(),
+    );
+    return entry ? entry.clearedAt : null;
+  };
+
   // ── READ RECEIPTS ──────────────────────────────────────────
 
   messageSchema.statics.markMessageAsRead = async function (messageId, userId) {
@@ -17,16 +35,28 @@ module.exports = function (messageSchema) {
     );
   };
 
+  /**
+   * Mark all messages in a room as read for a user.
+   * Only marks messages created after the user's clearedAt timestamp.
+   */
   messageSchema.statics.markRoomAsRead = async function (roomId, userId) {
-    const result = await this.updateMany(
-      {
-        roomId,
-        sender: { $ne: userId },
-        "readBy.user": { $ne: userId },
-        isDeleted: false,
-      },
-      { $addToSet: { readBy: { user: userId, readAt: new Date() } } },
-    );
+    const clearedAt = await getClearedAt(roomId, userId);
+
+    const query = {
+      roomId,
+      sender: { $ne: userId },
+      "readBy.user": { $ne: userId },
+      isDeleted: false,
+    };
+
+    // Only mark messages after clear timestamp as read
+    if (clearedAt) {
+      query.createdAt = { $gt: clearedAt };
+    }
+
+    const result = await this.updateMany(query, {
+      $addToSet: { readBy: { user: userId, readAt: new Date() } },
+    });
     return result.modifiedCount;
   };
 
@@ -43,27 +73,60 @@ module.exports = function (messageSchema) {
     );
   };
 
+  /**
+   * Get unread message count for a user in a room.
+   * Only counts messages created after the user's clearedAt timestamp.
+   */
   messageSchema.statics.getUnreadCount = async function (roomId, userId) {
-    return this.countDocuments({
+    const clearedAt = await getClearedAt(roomId, userId);
+
+    const query = {
       roomId,
       sender: { $ne: userId },
       "readBy.user": { $ne: userId },
       isDeleted: false,
-    });
+    };
+
+    if (clearedAt) {
+      query.createdAt = { $gt: clearedAt };
+    }
+
+    return this.countDocuments(query);
   };
 
   // ── QUERIES ────────────────────────────────────────────────
 
-  /** Lightweight message fetch (for initial + pagination) */
+  /**
+   * Lightweight message fetch with clearedAt filtering.
+   * Returns messages created after user's clearedAt timestamp only.
+   */
   messageSchema.statics.getMessagesLight = async function (
     roomId,
     limit = 30,
     before = null,
     userId = null,
   ) {
+    const clearedAt = await getClearedAt(roomId, userId);
+
     const query = { roomId, isDeleted: false };
-    if (userId) query.deletedFor = { $ne: userId };
-    if (before) query.createdAt = { $lt: new Date(before) };
+
+    if (userId) {
+      query.deletedFor = { $ne: userId };
+    }
+
+    // Apply clearedAt filter - only show messages after clear timestamp
+    if (clearedAt) {
+      query.createdAt = { $gt: clearedAt };
+      // If before is also provided, ensure it doesn't contradict clearedAt
+      if (before) {
+        const beforeDate = new Date(before);
+        if (beforeDate > clearedAt) {
+          query.createdAt.$lt = beforeDate;
+        }
+      }
+    } else if (before) {
+      query.createdAt = { $lt: new Date(before) };
+    }
 
     return this.find(query)
       .sort({ createdAt: -1 })
@@ -76,16 +139,36 @@ module.exports = function (messageSchema) {
       .lean();
   };
 
-  /** Full message fetch (for sync/refresh) */
+  /**
+   * Full message fetch with clearedAt filtering.
+   * Returns messages created after user's clearedAt timestamp only.
+   */
   messageSchema.statics.getMessages = async function (
     roomId,
     limit = 50,
     before = null,
     userId = null,
   ) {
+    const clearedAt = await getClearedAt(roomId, userId);
+
     const query = { roomId, isDeleted: false };
-    if (userId) query.deletedFor = { $ne: userId };
-    if (before) query.createdAt = { $lt: new Date(before) };
+
+    if (userId) {
+      query.deletedFor = { $ne: userId };
+    }
+
+    // Apply clearedAt filter - only show messages after clear timestamp
+    if (clearedAt) {
+      query.createdAt = { $gt: clearedAt };
+      if (before) {
+        const beforeDate = new Date(before);
+        if (beforeDate > clearedAt) {
+          query.createdAt.$lt = beforeDate;
+        }
+      }
+    } else if (before) {
+      query.createdAt = { $lt: new Date(before) };
+    }
 
     return this.find(query)
       .sort({ createdAt: -1 })

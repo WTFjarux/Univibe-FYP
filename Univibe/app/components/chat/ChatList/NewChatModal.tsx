@@ -12,7 +12,7 @@ import {
   StyleSheet,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import UserItem from "../ChatList/UserItem"; // Import default export
+import UserItem from "../ChatList/UserItem";
 import { API_BASE_URL } from "../../../../constants/ipConstants";
 
 // Define the User interface
@@ -32,7 +32,6 @@ interface NewChatModalProps {
   token: string | null;
 }
 
-// Change to default export
 export default function NewChatModal({
   visible,
   onClose,
@@ -63,11 +62,21 @@ export default function NewChatModal({
         },
       );
       const data = await res.json();
-      if (data.success && data.profiles) {
-        const filtered = data.profiles.filter(
-          (profile: { user?: { _id: string } }) =>
-            profile.user?._id !== currentUserId,
-        );
+
+      // FIX: API returns data.data, not data.profiles
+      if (data.success && data.data) {
+        const profiles = Array.isArray(data.data) ? data.data : [];
+
+        // Map profiles to User type and filter out current user
+        const filtered = profiles
+          .filter((profile: any) => profile.user?._id !== currentUserId)
+          .map((profile: any) => ({
+            _id: profile.user?._id || profile._id,
+            name: profile.user?.name || profile.fullName || "Unknown",
+            username: profile.username || "",
+            profilePicture: profile.profilePicture || "",
+          }));
+
         setUsers(filtered);
       } else {
         setUsers([]);

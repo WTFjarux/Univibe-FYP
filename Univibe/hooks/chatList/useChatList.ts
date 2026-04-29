@@ -161,14 +161,43 @@ export const useChatList = (token: string | null, currentUserId?: string) => {
   );
 
   // ---------------------------------------------------------------------------
-  // Socket Event Handlers (Ref-Based for Stale Closure Prevention)
+  // Chat Restored / Chat Cleared Handlers
+  // Declared BEFORE stableSocketHandlers to avoid "used before declaration"
   // ---------------------------------------------------------------------------
 
   /**
-   * Handles incoming real-time messages.
-   * If the room doesn't exist in the current list, triggers a full refresh
-   * to pick up the new chat. Otherwise, updates the last message inline.
+   * Handles chat restored event from socket.
+   * When the other user sends a message to a deleted chat, the room reappears
+   * in the list with only the new messages visible.
    */
+  const handleChatRestored = useCallback(
+    (data: { roomId: string }) => {
+      const exists = roomsRef.current.some((r) => r.roomId === data.roomId);
+
+      if (!exists) {
+        refreshSingleRoom(data.roomId);
+
+        if (socketService.getConnectionStatus()) {
+          socketService.joinRoom(data.roomId);
+        }
+      }
+    },
+    [refreshSingleRoom],
+  );
+
+  /**
+   * Handles chat cleared event from socket.
+   * Optional handler - most apps don't notify when the other user clears their chat.
+   */
+  const handleChatCleared = useCallback((data: { roomId: string }) => {
+    // Optional: refresh the room to update its state if needed
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Socket Event Handlers (Ref-Based for Stale Closure Prevention)
+  // ---------------------------------------------------------------------------
+
+  /** Handles incoming real-time messages */
   const handleNewMessageRef = useRef<(data: any) => void>(undefined);
 
   handleNewMessageRef.current = (data: any) => {
@@ -243,8 +272,14 @@ export const useChatList = (token: string | null, currentUserId?: string) => {
       onReactionUpdated: (data: any) => {
         handleReactionUpdatedRef.current?.(data);
       },
+      onChatRestored: (data: any) => {
+        handleChatRestored(data);
+      },
+      onChatCleared: (data: any) => {
+        handleChatCleared(data);
+      },
     }),
-    [],
+    [handleChatRestored, handleChatCleared],
   );
 
   useChatListSocket(stableSocketHandlers);

@@ -21,6 +21,8 @@ export interface ChatRoom {
   isPinned: boolean;
   isMuted: boolean;
   muteUntil?: string | null;
+  isCleared?: boolean; // Whether current user has cleared this chat
+  clearedAt?: string | null; // Timestamp when chat was cleared
 }
 
 export interface LastMessagePreview {
@@ -203,7 +205,16 @@ export interface MessagesResponse {
     roomId: string;
     messages: Message[];
     hasMore: boolean;
+    clearedAt?: string | null;
+    isCleared?: boolean;
   };
+}
+
+export interface DeleteChatHistoryResponse {
+  success: boolean;
+  message: string;
+  roomId?: string;
+  clearedAt?: string;
 }
 
 export interface MarkReadResponse {
@@ -238,6 +249,17 @@ export interface MessageDeleteData {
   roomId: string;
   messageId: string;
   deletedBy: string;
+}
+
+export interface ChatClearedData {
+  roomId: string;
+  success: boolean;
+  clearedAt: string;
+}
+
+export interface ChatRestoredData {
+  roomId: string;
+  userId: string;
 }
 
 export interface ReactionData {

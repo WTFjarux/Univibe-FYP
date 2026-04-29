@@ -16,6 +16,8 @@ interface UseChatListSocketProps {
   onMessagesRead: (data: ReadReceiptData) => void;
   onMessageDeleted: (data: MessageDeleteData) => void;
   onReactionUpdated: (data: ReactionData) => void;
+  onChatCleared?: (data: { roomId: string }) => void;
+  onChatRestored?: (data: { roomId: string }) => void;
 }
 
 // -----------------------------------------------------------------------------
@@ -36,6 +38,8 @@ export const useChatListSocket = ({
   onMessagesRead,
   onMessageDeleted,
   onReactionUpdated,
+  onChatCleared,
+  onChatRestored,
 }: UseChatListSocketProps) => {
   const isConnectedRef = useRef(false);
   const isListenersAttachedRef = useRef(false);
@@ -46,6 +50,8 @@ export const useChatListSocket = ({
     onMessagesRead,
     onMessageDeleted,
     onReactionUpdated,
+    onChatCleared,
+    onChatRestored,
   });
 
   handlersRef.current = {
@@ -53,6 +59,8 @@ export const useChatListSocket = ({
     onMessagesRead,
     onMessageDeleted,
     onReactionUpdated,
+    onChatCleared,
+    onChatRestored,
   };
 
   // ---------------------------------------------------------------------------
@@ -83,11 +91,21 @@ export const useChatListSocket = ({
       handlersRef.current.onReactionUpdated(data);
     };
 
+    const handleChatCleared = (data: { roomId: string }) => {
+      handlersRef.current.onChatCleared?.(data);
+    };
+
+    const handleChatRestored = (data: { roomId: string }) => {
+      handlersRef.current.onChatRestored?.(data);
+    };
+
     socketService.on("receive_message", handleNewMessage);
     socketService.on("messages_read", handleMessagesRead);
     socketService.on("message_deleted", handleDelete);
     socketService.on("reaction_added", handleReaction);
     socketService.on("reaction_removed", handleReaction);
+    socketService.on("chat_cleared", handleChatCleared);
+    socketService.on("chat_restored", handleChatRestored);
 
     isListenersAttachedRef.current = true;
   }, []);
@@ -142,6 +160,8 @@ export const useChatListSocket = ({
         socketService.removeAllListeners("message_deleted");
         socketService.removeAllListeners("reaction_added");
         socketService.removeAllListeners("reaction_removed");
+        socketService.removeAllListeners("chat_cleared");
+        socketService.removeAllListeners("chat_restored");
         isListenersAttachedRef.current = false;
       }
     };

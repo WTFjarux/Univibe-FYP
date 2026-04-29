@@ -234,6 +234,20 @@ export const useChatSocket = ({
       }
     };
 
+    /** Handles chat being cleared (by this user or other user) */
+    const handleChatCleared = (data: any) => {
+      if (!isMountedRef.current) return;
+      // If another user cleared their chat, we don't need to do anything
+      // The messages remain visible for us
+    };
+
+    /** Handles chat being restored (new message after clearing) */
+    const handleChatRestored = (data: any) => {
+      if (!isMountedRef.current) return;
+      // Chat was restored - we could refresh messages here if needed
+      // Currently the backend handles this via clearedAt filtering
+    };
+
     // -----------------------------------------------------------------------
     // Delivery to Recipient
     // -----------------------------------------------------------------------
@@ -305,6 +319,9 @@ export const useChatSocket = ({
     socketService.on("user_online", handleUserOnline);
     socketService.on("user_offline", handleUserOffline);
     socketService.on("user_joined_room", handleUserJoinedRoom);
+    socketService.on("chat_cleared", handleChatCleared);
+    socketService.on("chat_restored", handleChatRestored);
+
     socketService.on("message_error", handleMessageError);
     socketService.on("socket_connected", handleSocketConnected);
     socketService.on("socket_disconnected", handleSocketDisconnected);
@@ -333,6 +350,8 @@ export const useChatSocket = ({
       socketService.off("user_online", handleUserOnline);
       socketService.off("user_offline", handleUserOffline);
       socketService.off("user_joined_room", handleUserJoinedRoom);
+      socketService.off("chat_cleared", handleChatCleared);
+      socketService.off("chat_restored", handleChatRestored);
       socketService.off("message_error", handleMessageError);
       socketService.off("socket_connected", handleSocketConnected);
       socketService.off("socket_disconnected", handleSocketDisconnected);

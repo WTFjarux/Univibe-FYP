@@ -115,6 +115,8 @@ export default function ChatScreen() {
     handleScroll,
     initialScrollToBottom,
     enableAutoScroll,
+    isCleared, 
+    clearedAt,
   } = useChatScreen(flatListRef);
 
   // ---------------------------------------------------------------------------

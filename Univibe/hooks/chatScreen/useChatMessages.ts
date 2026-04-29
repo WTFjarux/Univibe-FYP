@@ -13,6 +13,8 @@ interface CacheEntry {
   messages: Message[];
   hasMore: boolean;
   timestamp: number;
+  isCleared?: boolean;
+  clearedAt?: string | null;
 }
 
 const messageCache = new Map<string, CacheEntry>();
@@ -43,6 +45,17 @@ export const useChatMessages = ({
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [isCleared, setIsCleared] = useState(false);
+  const [clearedAt, setClearedAt] = useState<string | null>(null);
+
+  // Refs for the latest cleared state values (used inside updateCache closure)
+  const isClearedRef = useRef(isCleared);
+  const clearedAtRef = useRef(clearedAt);
+
+  useEffect(() => {
+    isClearedRef.current = isCleared;
+    clearedAtRef.current = clearedAt;
+  }, [isCleared, clearedAt]);
 
   const pendingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
@@ -81,6 +94,8 @@ export const useChatMessages = ({
         messages: validMessages,
         hasMore: hasMoreFlag,
         timestamp: Date.now(),
+        isCleared: isClearedRef.current,
+        clearedAt: clearedAtRef.current,
       });
     },
     [roomId],
@@ -139,6 +154,10 @@ export const useChatMessages = ({
           setMessages(cached.messages);
           setHasMore(cached.hasMore);
 
+          // Restore cleared state from cache
+          setIsCleared(cached.isCleared || false);
+          setClearedAt(cached.clearedAt || null);
+
           processedIdsRef.current.clear();
           cached.messages.forEach((msg) => {
             if (msg._id && !isTempId(msg._id)) {
@@ -172,12 +191,22 @@ export const useChatMessages = ({
 
           setMessages(finalMessages);
           setHasMore(response.data.hasMore);
+
+          // Store cleared state
+          const serverIsCleared = response.data.isCleared || false;
+          const serverClearedAt = response.data.clearedAt || null;
+          setIsCleared(serverIsCleared);
+          setClearedAt(serverClearedAt);
+
+          // Update cache (isCleared/clearedAt picked up via refs on next render)
           updateCache(finalMessages, response.data.hasMore);
         }
       } catch (error) {
         if (cached && isMountedRef.current) {
           setMessages(cached.messages);
           setHasMore(cached.hasMore);
+          setIsCleared(cached.isCleared || false);
+          setClearedAt(cached.clearedAt || null);
         }
       } finally {
         if (isMountedRef.current) {
@@ -531,5 +560,9 @@ export const useChatMessages = ({
     clearAllPending,
     clearCache,
     processedIdsRef,
+    isCleared,
+    clearedAt,
+    setIsCleared,
+    setClearedAt,
   };
 };

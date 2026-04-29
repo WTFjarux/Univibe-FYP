@@ -8,6 +8,7 @@ import type {
   MessagesResponse,
   MarkReadResponse,
   Reaction,
+  DeleteChatHistoryResponse,
 } from "../types/chat.types";
 
 // -----------------------------------------------------------------------------
@@ -62,6 +63,15 @@ class ChatApiService {
     roomId: string,
   ): Promise<{ success: boolean; message?: string }> {
     const response = await api.delete(`/chat/room/${roomId}`);
+    return response.data;
+  }
+
+  /**
+   * Deletes chat history for the current user only.
+   * Other participant still sees all messages.
+   */
+  async deleteChatHistory(roomId: string): Promise<DeleteChatHistoryResponse> {
+    const response = await api.delete(`/chat/room/${roomId}/history`);
     return response.data;
   }
 
