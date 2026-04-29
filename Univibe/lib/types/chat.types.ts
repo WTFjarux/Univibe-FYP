@@ -66,6 +66,7 @@ export interface ReplyToData {
   senderId?: string;
   type?: string;
   mediaUrl?: string;
+  thumbnailUrl?: string;
   duration?: number;
 }
 
@@ -86,6 +87,7 @@ export interface ReplyToState {
   senderId?: string;
   type?: string;
   mediaUrl?: string;
+  thumbnailUrl?: string;
   duration?: number;
 }
 
@@ -95,24 +97,90 @@ export interface PendingMessage {
   timestamp: number;
   type?: string;
   mediaUrl?: string;
-  mediaName?: string; // ✅ Added: File name for attachments
-  mediaSize?: number; // ✅ Added: File size for attachments
+  mediaName?: string;
+  mediaSize?: number;
   duration?: number;
   replyTo?: ReplyToData;
-  groupId?: string; // ✅ Added: For grouping multiple images
-  groupIndex?: number; // ✅ Added: Position in image group
-  groupTotal?: number; // ✅ Added: Total images in group
+  groupId?: string;
+  groupIndex?: number;
+  groupTotal?: number;
 }
 
+// ============================================
+// ATTACHMENT TYPES
+// ============================================
+
+/**
+ * All supported attachment types
+ * Used for both input selection and processed attachments
+ */
+export type AttachmentType =
+  | "image"
+  | "video"
+  | "file"
+  | "document"
+  | "location"
+  | "audio";
+
+/**
+ * Raw attachment data from file picker or location share
+ * Type is flexible as it may come from various sources
+ */
 export interface AttachmentData {
-  type: "image" | "video" | "document" | "location";
+  type: AttachmentType;
   uri?: string;
   name?: string;
   size?: number;
   mimeType?: string;
+
+  // Location specific
   latitude?: number;
   longitude?: number;
   locationName?: string;
+}
+
+/**
+ * Processed attachment ready for upload
+ * Extends AttachmentData with processing metadata
+ */
+export interface ProcessedAttachment extends AttachmentData {
+  /** Whether this attachment needs server-side compression */
+  needsCompression?: boolean;
+
+  /** Original file size before any processing (in bytes) */
+  originalSize?: number;
+
+  /** Video width in pixels (for compression hints) */
+  videoWidth?: number;
+
+  /** Video height in pixels (for compression hints) */
+  videoHeight?: number;
+
+  /** Local URI for video thumbnail preview */
+  thumbnailUri?: string;
+
+  /** Video/audio duration in seconds */
+  duration?: number;
+}
+
+/**
+ * Video processing progress state for UI
+ */
+export interface VideoProcessingState {
+  /** Whether the processing modal is visible */
+  visible: boolean;
+
+  /** Progress percentage (0-100) */
+  progress: number;
+
+  /** Current status message */
+  message: string;
+
+  /** Name of the video being processed */
+  videoName: string;
+
+  /** Original file size display string */
+  originalSize: string;
 }
 
 // ============================================

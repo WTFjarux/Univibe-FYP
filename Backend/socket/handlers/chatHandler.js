@@ -167,6 +167,11 @@ const setupChatHandlers = (io, socket) => {
         }
 
         if (replyTo?.messageId) {
+          // Fetch the original message to get its thumbnailUrl
+          const originalMsg = await Message.findById(replyTo.messageId)
+            .select("thumbnailUrl")
+            .lean();
+
           messageData.replyTo = {
             messageId: replyTo.messageId,
             message: replyTo.message || "Media message",
@@ -174,6 +179,8 @@ const setupChatHandlers = (io, socket) => {
             senderId: replyTo.senderId || null,
             type: replyTo.type || "text",
             mediaUrl: replyTo.mediaUrl || null,
+            thumbnailUrl:
+              originalMsg?.thumbnailUrl || replyTo.thumbnailUrl || null,
             duration: replyTo.duration || null,
           };
         }

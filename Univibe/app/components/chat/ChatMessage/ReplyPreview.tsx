@@ -21,7 +21,9 @@ interface ReplyPreviewProps {
     senderId?: string;
     type?: string;
     mediaUrl?: string;
+    thumbnailUrl?: string;
     duration?: number;
+    videoDuration?: number;
   };
   isOwnMessage: boolean;
   currentUserId?: string;
@@ -40,7 +42,6 @@ export default function ReplyPreview({
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
 
-  // Check if this is a valid reply
   const isValidReply = (): boolean => {
     return !!(
       replyTo &&
@@ -59,74 +60,110 @@ export default function ReplyPreview({
     }
   };
 
-  // Detect reply type from message content
   const detectReplyType = (): string => {
     if (replyTo.type === "audio") return "audio";
     if (replyTo.type === "image") return "image";
+    if (replyTo.type === "video") return "video";
 
     const msgText = replyTo.message || "";
-    if (
-      msgText === "🎤 Voice message" ||
-      msgText.includes("Voice message") ||
-      msgText.includes("voice message")
-    ) {
+    if (msgText === "Voice message" || msgText.includes("Voice message"))
       return "audio";
-    }
+    if (msgText === "Photo" || msgText.includes("Photo")) return "image";
+    if (msgText === "Video" || msgText.includes("Video")) return "video";
 
-    if (replyTo.mediaUrl && replyTo.mediaUrl.includes("audio")) {
-      return "audio";
-    }
-
-    if (msgText === "📷 Photo" || msgText.includes("Photo")) {
-      return "image";
-    }
-    if (replyTo.mediaUrl && replyTo.mediaUrl.includes("image")) {
-      return "image";
+    if (replyTo.mediaUrl) {
+      if (replyTo.mediaUrl.includes("audio")) return "audio";
+      if (replyTo.mediaUrl.includes("image")) return "image";
+      if (replyTo.mediaUrl.includes("video")) return "video";
     }
 
     return "text";
   };
 
-  // Get the image URL for preview
   const getImageUrl = (): string | null => {
-    if (!replyTo.mediaUrl) return null;
-
-    // If it's already a full URL, return it
-    if (replyTo.mediaUrl.startsWith("http")) {
-      return replyTo.mediaUrl;
-    }
-
-    // Otherwise, use getFullImageUrl to construct the full URL
-    return getFullImageUrl(replyTo.mediaUrl);
+    const url = replyTo.thumbnailUrl || replyTo.mediaUrl;
+    if (!url) return null;
+    if (url.startsWith("http")) return url;
+    return getFullImageUrl(url);
   };
 
   const getReplyPreviewText = (): string => {
     const repliedSenderName = replyTo.senderName;
-
-    // Check if original message is from current user
     const isOriginalFromCurrentUser =
       (replyTo.senderId &&
         currentUserId &&
         String(replyTo.senderId) === String(currentUserId)) ||
       repliedSenderName === "You";
 
-    // Case 1: Current user replying to their own message
-    if (isOwnMessage && isOriginalFromCurrentUser) {
+    if (isOwnMessage && isOriginalFromCurrentUser)
       return "You replied to yourself";
-    }
-
-    // Case 2: Current user replying to other person's message
-    if (isOwnMessage && !isOriginalFromCurrentUser) {
+    if (isOwnMessage && !isOriginalFromCurrentUser)
       return `You replied to ${repliedSenderName}`;
-    }
-
-    // Case 3: Other person replying to their own message
-    if (!isOwnMessage && !isOriginalFromCurrentUser) {
+    if (!isOwnMessage && !isOriginalFromCurrentUser)
       return `${repliedSenderName} replied to themselves`;
-    }
-
-    // Case 4: Other person replying to current user's message
     return `${repliedSenderName} replied to you`;
+  };
+
+  const formatDuration = (seconds?: number): string => {
+    if (!seconds || seconds === 0) return "";
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const renderMediaThumbnail = (
+    iconName: keyof typeof Ionicons.glyphMap,
+    label: string,
+    isVideo?: boolean,
+  ) => {
+    const imageUrl = getImageUrl();
+
+    return (
+      <View style={styles.mediaPreviewContainer}>
+        {imageUrl && !imageError ? (
+          <View style={styles.mediaThumbnailWrapper}>
+            <Image
+              source={{ uri: imageUrl }}
+              style={styles.mediaThumbnail}
+              contentFit="cover"
+              transition={200}
+              cachePolicy="memory-disk"
+              placeholder={{ blurhash: BLUR_HASH }}
+              onLoad={() => setImageLoaded(true)}
+              onError={() => setImageError(true)}
+              recyclingKey={imageUrl}
+            />
+            {!imageLoaded && (
+              <View style={styles.mediaLoadingOverlay}>
+                <ActivityIndicator size="small" color="#8B5CF6" />
+              </View>
+            )}
+            <View style={styles.mediaIconOverlay}>
+              <Ionicons name={iconName} size={8} color="#fff" />
+            </View>
+            {isVideo && (
+              <View style={styles.videoPlayOverlay}>
+                <Ionicons name="play" size={14} color="#fff" />
+              </View>
+            )}
+          </View>
+        ) : (
+          <View style={styles.mediaFallback}>
+            <Ionicons name={iconName} size={16} color="#8E8E93" />
+          </View>
+        )}
+        <View style={styles.mediaTextContainer}>
+          <Text style={styles.messagePreview} numberOfLines={1}>
+            {label}
+          </Text>
+          {isVideo && replyTo.videoDuration ? (
+            <Text style={styles.durationText} numberOfLines={1}>
+              {formatDuration(replyTo.videoDuration)}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+    );
   };
 
   const renderReplyContent = () => {
@@ -134,14 +171,10 @@ export default function ReplyPreview({
 
     if (replyType === "audio") {
       let duration = replyTo.duration || 0;
-
       if (duration === 0 && replyTo.message) {
         const match = replyTo.message.match(/\((\d+):(\d+)\)/);
-        if (match) {
-          duration = parseInt(match[1]) * 60 + parseInt(match[2]);
-        }
+        if (match) duration = parseInt(match[1]) * 60 + parseInt(match[2]);
       }
-
       if (duration === 0) duration = 15;
 
       const minutes = Math.floor(duration / 60);
@@ -172,45 +205,13 @@ export default function ReplyPreview({
     }
 
     if (replyType === "image") {
-      const imageUrl = getImageUrl();
-
-      return (
-        <View style={styles.imagePreviewContainer}>
-          {imageUrl && !imageError ? (
-            <View style={styles.imageThumbnailWrapper}>
-              <Image
-                source={{ uri: imageUrl }}
-                style={styles.imageThumbnail}
-                contentFit="cover"
-                transition={200}
-                cachePolicy="memory-disk"
-                placeholder={{ blurhash: BLUR_HASH }}
-                onLoad={() => setImageLoaded(true)}
-                onError={() => setImageError(true)}
-                recyclingKey={imageUrl}
-              />
-              {!imageLoaded && (
-                <View style={styles.imageLoadingOverlay}>
-                  <ActivityIndicator size="small" color="#8B5CF6" />
-                </View>
-              )}
-              <View style={styles.imageIconOverlay}>
-                <Ionicons name="camera" size={8} color="#fff" />
-              </View>
-            </View>
-          ) : (
-            <View style={styles.imageFallback}>
-              <Ionicons name="image-outline" size={16} color="#8E8E93" />
-            </View>
-          )}
-          <Text style={styles.messagePreview} numberOfLines={1}>
-            Photo
-          </Text>
-        </View>
-      );
+      return renderMediaThumbnail("camera", "Photo");
     }
 
-    // Text message
+    if (replyType === "video") {
+      return renderMediaThumbnail("videocam", "Video", true);
+    }
+
     return (
       <Text style={styles.messagePreview} numberOfLines={1}>
         {replyTo.message}
@@ -285,7 +286,7 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     textAlign: "left",
   },
-  // Voice styles
+  // Voice
   voicePreview: {
     flexDirection: "row",
     alignItems: "center",
@@ -315,14 +316,14 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
     marginLeft: 2,
   },
-  // Image preview styles
-  imagePreviewContainer: {
+  // Shared media preview
+  mediaPreviewContainer: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
     marginTop: 2,
   },
-  imageThumbnailWrapper: {
+  mediaThumbnailWrapper: {
     width: IMAGE_PREVIEW_SIZE,
     height: IMAGE_PREVIEW_SIZE,
     borderRadius: 6,
@@ -332,12 +333,12 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: "rgba(0,0,0,0.08)",
   },
-  imageThumbnail: {
+  mediaThumbnail: {
     width: IMAGE_PREVIEW_SIZE,
     height: IMAGE_PREVIEW_SIZE,
     borderRadius: 6,
   },
-  imageLoadingOverlay: {
+  mediaLoadingOverlay: {
     position: "absolute",
     top: 0,
     left: 0,
@@ -347,7 +348,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "rgba(240, 240, 245, 0.5)",
   },
-  imageIconOverlay: {
+  mediaIconOverlay: {
     position: "absolute",
     bottom: 2,
     right: 2,
@@ -355,7 +356,17 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     padding: 1.5,
   },
-  imageFallback: {
+  videoPlayOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.2)",
+  },
+  mediaFallback: {
     width: IMAGE_PREVIEW_SIZE,
     height: IMAGE_PREVIEW_SIZE,
     borderRadius: 6,
@@ -364,5 +375,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 0.5,
     borderColor: "rgba(0,0,0,0.05)",
+  },
+  mediaTextContainer: {
+    flexShrink: 1,
+  },
+  durationText: {
+    fontSize: 10,
+    color: "#8E8E93",
+    fontFamily: "SofiaSans-Regular",
+    marginTop: 1,
   },
 });

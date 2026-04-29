@@ -25,16 +25,26 @@ import type {
 // -----------------------------------------------------------------------------
 
 /**
- * Central hook for the ChatScreen.
- * Orchestrates messages, socket events, read receipts, audio recording,
- * message sending, reactions, and scroll management.
+ * Central orchestrator for the ChatScreen.
+ *
+ * Composes all chat sub-hooks and provides a unified interface for the screen.
+ * Responsibilities:
+ * - Message loading, caching, and pagination (useChatMessages)
+ * - Real-time socket events (useChatSocket)
+ * - Sending text, audio, attachments, and location (useMessageSender)
+ * - Audio recording (useAudioRecorder)
+ * - Read receipts (useChatReadReceipts)
+ * - Scroll management and message highlighting (useChatScroll, useMessageScroll)
+ * - Reactions, deletes, and reply threading
  */
 export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   const params = useLocalSearchParams();
   const { token, user } = useAuth();
   const isMountedRef = useRef(true);
 
-  // ─── Route params ────────────────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // Route params extracted from navigation
+  // ---------------------------------------------------------------------------
 
   const roomId = params.roomId as string;
   const otherUserName = params.otherUserName as string;
@@ -43,7 +53,9 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     (params.otherUserId as string) ||
     (roomId && user?.id ? extractOtherUserIdFromRoomId(roomId, user.id) : "");
 
-  // ─── UI state ────────────────────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // UI state
+  // ---------------------------------------------------------------------------
 
   const [socketConnected, setSocketConnected] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
@@ -53,7 +65,9 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     null,
   );
 
-  // ─── Messages (with pagination + caching) ────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // Messages — loading, caching, pagination, optimistic updates
+  // ---------------------------------------------------------------------------
 
   const {
     messages,
@@ -81,7 +95,9 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     userName: user?.name,
   });
 
-  // ─── Read receipts (marks messages as read when viewing) ─────────────────
+  // ---------------------------------------------------------------------------
+  // Read receipts — marks messages as read when the user views the room
+  // ---------------------------------------------------------------------------
 
   useChatReadReceipts({
     token,
@@ -90,7 +106,9 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     messages,
   });
 
-  // ─── Scroll management ───────────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // Scroll management — auto-scroll, content size tracking, message highlighting
+  // ---------------------------------------------------------------------------
 
   const {
     highlightedMessageId,
@@ -108,12 +126,16 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     cleanup: cleanupScroll,
   } = useChatScroll(flatListRef);
 
-  // ─── Message sending setup ───────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // Message sender — text, audio, attachments, location
+  // ---------------------------------------------------------------------------
 
+  // Stable socket emit wrapper to avoid dependency churn
   const emitEvent = useCallback((event: string, data: any) => {
     socketService.emit(event, data);
   }, []);
 
+  // Scrolls to the bottom of the message list and re-enables auto-scroll
   const scrollToEnd = useCallback(() => {
     enableAutoScroll();
     requestAnimationFrame(() => {
@@ -137,9 +159,11 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
       emitEvent,
     });
 
-  // ─── Audio recorder ──────────────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // Audio recorder
+  // ---------------------------------------------------------------------------
 
-  /** Called when an audio recording is complete and ready to send */
+  // Called when the user finishes recording a voice note
   const handleAudioReady = useCallback(
     async (uri: string, duration: number) => {
       await sendAudioMessage(
@@ -156,10 +180,9 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   const audioRecorder = useAudioRecorder(handleAudioReady);
 
   // ---------------------------------------------------------------------------
-  // Socket Event Handlers
+  // Socket event handlers — stored in refs to prevent stale closures
   // ---------------------------------------------------------------------------
 
-  // Store frequently changing values in refs to prevent stale closures
   const userRef = useRef(user);
   userRef.current = user;
 
@@ -176,15 +199,21 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   addMessageRef.current = addMessage;
 
   /**
-   * Handles message delivery confirmations and read receipts from the socket.
-   * Updates message statuses (sent → delivered → read) based on server events.
+   * Handles delivery confirmations, read receipts, and optimistic
+   * message confirmations from the socket.
+   *
+   * Cases handled:
+   * - messages_read: Another user read all messages in the room
+   * - message_read: Another user read a single message
+   * - message_delivered_to_recipient: A message reached the recipient's device
+   * - success/failure: Optimistic message was confirmed or rejected by server
    */
   const onMessageDeliveredRef = useRef<(data: any) => void>(undefined);
 
   onMessageDeliveredRef.current = (data: any) => {
     const { tempId, messageId, message: messageData, success, type } = data;
 
-    // Bulk read receipt — other user read all messages in the room
+    // Other user read all messages in the room — bulk update statuses
     if (type === "messages_read") {
       setMessagesRef.current((prev: Message[]) => {
         const updated = prev.map((msg) => {
@@ -220,7 +249,7 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
       return;
     }
 
-    // Single message read receipt
+    // Other user read a single message — update that message only
     if (type === "message_read") {
       setMessagesRef.current((prev: Message[]) =>
         prev.map((msg) => {
@@ -251,7 +280,7 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
       return;
     }
 
-    // Delivery confirmation — message reached the recipient's device
+    // Message was delivered to the recipient's device
     if (type === "message_delivered_to_recipient") {
       setMessagesRef.current((prev: Message[]) =>
         prev.map((msg) => {
@@ -282,24 +311,26 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
       return;
     }
 
-    // Optimistic message confirmation
+    // Optimistic message was rejected by the server — remove it
     if (success === false) {
       if (tempId) removeOptimisticMessageRef.current(tempId);
       return;
     }
+
+    // Optimistic message was confirmed — replace temp with real message
     if (tempId) {
       confirmOptimisticMessageRef.current(tempId, messageId, messageData);
     }
   };
 
-  /** Handles incoming real-time messages from the socket */
+  // Handles incoming real-time messages from other users
   const onReceiveMessageRef = useRef<(message: Message) => void>(undefined);
 
   onReceiveMessageRef.current = (message: Message) => {
     addMessageRef.current(message);
   };
 
-  // Stable wrapper objects so socket listeners are never re-registered
+  // Stable callback objects — prevents socket listeners from re-registering
   const stableCallbacks = useRef({
     onMessageDelivered: (data: any) => {
       onMessageDeliveredRef.current?.(data);
@@ -322,10 +353,10 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   });
 
   // ---------------------------------------------------------------------------
-  // Send Handlers
+  // Send handlers — called from the ChatInput component
   // ---------------------------------------------------------------------------
 
-  /** Sends a text message and clears the reply state */
+  // Sends a text message and clears any active reply
   const handleSendMessage = useCallback(
     (text: string) => {
       sendTextMessage(text, replyToMessage, () => setReplyToMessage(null));
@@ -333,7 +364,7 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     [sendTextMessage, replyToMessage],
   );
 
-  /** Uploads and sends selected attachments */
+  // Uploads and sends selected attachments (images, videos, files)
   const handleAttachmentsSelected = useCallback(
     async (attachments: AttachmentData[]) => {
       setAttachmentUploading(true);
@@ -342,7 +373,7 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     [sendAttachments],
   );
 
-  /** Sends a shared location message */
+  // Sends a shared location
   const handleLocationShared = useCallback(
     (location: AttachmentData) => {
       sendLocation(location);
@@ -351,10 +382,10 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   );
 
   // ---------------------------------------------------------------------------
-  // Reply Handling
+  // Reply handling
   // ---------------------------------------------------------------------------
 
-  /** Sets a message as the reply target for the input bar */
+  // Sets a message as the reply target, shown in ReplyIndicator above the input
   const handleReply = useCallback((message: Message) => {
     setReplyToMessage({
       _id: message._id,
@@ -366,21 +397,21 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
           : message.sender?._id,
       type: message.type,
       mediaUrl: message.mediaUrl,
+      thumbnailUrl: message.thumbnailUrl,
       duration: message.duration,
     });
   }, []);
 
-  /** Cancels the current reply and clears highlights */
+  // Cancels the active reply and clears message highlighting
   const cancelReply = useCallback(() => {
     setReplyToMessage(null);
     clearHighlight();
   }, [clearHighlight]);
 
   // ---------------------------------------------------------------------------
-  // Scroll to Message
+  // Scroll to message — used when tapping a reply preview
   // ---------------------------------------------------------------------------
 
-  /** Scrolls to a specific message (used for reply navigation) */
   const handleScrollToMessage = useCallback(
     (messageId: string) => {
       const messageIndex = messages.findIndex((m) => m._id === messageId);
@@ -397,14 +428,14 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
 
   /**
    * Toggles a reaction on a message.
-   * Applies optimistic update first, then syncs with the server.
-   * Falls back to full reload on failure.
+   * Applies an optimistic update immediately, then syncs with the server.
+   * On failure, reloads messages from the server to restore correct state.
    */
   const handleReaction = useCallback(
     async (messageId: string, reaction: string, shouldRemove?: boolean) => {
       if (!token) return;
 
-      // Optimistic update
+      // Optimistic update — apply reaction locally first
       setMessages((prev) =>
         prev.map((msg) => {
           if (msg._id !== messageId) return msg;
@@ -441,7 +472,7 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
         }),
       );
 
-      // Server sync
+      // Server sync — confirm the reaction with the backend
       try {
         const data = await chatApi.toggleReaction(
           messageId,
@@ -461,10 +492,10 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   );
 
   // ---------------------------------------------------------------------------
-  // Delete Message
+  // Delete message
   // ---------------------------------------------------------------------------
 
-  /** Deletes a message locally and emits a socket event for the other user */
+  // Deletes a message locally and emits a socket event for the other user
   const handleDelete = useCallback(
     async (messageId: string) => {
       if (!token) return;
@@ -476,17 +507,17 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
           socketService.emit("delete_message", { messageId, roomId });
         }
       } catch {
-        // Silently fail — user can retry
+        // Silently fail
       }
     },
     [token, roomId, deleteMessage],
   );
 
   // ---------------------------------------------------------------------------
-  // Audio Played
+  // Audio played
   // ---------------------------------------------------------------------------
 
-  /** Marks an audio message as played on the server */
+  // Marks an audio message as played on the server
   const markAudioAsPlayed = useCallback(
     async (messageId: string) => {
       if (!token) return;
@@ -496,10 +527,9 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   );
 
   // ---------------------------------------------------------------------------
-  // Connection Status (Event-Driven)
+  // Connection status — event-driven via socket service events
   // ---------------------------------------------------------------------------
 
-  /** Monitors socket connection status in real-time via events */
   useEffect(() => {
     setSocketConnected(socketService.getConnectionStatus());
 
@@ -521,7 +551,7 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   // Cleanup
   // ---------------------------------------------------------------------------
 
-  /** Cleanup on unmount: stop audio and mark component as unmounted */
+  // Stops audio and marks component as unmounted on screen exit
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
@@ -529,59 +559,80 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     };
   }, []);
 
-  /** Stops all playing audio */
+  // Stops all currently playing audio (called during navigation)
   const audioCleanup = useCallback(() => {
     AudioManager.stopAllSounds();
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Return
+  // Return — unified interface for ChatScreen
   // ---------------------------------------------------------------------------
 
   return {
+    // Message data
     messages,
     loading,
     refreshing,
     loadingMore,
     hasMore,
+
+    // Connection state
     socketConnected,
     isOnline,
     uploading: uploading || attachmentUploading,
+
+    // Reply state
     replyToMessage,
+
+    // Message highlighting
     highlightedMessageId,
+
+    // Other user info
     otherUserName,
     otherUserId,
     otherUserAvatar,
+
+    // Current user
     user,
     token,
     roomId,
 
+    // Message loading
     loadMessages,
     loadOlderMessages,
     onRefresh,
+
+    // Sending
     handleSendMessage,
-    handleReply,
-    cancelReply,
-    handleReaction,
-    handleDelete,
-    markAudioAsPlayed,
     handleAttachmentsSelected,
     handleLocationShared,
-    handleScrollToMessage,
-    registerMessageRef,
 
+    // Reply
+    handleReply,
+    cancelReply,
+
+    // Reactions and deletes
+    handleReaction,
+    handleDelete,
+
+    // Audio
+    markAudioAsPlayed,
     isRecording: audioRecorder.isRecording,
     recordingDuration: audioRecorder.recordingDuration,
     startRecording: audioRecorder.startRecording,
     stopRecording: audioRecorder.stopRecording,
     cancelRecording: audioRecorder.cancelRecording,
 
+    // Scroll
+    handleScrollToMessage,
+    registerMessageRef,
     initialScrollToBottom,
     handleContentSizeChange,
     handleLayout,
     handleScroll,
     enableAutoScroll,
 
+    // Cleanup
     clearAllPending,
     clearCache,
     clearHighlight,

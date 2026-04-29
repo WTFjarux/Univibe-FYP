@@ -41,8 +41,6 @@ const ChatItem: React.FC<ChatItemProps> = ({
   isSelected,
   highlightAnim,
   isHighlighted,
-  itemScaleAnim,
-  itemTranslateYAnim,
   onPress,
   onLongPress,
   isUnread: isUnreadProp,
@@ -61,7 +59,11 @@ const ChatItem: React.FC<ChatItemProps> = ({
         !item.lastMessage.readBy.includes(currentUserId || "");
 
   const isMuted = item.isMuted === true;
-  const isLastMessageFromMe = item.lastMessage?.senderId === currentUserId;
+  const isLastMessageFromMe = !!(
+    item.lastMessage?.senderId &&
+    currentUserId &&
+    item.lastMessage.senderId.toString() === currentUserId.toString()
+  );
 
   const getAvatarSource = () => {
     if (avatarError) {
@@ -84,14 +86,18 @@ const ChatItem: React.FC<ChatItemProps> = ({
 
     switch (type) {
       case "audio":
-        displayMessage = "🎤 Voice message";
+        displayMessage = "Sent a Voice message";
         break;
       case "image":
-        displayMessage = "📷 Photo";
+        displayMessage = "Sent a Photo";
+        break;
+      case "video":
+        displayMessage = "Sent a Video";
         break;
       case "file":
-        displayMessage = "📎 File";
+        displayMessage = "Sent a File";
         break;
+
       default:
         displayMessage = message || "No messages yet";
     }

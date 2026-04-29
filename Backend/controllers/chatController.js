@@ -7,7 +7,9 @@ const ChatRoom = require("../models/ChatRoom");
 const fs = require("fs");
 const mongoose = require("mongoose");
 
-// ── HELPERS ──────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
 
 const getDirectRoomId = (id1, id2) => {
   const ids = [id1.toString(), id2.toString()].sort();
@@ -38,6 +40,7 @@ const formatMessage = (msg, currentUserId) => ({
         senderId: msg.replyTo.senderId,
         type: msg.replyTo.type || "text",
         mediaUrl: msg.replyTo.mediaUrl,
+        thumbnailUrl: msg.replyTo.thumbnailUrl || "",
         duration: msg.replyTo.duration,
       }
     : null,
@@ -50,7 +53,9 @@ const formatMessage = (msg, currentUserId) => ({
   readBy: (msg.readBy || []).map((r) => r.user?._id || r.user),
 });
 
-// ── ROOM CONTROLLERS ─────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// Room Controllers
+// -----------------------------------------------------------------------------
 
 exports.getOrCreateDirectRoom = async (req, res) => {
   try {
@@ -119,9 +124,7 @@ exports.getUserChatRooms = async (req, res) => {
           lastMessage: lastMsg
             ? {
                 message:
-                  lastMsg.type === "audio"
-                    ? "🎤 Voice message"
-                    : lastMsg.message,
+                  lastMsg.type === "audio" ? "Voice message" : lastMsg.message,
                 sentAt: lastMsg.createdAt,
                 senderId: lastMsg.sender?.toString(),
                 senderName: lastMsg.senderName,
@@ -168,7 +171,9 @@ exports.getRoomDetails = async (req, res) => {
   }
 };
 
-// ── MESSAGE CONTROLLERS ──────────────────────────────────────
+// -----------------------------------------------------------------------------
+// Message Controllers
+// -----------------------------------------------------------------------------
 
 exports.getMessageHistory = async (req, res) => {
   try {
@@ -193,7 +198,6 @@ exports.getMessageHistory = async (req, res) => {
   }
 };
 
-// ✅ NEW: Lightweight endpoint
 exports.getMessagesLight = async (req, res) => {
   try {
     const { roomId } = req.params;
@@ -259,7 +263,9 @@ exports.markMessageAsDelivered = async (req, res) => {
   }
 };
 
-// ── READ / UNREAD ────────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// Read / Unread
+// -----------------------------------------------------------------------------
 
 exports.markRoomAsRead = async (req, res) => {
   try {
@@ -287,7 +293,9 @@ exports.markRoomAsUnread = async (req, res) => {
   }
 };
 
-// ── UPLOADS ──────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// Uploads
+// -----------------------------------------------------------------------------
 
 exports.uploadAudio = async (req, res) => {
   try {
@@ -314,7 +322,7 @@ exports.uploadAudio = async (req, res) => {
       senderName: user.name,
       senderAvatar: profile?.profilePicture || "",
       roomId,
-      message: "🎤 Voice message",
+      message: "Voice message",
       type: "audio",
       mediaUrl: audioUrl,
       mediaSize: req.file.size,
@@ -339,22 +347,18 @@ exports.uploadAudio = async (req, res) => {
 
     const msg = await Message.create(data);
 
-    // 🔴 BROADCAST TO ROOM VIA SOCKET
     const io = req.app.get("io");
     if (io) {
       const formattedMsg = formatMessage(msg, req.user.id);
-      // Broadcast to everyone EXCEPT sender (sender already has optimistic message)
-      socket.to(roomId).emit("receive_message", formattedMsg);
-      // Or broadcast to everyone including sender:
-      // io.to(roomId).emit('receive_message', formattedMsg);
-      console.log(`📡 Audio broadcast to room: ${roomId}`);
+      io.to(roomId).emit("receive_message", formattedMsg);
+      console.log(`Audio broadcast to room: ${roomId}`);
     }
 
     await ChatRoom.findOneAndUpdate(
       { roomId },
       {
         lastMessage: {
-          message: "🎤 Voice message",
+          message: "Voice message",
           sentAt: new Date(),
           senderId: req.user.id,
           senderName: user.name,
@@ -383,6 +387,7 @@ exports.uploadAttachments = async (req, res) => {
     const user = await User.findById(req.user.id);
     const profile = await Profile.findOne({ user: req.user.id });
 
+    // Location sharing
     if (req.body.type === "location") {
       const loc =
         typeof req.body.locationData === "string"
@@ -400,12 +405,11 @@ exports.uploadAttachments = async (req, res) => {
         deliveredTo: [{ user: req.user.id }],
       });
 
-      // 🔴 BROADCAST LOCATION
       const io = req.app.get("io");
       if (io) {
         const formattedMsg = formatMessage(msg, req.user.id);
         io.to(roomId).emit("receive_message", formattedMsg);
-        console.log(`📡 Location broadcast to room: ${roomId}`);
+        console.log(`Location broadcast to room: ${roomId}`);
       }
 
       await ChatRoom.findOneAndUpdate(
@@ -424,30 +428,41 @@ exports.uploadAttachments = async (req, res) => {
         },
         { upsert: true },
       );
+
       return res.json({
         success: true,
         data: [formatMessage(msg, req.user.id)],
       });
     }
 
-    if (!req.files?.length)
+    // File attachments
+    if (!req.files?.length) {
       return res.status(400).json({ success: false, message: "No files" });
+    }
 
     const messages = await Promise.all(
       req.files.map(async (file) => {
-        const isImage = file.mimetype.startsWith("image/");
-        const isVideo = file.mimetype.startsWith("video/");
-        return Message.create({
+        const isImage = file.mimetype?.startsWith("image/");
+        const isVideo = file.mimetype?.startsWith("video/");
+
+        let messageText = ` ${file.originalname}`;
+        let messageType = "file";
+
+        if (isImage) {
+          messageText = " Photo";
+          messageType = "image";
+        } else if (isVideo) {
+          messageText = "🎥 Video";
+          messageType = "video";
+        }
+
+        const messageData = {
           sender: req.user.id,
           senderName: user.name,
           senderAvatar: profile?.profilePicture || "",
           roomId,
-          message: isImage
-            ? "📷 Photo"
-            : isVideo
-              ? "🎥 Video"
-              : `📎 ${file.originalname}`,
-          type: isImage ? "image" : isVideo ? "video" : "file",
+          message: messageText,
+          type: messageType,
           mediaUrl: `/uploads/chat/attachments/${file.filename}`,
           thumbnailUrl: file.thumbnailUrl || "",
           mediaSize: file.size,
@@ -455,11 +470,18 @@ exports.uploadAttachments = async (req, res) => {
           mediaMimeType: file.mimetype,
           readBy: [{ user: req.user.id }],
           deliveredTo: [{ user: req.user.id }],
-        });
+        };
+
+        // Preserve video duration from metadata extracted during upload
+        if (isVideo && file.metadata?.duration) {
+          messageData.duration = Math.round(file.metadata.duration);
+        }
+
+        return Message.create(messageData);
       }),
     );
 
-    // 🔴 BROADCAST ALL ATTACHMENTS TO ROOM
+    // Broadcast to room
     const io = req.app.get("io");
     const formattedMessages = messages.map((m) =>
       formatMessage(m, req.user.id),
@@ -469,20 +491,39 @@ exports.uploadAttachments = async (req, res) => {
       formattedMessages.forEach((msg) => {
         io.to(roomId).emit("receive_message", msg);
         console.log(
-          `📡 Attachment broadcast to room: ${roomId}, msg: ${msg._id}`,
+          `Attachment broadcast to room: ${roomId}, msg: ${msg._id}, type: ${msg.type}`,
         );
       });
     }
 
+    // Update room with smart last message summary
     const lastMsg = messages[messages.length - 1];
+
+    let lastMessageText;
+    if (messages.length === 1) {
+      lastMessageText = lastMsg.message;
+    } else {
+      const typeCount = messages.reduce((acc, m) => {
+        acc[m.type] = (acc[m.type] || 0) + 1;
+        return acc;
+      }, {});
+
+      const parts = [];
+      if (typeCount.image)
+        parts.push(`${typeCount.image} photo${typeCount.image > 1 ? "s" : ""}`);
+      if (typeCount.video)
+        parts.push(`${typeCount.video} video${typeCount.video > 1 ? "s" : ""}`);
+      if (typeCount.file)
+        parts.push(`${typeCount.file} file${typeCount.file > 1 ? "s" : ""}`);
+
+      lastMessageText = ` ${parts.join(", ")}`;
+    }
+
     await ChatRoom.findOneAndUpdate(
       { roomId },
       {
         lastMessage: {
-          message:
-            messages.length === 1
-              ? lastMsg.message
-              : `📎 ${messages.length} attachments`,
+          message: lastMessageText,
           sentAt: new Date(),
           senderId: req.user.id,
           senderName: user.name,
@@ -500,11 +541,14 @@ exports.uploadAttachments = async (req, res) => {
       data: formattedMessages,
     });
   } catch (e) {
+    console.error("uploadAttachments error:", e);
     res.status(500).json({ success: false, message: e.message });
   }
 };
 
-// ── AUDIO ────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// Audio
+// -----------------------------------------------------------------------------
 
 exports.markAudioAsPlayed = async (req, res) => {
   try {
@@ -515,7 +559,9 @@ exports.markAudioAsPlayed = async (req, res) => {
   }
 };
 
-// ── REACTIONS ────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// Reactions
+// -----------------------------------------------------------------------------
 
 exports.addReaction = async (req, res) => {
   try {
@@ -547,7 +593,9 @@ exports.removeReaction = async (req, res) => {
   }
 };
 
-// ── USER ─────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// User
+// -----------------------------------------------------------------------------
 
 exports.getOtherUserProfile = async (req, res) => {
   try {

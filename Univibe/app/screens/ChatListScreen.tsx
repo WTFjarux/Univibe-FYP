@@ -263,6 +263,7 @@ export default function ChatListScreen() {
         onToggleRead={() => toggleRead(selectedRoom)}
         onMute={() => toggleMute(selectedRoom)}
         onDelete={() => deleteChat(selectedRoom, handleCloseModal)}
+        currentUserId={user?.id}
       />
     </SafeAreaView>
   );

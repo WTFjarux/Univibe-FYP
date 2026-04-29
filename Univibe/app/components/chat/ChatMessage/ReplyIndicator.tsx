@@ -1,4 +1,4 @@
-// app/components/chat/ChatMessage/ReplyIndicator.tsx (UPDATED)
+// app/components/chat/ChatMessage/ReplyIndicator.tsx
 
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -23,15 +23,60 @@ interface ReplyIndicatorProps {
     senderId?: string;
     type?: string;
     mediaUrl?: string;
+    thumbnailUrl?: string;
+    mediaName?: string;
     duration?: number;
   } | null;
   onCancelReply: () => void;
 }
 
 const IMAGE_PREVIEW_SIZE = 56;
-
-// Blurhash for a light gray placeholder (no asset needed)
 const BLUR_HASH = "L6PZfSi_.AyE_3t7t7R**0o#DgR4";
+
+// -----------------------------------------------------------------------------
+// File helpers
+// -----------------------------------------------------------------------------
+
+const getFileIcon = (name?: string): keyof typeof Ionicons.glyphMap => {
+  if (!name) return "document-outline";
+  const ext = name.split(".").pop()?.toLowerCase();
+  const iconMap: Record<string, keyof typeof Ionicons.glyphMap> = {
+    pdf: "document-text",
+    doc: "document-text",
+    docx: "document-text",
+    xls: "grid",
+    xlsx: "grid",
+    ppt: "easel",
+    pptx: "easel",
+    zip: "archive",
+    rar: "archive",
+    txt: "document",
+    csv: "document",
+  };
+  return iconMap[ext || ""] || "document-outline";
+};
+
+const getFileColor = (name?: string): string => {
+  if (!name) return "#8B5CF6";
+  const ext = name.split(".").pop()?.toLowerCase();
+  const colorMap: Record<string, string> = {
+    pdf: "#FF3B30",
+    doc: "#007AFF",
+    docx: "#007AFF",
+    xls: "#34C759",
+    xlsx: "#34C759",
+    ppt: "#FF9500",
+    pptx: "#FF9500",
+    zip: "#5856D6",
+    rar: "#5856D6",
+    txt: "#8E8E93",
+  };
+  return colorMap[ext || ""] || "#8B5CF6";
+};
+
+// -----------------------------------------------------------------------------
+// Component
+// -----------------------------------------------------------------------------
 
 export default function ReplyIndicator({
   replyToMessage,
@@ -46,8 +91,6 @@ export default function ReplyIndicator({
   useEffect(() => {
     if (replyToMessage) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-      // Reset image states when new reply
       setImageLoaded(false);
       setImageError(false);
 
@@ -86,26 +129,93 @@ export default function ReplyIndicator({
   const isReplyingToSelf = replyToMessage.senderId === user?.id;
 
   const getReplyText = () => {
-    if (isReplyingToSelf) {
-      return "Replying to yourself";
-    }
+    if (isReplyingToSelf) return "Replying to yourself";
     return `Replying to ${replyToMessage.senderName}`;
   };
 
-  // Get the image URL for preview
   const getImageUrl = (): string | null => {
-    if (!replyToMessage.mediaUrl) return null;
-
-    // If it's already a full URL, return it
-    if (replyToMessage.mediaUrl.startsWith("http")) {
-      return replyToMessage.mediaUrl;
-    }
-
-    // Otherwise, use getFullImageUrl to construct the full URL
-    return getFullImageUrl(replyToMessage.mediaUrl);
+    const url = replyToMessage.thumbnailUrl || replyToMessage.mediaUrl;
+    if (!url) return null;
+    if (url.startsWith("http")) return url;
+    return getFullImageUrl(url);
   };
 
-  // Render the reply content based on message type
+  const renderMediaThumbnail = (
+    iconName: keyof typeof Ionicons.glyphMap,
+    label: string,
+    isVideo?: boolean,
+  ) => {
+    const imageUrl = getImageUrl();
+
+    return (
+      <View style={styles.mediaPreview}>
+        {imageUrl && !imageError ? (
+          <View style={styles.imagePreviewContainer}>
+            <Image
+              source={{ uri: imageUrl }}
+              style={styles.imagePreview}
+              contentFit="cover"
+              transition={300}
+              cachePolicy="memory-disk"
+              placeholder={{ blurhash: BLUR_HASH }}
+              onLoad={() => setImageLoaded(true)}
+              onError={() => setImageError(true)}
+              placeholderContentFit="cover"
+              recyclingKey={imageUrl}
+            />
+            {!imageLoaded && (
+              <View style={styles.imageLoadingContainer}>
+                <ActivityIndicator size="small" color="#8B5CF6" />
+              </View>
+            )}
+            <View style={styles.imageOverlay}>
+              <Ionicons name={iconName} size={12} color="#fff" />
+            </View>
+            {isVideo && (
+              <View style={styles.videoPlayBadge}>
+                <Ionicons name="play" size={16} color="#fff" />
+              </View>
+            )}
+          </View>
+        ) : (
+          <View style={styles.imageFallback}>
+            <Ionicons name={iconName} size={24} color="#8E8E93" />
+          </View>
+        )}
+        <View style={styles.mediaTextContainer}>
+          <Text style={styles.messagePreview} numberOfLines={1}>
+            {label}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
+  const renderFilePreview = () => {
+    const fileName =
+      replyToMessage.mediaName || replyToMessage.message || "File";
+    const fileIcon = getFileIcon(fileName);
+    const fileColor = getFileColor(fileName);
+
+    return (
+      <View style={styles.mediaPreview}>
+        <View
+          style={[
+            styles.fileIconContainer,
+            { backgroundColor: `${fileColor}18` },
+          ]}
+        >
+          <Ionicons name={fileIcon} size={24} color={fileColor} />
+        </View>
+        <View style={styles.mediaTextContainer}>
+          <Text style={styles.messagePreview} numberOfLines={1}>
+            {fileName}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
   const renderReplyContent = () => {
     const type = replyToMessage.type;
 
@@ -126,10 +236,7 @@ export default function ReplyIndicator({
                 key={i}
                 style={[
                   styles.waveBar,
-                  {
-                    height: h,
-                    backgroundColor: "#8B5CF6",
-                  },
+                  { height: h, backgroundColor: "#8B5CF6" },
                 ]}
               />
             ))}
@@ -141,65 +248,18 @@ export default function ReplyIndicator({
       );
     }
 
-    if (type === "image" || (type === "file" && replyToMessage.mediaUrl)) {
-      const imageUrl = getImageUrl();
-
-      return (
-        <View style={styles.mediaPreview}>
-          {imageUrl && !imageError ? (
-            <View style={styles.imagePreviewContainer}>
-              <Image
-                source={{ uri: imageUrl }}
-                style={styles.imagePreview}
-                contentFit="cover"
-                transition={300}
-                cachePolicy="memory-disk"
-                placeholder={{ blurhash: BLUR_HASH }}
-                onLoad={() => setImageLoaded(true)}
-                onError={() => setImageError(true)}
-                placeholderContentFit="cover"
-                recyclingKey={imageUrl}
-              />
-              {!imageLoaded && (
-                <View style={styles.imageLoadingContainer}>
-                  <ActivityIndicator size="small" color="#8B5CF6" />
-                </View>
-              )}
-              <View style={styles.imageOverlay}>
-                <Ionicons name="camera" size={12} color="#fff" />
-              </View>
-            </View>
-          ) : (
-            <View style={styles.imageFallback}>
-              <Ionicons name="image-outline" size={24} color="#8E8E93" />
-            </View>
-          )}
-          <View style={styles.mediaTextContainer}>
-            <Text style={styles.messagePreview} numberOfLines={1}>
-              {replyToMessage.type === "image" ? "Image" : "File"}
-            </Text>
-          </View>
-        </View>
-      );
+    if (type === "image") {
+      return renderMediaThumbnail("camera", "Photo");
     }
 
     if (type === "video") {
-      return (
-        <View style={styles.mediaPreview}>
-          <View style={styles.videoFallback}>
-            <Ionicons name="videocam-outline" size={24} color="#8E8E93" />
-          </View>
-          <View style={styles.mediaTextContainer}>
-            <Text style={styles.messagePreview} numberOfLines={1}>
-              Video
-            </Text>
-            <Text style={styles.tapToViewText}>Tap to view</Text>
-          </View>
-        </View>
-      );
+      return renderMediaThumbnail("videocam", "Video", true);
     }
 
-    // Text message - show the actual text
+    if (type === "file") {
+      return renderFilePreview();
+    }
+
     return (
       <Text style={styles.messagePreview} numberOfLines={2}>
         {replyToMessage.message}
@@ -211,10 +271,7 @@ export default function ReplyIndicator({
     <Animated.View
       style={[
         styles.container,
-        {
-          transform: [{ translateY: slideAnim }],
-          opacity: opacityAnim,
-        },
+        { transform: [{ translateY: slideAnim }], opacity: opacityAnim },
       ]}
     >
       <View style={styles.content}>
@@ -281,7 +338,6 @@ const styles = StyleSheet.create({
     marginLeft: 12,
     alignSelf: "flex-start",
   },
-  // Audio styles
   voicePreview: {
     flexDirection: "row",
     alignItems: "center",
@@ -309,7 +365,6 @@ const styles = StyleSheet.create({
     color: "#8E8E93",
     fontFamily: "SofiaSans-Regular",
   },
-  // Media preview styles
   mediaPreview: {
     flexDirection: "row",
     alignItems: "center",
@@ -324,11 +379,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#F0F0F5",
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.08)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
   },
   imagePreview: {
     width: IMAGE_PREVIEW_SIZE,
@@ -353,6 +403,16 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     padding: 3,
   },
+  videoPlayBadge: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.15)",
+  },
   imageFallback: {
     width: IMAGE_PREVIEW_SIZE,
     height: IMAGE_PREVIEW_SIZE,
@@ -363,24 +423,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.05)",
   },
-  videoFallback: {
+  fileIconContainer: {
     width: IMAGE_PREVIEW_SIZE,
     height: IMAGE_PREVIEW_SIZE,
     borderRadius: 10,
-    backgroundColor: "#F0F0F5",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.05)",
+    borderColor: "rgba(0,0,0,0.08)",
   },
   mediaTextContainer: {
     flex: 1,
     justifyContent: "center",
     gap: 2,
-  },
-  tapToViewText: {
-    fontSize: 11,
-    color: "#8E8E93",
-    fontFamily: "SofiaSans-Regular",
   },
 });

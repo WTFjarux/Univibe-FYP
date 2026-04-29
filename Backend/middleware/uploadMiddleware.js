@@ -6,12 +6,16 @@
  * - Cover photos
  * - Event images
  * - Audio messages (voice notes)
+ * - Chat attachments (images, videos, documents)
  *
  * Features:
  * - Automatic directory creation
  * - File type validation
  * - Image optimization with Sharp
+ * - Video metadata extraction with ffprobe
  * - Audio file support (mp3, m4a, aac, wav)
+ * - Video file support (mp4, mov, avi, webm, 3gp, mkv)
+ * - Document file support (pdf, doc, xls, ppt, txt, zip, rar)
  * - Error handling with user-friendly messages
  */
 
@@ -19,6 +23,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const sharp = require("sharp");
+const { spawn } = require("child_process");
 
 // ============================================
 // DIRECTORY CONFIGURATION
@@ -29,26 +34,27 @@ const uploadDirectories = {
   coverPhotos: "uploads/cover-photos",
   eventImages: "uploads/events",
   chatAudio: "uploads/chat/audio",
+  chatAttachments: "uploads/chat/attachments",
 };
 
-// Create all required directories
 Object.values(uploadDirectories).forEach((dir) => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
-    console.log(`✅ Created directory: ${dir}`);
+    console.log(`Created directory: ${dir}`);
   }
 });
 
-console.log("📁 Upload directories ready:");
-console.log(`   Audio files will be saved to: ${uploadDirectories.chatAudio}`);
+console.log("Upload directories ready:");
+console.log(`   Profile pictures: ${uploadDirectories.profilePictures}`);
+console.log(`   Cover photos: ${uploadDirectories.coverPhotos}`);
+console.log(`   Event images: ${uploadDirectories.eventImages}`);
+console.log(`   Audio files: ${uploadDirectories.chatAudio}`);
+console.log(`   Attachments: ${uploadDirectories.chatAttachments}`);
 
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
 
-/**
- * Format file size for logging
- */
 const formatBytes = (bytes, decimals = 2) => {
   if (bytes === 0) return "0 Bytes";
   const k = 1024;
@@ -58,9 +64,6 @@ const formatBytes = (bytes, decimals = 2) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + " " + sizes[i];
 };
 
-/**
- * Delete old image file
- */
 const deleteOldImage = async (filePath) => {
   if (!filePath) return false;
   try {
@@ -71,7 +74,7 @@ const deleteOldImage = async (filePath) => {
     }
     if (fs.existsSync(cleanPath)) {
       await fs.promises.unlink(cleanPath);
-      console.log(`🗑️ Deleted old image: ${cleanPath}`);
+      console.log(`Deleted old image: ${cleanPath}`);
       return true;
     }
   } catch (error) {
@@ -80,9 +83,6 @@ const deleteOldImage = async (filePath) => {
   return false;
 };
 
-/**
- * Delete audio file
- */
 const deleteAudioFile = async (filePath) => {
   if (!filePath) return false;
   try {
@@ -93,13 +93,88 @@ const deleteAudioFile = async (filePath) => {
     }
     if (fs.existsSync(cleanPath)) {
       await fs.promises.unlink(cleanPath);
-      console.log(`🗑️ Deleted audio file: ${cleanPath}`);
+      console.log(`Deleted audio file: ${cleanPath}`);
       return true;
     }
   } catch (error) {
     console.error(`Error deleting audio: ${error.message}`);
   }
   return false;
+};
+
+// ============================================
+// VIDEO METADATA EXTRACTION
+// ============================================
+
+const getVideoMetadata = (videoPath) => {
+  return new Promise((resolve) => {
+    const ffprobe = spawn("ffprobe", [
+      "-v",
+      "quiet",
+      "-print_format",
+      "json",
+      "-show_format",
+      "-show_streams",
+      videoPath,
+    ]);
+
+    let stdout = "";
+    let stderr = "";
+
+    ffprobe.stdout.on("data", (data) => {
+      stdout += data.toString();
+    });
+
+    ffprobe.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
+
+    ffprobe.on("error", (err) => {
+      console.warn(`ffprobe not available: ${err.message}`);
+      console.warn("   Install ffmpeg for video metadata extraction");
+      resolve(null);
+    });
+
+    ffprobe.on("close", (code) => {
+      if (code !== 0) {
+        console.error(`ffprobe exited with code ${code}:`, stderr);
+        resolve(null);
+        return;
+      }
+
+      try {
+        const metadata = JSON.parse(stdout);
+        const videoStream = metadata.streams?.find(
+          (s) => s.codec_type === "video",
+        );
+
+        if (!videoStream) {
+          console.warn("No video stream found in file");
+          resolve(null);
+          return;
+        }
+
+        const result = {
+          duration: parseFloat(metadata.format?.duration) || 0,
+          width: videoStream.width || 0,
+          height: videoStream.height || 0,
+          codec: videoStream.codec_name || "unknown",
+          bitrate: parseInt(metadata.format?.bit_rate) || 0,
+          fps: eval(videoStream.r_frame_rate) || 0,
+          size: parseInt(metadata.format?.size) || 0,
+        };
+
+        console.log(
+          `   Video metadata: ${result.width}x${result.height}, ${result.duration.toFixed(1)}s, ${result.codec}`,
+        );
+
+        resolve(result);
+      } catch (err) {
+        console.error("Failed to parse video metadata:", err.message);
+        resolve(null);
+      }
+    });
+  });
 };
 
 // ============================================
@@ -113,6 +188,8 @@ const getDestination = (fieldname) => {
     images: uploadDirectories.eventImages,
     eventImage: uploadDirectories.eventImages,
     audio: uploadDirectories.chatAudio,
+    attachments: uploadDirectories.chatAttachments,
+    attachment: uploadDirectories.chatAttachments,
   };
   return destinations[fieldname] || uploadDirectories.eventImages;
 };
@@ -142,13 +219,23 @@ const storage = multer.diskStorage({
   },
 });
 
+const attachmentStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDirectories.chatAttachments);
+  },
+  filename: (req, file, cb) => {
+    const userId = req.user?.id || "unknown";
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname).toLowerCase() || ".bin";
+    const filename = `attachment-${userId}-${uniqueSuffix}${ext}`;
+    cb(null, filename);
+  },
+});
+
 // ============================================
 // FILE FILTERS
 // ============================================
 
-/**
- * Image file filter
- */
 const imageFileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
   const isHeic = ext === ".heic" || ext === ".heif";
@@ -161,9 +248,6 @@ const imageFileFilter = (req, file, cb) => {
   }
 };
 
-/**
- * Audio file filter - Allows common audio formats
- */
 const audioFileFilter = (req, file, cb) => {
   const allowedAudioTypes = [
     "audio/mpeg",
@@ -187,6 +271,105 @@ const audioFileFilter = (req, file, cb) => {
   }
 };
 
+const attachmentFileFilter = (req, file, cb) => {
+  const allowedImageTypes = [
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+  ];
+
+  const allowedVideoTypes = [
+    "video/mp4",
+    "video/quicktime",
+    "video/x-msvideo",
+    "video/webm",
+    "video/3gpp",
+    "video/x-matroska",
+  ];
+
+  const allowedDocTypes = [
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "text/plain",
+    "application/zip",
+    "application/x-rar-compressed",
+    "application/octet-stream",
+  ];
+
+  const allAllowed = [
+    ...allowedImageTypes,
+    ...allowedVideoTypes,
+    ...allowedDocTypes,
+  ];
+
+  const ext = path.extname(file.originalname).toLowerCase();
+  const allowedExts = [
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".webp",
+    ".heic",
+    ".heif",
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".webm",
+    ".3gp",
+    ".mkv",
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".txt",
+    ".csv",
+    ".zip",
+    ".rar",
+  ];
+
+  if (allAllowed.includes(file.mimetype) || allowedExts.includes(ext)) {
+    cb(null, true);
+  } else {
+    cb(
+      new Error(
+        `File type not supported: ${file.originalname} (${file.mimetype})`,
+      ),
+      false,
+    );
+  }
+};
+
+const videoFileFilter = (req, file, cb) => {
+  const allowedVideoTypes = [
+    "video/mp4",
+    "video/quicktime",
+    "video/x-msvideo",
+    "video/webm",
+    "video/3gpp",
+    "video/x-matroska",
+  ];
+
+  const ext = path.extname(file.originalname).toLowerCase();
+  const allowedExts = [".mp4", ".mov", ".avi", ".webm", ".3gp", ".mkv"];
+
+  if (allowedVideoTypes.includes(file.mimetype) || allowedExts.includes(ext)) {
+    cb(null, true);
+  } else {
+    cb(new Error(`Video format not supported: ${file.originalname}`), false);
+  }
+};
+
 // ============================================
 // MULTER INSTANCES
 // ============================================
@@ -203,6 +386,24 @@ const audioUpload = multer({
   limits: { fileSize: 25 * 1024 * 1024 },
 });
 
+const attachmentUpload = multer({
+  storage: attachmentStorage,
+  fileFilter: attachmentFileFilter,
+  limits: {
+    fileSize: 200 * 1024 * 1024,
+    files: 10,
+  },
+});
+
+const videoUpload = multer({
+  storage: attachmentStorage,
+  fileFilter: videoFileFilter,
+  limits: {
+    fileSize: 200 * 1024 * 1024,
+    files: 5,
+  },
+});
+
 // ============================================
 // ERROR HANDLER
 // ============================================
@@ -210,13 +411,23 @@ const audioUpload = multer({
 const handleUploadError = (err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     let errorMessage = `Upload error: ${err.message}`;
+
     if (err.code === "LIMIT_FILE_SIZE") {
-      errorMessage = `File size too large. Maximum: ${err.field === "audio" ? "25MB" : "75MB"}.`;
+      const maxSize =
+        err.field === "audio"
+          ? "25MB"
+          : err.field === "video"
+            ? "200MB"
+            : err.field === "attachments"
+              ? "200MB"
+              : "75MB";
+      errorMessage = `File size too large. Maximum: ${maxSize}.`;
     } else if (err.code === "LIMIT_FILE_COUNT") {
-      errorMessage = "Too many files. Maximum 5 images per event.";
+      errorMessage = `Too many files. Maximum ${err.field === "video" ? "5 videos" : "10 files"} allowed.`;
     } else if (err.code === "LIMIT_UNEXPECTED_FILE") {
-      errorMessage = 'Unexpected file field. Use "images" for event photos.';
+      errorMessage = `Unexpected file field: "${err.field}". Please use the correct field name.`;
     }
+
     return res.status(400).json({ success: false, message: errorMessage });
   } else if (err) {
     return res.status(400).json({ success: false, message: err.message });
@@ -272,10 +483,9 @@ const processEventImages = async (files) => {
 };
 
 // ============================================
-// EXPORTED MIDDLEWARES
+// EXPORTED MIDDLEWARES - Image Uploads
 // ============================================
 
-// Image uploads
 const uploadProfilePicture = (req, res, next) => {
   imageUpload.single("profilePicture")(req, res, (err) =>
     handleUploadError(err, req, res, next),
@@ -320,227 +530,124 @@ const uploadWithErrorHandling = (req, res, next) => {
 };
 
 // ============================================
-// AUDIO UPLOAD MIDDLEWARE (UPDATED)
+// EXPORTED MIDDLEWARES - Audio Uploads
 // ============================================
 
-/**
- * Upload single audio file for voice messages
- * Returns the file info for further processing
- */
 const uploadAudioMessage = (req, res, next) => {
-  console.log("🔊 [uploadAudioMessage] Processing audio upload...");
+  console.log("[uploadAudioMessage] Processing audio upload...");
 
   audioUpload.single("audio")(req, res, (err) => {
     if (err) {
-      console.error("❌ Multer error:", err);
+      console.error("Multer error:", err);
       return handleUploadError(err, req, res, next);
     }
 
     if (req.file) {
-      // Verify file was actually saved
       const filePath = req.file.path;
       if (fs.existsSync(filePath)) {
         const stats = fs.statSync(filePath);
-        console.log("✅ Audio file saved successfully:");
-        console.log(`   📁 Path: ${filePath}`);
-        console.log(`   📝 Filename: ${req.file.filename}`);
-        console.log(`   📏 Size: ${formatBytes(stats.size)}`);
-        console.log(`   🎵 Type: ${req.file.mimetype}`);
+        console.log("Audio file saved successfully:");
+        console.log(`   Path: ${filePath}`);
+        console.log(`   Filename: ${req.file.filename}`);
+        console.log(`   Size: ${formatBytes(stats.size)}`);
+        console.log(`   Type: ${req.file.mimetype}`);
       } else {
-        console.error("❌ File not found at path after save:", filePath);
+        console.error("File not found at path after save:", filePath);
       }
 
-      // Add audio metadata for response
       req.audioInfo = {
         filename: req.file.filename,
         url: `/uploads/chat/audio/${req.file.filename}`,
         size: req.file.size,
         mimetype: req.file.mimetype,
       };
-      console.log("📦 audioInfo set:", req.audioInfo);
     } else {
-      console.error("❌ No file in request after multer processing");
+      console.error("No file in request after multer processing");
     }
 
     next();
   });
 };
 
-/**
- * Delete audio file after message is deleted or failed
- */
 const deleteAudioFileIfExists = async (fileUrl) => {
   return await deleteAudioFile(fileUrl);
 };
 
 // ============================================
-// 🔴 Updated: ATTACHMENT UPLOAD CONFIGURATION (Multiple Files)
+// EXPORTED MIDDLEWARES - Attachment Uploads
 // ============================================
 
-// Ensure attachment directory exists
-const attachmentDir = "uploads/chat/attachments";
-if (!fs.existsSync(attachmentDir)) {
-  fs.mkdirSync(attachmentDir, { recursive: true });
-  console.log(`✅ Created directory: ${attachmentDir}`);
-}
-
-/**
- * Attachment file filter - Allows images, videos, documents
- */
-const attachmentFileFilter = (req, file, cb) => {
-  const allowedImageTypes = [
-    "image/jpeg",
-    "image/png",
-    "image/gif",
-    "image/webp",
-    "image/heic",
-    "image/heif",
-  ];
-  const allowedVideoTypes = [
-    "video/mp4",
-    "video/quicktime",
-    "video/x-msvideo",
-    "video/webm",
-  ];
-  const allowedDocTypes = [
-    "application/pdf",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.ms-powerpoint",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    "text/plain",
-    "application/zip",
-    "application/x-rar-compressed",
-    "application/octet-stream",
-  ];
-
-  const allAllowed = [
-    ...allowedImageTypes,
-    ...allowedVideoTypes,
-    ...allowedDocTypes,
-  ];
-  const ext = path.extname(file.originalname).toLowerCase();
-  const allowedExts = [
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".gif",
-    ".webp",
-    ".heic",
-    ".heif",
-    ".mp4",
-    ".mov",
-    ".avi",
-    ".webm",
-    ".pdf",
-    ".doc",
-    ".docx",
-    ".xls",
-    ".xlsx",
-    ".ppt",
-    ".pptx",
-    ".txt",
-    ".csv",
-    ".zip",
-    ".rar",
-  ];
-
-  if (allAllowed.includes(file.mimetype) || allowedExts.includes(ext)) {
-    cb(null, true);
-  } else {
-    cb(new Error(`File type not supported: ${file.originalname}`), false);
-  }
-};
-
-// 🔴 Storage for multiple attachments
-const attachmentStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, attachmentDir);
-  },
-  filename: (req, file, cb) => {
-    const userId = req.user?.id || "unknown";
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname).toLowerCase() || ".bin";
-    const filename = `attachment-${userId}-${uniqueSuffix}${ext}`;
-    cb(null, filename);
-  },
-});
-
-// 🔴 Updated: Allow up to 10 files, 50MB each
-const attachmentUpload = multer({
-  storage: attachmentStorage,
-  fileFilter: attachmentFileFilter,
-  limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB per file
-    files: 10, // Max 10 files per upload
-  },
-});
-
-/**
- * 🔴 Upload multiple attachments (images, videos, documents)
- * Supports up to 10 files in a single request
- */
 const uploadAttachments = (req, res, next) => {
-  console.log("📎 [uploadAttachments] Processing attachment upload...");
+  console.log("[uploadAttachments] Processing attachment upload...");
 
-  // Accept multiple files with field name "attachments"
-  attachmentUpload.array("attachments", 10)(req, res, (err) => {
+  attachmentUpload.array("attachments", 10)(req, res, async (err) => {
     if (err) {
-      console.error("❌ Attachment upload error:", err);
+      console.error("Attachment upload error:", err);
       return handleUploadError(err, req, res, next);
     }
 
     if (req.files && req.files.length > 0) {
-      console.log(`✅ ${req.files.length} attachment(s) saved successfully:`);
+      console.log(`${req.files.length} attachment(s) saved successfully:`);
 
-      req.attachmentsInfo = req.files
-        .map((file) => {
+      req.attachmentsInfo = await Promise.all(
+        req.files.map(async (file) => {
           const filePath = file.path;
-          if (fs.existsSync(filePath)) {
-            const stats = fs.statSync(filePath);
-            console.log(
-              `   📁 ${file.originalname} (${formatBytes(stats.size)})`,
-            );
 
-            // Determine attachment type
-            let attachmentType = "file";
-            if (file.mimetype.startsWith("image/")) attachmentType = "image";
-            else if (file.mimetype.startsWith("video/"))
-              attachmentType = "video";
-
-            return {
-              filename: file.filename,
-              originalname: file.originalname,
-              url: `/uploads/chat/attachments/${file.filename}`,
-              size: file.size,
-              mimetype: file.mimetype,
-              type: attachmentType,
-            };
+          if (!fs.existsSync(filePath)) {
+            console.warn(`File not found: ${filePath}`);
+            return null;
           }
-          return null;
-        })
-        .filter(Boolean);
+
+          const stats = fs.statSync(filePath);
+
+          let attachmentType = "file";
+          if (file.mimetype?.startsWith("image/")) {
+            attachmentType = "image";
+          } else if (file.mimetype?.startsWith("video/")) {
+            attachmentType = "video";
+          }
+
+          let videoMetadata = null;
+          if (attachmentType === "video") {
+            videoMetadata = await getVideoMetadata(filePath);
+            if (videoMetadata) {
+              file.metadata = videoMetadata;
+            }
+          }
+
+          console.log(
+            `   ${file.originalname} (${formatBytes(stats.size)}) [${attachmentType}]`,
+          );
+
+          return {
+            filename: file.filename,
+            originalname: file.originalname,
+            url: `/uploads/chat/attachments/${file.filename}`,
+            size: file.size,
+            mimetype: file.mimetype,
+            type: attachmentType,
+            metadata: videoMetadata,
+          };
+        }),
+      );
+
+      req.attachmentsInfo = req.attachmentsInfo.filter(Boolean);
     } else {
-      console.log("ℹ️ No files in request (may be location share)");
+      console.log("No files in request (may be location share)");
     }
 
     next();
   });
 };
 
-/**
- * 🔴 Also keep single file upload for backward compatibility
- */
 const uploadSingleAttachment = (req, res, next) => {
   console.log(
-    "📎 [uploadSingleAttachment] Processing single attachment upload...",
+    "[uploadSingleAttachment] Processing single attachment upload...",
   );
 
-  attachmentUpload.single("attachment")(req, res, (err) => {
+  attachmentUpload.single("attachment")(req, res, async (err) => {
     if (err) {
-      console.error("❌ Attachment upload error:", err);
+      console.error("Attachment upload error:", err);
       return handleUploadError(err, req, res, next);
     }
 
@@ -548,16 +655,23 @@ const uploadSingleAttachment = (req, res, next) => {
       const filePath = req.file.path;
       if (fs.existsSync(filePath)) {
         const stats = fs.statSync(filePath);
-        console.log("✅ Attachment saved successfully:");
-        console.log(`   📁 Path: ${filePath}`);
-        console.log(`   📝 Filename: ${req.file.filename}`);
-        console.log(`   📏 Size: ${formatBytes(stats.size)}`);
-        console.log(`   📎 Type: ${req.file.mimetype}`);
+        console.log("Attachment saved successfully:");
+        console.log(`   Path: ${filePath}`);
+        console.log(`   Filename: ${req.file.filename}`);
+        console.log(`   Size: ${formatBytes(stats.size)}`);
+        console.log(`   Type: ${req.file.mimetype}`);
 
         let attachmentType = "file";
-        if (req.file.mimetype.startsWith("image/")) attachmentType = "image";
-        else if (req.file.mimetype.startsWith("video/"))
+        if (req.file.mimetype?.startsWith("image/")) {
+          attachmentType = "image";
+        } else if (req.file.mimetype?.startsWith("video/")) {
           attachmentType = "video";
+
+          const videoMetadata = await getVideoMetadata(filePath);
+          if (videoMetadata) {
+            req.file.metadata = videoMetadata;
+          }
+        }
 
         req.attachmentInfo = {
           filename: req.file.filename,
@@ -566,34 +680,77 @@ const uploadSingleAttachment = (req, res, next) => {
           size: req.file.size,
           mimetype: req.file.mimetype,
           type: attachmentType,
+          metadata: req.file.metadata || null,
         };
       }
     } else {
-      console.error("❌ No file in request after multer processing");
+      console.error("No file in request after multer processing");
     }
 
     next();
   });
 };
 
+const uploadVideo = (req, res, next) => {
+  console.log("[uploadVideo] Processing video upload...");
+
+  videoUpload.single("video")(req, res, async (err) => {
+    if (err) {
+      console.error("Video upload error:", err);
+      return handleUploadError(err, req, res, next);
+    }
+
+    if (req.file) {
+      const filePath = req.file.path;
+      if (fs.existsSync(filePath)) {
+        const stats = fs.statSync(filePath);
+        console.log("Video saved successfully:");
+        console.log(`   Path: ${filePath}`);
+        console.log(`   Filename: ${req.file.filename}`);
+        console.log(`   Size: ${formatBytes(stats.size)}`);
+        console.log(`   Type: ${req.file.mimetype}`);
+
+        const videoMetadata = await getVideoMetadata(filePath);
+        if (videoMetadata) {
+          req.file.metadata = videoMetadata;
+        }
+
+        req.videoInfo = {
+          filename: req.file.filename,
+          url: `/uploads/chat/attachments/${req.file.filename}`,
+          size: req.file.size,
+          mimetype: req.file.mimetype,
+          type: "video",
+          metadata: videoMetadata,
+        };
+      } else {
+        console.error("Video file not found at path:", filePath);
+      }
+    } else {
+      console.error("No video file in request");
+    }
+
+    next();
+  });
+};
+
+// ============================================
+// EXPORTS
+// ============================================
+
 module.exports = {
-  // Image uploads
   uploadProfilePicture,
   uploadCoverPhoto,
   uploadEventImages,
   uploadEventImage,
   uploadAndOptimizeEventImages,
   uploadWithErrorHandling,
-
-  // Audio uploads
   uploadAudioMessage,
   deleteAudioFileIfExists,
-
-  // Attachment uploads 
   uploadAttachments,
   uploadSingleAttachment,
-
-  // Utilities
+  uploadVideo,
+  getVideoMetadata,
   deleteOldImage,
   formatBytes,
 };

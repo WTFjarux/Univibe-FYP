@@ -1,6 +1,6 @@
 // app/components/chat/ChatMessage/AttachmentMessage.tsx
 
-import React, { useState, useCallback, memo } from "react";
+import React, { useState, memo } from "react";
 import {
   View,
   Text,
@@ -15,25 +15,23 @@ import { Ionicons } from "@expo/vector-icons";
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 // ============================================
-// FIXED DIMENSIONS (like Instagram/Messenger)
+// DIMENSIONS
 // ============================================
 
-const IMAGE_WIDTH = SCREEN_WIDTH * 0.55; // Fixed width
-const IMAGE_HEIGHT = IMAGE_WIDTH * 1.25; // 5:4 aspect ratio portrait
-const IMAGE_HEIGHT_LANDSCAPE = IMAGE_WIDTH * 0.7; // 4:3 landscape for wide images
-const MIN_IMAGE_WIDTH = 120;
+const IMAGE_WIDTH = SCREEN_WIDTH * 0.55;
+const IMAGE_HEIGHT = IMAGE_WIDTH * 1.25;
 
-// ✅ Blurhash strings for placeholder (you can generate per-image from backend)
 const DEFAULT_BLURHASH = "L5H2EC=PM+yV0g-mq.wG9c010J}I";
 const PHOTO_BLURHASH = "L6PZfSi_.AyE_3t7t7R**0o#DgR4";
 
 interface AttachmentMessageProps {
   type: "image" | "video" | "file" | "location";
   mediaUrl?: string;
-  thumbnailUrl?: string; // ✅ Optional thumbnail for progressive loading
+  thumbnailUrl?: string;
   mediaName?: string;
   mediaSize?: number;
   mediaMimeType?: string;
+  mediaDuration?: number;
   locationData?: {
     latitude: number;
     longitude: number;
@@ -41,14 +39,14 @@ interface AttachmentMessageProps {
   };
   isOwnMessage: boolean;
   onImagePress?: (url: string) => void;
+  onVideoPress?: (url: string) => void;
   onFilePress?: (url: string, name: string) => void;
   onLocationPress?: (latitude: number, longitude: number) => void;
-  // 🔴 NEW: Long press handler to bubble up to parent
   onLongPress?: (event: any) => void;
 }
 
 // ============================================
-// HELPERS (outside component = no re-creation)
+// HELPERS
 // ============================================
 
 const formatFileSize = (bytes?: number): string => {
@@ -56,6 +54,13 @@ const formatFileSize = (bytes?: number): string => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const formatDuration = (seconds?: number): string => {
+  if (!seconds || seconds === 0) return "";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
 };
 
 const getFileIcon = (name?: string): string => {
@@ -96,57 +101,45 @@ const getFileColor = (name?: string): string => {
 };
 
 // ============================================
-// IMAGE RENDERER (optimized)
+// IMAGE BUBBLE
 // ============================================
 
 interface ImageBubbleProps {
   uri: string;
-  thumbnailUri?: string;
   isOwnMessage: boolean;
   onPress: () => void;
-  // 🔴 NEW: Long press handler
   onLongPress?: (event: any) => void;
 }
 
 const ImageBubble = memo(
-  ({ uri, thumbnailUri, isOwnMessage, onPress, onLongPress }: ImageBubbleProps) => {
+  ({ uri, isOwnMessage, onPress, onLongPress }: ImageBubbleProps) => {
     const [loading, setLoading] = useState(true);
-
-    // 🔴 Handle long press separately from regular press
-    const handleLongPress = useCallback((event: any) => {
-      if (onLongPress) {
-        onLongPress(event);
-      }
-    }, [onLongPress]);
 
     return (
       <TouchableOpacity
-        style={styles.imageWrapper}
+        style={styles.mediaWrapper}
         activeOpacity={0.92}
         onPress={onPress}
-        onLongPress={handleLongPress}  // 🔴 Add long press handler
-        delayLongPress={300}  // 🔴 Match parent delay
+        onLongPress={onLongPress}
+        delayLongPress={300}
       >
-        {/* ✅ Loading indicator */}
         {loading && (
-          <View style={styles.imageLoadingOverlay}>
+          <View style={styles.mediaLoadingOverlay}>
             <ActivityIndicator
               size="small"
               color={isOwnMessage ? "#fff" : "#007AFF"}
             />
           </View>
         )}
-
-        {/* ✅ expo-image with blurhash placeholder + fade-in transition */}
         <Image
           source={{ uri }}
-          style={styles.image}
+          style={styles.mediaContent}
           placeholder={{ blurhash: PHOTO_BLURHASH }}
           placeholderContentFit="cover"
-          transition={400} // ✅ Smooth fade-in
+          transition={400}
           contentFit="cover"
-          cachePolicy="memory-disk" // ✅ Aggressive caching
-          recyclingKey={uri} // ✅ FlatList recycling
+          cachePolicy="memory-disk"
+          recyclingKey={uri}
           onLoadEnd={() => setLoading(false)}
         />
       </TouchableOpacity>
@@ -155,6 +148,86 @@ const ImageBubble = memo(
 );
 
 ImageBubble.displayName = "ImageBubble";
+
+// ============================================
+// VIDEO BUBBLE
+// ============================================
+
+interface VideoBubbleProps {
+  thumbnailUri?: string;
+  duration?: number;
+  isSending: boolean;
+  onPress: () => void;
+  onLongPress?: (event: any) => void;
+}
+
+const VideoBubble = memo(
+  ({
+    thumbnailUri,
+    duration,
+    isSending,
+    onPress,
+    onLongPress,
+  }: VideoBubbleProps) => {
+    return (
+      <TouchableOpacity
+        style={styles.mediaWrapper}
+        activeOpacity={isSending ? 1 : 0.9}
+        onPress={isSending ? undefined : onPress}
+        onLongPress={onLongPress}
+        delayLongPress={300}
+      >
+        {/* Thumbnail */}
+        {thumbnailUri ? (
+          <Image
+            source={{ uri: thumbnailUri }}
+            style={styles.mediaContent}
+            placeholder={{ blurhash: DEFAULT_BLURHASH }}
+            placeholderContentFit="cover"
+            transition={300}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+          />
+        ) : (
+          <View style={styles.videoPlaceholder}>
+            <Ionicons name="videocam" size={32} color="rgba(255,255,255,0.4)" />
+          </View>
+        )}
+
+        {/* Sending overlay */}
+        {isSending && (
+          <View style={styles.sendingOverlay}>
+            <ActivityIndicator size="large" color="#fff" />
+            <Text style={styles.sendingText}>Sending...</Text>
+          </View>
+        )}
+
+        {/* Play button */}
+        {!isSending && (
+          <View style={styles.playButtonCenter}>
+            <View style={styles.playButton}>
+              <Ionicons
+                name="play"
+                size={26}
+                color="#fff"
+                style={{ marginLeft: 3 }}
+              />
+            </View>
+          </View>
+        )}
+
+        {/* Duration badge */}
+        {duration != null && duration > 0 && (
+          <View style={styles.durationBadge}>
+            <Text style={styles.durationText}>{formatDuration(duration)}</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  },
+);
+
+VideoBubble.displayName = "VideoBubble";
 
 // ============================================
 // MAIN COMPONENT
@@ -166,68 +239,41 @@ const AttachmentMessage: React.FC<AttachmentMessageProps> = ({
   thumbnailUrl,
   mediaName,
   mediaSize,
+  mediaDuration,
   locationData,
   isOwnMessage,
   onImagePress,
+  onVideoPress,
   onFilePress,
   onLocationPress,
-  onLongPress,  // 🔴 NEW: Accept long press handler
+  onLongPress,
 }) => {
-  // ============================================
-  // IMAGE (fixed size, no getSize, blurhash placeholder)
-  // ============================================
   if (type === "image" && mediaUrl) {
     return (
       <ImageBubble
         uri={mediaUrl}
-        thumbnailUri={thumbnailUrl}
         isOwnMessage={isOwnMessage}
         onPress={() => onImagePress?.(mediaUrl)}
-        onLongPress={onLongPress}  // 🔴 Pass long press handler
+        onLongPress={onLongPress}
       />
     );
   }
 
-  // ============================================
-  // VIDEO RENDERER
-  // ============================================
   if (type === "video" && mediaUrl) {
+    const isSending =
+      mediaUrl.startsWith("file://") || mediaUrl.startsWith("/");
+
     return (
-      <TouchableOpacity
-        style={[
-          styles.videoContainer,
-          isOwnMessage ? styles.ownBg : styles.otherBg,
-        ]}
-        activeOpacity={0.9}
-        onPress={() => onImagePress?.(mediaUrl)}
-        onLongPress={onLongPress}  // 🔴 Add long press handler
-        delayLongPress={300}  // 🔴 Match parent delay
-      >
-        <View style={styles.videoPlayButton}>
-          <Ionicons name="play-circle" size={44} color="#fff" />
-        </View>
-        <View style={styles.videoInfo}>
-          <Ionicons
-            name="videocam"
-            size={16}
-            color={isOwnMessage ? "rgba(255,255,255,0.8)" : "#666"}
-          />
-          <Text style={[styles.videoText, isOwnMessage && styles.ownText]}>
-            Video
-          </Text>
-        </View>
-        {mediaSize != null && mediaSize > 0 && (
-          <Text style={[styles.videoSize, isOwnMessage && styles.ownCaption]}>
-            {formatFileSize(mediaSize)}
-          </Text>
-        )}
-      </TouchableOpacity>
+      <VideoBubble
+        thumbnailUri={thumbnailUrl}
+        duration={mediaDuration}
+        isSending={isSending}
+        onPress={() => onVideoPress?.(mediaUrl)}
+        onLongPress={onLongPress}
+      />
     );
   }
 
-  // ============================================
-  // FILE/DOCUMENT RENDERER
-  // ============================================
   if (type === "file" && mediaUrl) {
     const fileColor = getFileColor(mediaName);
     return (
@@ -238,8 +284,8 @@ const AttachmentMessage: React.FC<AttachmentMessageProps> = ({
         ]}
         activeOpacity={0.7}
         onPress={() => onFilePress?.(mediaUrl, mediaName || "File")}
-        onLongPress={onLongPress}  // 🔴 Add long press handler
-        delayLongPress={300}  // 🔴 Match parent delay
+        onLongPress={onLongPress}
+        delayLongPress={300}
       >
         <View style={[styles.fileIcon, { backgroundColor: `${fileColor}20` }]}>
           <Ionicons
@@ -268,9 +314,6 @@ const AttachmentMessage: React.FC<AttachmentMessageProps> = ({
     );
   }
 
-  // ============================================
-  // LOCATION RENDERER
-  // ============================================
   if (type === "location" && locationData) {
     return (
       <TouchableOpacity
@@ -282,8 +325,8 @@ const AttachmentMessage: React.FC<AttachmentMessageProps> = ({
         onPress={() =>
           onLocationPress?.(locationData.latitude, locationData.longitude)
         }
-        onLongPress={onLongPress}  // 🔴 Add long press handler
-        delayLongPress={300}  // 🔴 Match parent delay
+        onLongPress={onLongPress}
+        delayLongPress={300}
       >
         <View style={styles.locationHeader}>
           <Ionicons
@@ -322,20 +365,20 @@ const AttachmentMessage: React.FC<AttachmentMessageProps> = ({
 // ============================================
 
 const styles = StyleSheet.create({
-  // Image - FIXED dimensions
-  imageWrapper: {
+  // Shared media wrapper (image + video same size)
+  mediaWrapper: {
     width: IMAGE_WIDTH,
     height: IMAGE_HEIGHT,
     borderRadius: 12,
     overflow: "hidden",
     backgroundColor: "#E5E5EA",
   },
-  image: {
+  mediaContent: {
     width: "100%",
     height: "100%",
     borderRadius: 12,
   },
-  imageLoadingOverlay: {
+  mediaLoadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: "center",
     alignItems: "center",
@@ -344,41 +387,58 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
 
-  // Video
-  videoContainer: {
-    borderRadius: 16,
-    overflow: "hidden",
-    width: IMAGE_WIDTH,
-    minHeight: 160,
+  // Video-specific
+  videoPlaceholder: {
+    ...StyleSheet.absoluteFillObject,
     justifyContent: "center",
     alignItems: "center",
-    padding: 20,
+    backgroundColor: "#1a1a1a",
+    borderRadius: 12,
   },
-  ownBg: { backgroundColor: "rgba(0,0,0,0.15)" },
-  otherBg: { backgroundColor: "rgba(0,0,0,0.05)" },
-  videoPlayButton: {
-    marginBottom: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 4,
+  sendingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.6)",
+    borderRadius: 12,
+    zIndex: 3,
+    gap: 12,
   },
-  videoInfo: { flexDirection: "row", alignItems: "center", gap: 6 },
-  videoText: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#666",
+  sendingText: {
+    color: "#fff",
+    fontSize: 13,
     fontFamily: "SofiaSans-Medium",
   },
-  ownText: { color: "#fff" },
-  videoSize: {
-    fontSize: 11,
-    color: "#8E8E93",
-    marginTop: 4,
-    fontFamily: "SofiaSans-Regular",
+  playButtonCenter: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 2,
   },
-  ownCaption: { color: "rgba(255,255,255,0.7)" },
+  playButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  durationBadge: {
+    position: "absolute",
+    bottom: 8,
+    right: 8,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    zIndex: 2,
+  },
+  durationText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "600",
+    fontFamily: "SofiaSans-Medium",
+  },
 
   // File
   fileContainer: {
@@ -389,6 +449,8 @@ const styles = StyleSheet.create({
     gap: 12,
     minWidth: IMAGE_WIDTH * 0.8,
   },
+  ownBg: { backgroundColor: "#8b5cf6" },
+  otherBg: { backgroundColor: "rgba(0,0,0,0.05)" },
   fileIcon: {
     width: 48,
     height: 48,
@@ -404,11 +466,13 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Medium",
     marginBottom: 3,
   },
+  ownText: { color: "#fff" },
   fileSizeText: {
     fontSize: 11,
     color: "#8E8E93",
     fontFamily: "SofiaSans-Regular",
   },
+  ownCaption: { color: "rgba(255,255,255,0.7)" },
 
   // Location
   locationContainer: {

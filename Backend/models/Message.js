@@ -59,6 +59,7 @@ const messageSchema = new mongoose.Schema(
       senderId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
       type: { type: String, enum: messageTypes, default: "text" },
       mediaUrl: { type: String, default: "" },
+      thumbnailUrl: { type: String, default: "" },
       duration: { type: Number, default: 0 },
     },
 
@@ -124,7 +125,7 @@ messageSchema.pre("save", function (next) {
     )
       this.replyTo.type = "audio";
     else if (
-      this.replyTo.message === "📷 Photo" ||
+      this.replyTo.message === "Photo" ||
       this.replyTo.mediaUrl?.includes("image")
     )
       this.replyTo.type = "image";
