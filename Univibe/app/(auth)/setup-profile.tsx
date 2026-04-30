@@ -420,7 +420,7 @@ export default function SetupProfileScreen() {
                       <Ionicons
                         name="person-circle-outline"
                         size={20}
-                        color="#4f46e5"
+                        color="#8b5cf6"
                       />
                       <Text style={styles.label}>
                         Username <Text style={styles.requiredStar}>*</Text>
@@ -459,7 +459,7 @@ export default function SetupProfileScreen() {
                       <Ionicons
                         name="business-outline"
                         size={20}
-                        color="#4f46e5"
+                        color="#8b5cf6"
                       />
                     }
                   />
@@ -486,7 +486,7 @@ export default function SetupProfileScreen() {
                   {/* University Email */}
                   <View style={styles.inputGroup}>
                     <View style={styles.labelContainer}>
-                      <Ionicons name="mail-outline" size={20} color="#4f46e5" />
+                      <Ionicons name="mail-outline" size={20} color="#8b5cf6" />
                       <Text style={styles.label}>
                         University Email{" "}
                         <Text style={styles.requiredStar}>*</Text>
@@ -517,7 +517,7 @@ export default function SetupProfileScreen() {
                       <Ionicons
                         name="school-outline"
                         size={20}
-                        color="#4f46e5"
+                        color="#8b5cf6"
                       />
                     }
                   />
@@ -540,7 +540,7 @@ export default function SetupProfileScreen() {
                       <Ionicons
                         name="today-outline"
                         size={20}
-                        color="#4f46e5"
+                        color="#8b5cf6"
                       />
                     }
                   />
@@ -559,7 +559,7 @@ export default function SetupProfileScreen() {
                     onPress={prevStep}
                     disabled={loading}
                   >
-                    <Ionicons name="arrow-back" size={18} color="#4f46e5" />
+                    <Ionicons name="arrow-back" size={18} color="#8b5cf6" />
                     <Text style={styles.secondaryButtonText}>Back</Text>
                   </TouchableOpacity>
                 )}
@@ -641,8 +641,19 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   headerContent: { flex: 1 },
-  title: { fontSize: 28, fontWeight: "700", color: "#111827", marginBottom: 8 },
-  subtitle: { fontSize: 15, color: "#6b7280", lineHeight: 22 },
+  title: {
+    fontSize: 28,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 8,
+    fontFamily: "SofiaSans-Bold",
+  },
+  subtitle: {
+    fontSize: 15,
+    color: "#6b7280",
+    lineHeight: 22,
+    fontFamily: "SofiaSans-Regular",
+  },
   stepContainer: { alignItems: "center", marginBottom: 40 },
   stepCirclesContainer: {
     flexDirection: "row",
@@ -659,12 +670,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 1,
   },
-  stepCircleActive: { backgroundColor: "#4f46e5" },
+  stepCircleActive: { backgroundColor: "#8b5cf6" },
   stepCircleInactive: { backgroundColor: "#e5e7eb" },
-  stepNumber: { fontSize: 16, fontWeight: "600", color: "#9ca3af" },
+  stepNumber: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#9ca3af",
+    fontFamily: "SofiaSans-Bold",
+  },
   stepNumberActive: { color: "white" },
   stepLine: { width: 150, height: 3, marginHorizontal: 2 },
-  stepLineActive: { backgroundColor: "#4f46e5" },
+  stepLineActive: { backgroundColor: "#8b5cf6" },
   stepLineInactive: { backgroundColor: "#e5e7eb" },
   stepLabelsContainer: {
     flexDirection: "row",
@@ -678,12 +694,13 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginBottom: 6,
     color: "#9ca3af",
+    fontFamily: "SofiaSans-Bold",
   },
-  stepLabelActive: { color: "#4f46e5" },
+  stepLabelActive: { color: "#8b5cf6" },
   activeUnderline: {
     width: "80%",
     height: 3,
-    backgroundColor: "#4f46e5",
+    backgroundColor: "#8b5cf6",
     borderRadius: 2,
   },
   formCard: {
@@ -705,7 +722,12 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     gap: 8,
   },
-  label: { fontSize: 15, fontWeight: "600", color: "#374151" },
+  label: {
+    fontSize: 15,
+    fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
+    color: "#374151",
+  },
   requiredStar: { color: "#ef4444", fontSize: 15 },
   input: {
     backgroundColor: "#f9fafb",
@@ -715,6 +737,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 15,
+    fontFamily: "SofiaSans-Regular",
     color: "#000000",
   },
   inputError: { borderColor: "#ef4444" },
@@ -726,9 +749,17 @@ const styles = StyleSheet.create({
     marginTop: 8,
     gap: 6,
   },
-  validationTextLoading: { fontSize: 12, color: "#4f46e5" },
-  validationTextError: { fontSize: 12, color: "#ef4444" },
-  validationTextSuccess: { fontSize: 12, color: "#10b981" },
+  validationTextLoading: { fontSize: 12, color: "#8b5cf6" },
+  validationTextError: {
+    fontSize: 12,
+    color: "#ef4444",
+    fontFamily: "SofiaSans-Regular",
+  },
+  validationTextSuccess: {
+    fontSize: 12,
+    color: "#10b981",
+    fontFamily: "SofiaSans-Regular",
+  },
   buttonContainer: { flexDirection: "row", marginTop: 30, gap: 12 },
   buttonContainerSpaced: { justifyContent: "space-between" },
   secondaryButton: {
@@ -738,14 +769,15 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#4f46e5",
+    borderColor: "#8b5cf6",
     backgroundColor: "white",
   },
   secondaryButtonText: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#4f46e5",
+    color: "#8b5cf6",
     marginLeft: 8,
+    fontFamily: "SofiaSans-Bold",
   },
   primaryButton: {
     flexDirection: "row",
@@ -754,7 +786,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 14,
     borderRadius: 12,
-    backgroundColor: "#4f46e5",
+    backgroundColor: "#8b5cf6",
     flex: 1,
   },
   disabledButton: { backgroundColor: "#9ca3af" },
@@ -763,6 +795,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "white",
     marginRight: 8,
+    fontFamily: "SofiaSans-Bold",
   },
   submitButton: {
     flexDirection: "row",
@@ -780,6 +813,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "white",
     marginRight: 8,
+    fontFamily: "SofiaSans-Bold",
   },
   footer: { alignItems: "center", paddingHorizontal: 20 },
   footerText: {
@@ -787,5 +821,6 @@ const styles = StyleSheet.create({
     color: "#9ca3af",
     textAlign: "center",
     lineHeight: 18,
+    fontFamily: "SofiaSans-Regular",
   },
 });

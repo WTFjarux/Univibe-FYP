@@ -335,14 +335,13 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 30,
     fontFamily: "SofiaSans-Bold",
-    fontWeight: "bold",
   },
   signInTitle: {
     color: "#1f2937",
     fontSize: 24,
     textAlign: "center",
     marginBottom: 30,
-    fontWeight: "bold",
+    fontFamily: "SofiaSans-Bold",
   },
   formContainer: {
     width: "100%",
@@ -372,6 +371,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     color: "#1f2937",
+    fontFamily: "SofiaSans-Regular",
   },
   eyeButton: {
     padding: 5,
@@ -383,7 +383,7 @@ const styles = StyleSheet.create({
   forgotPasswordText: {
     color: "#8b5cf6",
     fontSize: 14,
-    fontWeight: "500",
+    fontFamily: "SofiaSans-Medium",
   },
   loginButton: {
     width: "90%",
@@ -407,7 +407,7 @@ const styles = StyleSheet.create({
     color: "white",
     textAlign: "center",
     fontSize: 16,
-    fontWeight: "600",
+    fontFamily: "SofiaSans-SemiBold",
   },
   orContainer: {
     flexDirection: "row",
@@ -424,12 +424,13 @@ const styles = StyleSheet.create({
     color: "#6b7280",
     fontSize: 16,
     marginHorizontal: 15,
-    fontWeight: "500",
+    fontFamily: "SofiaSans-Medium",
   },
   continueWith: {
     color: "#6b7280",
     fontSize: 15,
     marginBottom: 20,
+    fontFamily: "SofiaSans-Regular",
   },
   socialRow: {
     flexDirection: "row",
@@ -446,12 +447,13 @@ const styles = StyleSheet.create({
   signUpText: {
     color: "#6b7280",
     fontSize: 14,
+    fontFamily: "SofiaSans-Regular",
   },
   signUpLink: {
     color: "#8b5cf6",
     fontSize: 14,
-    fontWeight: "600",
     textDecorationLine: "underline",
+    fontFamily: "SofiaSans-SemiBold",
   },
   modalOverlay: {
     flex: 1,
@@ -479,10 +481,10 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 22,
-    fontWeight: "bold",
     color: "#1f2937",
     marginTop: 10,
     textAlign: "center",
+    fontFamily: "SofiaSans-Bold",
   },
   modalText: {
     fontSize: 15,
@@ -490,6 +492,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 22,
     marginBottom: 15,
+    fontFamily: "SofiaSans-Regular",
   },
   modalSubtext: {
     fontSize: 13,
@@ -498,6 +501,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginBottom: 20,
     fontStyle: "italic",
+    fontFamily: "SofiaSans-Regular",
   },
   emailContainer: {
     flexDirection: "row",
@@ -517,8 +521,8 @@ const styles = StyleSheet.create({
   emailText: {
     color: "#1f2937",
     fontSize: 14,
-    fontWeight: "500",
     flex: 1,
+    fontFamily: "SofiaSans-Medium",
   },
   resendButton: {
     flexDirection: "row",
@@ -535,7 +539,7 @@ const styles = StyleSheet.create({
   resendButtonText: {
     color: "white",
     fontSize: 15,
-    fontWeight: "600",
+    fontFamily: "SofiaSans-SemiBold",
   },
   successContainer: {
     flexDirection: "row",
@@ -554,6 +558,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginLeft: 8,
     flex: 1,
+    fontFamily: "SofiaSans-Regular",
   },
   closeButton: {
     paddingVertical: 12,
@@ -566,7 +571,7 @@ const styles = StyleSheet.create({
   closeButtonText: {
     color: "#6b7280",
     fontSize: 15,
-    fontWeight: "500",
     textAlign: "center",
+    fontFamily: "SofiaSans-Medium",
   },
 });

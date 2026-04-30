@@ -375,6 +375,7 @@ const styles = StyleSheet.create({
     color: "white",
     marginTop: 12,
     fontSize: 14,
+    fontFamily: "SofiaSans-Regular",
   },
   modalHeader: {
     alignItems: "center",
@@ -398,11 +399,13 @@ const styles = StyleSheet.create({
     color: "white",
     textAlign: "center",
     marginBottom: 5,
+    fontFamily: "SofiaSans-Bold",
   },
   modalSubtitle: {
     fontSize: 16,
     color: "rgba(255, 255, 255, 0.8)",
     textAlign: "center",
+    fontFamily: "SofiaSans-Regular",
   },
   emailContainer: {
     flexDirection: "row",
@@ -428,6 +431,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "500",
     flex: 1,
+    fontFamily: "SofiaSans-Medium",
   },
   verifiedBadge: {
     marginLeft: 8,
@@ -462,6 +466,7 @@ const styles = StyleSheet.create({
     color: "rgba(255, 255, 255, 0.9)",
     fontSize: 14,
     flex: 1,
+    fontFamily: "SofiaSans-Regular",
   },
   noteText: {
     color: "rgba(255, 255, 255, 0.7)",
@@ -469,6 +474,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 25,
     fontStyle: "italic",
+    fontFamily: "SofiaSans-Regular",
   },
   buttonContainer: {
     width: "100%",
@@ -492,6 +498,7 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 16,
     fontWeight: "600",
+    fontFamily: "SofiaSans-SemiBold",
   },
   resendContainer: {
     flexDirection: "row",
@@ -502,12 +509,14 @@ const styles = StyleSheet.create({
   resendText: {
     color: "rgba(255, 255, 255, 0.7)",
     fontSize: 13,
+    fontFamily: "SofiaSans-Regular",
   },
   resendLink: {
     color: "#6C63FF",
     fontSize: 13,
     fontWeight: "600",
     textDecorationLine: "underline",
+    fontFamily: "SofiaSans-SemiBold",
   },
 });
 

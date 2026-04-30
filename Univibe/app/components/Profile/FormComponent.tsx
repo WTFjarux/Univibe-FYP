@@ -153,7 +153,7 @@ export const YearSelector: React.FC<YearSelectorProps> = ({
   return (
     <View style={styles.inputGroup}>
       <View style={styles.labelContainer}>
-        <MaterialIcons name="calendar-today" size={20} color="#4f46e5" />
+        <MaterialIcons name="calendar-today" size={20} color="#8b5cf6" />
         <Text style={styles.label}>
           Current Year {required && <Text style={styles.requiredStar}>*</Text>}
         </Text>
@@ -199,7 +199,7 @@ export const PronounsSelector: React.FC<PronounsSelectorProps> = ({
   return (
     <View style={styles.inputGroup}>
       <View style={styles.labelContainer}>
-        <MaterialIcons name="badge" size={20} color="#4f46e5" />
+        <MaterialIcons name="badge" size={20} color="#8b5cf6" />
         <Text style={styles.label}>Pronouns</Text>
       </View>
       <View style={styles.pronounContainer}>
@@ -243,7 +243,7 @@ export const BioInput: React.FC<BioInputProps> = ({
   return (
     <View style={styles.inputGroup}>
       <View style={styles.labelContainer}>
-        <Ionicons name="document-text-outline" size={20} color="#4f46e5" />
+        <Ionicons name="document-text-outline" size={20} color="#8b5cf6" />
         <Text style={styles.label}>Bio</Text>
       </View>
       <TextInput

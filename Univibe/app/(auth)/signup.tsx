@@ -539,7 +539,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 30,
     fontFamily: "SofiaSans-Bold",
-    fontWeight: "bold",
   },
   signUpTitle: {
     color: "#1f2937",
@@ -547,7 +546,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 30,
     fontFamily: "SofiaSans-Bold",
-    fontWeight: "bold",
   },
   formContainer: {
     width: "100%",
@@ -572,7 +570,12 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   inputIcon: { marginRight: 12 },
-  input: { flex: 1, fontSize: 16, color: "#1f2937" },
+  input: {
+    flex: 1,
+    fontSize: 16,
+    color: "#1f2937",
+    fontFamily: "SofiaSans-Regular",
+  },
   eyeButton: { padding: 5 },
   passwordRequirements: { width: "100%", padding: 15, marginBottom: 15 },
   requirementRow: {
@@ -584,6 +587,7 @@ const styles = StyleSheet.create({
     color: "#6b7280",
     fontSize: 13,
     marginLeft: 8,
+    fontFamily: "SofiaSans-Regular",
   },
   requirementMet: { color: "#10b981" },
   termsContainer: { marginBottom: 20, paddingHorizontal: 10 },
@@ -592,11 +596,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: "center",
     lineHeight: 16,
+    fontFamily: "SofiaSans-Regular",
   },
   termsLink: {
-    fontWeight: "600",
     textDecorationLine: "underline",
     color: "#8b5cf6",
+    fontFamily: "SofiaSans-SemiBold",
   },
   signUpButton: {
     width: "90%",
@@ -617,7 +622,7 @@ const styles = StyleSheet.create({
     color: "white",
     textAlign: "center",
     fontSize: 16,
-    fontWeight: "600",
+    fontFamily: "SofiaSans-SemiBold",
   },
   orContainer: {
     flexDirection: "row",
@@ -630,17 +635,26 @@ const styles = StyleSheet.create({
     color: "#6b7280",
     fontSize: 16,
     marginHorizontal: 15,
-    fontFamily: "Sofia-Regular",
+    fontFamily: "SofiaSans-Medium",
   },
-  continueWith: { color: "#6b7280", fontSize: 15, marginBottom: 20 },
+  continueWith: {
+    color: "#6b7280",
+    fontSize: 15,
+    marginBottom: 20,
+    fontFamily: "SofiaSans-Regular",
+  },
   socialRow: { flexDirection: "row", marginBottom: 30, gap: 25 },
   socialButton: { padding: 10 },
   signInContainer: { flexDirection: "row", justifyContent: "center" },
-  signInText: { color: "#6b7280", fontSize: 14 },
+  signInText: {
+    color: "#6b7280",
+    fontSize: 14,
+    fontFamily: "SofiaSans-Regular",
+  },
   signInLink: {
     color: "#8b5cf6",
     fontSize: 14,
-    fontWeight: "600",
     textDecorationLine: "underline",
+    fontFamily: "SofiaSans-SemiBold",
   },
 });
