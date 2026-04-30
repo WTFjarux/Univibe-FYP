@@ -1,5 +1,6 @@
 // Backend/controllers/authController.js
 const User = require("../models/User");
+const Profile = require("../models/Profile");
 const { generateToken } = require("../middleware/authmiddleware");
 const { sendVerificationEmail } = require("../services/verificationService");
 const { createInitialProfile } = require("../services/profileService");
@@ -7,13 +8,13 @@ const { renderTemplate } = require("../utils/templateLoader");
 
 /**
  * Register a new user
- * Creates user account, sends verification email, and creates initial profile
+ * Creates user account and sends verification email
+ * NO profile created, NO token returned until email is verified
  */
 const register = async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
-    // Input validation
     if (!name || !email || !password) {
       return res.status(400).json({
         success: false,
@@ -28,16 +29,29 @@ const register = async (req, res) => {
       });
     }
 
-    // Check for existing user
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: "Email already exists",
-      });
+      if (!existingUser.isEmailVerified) {
+        const hoursSinceCreation =
+          (Date.now() - existingUser.createdAt.getTime()) / (1000 * 60 * 60);
+        if (hoursSinceCreation > 24) {
+          await User.findByIdAndDelete(existingUser._id);
+        } else {
+          return res.status(400).json({
+            success: false,
+            message:
+              "An account with this email already exists. Please check your email for verification link or try again later.",
+            code: "PENDING_VERIFICATION",
+          });
+        }
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Email already exists",
+        });
+      }
     }
 
-    // Create user
     const user = await User.create({
       name,
       email,
@@ -45,37 +59,17 @@ const register = async (req, res) => {
       isEmailVerified: false,
     });
 
-    // Send verification email (non-blocking for response)
     const emailSent = await sendVerificationEmail(user);
-
-    // Create initial profile (non-blocking)
-    try {
-      await createInitialProfile(user);
-    } catch (profileError) {
-      // Continue - user can complete profile later
-    }
-
-    // Generate authentication token
-    const token = generateToken(user);
 
     res.status(201).json({
       success: true,
       message: emailSent
         ? "Registration successful! Check your email to verify your account."
         : "Registration successful! Email verification may be delayed.",
-      token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        profileComplete: user.profileComplete,
-        isEmailVerified: user.isEmailVerified,
-        needsVerification: !user.isEmailVerified,
-      },
+      requiresVerification: true,
+      email: user.email,
     });
   } catch (error) {
-    // Handle validation errors
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((val) => val.message);
       return res.status(400).json({
@@ -84,7 +78,6 @@ const register = async (req, res) => {
       });
     }
 
-    // Handle duplicate key error
     if (error.code === 11000) {
       return res.status(400).json({
         success: false,
@@ -92,6 +85,7 @@ const register = async (req, res) => {
       });
     }
 
+    console.error("Registration error:", error);
     res.status(500).json({
       success: false,
       message: "Server error during registration",
@@ -114,7 +108,6 @@ const login = async (req, res) => {
       });
     }
 
-    // Find user with sensitive fields for verification
     const user = await User.findOne({ email }).select(
       "+password +emailVerificationToken +emailVerificationTokenExpires +emailVerificationSentAt",
     );
@@ -127,7 +120,6 @@ const login = async (req, res) => {
       });
     }
 
-    // Verify password
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
       return res.status(401).json({
@@ -137,16 +129,15 @@ const login = async (req, res) => {
       });
     }
 
-    // Check email verification status
     if (!user.isEmailVerified) {
-      // Handle expired verification tokens
       if (user.emailVerificationToken && user.isVerificationTokenExpired()) {
         const emailSent = await sendVerificationEmail(user);
 
         if (emailSent) {
           return res.status(403).json({
             success: false,
-            message: "Verification link expired. New email sent.",
+            message:
+              "Verification link expired. A new verification email has been sent.",
             code: "VERIFICATION_EXPIRED_RESENT",
             needsVerification: true,
             canResend: user.canResendVerification(),
@@ -154,7 +145,6 @@ const login = async (req, res) => {
         }
       }
 
-      // Block login for unverified users
       return res.status(403).json({
         success: false,
         message: "Please verify your email before logging in.",
@@ -165,7 +155,14 @@ const login = async (req, res) => {
       });
     }
 
-    // Login successful
+    // ✅ Check if profile is TRULY complete (not default with "Undecided" major)
+    const profile = await Profile.findOne({ user: user._id });
+    const isProfileTrulyComplete =
+      profile &&
+      profile.major &&
+      profile.major !== "Undecided" &&
+      user.profileComplete === true;
+
     const token = generateToken(user);
 
     res.json({
@@ -177,11 +174,12 @@ const login = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        profileComplete: user.profileComplete,
+        profileComplete: isProfileTrulyComplete,
         isEmailVerified: user.isEmailVerified,
       },
     });
   } catch (error) {
+    console.error("Login error:", error);
     res.status(500).json({
       success: false,
       message: "Server error during login",
@@ -211,7 +209,7 @@ const verifyEmailPage = (req, res) => {
 
 /**
  * API endpoint to verify email from token
- * Called by the HTML verification page via AJAX
+ * Creates default profile but does NOT mark as complete
  */
 const verifyEmailAPI = async (req, res) => {
   try {
@@ -224,7 +222,6 @@ const verifyEmailAPI = async (req, res) => {
       });
     }
 
-    // Find user by verification token
     const user = await User.findOne({
       emailVerificationToken: token,
     }).select("+emailVerificationToken +emailVerificationTokenExpires");
@@ -236,7 +233,6 @@ const verifyEmailAPI = async (req, res) => {
       });
     }
 
-    // Validate token
     if (!user.isVerificationTokenValid(token)) {
       return res.status(400).json({
         success: false,
@@ -245,13 +241,12 @@ const verifyEmailAPI = async (req, res) => {
       });
     }
 
-    // Mark email as verified and clear token
     user.isEmailVerified = true;
     user.emailVerificationToken = null;
     user.emailVerificationTokenExpires = null;
+    // ✅ Don't set profileComplete here - it stays false
     await user.save();
 
-    // Reload user for fresh data
     const updatedUser = await User.findById(user._id);
     if (!updatedUser) {
       return res.status(500).json({
@@ -260,7 +255,18 @@ const verifyEmailAPI = async (req, res) => {
       });
     }
 
-    // Generate new token with verified status
+    // Create default profile placeholder (NOT marked as complete)
+    try {
+      await createInitialProfile(updatedUser);
+      // ❌ REMOVED: updatedUser.profileComplete = true;
+      // ❌ REMOVED: await updatedUser.save();
+    } catch (profileError) {
+      console.error(
+        "Profile creation error during verification:",
+        profileError,
+      );
+    }
+
     const newToken = generateToken(updatedUser);
 
     res.json({
@@ -272,11 +278,12 @@ const verifyEmailAPI = async (req, res) => {
         name: updatedUser.name,
         email: updatedUser.email,
         role: updatedUser.role,
-        profileComplete: updatedUser.profileComplete,
+        profileComplete: false, // ✅ Not complete until setup form is submitted
         isEmailVerified: updatedUser.isEmailVerified,
       },
     });
   } catch (error) {
+    console.error("Email verification error:", error);
     res.status(500).json({
       success: false,
       message: "Server error during email verification",
@@ -316,7 +323,6 @@ const resendVerification = async (req, res) => {
       });
     }
 
-    // Enforce cooldown period
     if (!user.canResendVerification()) {
       return res.status(429).json({
         success: false,
@@ -339,6 +345,7 @@ const resendVerification = async (req, res) => {
       message: "Verification email sent successfully",
     });
   } catch (error) {
+    console.error("Resend verification error:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -353,6 +360,13 @@ const getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
 
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
     res.json({
       success: true,
       user: {
@@ -365,6 +379,7 @@ const getMe = async (req, res) => {
       },
     });
   } catch (error) {
+    console.error("Get me error:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -373,7 +388,7 @@ const getMe = async (req, res) => {
 };
 
 /**
- * Check user's email verification status
+ * Check user's email verification status (requires auth)
  */
 const checkVerificationStatus = async (req, res) => {
   try {
@@ -404,6 +419,44 @@ const checkVerificationStatus = async (req, res) => {
       },
     });
   } catch (error) {
+    console.error("Check verification status error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error checking verification status",
+    });
+  }
+};
+
+/**
+ * Check verification status by email (no auth required)
+ */
+const checkVerificationByEmail = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email required",
+      });
+    }
+
+    const user = await User.findOne({ email }).select("isEmailVerified email");
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      isEmailVerified: user.isEmailVerified,
+      email: user.email,
+    });
+  } catch (error) {
+    console.error("Check verification by email error:", error);
     res.status(500).json({
       success: false,
       message: "Error checking verification status",
@@ -413,7 +466,6 @@ const checkVerificationStatus = async (req, res) => {
 
 /**
  * Refresh authentication token
- * Useful when token data is stale (e.g., after email verification)
  */
 const refreshToken = async (req, res) => {
   try {
@@ -426,7 +478,6 @@ const refreshToken = async (req, res) => {
       });
     }
 
-    // Generate fresh token with current user data
     const newToken = generateToken(user);
 
     res.json({
@@ -443,6 +494,7 @@ const refreshToken = async (req, res) => {
       },
     });
   } catch (error) {
+    console.error("Refresh token error:", error);
     res.status(500).json({
       success: false,
       message: "Error refreshing token",
@@ -452,7 +504,6 @@ const refreshToken = async (req, res) => {
 
 /**
  * Verify email and refresh token in one call
- * Used by frontend after email verification completes
  */
 const verifyAndRefreshToken = async (req, res) => {
   try {
@@ -465,7 +516,6 @@ const verifyAndRefreshToken = async (req, res) => {
       });
     }
 
-    // Verify email is confirmed
     if (!user.isEmailVerified) {
       return res.status(403).json({
         success: false,
@@ -476,7 +526,6 @@ const verifyAndRefreshToken = async (req, res) => {
       });
     }
 
-    // Generate fresh token
     const newToken = generateToken(user);
 
     res.json({
@@ -493,12 +542,37 @@ const verifyAndRefreshToken = async (req, res) => {
       },
     });
   } catch (error) {
+    console.error("Verify and refresh token error:", error);
     res.status(500).json({
       success: false,
       message: "Error verifying and refreshing token",
     });
   }
 };
+
+/**
+ * Cleanup unverified accounts older than 24 hours
+ */
+const cleanupUnverifiedAccounts = async () => {
+  try {
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const result = await User.deleteMany({
+      isEmailVerified: false,
+      createdAt: { $lt: twentyFourHoursAgo },
+    });
+
+    if (result.deletedCount > 0) {
+      console.log(`Cleaned up ${result.deletedCount} unverified accounts`);
+    }
+  } catch (error) {
+    console.error("Cleanup error:", error);
+  }
+};
+
+// Run cleanup every hour and on startup
+setInterval(cleanupUnverifiedAccounts, 60 * 60 * 1000);
+cleanupUnverifiedAccounts();
 
 module.exports = {
   register,
@@ -508,6 +582,8 @@ module.exports = {
   resendVerification,
   getMe,
   checkVerificationStatus,
+  checkVerificationByEmail,
   refreshToken,
   verifyAndRefreshToken,
+  cleanupUnverifiedAccounts,
 };

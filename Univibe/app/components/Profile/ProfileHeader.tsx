@@ -416,7 +416,7 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#111827",
     marginBottom: 4,
-    fontFamily:"SofiaSans-Bold",
+    fontFamily: "SofiaSans-Bold",
   },
 
   usernameContainer: {
@@ -428,7 +428,7 @@ const styles = StyleSheet.create({
     color: "#6b7280",
     fontSize: 16,
     marginRight: 8,
-    fontFamily:"SofiaSans-Regular",
+    fontFamily: "SofiaSans-Regular",
   },
 
   verifiedBadge: {
@@ -444,10 +444,10 @@ const styles = StyleSheet.create({
   },
 
   bio: {
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: "500",
     lineHeight: 20,
     color: "#000000",
-    fontFamily:"SofiaSans-Regular",
+    fontFamily: "SofiaSans-Regular",
   },
 });

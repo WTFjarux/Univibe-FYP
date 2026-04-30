@@ -1,9 +1,10 @@
+// app/(auth)/login.tsx - Updated with verification check in modal
 import { LinearGradient } from "expo-linear-gradient";
 import { Link, router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../lib/contexts/AuthContext";
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { API_BASE_URL } from "../../constants/ipConstants";
 import {
   View,
@@ -23,8 +24,12 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [isEmailVerified, setIsEmailVerified] = useState(false);
+  const [isCheckingVerification, setIsCheckingVerification] = useState(false);
   const [resendingEmail, setResendingEmail] = useState(false);
-  const [resendSuccess, setResendSuccess] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const { login, isLoading } = useAuth();
 
   const handleLogin = async () => {
@@ -35,7 +40,7 @@ export default function LoginScreen() {
 
     try {
       await login(email, password);
-      router.replace("../(tabs)");
+      router.replace("/(tabs)");
     } catch (error: any) {
       console.log("🔍 Login error:", error.message);
 
@@ -45,6 +50,7 @@ export default function LoginScreen() {
         errorMsg.toLowerCase().includes("email not verified") ||
         errorMsg.toLowerCase().includes("verification")
       ) {
+        setIsEmailVerified(false);
         setShowVerificationModal(true);
       } else if (
         errorMsg.toLowerCase().includes("invalid email") ||
@@ -57,115 +63,101 @@ export default function LoginScreen() {
     }
   };
 
-  const handleResendVerification = async () => {
-    if (!email) {
-      Alert.alert("Error", "Please enter your email");
-      return;
+  // Auto-check verification status every 3 seconds when modal is open
+  useEffect(() => {
+    if (showVerificationModal && !isEmailVerified) {
+      checkVerificationStatus();
+
+      pollingRef.current = setInterval(() => {
+        checkVerificationStatus();
+      }, 3000);
     }
 
-    try {
-      setResendingEmail(true);
-      setResendSuccess(false);
+    if (isEmailVerified && showVerificationModal) {
+      // Close modal and auto-login
+      const timer = setTimeout(() => {
+        setShowVerificationModal(false);
+        handleLogin();
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
 
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [showVerificationModal, isEmailVerified]);
+
+  // Resend cooldown timer
+  useEffect(() => {
+    if (resendCooldown > 0) {
+      const timer = setTimeout(() => {
+        setResendCooldown((prev) => prev - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [resendCooldown]);
+
+  const checkVerificationStatus = async () => {
+    try {
+      setIsCheckingVerification(true);
       const response = await fetch(
-        `${API_BASE_URL}/api/auth/resend-verification`,
+        `${API_BASE_URL}/api/auth/check-verification-by-email`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email }),
         },
       );
 
       const data = await response.json();
 
-      if (!response.ok) {
-        Alert.alert(
-          "Error",
-          data.message || "Failed to resend verification email",
-        );
-        return;
+      if (data.success && data.isEmailVerified) {
+        setIsEmailVerified(true);
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
       }
+    } catch (error) {
+      // Silent fail
+    } finally {
+      setIsCheckingVerification(false);
+    }
+  };
 
-      setResendSuccess(true);
-      setTimeout(() => setResendSuccess(false), 3000);
+  const handleResendVerification = async () => {
+    try {
+      setResendingEmail(true);
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/auth/resend-verification`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        },
+      );
+
+      const data = await response.json();
+
+      if (data.success) {
+        setResendCooldown(60);
+        Alert.alert(
+          "Email Sent",
+          "New verification email sent! Please check your inbox.",
+        );
+      } else {
+        Alert.alert("Error", data.message || "Failed to resend email");
+      }
     } catch (error) {
       Alert.alert("Error", "Failed to resend verification email");
     } finally {
       setResendingEmail(false);
     }
   };
-
-  const VerificationModal = () => (
-    <Modal
-      animationType="fade"
-      transparent={true}
-      visible={showVerificationModal}
-      onRequestClose={() => setShowVerificationModal(false)}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Ionicons name="mail-outline" size={60} color="#8b5cf6" />
-            <Text style={styles.modalTitle}>Email Verification Required</Text>
-          </View>
-
-          <Text style={styles.modalText}>
-            Please verify your email address before logging in. Check your inbox
-            for the verification email we sent to:
-          </Text>
-
-          <View style={styles.emailContainer}>
-            <Ionicons
-              name="mail"
-              size={20}
-              color="#8b5cf6"
-              style={styles.emailIcon}
-            />
-            <Text style={styles.emailText}>{email}</Text>
-          </View>
-
-          <Text style={styles.modalSubtext}>
-            Can't find the email? Check your spam folder or resend it below.
-          </Text>
-
-          <TouchableOpacity
-            style={styles.resendButton}
-            onPress={handleResendVerification}
-            disabled={resendingEmail}
-          >
-            {resendingEmail ? (
-              <ActivityIndicator color="#FFF" />
-            ) : (
-              <>
-                <Ionicons name="refresh-outline" size={20} color="#FFF" />
-                <Text style={styles.resendButtonText}>
-                  Resend Verification Email
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          {resendSuccess && (
-            <View style={styles.successContainer}>
-              <Ionicons name="checkmark-circle" size={20} color="#10b981" />
-              <Text style={styles.successText}>
-                Verification email sent! Please check your inbox.
-              </Text>
-            </View>
-          )}
-
-          <TouchableOpacity
-            style={styles.closeButton}
-            onPress={() => setShowVerificationModal(false)}
-          >
-            <Text style={styles.closeButtonText}>Close</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
 
   return (
     <LinearGradient colors={["#faf9f6", "#e8e6e1"]} style={styles.container}>
@@ -289,22 +281,140 @@ export default function LoginScreen() {
         </KeyboardAvoidingView>
       </SafeAreaView>
 
-      {/* Verification Modal */}
-      <VerificationModal />
+      {/* Bright Verification Modal with Auto-Check */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={showVerificationModal}
+        onRequestClose={() => {
+          setShowVerificationModal(false);
+          if (pollingRef.current) clearInterval(pollingRef.current);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.verifyModalContent}>
+            {/* Checking indicator */}
+            {!isEmailVerified && (
+              <View style={styles.checkingRow}>
+                <ActivityIndicator size="small" color="#8b5cf6" />
+                <Text style={styles.checkingText}>
+                  Waiting for email verification...
+                </Text>
+              </View>
+            )}
+
+            {/* Verified state */}
+            {isEmailVerified && (
+              <View style={styles.verifiedRow}>
+                <Ionicons name="checkmark-circle" size={20} color="#10b981" />
+                <Text style={styles.verifiedRowText}>
+                  Email verified! Logging you in...
+                </Text>
+              </View>
+            )}
+
+            {/* Icon */}
+            <View style={styles.verifyIconCircle}>
+              <Ionicons
+                name={
+                  isEmailVerified ? "checkmark-circle" : "mail-open-outline"
+                }
+                size={48}
+                color={isEmailVerified ? "#10b981" : "#8b5cf6"}
+              />
+            </View>
+
+            {/* Title */}
+            <Text style={styles.verifyModalTitle}>
+              {isEmailVerified ? "Email Verified!" : "Check Your Email"}
+            </Text>
+
+            {/* Email */}
+            <View style={styles.verifyEmailBadge}>
+              <Ionicons name="mail" size={16} color="#8b5cf6" />
+              <Text style={styles.verifyEmailText}>{email}</Text>
+            </View>
+
+            {/* Instructions - only show when not verified */}
+            {!isEmailVerified && (
+              <View style={styles.verifyInstructionsBox}>
+                <View style={styles.verifyInstructionItem}>
+                  <View style={styles.verifyStepNumber}>
+                    <Text style={styles.verifyStepNumberText}>1</Text>
+                  </View>
+                  <Text style={styles.verifyInstructionText}>
+                    Open your email inbox
+                  </Text>
+                </View>
+                <View style={styles.verifyInstructionItem}>
+                  <View style={styles.verifyStepNumber}>
+                    <Text style={styles.verifyStepNumberText}>2</Text>
+                  </View>
+                  <Text style={styles.verifyInstructionText}>
+                    Click the verification link
+                  </Text>
+                </View>
+                <View style={styles.verifyInstructionItem}>
+                  <View style={styles.verifyStepNumber}>
+                    <Text style={styles.verifyStepNumberText}>3</Text>
+                  </View>
+                  <Text style={styles.verifyInstructionText}>
+                    Return here - we'll log you in automatically!
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* Resend Button */}
+            {!isEmailVerified && (
+              <TouchableOpacity
+                style={[
+                  styles.verifyResendBtn,
+                  resendCooldown > 0 && styles.disabledButton,
+                ]}
+                onPress={handleResendVerification}
+                disabled={resendCooldown > 0 || resendingEmail}
+              >
+                {resendingEmail ? (
+                  <ActivityIndicator size="small" color="#8b5cf6" />
+                ) : (
+                  <>
+                    <Ionicons
+                      name="refresh-outline"
+                      size={18}
+                      color="#8b5cf6"
+                    />
+                    <Text style={styles.verifyResendBtnText}>
+                      {resendCooldown > 0
+                        ? `Resend in ${resendCooldown}s`
+                        : "Resend Email"}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+
+            {/* Close Button */}
+            <TouchableOpacity
+              style={styles.verifyCloseBtn}
+              onPress={() => {
+                setShowVerificationModal(false);
+                if (pollingRef.current) clearInterval(pollingRef.current);
+              }}
+            >
+              <Text style={styles.verifyCloseBtnText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  safeArea: {
-    flex: 1,
-  },
-  keyboardAvoidingView: {
-    flex: 1,
-  },
+  container: { flex: 1 },
+  safeArea: { flex: 1 },
+  keyboardAvoidingView: { flex: 1 },
   content: {
     flex: 1,
     paddingHorizontal: 30,
@@ -312,10 +422,7 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     justifyContent: "flex-start",
   },
-  logoContainer: {
-    alignItems: "center",
-    marginTop: 20,
-  },
+  logoContainer: { alignItems: "center", marginTop: 20 },
   logoText: {
     fontSize: 48,
     color: "#1f2937",
@@ -343,10 +450,7 @@ const styles = StyleSheet.create({
     marginBottom: 30,
     fontFamily: "SofiaSans-Bold",
   },
-  formContainer: {
-    width: "100%",
-    alignItems: "center",
-  },
+  formContainer: { width: "100%", alignItems: "center" },
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -364,22 +468,15 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 2,
   },
-  inputIcon: {
-    marginRight: 12,
-  },
+  inputIcon: { marginRight: 12 },
   input: {
     flex: 1,
     fontSize: 16,
     color: "#1f2937",
     fontFamily: "SofiaSans-Regular",
   },
-  eyeButton: {
-    padding: 5,
-  },
-  forgotPassword: {
-    alignSelf: "flex-end",
-    marginBottom: 25,
-  },
+  eyeButton: { padding: 5 },
+  forgotPassword: { alignSelf: "flex-end", marginBottom: 25 },
   forgotPasswordText: {
     color: "#8b5cf6",
     fontSize: 14,
@@ -400,9 +497,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  disabledButton: {
-    opacity: 0.6,
-  },
+  disabledButton: { opacity: 0.6 },
   loginButtonText: {
     color: "white",
     textAlign: "center",
@@ -415,11 +510,7 @@ const styles = StyleSheet.create({
     width: "100%",
     marginBottom: 15,
   },
-  orLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: "#d1d5db",
-  },
+  orLine: { flex: 1, height: 1, backgroundColor: "#d1d5db" },
   orText: {
     color: "#6b7280",
     fontSize: 16,
@@ -432,18 +523,9 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     fontFamily: "SofiaSans-Regular",
   },
-  socialRow: {
-    flexDirection: "row",
-    marginBottom: 30,
-    gap: 25,
-  },
-  socialButton: {
-    padding: 10,
-  },
-  signUpContainer: {
-    flexDirection: "row",
-    justifyContent: "center",
-  },
+  socialRow: { flexDirection: "row", marginBottom: 30, gap: 25 },
+  socialButton: { padding: 10 },
+  signUpContainer: { flexDirection: "row", justifyContent: "center" },
   signUpText: {
     color: "#6b7280",
     fontSize: 14,
@@ -455,91 +537,148 @@ const styles = StyleSheet.create({
     textDecorationLine: "underline",
     fontFamily: "SofiaSans-SemiBold",
   },
+
+  // Modal Styles
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
     justifyContent: "center",
     alignItems: "center",
     padding: 20,
   },
-  modalContent: {
-    backgroundColor: "white",
-    borderRadius: 20,
-    padding: 25,
+  verifyModalContent: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    padding: 28,
     width: "100%",
-    maxWidth: 400,
+    maxWidth: 380,
     alignItems: "center",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
     elevation: 10,
   },
-  modalHeader: {
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 22,
-    color: "#1f2937",
-    marginTop: 10,
-    textAlign: "center",
-    fontFamily: "SofiaSans-Bold",
-  },
-  modalText: {
-    fontSize: 15,
-    color: "#4b5563",
-    textAlign: "center",
-    lineHeight: 22,
-    marginBottom: 15,
-    fontFamily: "SofiaSans-Regular",
-  },
-  modalSubtext: {
-    fontSize: 13,
-    color: "#6b7280",
-    textAlign: "center",
-    lineHeight: 18,
-    marginBottom: 20,
-    fontStyle: "italic",
-    fontFamily: "SofiaSans-Regular",
-  },
-  emailContainer: {
+  checkingRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#f3f4f6",
-    paddingHorizontal: 15,
-    paddingVertical: 12,
+    backgroundColor: "#F5F3FF",
     borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     marginBottom: 20,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
     width: "100%",
+    gap: 10,
   },
-  emailIcon: {
-    marginRight: 10,
-  },
-  emailText: {
-    color: "#1f2937",
+  checkingText: {
+    color: "#7C3AED",
     fontSize: 14,
-    flex: 1,
     fontFamily: "SofiaSans-Medium",
   },
-  resendButton: {
+  verifiedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ECFDF5",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+    width: "100%",
+    gap: 10,
+  },
+  verifiedRowText: {
+    color: "#059669",
+    fontSize: 14,
+    fontFamily: "SofiaSans-Medium",
+  },
+  verifyIconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "#F5F3FF",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  verifyModalTitle: {
+    fontSize: 22,
+    color: "#1F2937",
+    fontFamily: "SofiaSans-Bold",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  verifyEmailBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F5F3FF",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+    gap: 8,
+  },
+  verifyEmailText: {
+    color: "#4C1D95",
+    fontSize: 14,
+    fontFamily: "SofiaSans-Medium",
+  },
+  verifyInstructionsBox: {
+    width: "100%",
+    backgroundColor: "#FAFAFA",
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+  },
+  verifyInstructionItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+    gap: 12,
+  },
+  verifyStepNumber: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#8b5cf6",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  verifyStepNumberText: { color: "white", fontSize: 14, fontWeight: "700" },
+  verifyInstructionText: {
+    color: "#4B5563",
+    fontSize: 14,
+    flex: 1,
+    fontFamily: "SofiaSans-Regular",
+  },
+  verifyResendBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#8b5cf6",
     paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 12,
+    borderRadius: 14,
     width: "100%",
-    marginBottom: 15,
-    gap: 10,
+    marginBottom: 10,
+    backgroundColor: "#F5F3FF",
+    gap: 8,
   },
-  resendButtonText: {
-    color: "white",
+  verifyResendBtnText: {
+    color: "#7C3AED",
     fontSize: 15,
     fontFamily: "SofiaSans-SemiBold",
+  },
+  verifyCloseBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    width: "100%",
+  },
+  verifyCloseBtnText: {
+    color: "#6B7280",
+    fontSize: 14,
+    textAlign: "center",
+    fontFamily: "SofiaSans-Medium",
   },
   successContainer: {
     flexDirection: "row",
@@ -559,19 +698,5 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     flex: 1,
     fontFamily: "SofiaSans-Regular",
-  },
-  closeButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    width: "100%",
-  },
-  closeButtonText: {
-    color: "#6b7280",
-    fontSize: 15,
-    textAlign: "center",
-    fontFamily: "SofiaSans-Medium",
   },
 });

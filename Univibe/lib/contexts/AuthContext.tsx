@@ -49,7 +49,7 @@ interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
-  signup: (name: string, email: string, password: string) => Promise<void>;
+  signup: (name: string, email: string, password: string) => Promise<any>;
   logout: () => Promise<void>;
   setupProfile: (profileData: any) => Promise<any>;
   refreshProfile: () => Promise<void>;
@@ -81,7 +81,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const [token, setToken] = useState<string | null>(null);
   const [profile, setProfile] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const isAuthenticated = !!token;
+  const isAuthenticated =
+    !!token && !!user?.isEmailVerified && !!user?.profileComplete;
   const appState = useRef(AppState.currentState);
 
   // Initialize auth state on mount
@@ -186,6 +187,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const clearAuthData = async () => {
     try {
       await SecureStore.deleteItemAsync("authToken");
+      await SecureStore.deleteItemAsync("profile_complete");
     } catch (error) {
       console.error("Error clearing token:", error);
     }
@@ -243,19 +245,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   /**
+   * Check if user has ACTUALLY completed profile setup
+   * Default profile has major: "Undecided" - so completed profile won't
+   */
+  const hasCompletedProfile = (profileData: any, userData?: any): boolean => {
+    // Most reliable: user.profileComplete flag from backend
+    if (userData?.profileComplete === true) return true;
+    if (profileData?.user?.profileComplete === true) return true;
+    if (profileData?.data?.user?.profileComplete === true) return true;
+
+    // Fallback: check if profile has been customized
+    const p = profileData?.data?.profile || profileData?.profile || profileData;
+    if (p?.major && p.major !== "Undecided" && p?.username) return true;
+
+    return false;
+  };
+
+  /**
    * Refresh current user's profile data
    */
   const refreshUserProfile = async () => {
     try {
       const currentToken =
         token || (await SecureStore.getItemAsync("authToken"));
-      if (!currentToken) {
-        return;
-      }
+      if (!currentToken) return;
 
       const response = await profileService.getMyProfile();
       if (response.success && response.data) {
-        setUser(response.data.user);
+        setUser((prev) => ({
+          ...prev,
+          ...response.data.user,
+          id: prev?.id || response.data.user?._id,
+          email: prev?.email || response.data.user?.email,
+          profileComplete:
+            response.data.user?.profileComplete ?? prev?.profileComplete,
+        }));
         setProfile(response.data.profile);
       }
     } catch (error) {
@@ -284,6 +308,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
   /**
    * Check and restore authentication state on app start
+   * Keeps token even if profile incomplete (routing layers handle redirection)
    */
   const checkAuthState = async () => {
     try {
@@ -296,7 +321,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         return;
       }
 
-      // Verify token is valid
       let decoded: CustomJwtPayload;
       try {
         decoded = jwtDecode<CustomJwtPayload>(storedToken);
@@ -307,11 +331,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         return;
       }
 
+      // Block unverified users
+      if (!decoded.isEmailVerified) {
+        console.log("🔐 Email not verified, clearing session");
+        await clearAuthData();
+        setIsLoading(false);
+        return;
+      }
+
       const currentTime = Date.now() / 1000;
 
       if (decoded.exp && decoded.exp > currentTime) {
-        // Token is valid
-        console.log("🔐 Token is valid, restoring session");
+        console.log("🔐 Verified session found, restoring...");
         setToken(storedToken);
         setUser({
           id: decoded.id,
@@ -322,10 +353,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           iat: decoded.iat,
         });
 
-        await fetchUserProfile();
-        console.log("🔐 Session restored successfully");
+        // Fetch profile to check completion status
+        const profileData = await fetchUserProfile();
+
+        if (hasCompletedProfile(profileData, { profileComplete: false })) {
+          console.log("🔐 Profile complete, full access granted");
+          setUser((prev) => (prev ? { ...prev, profileComplete: true } : null));
+        } else {
+          console.log("🔐 Profile incomplete, user needs setup");
+          setUser((prev) =>
+            prev ? { ...prev, profileComplete: false } : null,
+          );
+        }
       } else {
-        // Token expired
         console.log("🔐 Token expired, clearing session");
         await clearAuthData();
       }
@@ -360,9 +400,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       const data = await response.json();
 
       if (data.success) {
-        if (data.isEmailVerified && token) {
+        if (data.isEmailVerified && currentToken) {
           try {
-            const decoded = jwtDecode<CustomJwtPayload>(token);
+            const decoded = jwtDecode<CustomJwtPayload>(currentToken);
             if (!decoded.isEmailVerified) {
               await refreshToken();
             }
@@ -434,13 +474,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       if (responseData.token) {
-        // Store token
         await SecureStore.setItemAsync("authToken", responseData.token);
-
-        // Verify storage
-        const savedToken = await SecureStore.getItemAsync("authToken");
-        console.log("🔐 Token saved successfully:", !!savedToken);
-
         setToken(responseData.token);
 
         const decoded = jwtDecode<CustomJwtPayload>(responseData.token);
@@ -449,12 +483,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           email: decoded.email,
           role: decoded.role,
           isEmailVerified: decoded.isEmailVerified,
+          profileComplete: responseData.user?.profileComplete ?? false,
           exp: decoded.exp,
           iat: decoded.iat,
         });
 
         await fetchUserProfile();
-        console.log("🔐 Login successful, user:", decoded.email);
+        console.log(
+          "🔐 Login successful, profileComplete:",
+          responseData.user?.profileComplete,
+        );
       } else {
         throw new Error("Authentication failed");
       }
@@ -467,6 +505,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
   /**
    * Register new user account
+   * No token stored - user must verify email first
    */
   const signup = async (name: string, email: string, password: string) => {
     try {
@@ -478,30 +517,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         body: JSON.stringify({ name, email, password }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || "Registration failed");
-      }
-
       const data = await response.json();
 
-      if (data.token) {
-        await SecureStore.setItemAsync("authToken", data.token);
-        setToken(data.token);
-
-        const decoded = jwtDecode<CustomJwtPayload>(data.token);
-        setUser({
-          id: decoded.id,
-          email: decoded.email,
-          role: decoded.role,
-          isEmailVerified: decoded.isEmailVerified,
-          exp: decoded.exp,
-          iat: decoded.iat,
-        });
-        setProfile(null);
-      } else {
-        throw new Error("Registration incomplete");
+      if (!response.ok) {
+        throw new Error(data.message || "Registration failed");
       }
+
+      await SecureStore.deleteItemAsync("authToken");
+      setToken(null);
+      setUser(null);
+      setProfile(null);
+
+      return data;
     } catch (error: any) {
       throw error;
     } finally {
@@ -520,6 +547,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
       if (response?.success === true) {
         await fetchUserProfile();
+        setUser((prev) => (prev ? { ...prev, profileComplete: true } : null));
         return response;
       } else {
         throw new Error(response?.message || "Profile creation failed");

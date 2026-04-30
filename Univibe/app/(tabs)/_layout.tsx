@@ -6,7 +6,7 @@ import { useAuth } from "../../lib/contexts/AuthContext";
 import { View, ActivityIndicator, Text } from "react-native";
 
 export default function TabLayout() {
-  const { isLoading, token } = useAuth();
+  const { isLoading, token, user } = useAuth();
 
   // Show loading screen while checking auth
   if (isLoading) {
@@ -27,11 +27,24 @@ export default function TabLayout() {
 
   // If no token, redirect to landing page
   if (!token) {
-    console.log("🚫 No token in tabs layout, redirecting to landing page");
+    console.log("🚫 No token, redirecting to landing page");
     return <Redirect href="/screens/landingPage" />;
   }
 
-  // User is authenticated, show tabs
+  // If email not verified, redirect to login
+  if (!user?.isEmailVerified) {
+    console.log("🚫 Email not verified, redirecting to login");
+    return <Redirect href="/(auth)/login" />;
+  }
+
+  // ✅ If profile not complete, redirect to setup
+  if (user?.profileComplete === false) {
+    console.log("🚫 Profile not complete, redirecting to setup");
+    return <Redirect href="/(auth)/setup-profile" />;
+  }
+
+  // User is fully authenticated, verified, and has completed profile
+  console.log("✅ User fully authenticated - showing tabs");
   return (
     <Tabs
       screenOptions={{
@@ -49,7 +62,7 @@ export default function TabLayout() {
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: "500",
-          fontFamily: "SofiaSans-Bold", 
+          fontFamily: "SofiaSans-Bold",
         },
         tabBarIconStyle: {
           marginBottom: 5,

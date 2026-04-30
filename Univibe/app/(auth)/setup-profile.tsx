@@ -17,10 +17,10 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { Ionicons } from "@expo/vector-icons";
+import { useAuth } from "../../lib/contexts/AuthContext";
 import { profileService } from "../../lib/services/profileService";
 import { API_BASE_URL } from "../../constants/ipConstants";
 
-// Import shared components and constants
 import {
   ScrollableDropdown,
   YearSelector,
@@ -37,6 +37,8 @@ export default function SetupProfileScreen() {
   const [loading, setLoading] = useState(false);
   const [activeStep, setActiveStep] = useState(1);
 
+  const { refreshUserProfile } = useAuth();
+
   const [formData, setFormData] = useState({
     username: "",
     campus: "",
@@ -48,47 +50,36 @@ export default function SetupProfileScreen() {
     universityEmail: "",
   });
 
-  // Username validation state
   const [usernameStatus, setUsernameStatus] = useState({
     loading: false,
     available: false,
     error: "",
   });
 
-  // Handle campus selection
   const handleCampusSelect = (value: string) => {
     setFormData({ ...formData, campus: value });
   };
 
-  // Handle major selection
   const handleMajorSelect = (value: string) => {
     setFormData({ ...formData, major: value });
   };
 
-  // Handle year selection
   const handleYearSelect = (year: string) => {
     setFormData({ ...formData, year });
   };
 
-  // Handle pronouns selection
   const handlePronounsSelect = (pronouns: string) => {
     setFormData({ ...formData, pronouns });
   };
 
-  // Handle graduation year selection
   const handleGraduationYearSelect = (year: string) => {
     setFormData({ ...formData, graduationYear: year });
   };
 
-  // Debounced username check
   useEffect(() => {
     const checkUsername = async () => {
       if (!formData.username.trim()) {
-        setUsernameStatus({
-          loading: false,
-          available: false,
-          error: "",
-        });
+        setUsernameStatus({ loading: false, available: false, error: "" });
         return;
       }
 
@@ -136,19 +127,13 @@ export default function SetupProfileScreen() {
 
         const response = await fetch(
           `${API_BASE_URL}/api/profile/check-username/${formData.username}`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          },
+          { headers: { Authorization: `Bearer ${token}` } },
         );
 
         const data = await response.json();
 
         if (response.status === 200 && data.available === true) {
-          setUsernameStatus({
-            loading: false,
-            available: true,
-            error: "",
-          });
+          setUsernameStatus({ loading: false, available: true, error: "" });
         } else if (response.status === 409 || data.success === false) {
           setUsernameStatus({
             loading: false,
@@ -163,7 +148,6 @@ export default function SetupProfileScreen() {
           });
         }
       } catch (error) {
-        console.error("Username check error:", error);
         setUsernameStatus({
           loading: false,
           available: false,
@@ -244,11 +228,17 @@ export default function SetupProfileScreen() {
         }
         await SecureStore.setItemAsync("profile_complete", "true");
 
-        Alert.alert(
-          "🎉 Profile Complete!",
-          "Your profile has been set up successfully!",
-          [{ text: "Get Started", onPress: () => router.replace("/(tabs)") }],
-        );
+        // ✅ Refresh auth state to update profileComplete
+        await refreshUserProfile();
+
+        // ✅ Navigate directly to tabs - state is now updated
+        setTimeout(() => {
+          Alert.alert(
+            "🎉 Profile Complete!",
+            "Your profile has been set up successfully!",
+            [{ text: "Get Started", onPress: () => router.replace("/(tabs)") }],
+          );
+        }, 300);
       } else {
         Alert.alert(
           "Setup Failed",
@@ -294,7 +284,7 @@ export default function SetupProfileScreen() {
     if (usernameStatus.loading) {
       return (
         <View style={styles.validationContainer}>
-          <ActivityIndicator size="small" color="#4f46e5" />
+          <ActivityIndicator size="small" color="#8b5cf6" />
           <Text style={styles.validationTextLoading}>Checking username...</Text>
         </View>
       );
@@ -392,13 +382,8 @@ export default function SetupProfileScreen() {
             contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
           >
+            {/* Header without back button */}
             <View style={styles.header}>
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={() => router.back()}
-              >
-                <Ionicons name="arrow-back" size={24} color="#4f46e5" />
-              </TouchableOpacity>
               <View style={styles.headerContent}>
                 <Text style={styles.title}>Complete Your Profile</Text>
                 <Text style={styles.subtitle}>
@@ -414,7 +399,6 @@ export default function SetupProfileScreen() {
             <View style={styles.formCard}>
               {activeStep === 1 && (
                 <View style={styles.stepContent}>
-                  {/* Username */}
                   <View style={styles.inputGroup}>
                     <View style={styles.labelContainer}>
                       <Ionicons
@@ -447,7 +431,6 @@ export default function SetupProfileScreen() {
                     </Text>
                   </View>
 
-                  {/* Campus / College - Scrollable Dropdown */}
                   <ScrollableDropdown
                     label="Campus / College"
                     value={formData.campus}
@@ -464,13 +447,11 @@ export default function SetupProfileScreen() {
                     }
                   />
 
-                  {/* Pronouns Selector */}
                   <PronounsSelector
                     value={formData.pronouns}
                     onSelect={handlePronounsSelect}
                   />
 
-                  {/* Bio Input */}
                   <BioInput
                     value={formData.bio}
                     onChange={(text: string) =>
@@ -483,7 +464,6 @@ export default function SetupProfileScreen() {
 
               {activeStep === 2 && (
                 <View style={styles.stepContent}>
-                  {/* University Email */}
                   <View style={styles.inputGroup}>
                     <View style={styles.labelContainer}>
                       <Ionicons name="mail-outline" size={20} color="#8b5cf6" />
@@ -505,7 +485,6 @@ export default function SetupProfileScreen() {
                     />
                   </View>
 
-                  {/* Major - Scrollable Dropdown */}
                   <ScrollableDropdown
                     label="Major / Department"
                     value={formData.major}
@@ -522,14 +501,12 @@ export default function SetupProfileScreen() {
                     }
                   />
 
-                  {/* Year Selector */}
                   <YearSelector
                     value={formData.year}
                     onSelect={handleYearSelect}
                     required={true}
                   />
 
-                  {/* Graduation Year - Scrollable Dropdown */}
                   <ScrollableDropdown
                     label="Expected Graduation Year"
                     value={formData.graduationYear}
@@ -604,13 +581,6 @@ export default function SetupProfileScreen() {
                 )}
               </View>
             </View>
-
-            <View style={styles.footer}>
-              <Text style={styles.footerText}>
-                By continuing, you agree to our Terms of Service and Privacy
-                Policy
-              </Text>
-            </View>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -624,35 +594,24 @@ const styles = StyleSheet.create({
   keyboardAvoidingView: { flex: 1 },
   scrollContent: { paddingHorizontal: 20, paddingBottom: 40 },
   header: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    marginTop: 20,
+    marginTop: 60,
     marginBottom: 35,
   },
-  backButton: {
-    padding: 8,
-    marginRight: 12,
-    backgroundColor: "white",
-    borderRadius: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  headerContent: { flex: 1 },
+  headerContent: { flex: 1, alignItems: "center" },
   title: {
     fontSize: 28,
     fontWeight: "700",
     color: "#111827",
     marginBottom: 8,
     fontFamily: "SofiaSans-Bold",
+    textAlign: "center",
   },
   subtitle: {
     fontSize: 15,
     color: "#6b7280",
     lineHeight: 22,
     fontFamily: "SofiaSans-Regular",
+    textAlign: "center",
   },
   stepContainer: { alignItems: "center", marginBottom: 40 },
   stepCirclesContainer: {
@@ -814,13 +773,5 @@ const styles = StyleSheet.create({
     color: "white",
     marginRight: 8,
     fontFamily: "SofiaSans-Bold",
-  },
-  footer: { alignItems: "center", paddingHorizontal: 20 },
-  footerText: {
-    fontSize: 12,
-    color: "#9ca3af",
-    textAlign: "center",
-    lineHeight: 18,
-    fontFamily: "SofiaSans-Regular",
   },
 });

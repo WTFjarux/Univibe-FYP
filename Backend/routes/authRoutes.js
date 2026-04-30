@@ -8,6 +8,7 @@ const {
   resendVerification,
   getMe,
   checkVerificationStatus,
+  checkVerificationByEmail,
   refreshToken,
   verifyAndRefreshToken,
 } = require("../controllers/authController");
@@ -16,11 +17,12 @@ const { protect } = require("../middleware/authmiddleware");
 const router = express.Router();
 
 // ============================================
-// Public Routes
+// Public Routes (No Authentication Required)
 // ============================================
 router.post("/register", register);
 router.post("/login", login);
 router.post("/resend-verification", resendVerification);
+router.post("/check-verification-by-email", checkVerificationByEmail);
 
 // ============================================
 // Email Verification Routes

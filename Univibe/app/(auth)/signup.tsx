@@ -1,5 +1,5 @@
 // app/(auth)/signup.tsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -11,13 +11,15 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  Modal,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Link, router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../lib/contexts/AuthContext";
-import VerificationModal from "./VerificationModal";
+import { API_BASE_URL } from "../../constants/ipConstants";
+import * as SecureStore from "expo-secure-store";
 
 export default function SignUpScreen() {
   const [fullName, setFullName] = useState("");
@@ -30,14 +32,15 @@ export default function SignUpScreen() {
   const [showVerificationModal, setShowVerificationModal] = useState(false);
   const [verificationEmail, setVerificationEmail] = useState("");
   const [isEmailVerified, setIsEmailVerified] = useState(false);
-  const [isCheckingVerification, setIsCheckingVerification] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const savedPasswordRef = useRef<string>("");
 
   const {
     signup: authSignup,
-    token,
-    checkVerificationStatus,
     resendVerificationEmail,
-    refreshToken,
+    login: authLogin,
   } = useAuth();
 
   const validateForm = (): boolean => {
@@ -79,8 +82,12 @@ export default function SignUpScreen() {
 
     try {
       setIsLoading(true);
+      // Save password for auto-login after verification
+      savedPasswordRef.current = password;
+
       await authSignup(fullName, email, password);
       setVerificationEmail(email);
+      setIsEmailVerified(false);
       setShowVerificationModal(true);
       clearForm();
     } catch (error: any) {
@@ -97,36 +104,97 @@ export default function SignUpScreen() {
     setConfirmPassword("");
   };
 
-  const handleCheckVerification = async () => {
+  // Auto-login after email verified
+  const autoLoginAndProceed = async () => {
     try {
-      setIsCheckingVerification(true);
-      const result = await checkVerificationStatus();
+      setIsLoggingIn(true);
 
-      if (result.isEmailVerified) {
+      // ✅ Use the AuthContext login function which updates state
+      await authLogin(verificationEmail, savedPasswordRef.current);
+
+      // Clean up
+      setShowVerificationModal(false);
+      savedPasswordRef.current = "";
+
+      // AuthContext now has the token and user state updated
+      router.replace("/(auth)/setup-profile");
+    } catch (error: any) {
+      console.log("🔴 Auto-login error:", error.message);
+      Alert.alert("Error", "Failed to authenticate. Please login manually.", [
+        {
+          text: "Go to Login",
+          onPress: () => {
+            setShowVerificationModal(false);
+            router.replace("/(auth)/login");
+          },
+        },
+      ]);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  // Auto-check verification status every 3 seconds
+  useEffect(() => {
+    if (showVerificationModal && !isEmailVerified) {
+      checkVerificationStatus();
+
+      pollingRef.current = setInterval(() => {
+        checkVerificationStatus();
+      }, 3000);
+    }
+
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [showVerificationModal, isEmailVerified]);
+
+  // When verified, auto-login
+  useEffect(() => {
+    if (isEmailVerified && showVerificationModal) {
+      // Small delay to show the verified state
+      const timer = setTimeout(() => {
+        autoLoginAndProceed();
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [isEmailVerified]);
+
+  // Resend cooldown timer
+  useEffect(() => {
+    if (resendCooldown > 0) {
+      const timer = setTimeout(() => {
+        setResendCooldown((prev) => prev - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [resendCooldown]);
+
+  const checkVerificationStatus = async () => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/auth/check-verification-by-email`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: verificationEmail }),
+        },
+      );
+
+      const data = await response.json();
+
+      if (data.success && data.isEmailVerified) {
         setIsEmailVerified(true);
-        if (refreshToken) {
-          await refreshToken();
-        }
-      } else {
-        setIsEmailVerified(false);
-        if (!showVerificationModal) {
-          Alert.alert(
-            "Not Verified Yet",
-            "Your email is still pending verification.",
-            [
-              { text: "OK", style: "cancel" },
-              {
-                text: "Resend Email",
-                onPress: handleResendVerification,
-              },
-            ],
-          );
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
         }
       }
     } catch (error) {
-      Alert.alert("Error", "Failed to check verification status");
-    } finally {
-      setIsCheckingVerification(false);
+      // Silent fail - will retry on next poll
     }
   };
 
@@ -135,7 +203,8 @@ export default function SignUpScreen() {
       const result = await resendVerificationEmail(verificationEmail);
 
       if (result.success) {
-        Alert.alert("Email Sent", "New verification email sent");
+        setResendCooldown(60);
+        Alert.alert("Email Sent", "New verification email sent!");
       } else {
         Alert.alert("Error", result.message || "Failed to resend email");
       }
@@ -144,86 +213,22 @@ export default function SignUpScreen() {
     }
   };
 
-  const handleVerificationComplete = async (newToken: string) => {
-    try {
-      if (refreshToken) {
-        await refreshToken();
-      }
-      setIsEmailVerified(true);
-      setShowVerificationModal(false);
-      router.replace("/(auth)/setup-profile");
-    } catch (error) {
-      // Silently fail - user can retry
+  const handleCloseModal = () => {
+    setShowVerificationModal(false);
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
     }
+    savedPasswordRef.current = "";
   };
 
-  const handleSetupProfile = async () => {
-    try {
-      setIsCheckingVerification(true);
-
-      if (refreshToken) {
-        await refreshToken();
-      }
-
-      const result = await checkVerificationStatus();
-
-      if (!result.isEmailVerified) {
-        Alert.alert(
-          "Email Verification Required",
-          "Please verify your email before setting up your profile.",
-          [
-            { text: "OK", style: "cancel" },
-            {
-              text: "Check Status",
-              onPress: handleCheckVerification,
-            },
-            {
-              text: "Resend Email",
-              onPress: handleResendVerification,
-            },
-          ],
-        );
-        return;
-      }
-
-      setShowVerificationModal(false);
-      router.replace("/(auth)/setup-profile");
-    } catch (error) {
-      Alert.alert("Error", "Failed to check verification");
-    } finally {
-      setIsCheckingVerification(false);
-    }
-  };
-
+  // Cleanup on unmount
   useEffect(() => {
-    let intervalId: number | null = null;
-
-    if (showVerificationModal && !isEmailVerified) {
-      intervalId = setInterval(async () => {
-        try {
-          const result = await checkVerificationStatus();
-          if (result.isEmailVerified) {
-            setIsEmailVerified(true);
-            if (refreshToken) {
-              await refreshToken();
-            }
-            if (intervalId) clearInterval(intervalId);
-          }
-        } catch (error) {
-          // Silently fail
-        }
-      }, 5000);
-    }
-
     return () => {
-      if (intervalId) clearInterval(intervalId);
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+      }
     };
-  }, [
-    showVerificationModal,
-    isEmailVerified,
-    checkVerificationStatus,
-    refreshToken,
-  ]);
+  }, []);
 
   return (
     <LinearGradient colors={["#faf9f6", "#e8e6e1"]} style={styles.container}>
@@ -360,7 +365,6 @@ export default function SignUpScreen() {
                     At least 6 characters
                   </Text>
                 </View>
-
                 <View style={styles.requirementRow}>
                   <Ionicons
                     name={
@@ -380,7 +384,6 @@ export default function SignUpScreen() {
                     At least 1 capital letter
                   </Text>
                 </View>
-
                 <View style={styles.requirementRow}>
                   <Ionicons
                     name={
@@ -398,7 +401,6 @@ export default function SignUpScreen() {
                     At least 1 number
                   </Text>
                 </View>
-
                 <View style={styles.requirementRow}>
                   <Ionicons
                     name={
@@ -490,21 +492,140 @@ export default function SignUpScreen() {
         </KeyboardAvoidingView>
       </SafeAreaView>
 
-      <VerificationModal
+      {/* Bright Modern Verification Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
         visible={showVerificationModal}
-        email={verificationEmail}
-        token={token}
-        isEmailVerified={isEmailVerified}
-        onClose={() => {
-          setShowVerificationModal(false);
-          setVerificationEmail("");
-          setIsEmailVerified(false);
-        }}
-        onSetupProfile={handleSetupProfile}
-        onResendVerification={handleResendVerification}
-        onVerificationComplete={handleVerificationComplete}
-        isChecking={isCheckingVerification}
-      />
+        onRequestClose={handleCloseModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            {/* Loading Indicator */}
+            {!isEmailVerified && !isLoggingIn && (
+              <View style={styles.loadingRow}>
+                <ActivityIndicator size="small" color="#8b5cf6" />
+                <Text style={styles.loadingText}>
+                  Waiting for email verification...
+                </Text>
+              </View>
+            )}
+
+            {/* Logging in state */}
+            {isLoggingIn && (
+              <View style={styles.loadingRow}>
+                <ActivityIndicator size="small" color="#10b981" />
+                <Text style={[styles.loadingText, { color: "#10b981" }]}>
+                  Setting up your account...
+                </Text>
+              </View>
+            )}
+
+            {/* Icon */}
+            <View style={styles.iconCircle}>
+              <Ionicons
+                name={
+                  isEmailVerified
+                    ? "checkmark-circle"
+                    : isLoggingIn
+                      ? "hourglass-outline"
+                      : "mail-outline"
+                }
+                size={48}
+                color={
+                  isEmailVerified
+                    ? "#10b981"
+                    : isLoggingIn
+                      ? "#8b5cf6"
+                      : "#8b5cf6"
+                }
+              />
+            </View>
+
+            {/* Title */}
+            <Text style={styles.modalTitle}>
+              {isEmailVerified
+                ? "Email Verified!"
+                : isLoggingIn
+                  ? "Almost there..."
+                  : "Check Your Email"}
+            </Text>
+
+            {/* Email display */}
+            <View style={styles.emailBadge}>
+              <Ionicons name="mail" size={16} color="#8b5cf6" />
+              <Text style={styles.emailBadgeText}>{verificationEmail}</Text>
+            </View>
+
+            {/* Instructions */}
+            {!isEmailVerified && !isLoggingIn && (
+              <View style={styles.instructionsBox}>
+                <View style={styles.instructionItem}>
+                  <View style={styles.stepNumber}>
+                    <Text style={styles.stepNumberText}>1</Text>
+                  </View>
+                  <Text style={styles.instructionItemText}>
+                    Open your email inbox
+                  </Text>
+                </View>
+                <View style={styles.instructionItem}>
+                  <View style={styles.stepNumber}>
+                    <Text style={styles.stepNumberText}>2</Text>
+                  </View>
+                  <Text style={styles.instructionItemText}>
+                    Click the verification link
+                  </Text>
+                </View>
+                <View style={styles.instructionItem}>
+                  <View style={styles.stepNumber}>
+                    <Text style={styles.stepNumberText}>3</Text>
+                  </View>
+                  <Text style={styles.instructionItemText}>
+                    Come back here - we'll take care of the rest!
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* Verified message */}
+            {isEmailVerified && !isLoggingIn && (
+              <View style={styles.verifiedBox}>
+                <Ionicons name="sparkles" size={20} color="#10b981" />
+                <Text style={styles.verifiedText}>
+                  Redirecting you to profile setup...
+                </Text>
+              </View>
+            )}
+
+            {/* Resend Button */}
+            {!isEmailVerified && !isLoggingIn && (
+              <TouchableOpacity
+                style={[
+                  styles.resendBtn,
+                  resendCooldown > 0 && styles.disabledButton,
+                ]}
+                onPress={handleResendVerification}
+                disabled={resendCooldown > 0}
+              >
+                <Ionicons name="refresh-outline" size={18} color="#8b5cf6" />
+                <Text style={styles.resendBtnText}>
+                  {resendCooldown > 0
+                    ? `Resend in ${resendCooldown}s`
+                    : "Resend Email"}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Close Button */}
+            <TouchableOpacity
+              style={styles.closeBtn}
+              onPress={handleCloseModal}
+            >
+              <Text style={styles.closeBtnText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </LinearGradient>
   );
 }
@@ -547,11 +668,7 @@ const styles = StyleSheet.create({
     marginBottom: 30,
     fontFamily: "SofiaSans-Bold",
   },
-  formContainer: {
-    width: "100%",
-    alignItems: "center",
-    marginBottom: 40,
-  },
+  formContainer: { width: "100%", alignItems: "center", marginBottom: 40 },
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -656,5 +773,151 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textDecorationLine: "underline",
     fontFamily: "SofiaSans-SemiBold",
+  },
+  // Modal Styles - Bright & Modern
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    padding: 28,
+    width: "100%",
+    maxWidth: 380,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    elevation: 10,
+  },
+  loadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F5F3FF",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+    width: "100%",
+    gap: 10,
+  },
+  loadingText: {
+    color: "#7C3AED",
+    fontSize: 14,
+    fontFamily: "SofiaSans-Medium",
+  },
+  iconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "#F5F3FF",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 22,
+    color: "#1F2937",
+    fontFamily: "SofiaSans-Bold",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  emailBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F5F3FF",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+    gap: 8,
+  },
+  emailBadgeText: {
+    color: "#4C1D95",
+    fontSize: 14,
+    fontFamily: "SofiaSans-Medium",
+  },
+  instructionsBox: {
+    width: "100%",
+    backgroundColor: "#FAFAFA",
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+  },
+  instructionItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+    gap: 12,
+  },
+  stepNumber: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#8b5cf6",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  stepNumberText: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  instructionItemText: {
+    color: "#4B5563",
+    fontSize: 14,
+    flex: 1,
+    fontFamily: "SofiaSans-Regular",
+  },
+  verifiedBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ECFDF5",
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+    width: "100%",
+    gap: 8,
+  },
+  verifiedText: {
+    color: "#059669",
+    fontSize: 14,
+    fontFamily: "SofiaSans-Medium",
+  },
+  resendBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    borderRadius: 14,
+    width: "100%",
+    marginBottom: 10,
+    backgroundColor: "#F5F3FF",
+    gap: 8,
+  },
+  resendBtnText: {
+    color: "#7C3AED",
+    fontSize: 15,
+    fontFamily: "SofiaSans-SemiBold",
+  },
+  closeBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    width: "100%",
+  },
+  closeBtnText: {
+    color: "#6B7280",
+    fontSize: 14,
+    textAlign: "center",
+    fontFamily: "SofiaSans-Medium",
   },
 });

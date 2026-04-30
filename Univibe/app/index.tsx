@@ -1,58 +1,41 @@
-// app/index.tsx - CORRECTED
-import React, { useEffect, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
-import { useRouter } from "expo-router";
-import * as SecureStore from "expo-secure-store";
-import { jwtDecode } from "jwt-decode";
+// app/index.tsx
+import { Redirect } from "expo-router";
+import { useAuth } from "../lib/contexts/AuthContext";
+import { View, ActivityIndicator } from "react-native";
 
 export default function Index() {
-  const [isLoading, setIsLoading] = useState(true);
-  const router = useRouter();
-
-  useEffect(() => {
-    checkAuth();
-  }, []);
-
-  const checkAuth = async () => {
-    try {
-      console.log("🔍 Checking authentication...");
-      const token = await SecureStore.getItemAsync("authToken");
-      console.log("Token found:", !!token);
-
-      if (token) {
-        const decoded: any = jwtDecode(token);
-        const currentTime = Date.now() / 1000;
-
-        if (decoded.exp && decoded.exp > currentTime) {
-          // Token is valid - go to main app
-          console.log("✅ Valid token, redirecting to /(tabs)");
-          router.replace("/(tabs)"); // CHANGED FROM /(protected)/(tabs)
-          return;
-        } else {
-          // Token expired - clear it
-          console.log("❌ Token expired, clearing...");
-          await SecureStore.deleteItemAsync("authToken");
-        }
-      }
-
-      // No token or token expired - go to login
-      console.log("ℹ️ No valid token, redirecting to landingPage");
-      router.replace("/screens/landingPage");
-    } catch (error) {
-      console.error("Auth check error:", error);
-      router.replace("/screens/landingPage");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const { isLoading, token, user } = useAuth();
 
   if (isLoading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          backgroundColor: "#faf9f6",
+        }}
+      >
         <ActivityIndicator size="large" color="#8b5cf6" />
       </View>
     );
   }
 
-  return null;
+  // No token → landing page
+  if (!token) {
+    return <Redirect href="/screens/landingPage" />;
+  }
+
+  // Has token + verified + profile complete → tabs
+  if (user?.isEmailVerified && user?.profileComplete) {
+    return <Redirect href="/(tabs)" />;
+  }
+
+  // Has token + verified + no profile → setup
+  if (user?.isEmailVerified && !user?.profileComplete) {
+    return <Redirect href="/(auth)/setup-profile" />;
+  }
+
+  // Has token but not verified → login
+  return <Redirect href="/(auth)/login" />;
 }
