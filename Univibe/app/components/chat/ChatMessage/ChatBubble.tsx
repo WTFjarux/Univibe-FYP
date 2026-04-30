@@ -21,6 +21,7 @@ import ChatVideoPlayer from "./ChatVideoPlayer";
 import ChatMessageOptionsModal from "./ChatMessageOptionsModal";
 import ReplyPreview from "./ReplyPreview";
 import ChatFileViewer from "./ChatFileViewer";
+import PostCard from "../../Feed/Post/PostCard";
 
 // -----------------------------------------------------------------------------
 // Types
@@ -35,7 +36,7 @@ interface Message {
   roomId: string;
   createdAt: string;
   status?: "sent" | "delivered" | "read" | "sending";
-  type?: "text" | "image" | "audio" | "video" | "file" | "location";
+  type?: "text" | "image" | "audio" | "video" | "file" | "location" | "post";
   mediaUrl?: string;
   thumbnailUrl?: string;
   mediaSize?: number;
@@ -62,6 +63,18 @@ interface Message {
   originalSenderId?: string;
   originalSenderName?: string;
   forwardedAt?: string;
+  // Shared post
+  sharedPost?: {
+    postId: string;
+    postContent?: string;
+    postImage?: string;
+    postAuthorId?: string;
+    postAuthorName?: string;
+    postAuthorUsername?: string;
+    postAuthorAvatar?: string;
+    isAnonymous?: boolean;
+    postCreatedAt?: string;
+  };
 }
 
 interface ChatBubbleProps {
@@ -153,6 +166,8 @@ export default function ChatBubble({
   const isMediaType = ["image", "video", "file", "location"].includes(
     message.type || "",
   );
+
+  const isPostType = message.type === "post" && message.sharedPost;
 
   const isForwarded = message.isForwarded === true;
 
@@ -298,28 +313,19 @@ export default function ChatBubble({
 
   /**
    * Builds the forwarded label text.
-   * - "You forwarded" - when the current user forwarded this message
-   * - "Forwarded" - when receiving a forwarded message from someone else
    */
   const getForwardedLabel = (): string => {
     if (!isForwarded) return "";
-
     const senderId = getSenderId();
-
-    if (senderId === currentUserId) {
-      return "You forwarded";
-    }
-
+    if (senderId === currentUserId) return "You forwarded";
     return "Forwarded";
   };
 
   /**
    * Renders the forwarded indicator label OUTSIDE the bubble.
-   * Positioned above the bubble, aligned based on message ownership.
    */
   const renderForwardedLabel = () => {
     if (!isForwarded) return null;
-
     const label = getForwardedLabel();
     if (!label) return null;
 
@@ -338,7 +344,97 @@ export default function ChatBubble({
     );
   };
 
+  /**
+   * Builds a Post object from sharedPost data for the PostCard component.
+   */
+  const buildPostFromSharedData = () => {
+    if (!message.sharedPost || !message.sharedPost.postId) return null;
+
+    return {
+      _id: message.sharedPost.postId,
+      user: {
+        _id: message.sharedPost.postAuthorId || "",
+        name: message.sharedPost.postAuthorName || "Unknown",
+        username: message.sharedPost.isAnonymous
+          ? "anonymous"
+          : message.sharedPost.postAuthorUsername || "user",
+        profilePicture: message.sharedPost.postAuthorAvatar || "",
+        verified: false,
+      },
+      content: message.sharedPost.postContent || "",
+      images: message.sharedPost.postImage
+        ? [
+            {
+              filename: "",
+              url: message.sharedPost.postImage,
+              path: "",
+              mimetype: "image/jpeg",
+              size: 0,
+            },
+          ]
+        : [],
+      likes: [],
+      comments: [],
+      reposts: [],
+      tags: [],
+      mentions: [],
+      campus: "",
+      visibility: "campus" as const,
+      isPinned: false,
+      isEdited: false,
+      createdAt: message.sharedPost.postCreatedAt || new Date().toISOString(),
+      updatedAt: "",
+      __v: 0,
+      isAnonymous: message.sharedPost.isAnonymous || false,
+      commentCount: 0,
+    };
+  };
+
   const renderMessageContent = () => {
+    // Shared Post message
+    if (isPostType) {
+      const postData = buildPostFromSharedData();
+      if (!postData) return null;
+
+      const hasMessage = message.message && message.message.trim().length > 0;
+
+      return (
+        <View style={styles.postMessageContainer}>
+          <PostCard
+            post={postData}
+            compact={true}
+            hideActions={true}
+            hideTime={true}
+            onLikePress={() => {}}
+            onCommentPress={() => {}}
+            onRepostPress={() => {}}
+            onSharePress={() => {}}
+          />
+          {hasMessage && (
+            <View
+              style={[
+                styles.messageBubble,
+                isOwnMessage
+                  ? styles.ownMessageBubble
+                  : styles.otherMessageBubble,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.messageText,
+                  isOwnMessage
+                    ? styles.ownMessageText
+                    : styles.otherMessageText,
+                ]}
+              >
+                {message.message}
+              </Text>
+            </View>
+          )}
+        </View>
+      );
+    }
+
     // Media messages (image, video, file, location)
     if (isMediaType) {
       return (
@@ -417,13 +513,15 @@ export default function ChatBubble({
     // Audio message
     if (message.type === "audio") {
       return (
-        <AudioPlayer
-          audioUrl={message.mediaUrl || ""}
-          duration={message.duration || 0}
-          isOwnMessage={isOwnMessage}
-          messageId={message._id}
-          onPlayed={onAudioPlayed}
-        />
+        <View style={styles.audioMessageContainer}>
+          <AudioPlayer
+            audioUrl={message.mediaUrl || ""}
+            duration={message.duration || 0}
+            isOwnMessage={isOwnMessage}
+            messageId={message._id}
+            onPlayed={onAudioPlayed}
+          />
+        </View>
       );
     }
 
@@ -515,11 +613,11 @@ export default function ChatBubble({
               delayLongPress={300}
               style={({ pressed }) => [
                 styles.bubble,
-                (!isMediaType || message.type === "audio") &&
-                  styles.bubbleAutoWidth,
-                (!isMediaType || message.type === "audio") &&
+                !isMediaType && !isPostType && styles.bubbleAutoWidth,
+                !isMediaType &&
+                  !isPostType &&
                   (isOwnMessage ? styles.ownBubble : styles.otherBubble),
-                isMediaType && message.type !== "audio" && styles.mediaBubble,
+                (isMediaType || isPostType) && styles.mediaBubble,
                 isOwnMessage ? styles.bubbleAlignRight : styles.bubbleAlignLeft,
                 pressed && styles.bubblePressed,
               ]}
@@ -677,7 +775,29 @@ const styles = StyleSheet.create({
   ownMessageText: { color: "#fff" },
   otherMessageText: { color: "#000" },
 
-  // Forwarded label — OUTSIDE the bubble
+  // Message bubble for shared post
+  messageBubble: {
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+    alignSelf: "flex-start",
+  },
+  ownMessageBubble: {
+    backgroundColor: "#8b5cf6",
+    alignSelf: "flex-end",
+    borderBottomRightRadius: 4,
+  },
+  otherMessageBubble: {
+    backgroundColor: "#E5E5EA",
+    alignSelf: "flex-start",
+    borderBottomLeftRadius: 4,
+  },
+  postMessageContainer: {
+    width: 260,
+    maxWidth: "100%",
+  },
+
   forwardedLabelContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -699,12 +819,13 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
 
-  audioMessageContainer: { minWidth: 200, maxWidth: 250 },
+  audioMessageContainer: { minWidth: 150, maxWidth: 250 },
   audioLoadingContainer: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    minWidth: 150,
+    minWidth: 200,
+    maxWidth: 280,
   },
   audioLoadingIconWrap: {
     width: 28,

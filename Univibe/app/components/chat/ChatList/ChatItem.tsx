@@ -98,6 +98,10 @@ const ChatItem: React.FC<ChatItemProps> = ({
         displayMessage = "Sent a File";
         break;
 
+      case "post":
+        displayMessage = message || "Shared a post";
+        break;
+
       default:
         displayMessage = message || "No messages yet";
     }
@@ -279,7 +283,6 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: "#007AFF",
   },
   pinnedAvatar: {
     borderWidth: 2,

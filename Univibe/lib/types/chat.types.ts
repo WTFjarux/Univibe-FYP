@@ -30,7 +30,7 @@ export interface LastMessagePreview {
   sentAt: string;
   senderId: string;
   senderName: string;
-  type: "text" | "image" | "audio" | "video" | "file" | "location";
+  type: "text" | "image" | "audio" | "video" | "file" | "location" | "post";
   readBy: string[];
 }
 
@@ -41,7 +41,7 @@ export interface Message {
   senderAvatar?: string;
   roomId: string;
   message: string;
-  type: "text" | "image" | "audio" | "video" | "file" | "location";
+  type: "text" | "image" | "audio" | "video" | "file" | "location" | "post";
   createdAt: string;
   status: "sent" | "delivered" | "read" | "sending";
   readBy?: Array<{ user: string; readAt: string } | string>;

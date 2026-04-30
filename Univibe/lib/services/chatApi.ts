@@ -133,6 +133,26 @@ class ChatApiService {
     return response.data;
   }
 
+  async sharePost(
+    postId: string,
+    targetChatIds: string[],
+    comment?: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      sharedCount: number;
+      sharedMessages: any[];
+    };
+  }> {
+    const response = await api.post("/chat/share-post", {
+      postId,
+      targetChatIds,
+      comment,
+    });
+    return response.data;
+  }
+
   async deleteMessage(
     messageId: string,
   ): Promise<{ success: boolean; message?: string }> {

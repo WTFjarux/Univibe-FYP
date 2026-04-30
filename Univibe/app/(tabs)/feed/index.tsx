@@ -21,6 +21,7 @@ import FeedHeader from "@/app/components/Feed/FeedHeader";
 import CreatePostButton from "@/app/components/Feed/Post/CreatePostButton";
 import FilterTabs from "@/app/components/Feed/FilterTabs";
 import PostCard from "@/app/components/Feed/Post/PostCard";
+import SharePostModal from "@/app/components/Feed/Post/SharePostModal";
 
 // Services
 import {
@@ -29,6 +30,7 @@ import {
   deletePost,
   restorePost,
   Post,
+  getFullImageUrl,
 } from "../../../lib/services/postService";
 
 // Styles
@@ -55,6 +57,10 @@ export default function FeedScreen() {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Share post modal state
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [sharePost, setSharePost] = useState<Post | null>(null);
 
   // User interaction states
   const [savedPosts, setSavedPosts] = useState<Set<string>>(new Set());
@@ -92,7 +98,6 @@ export default function FeedScreen() {
     setInfoType(type);
     setUndoAction(action || null);
 
-    // Clear existing timeout
     if (undoTimeoutRef.current) {
       clearTimeout(undoTimeoutRef.current);
       undoTimeoutRef.current = undefined;
@@ -122,7 +127,6 @@ export default function FeedScreen() {
       }
     });
 
-    // Auto hide after 5 seconds if not undone
     if (autoHide) {
       undoTimeoutRef.current = setTimeout(() => {
         setInfoMessage(null);
@@ -218,12 +222,8 @@ export default function FeedScreen() {
       case "delete":
         if (undoAction.postId && undoAction.deletedPost) {
           try {
-            // Call API to restore the post
             await restorePost(undoAction.postId);
-
-            // Restore to UI
             setPosts((prev) => {
-              // Check if post already exists
               if (prev.some((p) => p._id === undoAction.postId)) {
                 return prev;
               }
@@ -254,7 +254,6 @@ export default function FeedScreen() {
       setError(null);
       const response = await getPosts(filter, pageNum);
 
-      // Filter out hidden posts, muted users, and blocked users
       const filteredPosts = response.posts.filter(
         (post) =>
           !hiddenPosts.has(post._id) &&
@@ -273,7 +272,6 @@ export default function FeedScreen() {
       console.error("Error fetching posts:", error);
       setError(error.message || "Failed to load posts");
 
-      // Handle session expiry
       if (
         error.message?.includes("401") ||
         error.message?.includes("unauthorized") ||
@@ -311,9 +309,6 @@ export default function FeedScreen() {
     }, [activeFilter, token]),
   );
 
-  /**
-   * Handle pull-to-refresh
-   */
   const onRefresh = () => {
     if (token) {
       setRefreshing(true);
@@ -322,9 +317,6 @@ export default function FeedScreen() {
     }
   };
 
-  /**
-   * Handle filter tab change
-   */
   const handleFilterChange = (filterId: string) => {
     if (token) {
       setActiveFilter(filterId);
@@ -334,9 +326,6 @@ export default function FeedScreen() {
     }
   };
 
-  /**
-   * Handle infinite scroll - load more posts
-   */
   const loadMore = () => {
     if (token && !loading && hasMore) {
       const nextPage = page + 1;
@@ -395,8 +384,18 @@ export default function FeedScreen() {
     showInfoBar("Repost feature coming soon!", "info");
   };
 
+  // UPDATED: Open SharePostModal instead of showing info
   const handleShare = (postId: string) => {
-    showInfoBar("Share feature coming soon!", "info");
+    if (!token) {
+      showInfoBar("Please login to share posts", "info");
+      return;
+    }
+
+    const post = posts.find((p) => p._id === postId);
+    if (post) {
+      setSharePost(post);
+      setShareModalVisible(true);
+    }
   };
 
   // ============ PROFILE NAVIGATION HANDLER ============
@@ -423,14 +422,11 @@ export default function FeedScreen() {
     });
   };
 
-  // FIXED: handleDeletePost now correctly accepts postId and post
   const handleDeletePost = async (postId: string) => {
-    // Find the post to delete
     const postToDelete = posts.find((p) => p._id === postId);
     if (!postToDelete) return;
 
     try {
-      // Store the deleted post for potential undo
       setPosts((prev) => prev.filter((p) => p._id !== postId));
       showInfoBar(
         "Post deleted",
@@ -443,11 +439,9 @@ export default function FeedScreen() {
         true,
       );
 
-      // Soft delete from server
       await deletePost(postId);
     } catch (error: any) {
       console.error("Error deleting post:", error);
-      // Restore the post if deletion failed
       setPosts((prev) => {
         if (prev.some((p) => p._id === postId)) return prev;
         const newPosts = [...prev, postToDelete];
@@ -477,10 +471,7 @@ export default function FeedScreen() {
       showInfoBar(
         "Post saved to your items",
         "success",
-        {
-          type: "save",
-          postId,
-        },
+        { type: "save", postId },
         true,
       );
     } else {
@@ -506,7 +497,6 @@ export default function FeedScreen() {
   };
 
   const handleHidePost = (postId: string) => {
-    // Find the post to hide
     const postToHide = posts.find((p) => p._id === postId);
     if (!postToHide) return;
 
@@ -540,25 +530,8 @@ export default function FeedScreen() {
     showInfoBar(
       `User ${displayName} muted`,
       "info",
-      {
-        type: "mute",
-        userId,
-        userName: displayName,
-      },
+      { type: "mute", userId, userName: displayName },
       true,
-    );
-  };
-
-  const handleUnmuteUser = (userId: string) => {
-    setMutedUsers((prev) => {
-      const newSet = new Set(prev);
-      newSet.delete(userId);
-      return newSet;
-    });
-    fetchPosts(activeFilter, 1);
-    showInfoBar(
-      "User unmuted, you will now see posts from this user again",
-      "success",
     );
   };
 
@@ -574,25 +547,8 @@ export default function FeedScreen() {
     showInfoBar(
       `User ${displayName} blocked`,
       "info",
-      {
-        type: "block",
-        userId,
-        userName: displayName,
-      },
+      { type: "block", userId, userName: displayName },
       true,
-    );
-  };
-
-  const handleUnblockUser = (userId: string) => {
-    setBlockedUsers((prev) => {
-      const newSet = new Set(prev);
-      newSet.delete(userId);
-      return newSet;
-    });
-    fetchPosts(activeFilter, 1);
-    showInfoBar(
-      "User unblocked, you will now see posts from this user again",
-      "success",
     );
   };
 
@@ -616,6 +572,17 @@ export default function FeedScreen() {
 
   const handleProfilePress = () => {
     router.push("/(tabs)/profile");
+  };
+
+  // ============ SHARE MODAL HANDLERS ============
+
+  const handleShareModalClose = () => {
+    setShareModalVisible(false);
+    setTimeout(() => setSharePost(null), 300);
+  };
+
+  const handleShareSuccess = (data: any) => {
+    showInfoBar("Post shared successfully", "success");
   };
 
   // ============ RENDER HELPERS ============
@@ -647,7 +614,7 @@ export default function FeedScreen() {
           },
         ]}
       >
-        <Ionicons name={iconName} size={20} color="#fff" />
+        <Ionicons name={iconName as any} size={20} color="#fff" />
         <Text style={styles.infoBarText}>{infoMessage}</Text>
         {undoAction && (
           <TouchableOpacity onPress={handleUndo} style={styles.undoButton}>
@@ -708,6 +675,25 @@ export default function FeedScreen() {
       </TouchableOpacity>
     </View>
   );
+
+  // Get share post data for the modal
+  const getSharePostData = () => {
+    if (!sharePost) return null;
+    return {
+      postId: sharePost._id,
+      postContent: sharePost.content || "",
+      postImage: sharePost.images?.[0]?.url
+        ? getFullImageUrl(sharePost.images[0].url)
+        : "",
+      postAuthorName: sharePost.isAnonymous
+        ? "Anonymous"
+        : sharePost.user?.name || "Unknown",
+      postAuthorAvatar: sharePost.user?.profilePicture || "",
+      isAnonymous: sharePost.isAnonymous || false,
+    };
+  };
+
+  const sharePostData = getSharePostData();
 
   // Early returns for auth and loading states
   if (!token) return renderLoginPrompt();
@@ -805,6 +791,21 @@ export default function FeedScreen() {
 
       {/* Info bar rendered at the bottom */}
       {renderInfoBar()}
+
+      {/* Share Post Modal */}
+      {sharePostData && (
+        <SharePostModal
+          visible={shareModalVisible}
+          onClose={handleShareModalClose}
+          onSuccess={handleShareSuccess}
+          postId={sharePostData.postId}
+          postContent={sharePostData.postContent}
+          postImage={sharePostData.postImage}
+          postAuthorName={sharePostData.postAuthorName}
+          postAuthorAvatar={sharePostData.postAuthorAvatar}
+          isAnonymous={sharePostData.isAnonymous}
+        />
+      )}
     </SafeAreaView>
   );
 }

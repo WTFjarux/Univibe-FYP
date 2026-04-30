@@ -15,7 +15,15 @@ const reactionEnum = [
   "👏",
   "🔥",
 ];
-const messageTypes = ["text", "image", "audio", "video", "file", "location"];
+const messageTypes = [
+  "text",
+  "image",
+  "audio",
+  "video",
+  "file",
+  "location",
+  "post",
+];
 
 const messageSchema = new mongoose.Schema(
   {
@@ -30,7 +38,15 @@ const messageSchema = new mongoose.Schema(
 
     roomId: { type: String, required: true, index: true },
 
-    message: { type: String, required: true, trim: true, maxlength: 5000 },
+    message: {
+      type: String,
+      required: function () {
+        // Post type can have empty message
+        return this.type !== "post";
+      },
+      trim: true,
+      maxlength: 5000,
+    },
     type: { type: String, enum: messageTypes, default: "text" },
 
     // Media
@@ -38,7 +54,7 @@ const messageSchema = new mongoose.Schema(
     mediaSize: { type: Number, default: 0 },
     mediaName: { type: String, default: "" },
     mediaMimeType: { type: String, default: "" },
-    thumbnailUrl: { type: String, default: "" }, // ✅ NEW: thumbnail
+    thumbnailUrl: { type: String, default: "" },
 
     // Location
     locationData: {
@@ -63,6 +79,7 @@ const messageSchema = new mongoose.Schema(
       duration: { type: Number, default: 0 },
     },
 
+    // Forwarding
     isForwarded: { type: Boolean, default: false },
     originalMessageId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -74,7 +91,21 @@ const messageSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
+    originalSenderName: { type: String, default: "" },
     forwardedAt: { type: Date, default: null },
+
+    // Post sharing
+    sharedPost: {
+      postId: { type: mongoose.Schema.Types.ObjectId, ref: "Post" },
+      postContent: { type: String, default: "" },
+      postImage: { type: String, default: "" },
+      postAuthorId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      postAuthorName: { type: String, default: "" },
+      postAuthorUsername: { type: String, default: "" },
+      postAuthorAvatar: { type: String, default: "" },
+      isAnonymous: { type: Boolean, default: false },
+      postCreatedAt: { type: Date },
+    },
 
     // Read receipts
     readBy: [
@@ -121,6 +152,7 @@ messageSchema.index({ sender: 1, createdAt: -1 });
 messageSchema.index({ "readBy.user": 1 });
 messageSchema.index({ "deliveredTo.user": 1 });
 messageSchema.index({ roomId: 1, "readBy.user": 1 });
+messageSchema.index({ "sharedPost.postId": 1 }); // For finding messages that reference a post
 
 // ============================================
 // PRE-SAVE HOOKS
@@ -131,6 +163,7 @@ messageSchema.pre("save", function (next) {
     const s = (this.duration % 60).toString().padStart(2, "0");
     this.message = `🎤 Voice message (${m}:${s})`;
   }
+
   if (this.replyTo?.message && !this.replyTo.type) {
     if (
       this.replyTo.message === "🎤 Voice message" ||

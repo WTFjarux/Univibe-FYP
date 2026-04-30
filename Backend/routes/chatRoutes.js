@@ -38,8 +38,11 @@ router.delete("/room/:roomId/history", ctrl.deleteChatHistory);
 router.get("/messages/:roomId", ctrl.getMessageHistory);
 router.get("/messages/:roomId/light", ctrl.getMessagesLight);
 
-// Forward message 
+// Forward message
 router.post("/messages/forward", ctrl.forwardMessage);
+
+// Share Post to chat
+router.post("/share-post", ctrl.sharePost);
 
 router.delete("/message/:messageId", ctrl.deleteMessage);
 router.post("/message/:messageId/read", ctrl.markMessageAsRead);

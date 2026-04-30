@@ -38,6 +38,7 @@ const formatMessage = (msg, currentUserId) => ({
   originalSenderId: msg.originalSenderId || null,
   originalSenderName: msg.originalSenderName || null,
   forwardedAt: msg.forwardedAt || null,
+  sharedPost: msg.sharedPost || null,
   replyTo: msg.replyTo?.messageId
     ? {
         messageId: msg.replyTo.messageId,
@@ -531,7 +532,9 @@ exports.forwardMessage = async (req, res) => {
           originalSenderId:
             originalMessage.sender._id || originalMessage.sender,
           originalSenderName:
-            originalMessage.senderName || originalMessage.sender?.name || "Unknown",
+            originalMessage.senderName ||
+            originalMessage.sender?.name ||
+            "Unknown",
           forwardedAt: new Date(),
           readBy: [{ user: userId, readAt: new Date() }],
           deliveredTo: [{ user: userId, deliveredAt: new Date() }],
@@ -665,6 +668,156 @@ exports.markRoomAsUnread = async (req, res) => {
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+//-----------------------------------------------------------------------------
+// Share Post to Chat
+// -----------------------------------------------------------------------------
+
+exports.sharePost = async (req, res) => {
+  try {
+    const { postId, targetChatIds, comment } = req.body;
+    const userId = req.user.id;
+
+    // Validation
+    if (
+      !postId ||
+      !targetChatIds ||
+      !Array.isArray(targetChatIds) ||
+      targetChatIds.length === 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "postId and targetChatIds (non-empty array) are required",
+      });
+    }
+
+    if (targetChatIds.length > 10) {
+      return res.status(400).json({
+        success: false,
+        message: "Maximum 10 chats can be shared to at once",
+      });
+    }
+
+    // Fetchh Post details
+    const Post = require("../models/Post");
+    const post = await Post.findById(postId)
+      .populate("user", "name username")
+      .lean();
+
+    if (!post) {
+      return res.status(404).json({
+        success: false,
+        message: "Post not found",
+      });
+    }
+
+    // Verify target chats
+    const targetRooms = await ChatRoom.find({
+      roomId: { $in: targetChatIds },
+      "participants.userId": userId,
+    }).lean();
+
+    const validRoomIds = targetRooms.map((r) => r.roomId);
+
+    if (validRoomIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid target chats found",
+      });
+    }
+
+    const user = await User.findById(userId).select("name").lean();
+    const profile = await Profile.findOne({ user: userId })
+      .select("profilePicture")
+      .lean();
+
+    const sharedMessages = [];
+    const io = req.app.get("io");
+
+    await Promise.all(
+      validRoomIds.map(async (targetRoomId) => {
+        const messageText = comment || "";
+
+        // Get first image if available
+        const postImage =
+          post.images && post.images.length > 0 ? post.images[0].url : "";
+
+        const sharedPostData = {
+          sender: userId,
+          senderName: user?.name || "Unknown",
+          senderAvatar: profile?.profilePicture || "",
+          roomId: targetRoomId,
+          message: messageText,
+          type: "post",
+          sharedPost: {
+            postId: post._id,
+            postContent: post.content ? post.content.substring(0, 200) : "",
+            postImage: postImage,
+            postAuthorId: post.user?._id || post.user,
+            postAuthorName: post.isAnonymous
+              ? "Anonymous"
+              : post.user?.name || "Unknown",
+            postAuthorUsername: post.isAnonymous
+              ? "anonymous"
+              : post.user?.username || "user",
+            postAuthorAvatar: post.isAnonymous ? "" : post.user?.avatar || "",
+            isAnonymous: post.isAnonymous || false,
+            postCreatedAt: post.createdAt,
+          },
+          readBy: [{ user: userId, readAt: new Date() }],
+          deliveredTo: [{ user: userId, deliveredAt: new Date() }],
+        };
+
+        const sharedMessage = await Message.create(sharedPostData);
+        sharedMessages.push(sharedMessage);
+
+        await ChatRoom.findOneAndUpdate(
+          { roomId: targetRoomId },
+          {
+            lastMessage: {
+              message: messageText,
+              sentAt: new Date(),
+              senderId: userId,
+              senderName: user?.name || "Unknown",
+              type: "post",
+              readBy: [userId],
+            },
+            updatedAt: new Date(),
+            $inc: { messageCount: 1 },
+            $pull: { clearedBy: { user: userId } },
+          },
+        );
+
+        if (io) {
+          const populatedMessage = await Message.findById(sharedMessage._id)
+            .populate("sender", "name avatar")
+            .populate("readBy.user", "name avatar")
+            .lean();
+
+          io.to(targetRoomId).emit(
+            "receive_message",
+            formatMessage(populatedMessage, userId),
+          );
+        }
+      }),
+    );
+
+    res.json({
+      success: true,
+      message: `Post shared to ${sharedMessages.length} chat(s)`,
+      data: {
+        sharedCount: sharedMessages.length,
+        sharedMessages: sharedMessages.map((msg) => formatMessage(msg, userId)),
+      },
+    });
+  } catch (e) {
+    console.error("sharePost error:", e);
+    res.status(500).json({
+      success: false,
+      message: "Failed to share post",
+    });
   }
 };
 

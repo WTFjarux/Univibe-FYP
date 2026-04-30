@@ -1,4 +1,4 @@
-// app/components/Feed/Post/PostCard.tsx - Complete Fixed Version
+// app/components/Feed/Post/PostCard.tsx - Complete Updated Version
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
@@ -27,6 +27,9 @@ type IconName = React.ComponentProps<typeof Ionicons>["name"];
 
 interface PostCardProps {
   post: Post;
+  compact?: boolean;
+  hideActions?: boolean;
+  hideTime?: boolean;
   onLikePress: (postId: string) => void;
   onCommentPress: (postId: string) => void;
   onRepostPress: (postId: string) => void;
@@ -44,6 +47,9 @@ interface PostCardProps {
 
 const PostCard: React.FC<PostCardProps> = ({
   post,
+  compact = false,
+  hideActions = false,
+  hideTime = false,
   onLikePress,
   onCommentPress,
   onRepostPress,
@@ -71,19 +77,16 @@ const PostCard: React.FC<PostCardProps> = ({
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
 
-  // Track comment count locally with state for real-time updates
   const [displayCommentCount, setDisplayCommentCount] = useState(
     post.commentCount || post.comments?.length || 0,
   );
 
-  // Track like state locally for optimistic updates
   const [isLiked, setIsLiked] = useState(post.isLiked || false);
   const [likesCount, setLikesCount] = useState(post.likes?.length || 0);
 
   const scrollViewRef = useRef<ScrollView>(null);
-  const imageHeight = 400;
+  const imageHeight = compact ? 160 : 400;
 
-  // ===== Early Return for Invalid Post =====
   if (!post) {
     console.warn("PostCard: post is null or undefined");
     return null;
@@ -99,9 +102,8 @@ const PostCard: React.FC<PostCardProps> = ({
     setLikesCount(post.likes?.length || 0);
   }, [post.isLiked, post.likes?.length]);
 
-  // ===== Event Listeners for Real-time Updates =====
+  // ===== Event Listeners =====
   useEffect(() => {
-    // Listen for comment count changes from CommentsScreen
     const unsubComments = commentEvents.on(
       EVENTS.COMMENT_COUNT_CHANGED,
       (data: { postId: string; count: number }) => {
@@ -110,7 +112,6 @@ const PostCard: React.FC<PostCardProps> = ({
         }
       },
     );
-
     return () => {
       unsubComments();
     };
@@ -158,14 +159,6 @@ const PostCard: React.FC<PostCardProps> = ({
   }, [post.isAnonymous, post.originalUser, post.user]);
 
   // ===== Image Handling =====
-  const getProfileImage = useCallback((): ImageSourcePropType => {
-    if (post.isAnonymous) return DEFAULT_AVATAR;
-    if (!avatarError && post.user?.profilePicture?.trim()) {
-      return { uri: getFullImageUrl(post.user.profilePicture) };
-    }
-    return DEFAULT_AVATAR;
-  }, [post.isAnonymous, avatarError, post.user?.profilePicture]);
-
   const getPostImages = useCallback(() => {
     if (!post.images?.length) return [];
     return post.images.map((image) => ({
@@ -180,10 +173,7 @@ const PostCard: React.FC<PostCardProps> = ({
   const handleUserPress = useCallback(() => {
     try {
       const userId = getUserIdForNavigation();
-      if (!userId) {
-        console.warn("No user ID found for navigation");
-        return;
-      }
+      if (!userId) return;
 
       if (onProfilePress) {
         onProfilePress(userId);
@@ -196,9 +186,13 @@ const PostCard: React.FC<PostCardProps> = ({
       }
     } catch (error) {
       console.error("Navigation error in PostCard:", error);
-      Alert.alert("Error", "Could not navigate to profile");
     }
   }, [currentUserId, getUserIdForNavigation, onProfilePress, router]);
+
+  // Navigate to post detail for BOTH compact and feed mode
+  const handlePostPress = useCallback(() => {
+    router.push({ pathname: "/post/[id]", params: { id: post._id } });
+  }, [post._id, router]);
 
   // ===== Image Carousel =====
   const handleScroll = useCallback(
@@ -228,8 +222,6 @@ const PostCard: React.FC<PostCardProps> = ({
     const icons: Record<string, IconName> = {
       campus: "school-outline",
       connections: "people-outline",
-      following: "eye-outline",
-      private: "lock-closed-outline",
     };
     return icons[post.visibility] || "globe-outline";
   }, [post.visibility]);
@@ -238,8 +230,6 @@ const PostCard: React.FC<PostCardProps> = ({
     const names: Record<string, string> = {
       campus: "Campus",
       connections: "Connections",
-      following: "Following",
-      private: "Only Me",
     };
     return names[post.visibility] || "Public";
   }, [post.visibility]);
@@ -248,8 +238,6 @@ const PostCard: React.FC<PostCardProps> = ({
     const colors: Record<string, string> = {
       campus: "#3b82f6",
       connections: "#8b5cf6",
-      following: "#10b981",
-      private: "#6b7280",
     };
     return colors[post.visibility] || "#9ca3af";
   }, [post.visibility]);
@@ -281,13 +269,6 @@ const PostCard: React.FC<PostCardProps> = ({
     [onHide],
   );
 
-  const handleCopyLink = useCallback(
-    (postId: string) => {
-      if (onCopyLink) onCopyLink(postId);
-    },
-    [onCopyLink],
-  );
-
   // ===== Display Helpers =====
   const getUserDisplayName = useCallback(() => {
     if (post.isAnonymous) return "Anonymous";
@@ -302,13 +283,15 @@ const PostCard: React.FC<PostCardProps> = ({
   // ===== Render Functions =====
   const renderIndicators = useCallback(() => {
     if (postImages.length <= 1) return null;
-
     return (
       <View style={styles.indicatorsContainer}>
         {postImages.map((_, index) => (
           <TouchableOpacity
             key={index}
-            onPress={() => goToImage(index)}
+            onPress={(e) => {
+              e.stopPropagation();
+              goToImage(index);
+            }}
             style={[
               styles.indicator,
               index === currentImageIndex && styles.activeIndicator,
@@ -321,7 +304,6 @@ const PostCard: React.FC<PostCardProps> = ({
 
   const renderSingleImage = useCallback(() => {
     if (containerWidth === 0) return null;
-
     const image = postImages[0];
 
     if (postImageError[0]) {
@@ -332,7 +314,11 @@ const PostCard: React.FC<PostCardProps> = ({
             { width: containerWidth, height: imageHeight },
           ]}
         >
-          <Ionicons name="image-outline" size={48} color="#9ca3af" />
+          <Ionicons
+            name="image-outline"
+            size={compact ? 32 : 48}
+            color="#9ca3af"
+          />
           <Text style={styles.imageErrorText}>Image failed to load</Text>
         </View>
       );
@@ -354,6 +340,7 @@ const PostCard: React.FC<PostCardProps> = ({
     postImages,
     postImageError,
     imageHeight,
+    compact,
     handleImageError,
   ]);
 
@@ -382,14 +369,17 @@ const PostCard: React.FC<PostCardProps> = ({
                     { width: containerWidth, height: imageHeight },
                   ]}
                 >
-                  <Ionicons name="image-outline" size={48} color="#9ca3af" />
+                  <Ionicons
+                    name="image-outline"
+                    size={compact ? 32 : 48}
+                    color="#9ca3af"
+                  />
                   <Text style={styles.imageErrorText}>
                     Image failed to load
                   </Text>
                 </View>
               );
             }
-
             return (
               <Image
                 key={index}
@@ -412,26 +402,56 @@ const PostCard: React.FC<PostCardProps> = ({
     postImages,
     postImageError,
     imageHeight,
+    compact,
     handleScroll,
     handleImageError,
     renderIndicators,
   ]);
 
   const renderAvatar = useCallback(() => {
+    const avatarSize = compact ? 28 : 40;
+
     if (post.isAnonymous) {
       return (
-        <View style={[styles.postAvatar, styles.anonymousAvatar]}>
-          <Ionicons name="eye-off-outline" size={20} color="#9ca3af" />
+        <View
+          style={[
+            styles.postAvatar,
+            styles.anonymousAvatar,
+            {
+              width: avatarSize,
+              height: avatarSize,
+              borderRadius: avatarSize / 2,
+            },
+          ]}
+        >
+          <Ionicons
+            name="eye-off-outline"
+            size={compact ? 14 : 20}
+            color="#9ca3af"
+          />
         </View>
       );
     }
 
     if (!avatarError && post.user?.profilePicture) {
       return (
-        <TouchableOpacity onPress={handleUserPress}>
+        <TouchableOpacity
+          onPress={(e) => {
+            e.stopPropagation();
+            handleUserPress();
+          }}
+          disabled={compact}
+        >
           <Image
             source={{ uri: getFullImageUrl(post.user.profilePicture) }}
-            style={styles.postAvatar}
+            style={[
+              styles.postAvatar,
+              {
+                width: avatarSize,
+                height: avatarSize,
+                borderRadius: avatarSize / 2,
+              },
+            ]}
             onError={() => setAvatarError(true)}
           />
         </TouchableOpacity>
@@ -439,92 +459,65 @@ const PostCard: React.FC<PostCardProps> = ({
     }
 
     return (
-      <TouchableOpacity onPress={handleUserPress}>
-        <Image source={DEFAULT_AVATAR} style={styles.postAvatar} />
+      <TouchableOpacity
+        onPress={(e) => {
+          e.stopPropagation();
+          handleUserPress();
+        }}
+        disabled={compact}
+      >
+        <Image
+          source={DEFAULT_AVATAR}
+          style={[
+            styles.postAvatar,
+            {
+              width: avatarSize,
+              height: avatarSize,
+              borderRadius: avatarSize / 2,
+            },
+          ]}
+        />
       </TouchableOpacity>
     );
   }, [
     post.isAnonymous,
     avatarError,
     post.user?.profilePicture,
+    compact,
     handleUserPress,
   ]);
 
-  const renderEditedIndicator = useCallback(() => {
-    if (!post.isEdited) return null;
-
-    if (ownPost) {
-      return (
-        <View style={styles.editedIndicator}>
-          <Ionicons name="create-outline" size={12} color="#9ca3af" />
-          <Text style={styles.editedText}>
-            Edited {post.editedAt ? formatTimeAgo(post.editedAt) : ""}
-          </Text>
-        </View>
-      );
-    }
-
-    return (
-      <View style={styles.editedIndicator}>
-        <Ionicons name="create-outline" size={12} color="#9ca3af" />
-        <Text style={styles.editedText}>Edited</Text>
-      </View>
-    );
-  }, [post.isEdited, post.editedAt, ownPost]);
-
-  // ===== Constants =====
   const visibilityIconName = getVisibilityIconName();
   const visibilityBadgeColor = getVisibilityBadgeColor();
 
   // ===== Main Render =====
   return (
-    <View
-      style={styles.postCard}
+    <TouchableOpacity
+      style={[styles.postCard, compact && styles.compactPostCard]}
+      onPress={handlePostPress}
+      activeOpacity={0.8}
       onLayout={(event) => {
         const { width } = event.nativeEvent.layout;
         setContainerWidth(width);
       }}
     >
       {/* Post Header */}
-      <View style={styles.postHeader}>
+      <View style={[styles.postHeader, compact && styles.compactPostHeader]}>
         {renderAvatar()}
 
         <View style={styles.postUserInfo}>
-          {!post.isAnonymous ? (
-            <TouchableOpacity onPress={handleUserPress}>
-              <View style={styles.postUser}>
-                <Text style={styles.postUserName}>{getUserDisplayName()}</Text>
+          <View style={styles.postUser}>
+            <Text
+              style={[styles.postUserName, compact && styles.compactUserName]}
+            >
+              {getUserDisplayName()}
+            </Text>
 
-                {post.user?.verified && (
-                  <Ionicons name="checkmark-circle" size={16} color="#10b981" />
-                )}
+            {post.user?.verified && !compact && (
+              <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+            )}
 
-                <View
-                  style={[
-                    styles.visibilityBadge,
-                    { backgroundColor: `${visibilityBadgeColor}15` },
-                  ]}
-                >
-                  <Ionicons
-                    name={visibilityIconName}
-                    size={12}
-                    color={visibilityBadgeColor}
-                  />
-                  <Text
-                    style={[
-                      styles.visibilityBadgeText,
-                      { color: visibilityBadgeColor },
-                    ]}
-                  >
-                    {getVisibilityDisplayName()}
-                  </Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.postUser}>
-              <Text style={styles.postUserName}>{getUserDisplayName()}</Text>
-
+            {!compact && (
               <View
                 style={[
                   styles.visibilityBadge,
@@ -545,33 +538,59 @@ const PostCard: React.FC<PostCardProps> = ({
                   {getVisibilityDisplayName()}
                 </Text>
               </View>
-            </View>
-          )}
+            )}
+          </View>
 
-          <Text style={styles.postUserDetails}>
-            @{getUserDisplayHandle()} • {formatTimeAgo(post.createdAt)}
-          </Text>
+          {/* Only show username and time if not hidden */}
+          {hideTime ? (
+            <Text
+              style={[
+                styles.postUserDetails,
+                compact && styles.compactUserDetails,
+              ]}
+            >
+              @{getUserDisplayHandle()}
+            </Text>
+          ) : (
+            <Text
+              style={[
+                styles.postUserDetails,
+                compact && styles.compactUserDetails,
+              ]}
+            >
+              @{getUserDisplayHandle()} • {formatTimeAgo(post.createdAt)}
+            </Text>
+          )}
         </View>
 
-        <TouchableOpacity onPress={handleMorePress}>
-          <Ionicons name="ellipsis-horizontal" size={20} color="#9ca3af" />
-        </TouchableOpacity>
+        {!compact && (
+          <TouchableOpacity
+            onPress={(e) => {
+              e.stopPropagation();
+              handleMorePress();
+            }}
+          >
+            <Ionicons name="ellipsis-horizontal" size={20} color="#9ca3af" />
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Post Content */}
-      <Text style={styles.postContent}>{post.content}</Text>
-
-      {/* Edited Indicator */}
-      {renderEditedIndicator()}
+      {!compact && post.content ? (
+        <Text style={styles.postContent}>{post.content}</Text>
+      ) : compact && post.content ? (
+        <Text style={styles.compactPostContent} numberOfLines={2}>
+          {post.content}
+        </Text>
+      ) : null}
 
       {/* Post Images */}
       {postImages.length > 0 && containerWidth > 0 && (
-        <View style={styles.imagesContainer}>
+        <View style={[styles.imagesContainer, compact && { marginBottom: 0 }]}>
           {postImages.length === 1
             ? renderSingleImage()
             : renderMultipleImages()}
-
-          {postImages.length > 1 && (
+          {postImages.length > 1 && !compact && (
             <View style={styles.imageCounter}>
               <Ionicons name="images-outline" size={16} color="white" />
               <Text style={styles.imageCounterText}>
@@ -582,70 +601,106 @@ const PostCard: React.FC<PostCardProps> = ({
         </View>
       )}
 
-      {/* Post Actions */}
-      <View style={styles.postActions}>
-        <TouchableOpacity
-          style={styles.postAction}
-          onPress={() => onLikePress(post._id)}
+      {/* Post Actions - Hidden when hideActions is true */}
+      {!hideActions && (
+        <View
+          style={[styles.postActions, compact && styles.compactPostActions]}
         >
-          <Ionicons
-            name={isLiked ? "heart" : "heart-outline"}
-            size={20}
-            color={isLiked ? "#ef4444" : "#6b7280"}
-          />
-          <Text style={[styles.postActionText, isLiked && styles.likedText]}>
-            {likesCount}
-          </Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.postAction}
+            onPress={(e) => {
+              e.stopPropagation();
+              onLikePress(post._id);
+            }}
+          >
+            <Ionicons
+              name={isLiked ? "heart" : "heart-outline"}
+              size={compact ? 16 : 20}
+              color={isLiked ? "#ef4444" : "#6b7280"}
+            />
+            <Text
+              style={[
+                styles.postActionText,
+                isLiked && styles.likedText,
+                compact && styles.compactActionText,
+              ]}
+            >
+              {likesCount}
+            </Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.postAction}
-          onPress={() => onCommentPress(post._id)}
-        >
-          <Ionicons name="chatbubble-outline" size={20} color="#6b7280" />
-          <Text style={styles.postActionText}>{displayCommentCount}</Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.postAction}
+            onPress={(e) => {
+              e.stopPropagation();
+              onCommentPress(post._id);
+            }}
+          >
+            <Ionicons
+              name="chatbubble-outline"
+              size={compact ? 16 : 20}
+              color="#6b7280"
+            />
+            <Text
+              style={[
+                styles.postActionText,
+                compact && styles.compactActionText,
+              ]}
+            >
+              {displayCommentCount}
+            </Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.postAction}
-          onPress={() => onRepostPress(post._id)}
-        >
-          <Ionicons
-            name={post.isReposted ? "repeat" : "repeat-outline"}
-            size={20}
-            color={post.isReposted ? "#10b981" : "#6b7280"}
-          />
-          <Text style={styles.postActionText}>{post.reposts?.length || 0}</Text>
-        </TouchableOpacity>
+          {!compact && (
+            <>
+              <TouchableOpacity
+                style={styles.postAction}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  onRepostPress(post._id);
+                }}
+              >
+                <Ionicons name="repeat-outline" size={20} color="#6b7280" />
+                <Text style={styles.postActionText}>
+                  {post.reposts?.length || 0}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.postAction}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  onSharePress(post._id);
+                }}
+              >
+                <Ionicons name="share-outline" size={20} color="#6b7280" />
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      )}
 
-        <TouchableOpacity
-          style={styles.postAction}
-          onPress={() => onSharePress(post._id)}
-        >
-          <Ionicons name="share-outline" size={20} color="#6b7280" />
-        </TouchableOpacity>
-      </View>
-
-      {/* Post Options Modal */}
-      <PostOptionsModal
-        visible={optionsVisible}
-        onClose={() => setOptionsVisible(false)}
-        postId={post._id}
-        isOwnPost={ownPost}
-        isSaved={isSaved}
-        isReported={isReported}
-        isHidden={isHidden}
-        onEdit={onEdit}
-        onDelete={onDelete}
-        onSave={handleSave}
-        onReport={handleReport}
-        onHide={handleHide}
-        onShare={onSharePress}
-        onMuteUser={onMuteUser}
-        onBlockUser={onBlockUser}
-        userId={post.user?._id}
-      />
-    </View>
+      {/* Post Options Modal - only in non-compact mode */}
+      {!compact && (
+        <PostOptionsModal
+          visible={optionsVisible}
+          onClose={() => setOptionsVisible(false)}
+          postId={post._id}
+          isOwnPost={ownPost}
+          isSaved={isSaved}
+          isReported={isReported}
+          isHidden={isHidden}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onSave={handleSave}
+          onReport={handleReport}
+          onHide={handleHide}
+          onShare={onSharePress}
+          onMuteUser={onMuteUser}
+          onBlockUser={onBlockUser}
+          userId={post.user?._id}
+        />
+      )}
+    </TouchableOpacity>
   );
 };
 
@@ -662,12 +717,26 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
+  compactPostCard: {
+    marginBottom: 0,
+    borderRadius: 12,
+    shadowOpacity: 0,
+    elevation: 0,
+    borderWidth: 1,
+    borderColor: "#E5E5EA",
+    width: "100%",
+  },
   postHeader: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 12,
     paddingHorizontal: 20,
     paddingTop: 25,
+  },
+  compactPostHeader: {
+    paddingHorizontal: 10,
+    paddingTop: 10,
+    marginBottom: 10,
   },
   postAvatar: {
     width: 40,
@@ -696,14 +765,19 @@ const styles = StyleSheet.create({
   },
   postUserName: {
     fontSize: 15,
-    fontWeight: "600",
     color: "#111827",
     fontFamily: "SofiaSans-Bold",
+  },
+  compactUserName: {
+    fontSize: 13,
   },
   postUserDetails: {
     fontSize: 13,
     color: "#6b7280",
     fontFamily: "SofiaSans-Regular",
+  },
+  compactUserDetails: {
+    fontSize: 11,
   },
   visibilityBadge: {
     flexDirection: "row",
@@ -716,7 +790,6 @@ const styles = StyleSheet.create({
   },
   visibilityBadgeText: {
     fontSize: 10,
-    fontWeight: "500",
     fontFamily: "SofiaSans-Regular",
   },
   postContent: {
@@ -727,17 +800,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     fontFamily: "SofiaSans-Regular",
   },
-  editedIndicator: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginTop: -8,
-    marginBottom: 12,
-    paddingHorizontal: 20,
-  },
-  editedText: {
-    fontSize: 11,
-    color: "#9ca3af",
+  compactPostContent: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: "#374151",
+    marginBottom: 6,
+    paddingHorizontal: 10,
     fontFamily: "SofiaSans-Regular",
   },
   imagesContainer: {
@@ -797,7 +865,6 @@ const styles = StyleSheet.create({
   imageCounterText: {
     color: "white",
     fontSize: 12,
-    fontWeight: "600",
   },
   postActions: {
     flexDirection: "row",
@@ -807,6 +874,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderTopWidth: 1,
     borderTopColor: "#f3f4f6",
+  },
+  compactPostActions: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 16,
   },
   postAction: {
     flexDirection: "row",
@@ -818,6 +890,9 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
     color: "#6b7280",
     minWidth: 24,
+  },
+  compactActionText: {
+    fontSize: 11,
   },
   likedText: {
     color: "#ef4444",

@@ -473,17 +473,17 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#fff",
+    backgroundColor: "#eeeeee",
   },
   centered: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#fff",
+    backgroundColor: "#eeeeee",
   },
   kav: {
     flex: 1,
-    backgroundColor: "#f8f9fa",
+    backgroundColor: "#eeeeee",
   },
   listContent: {
     paddingHorizontal: 12,
