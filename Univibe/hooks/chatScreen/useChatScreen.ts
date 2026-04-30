@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useLocalSearchParams } from "expo-router";
+import { Alert } from "react-native";
 import { useAuth } from "../../lib/contexts/AuthContext";
 import { useChatMessages } from "./useChatMessages";
 import { useAudioRecorder } from "./useAudioRecorder";
@@ -64,7 +65,7 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   const [replyToMessage, setReplyToMessage] = useState<ReplyToState | null>(
     null,
   );
-
+  const [forwarding, setForwarding] = useState(false);
   // ---------------------------------------------------------------------------
   // Messages — loading, caching, pagination, optimistic updates
   // ---------------------------------------------------------------------------
@@ -160,6 +161,36 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
       scrollToEnd,
       emitEvent,
     });
+
+  const handleForwardMessage = useCallback(
+    async (messageId: string, targetChatIds: string[]) => {
+      if (!token) return;
+
+      setForwarding(true);
+      try {
+        const response = await chatApi.forwardMessage(messageId, targetChatIds);
+
+        if (response.success) {
+          Alert.alert(
+            "Success",
+            `Message forwarded to ${response.data?.forwardedCount || 0} chat(s)`,
+          );
+          return response.data;
+        } else {
+          Alert.alert("Error", response.message || "Failed to forward message");
+          return null;
+        }
+      } catch (error: any) {
+        const message =
+          error.response?.data?.message || "Failed to forward message";
+        Alert.alert("Error", message);
+        return null;
+      } finally {
+        setForwarding(false);
+      }
+    },
+    [token],
+  );
 
   // ---------------------------------------------------------------------------
   // Audio recorder
@@ -612,6 +643,10 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     // Reply
     handleReply,
     cancelReply,
+
+    // Forward
+    handleForwardMessage,
+    forwarding,
 
     // Reactions and deletes
     handleReaction,

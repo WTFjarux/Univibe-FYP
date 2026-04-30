@@ -63,6 +63,19 @@ const messageSchema = new mongoose.Schema(
       duration: { type: Number, default: 0 },
     },
 
+    isForwarded: { type: Boolean, default: false },
+    originalMessageId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message",
+      default: null,
+    },
+    originalSenderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    forwardedAt: { type: Date, default: null },
+
     // Read receipts
     readBy: [
       {

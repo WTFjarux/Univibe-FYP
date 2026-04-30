@@ -1,6 +1,12 @@
 // app/screens/ChatScreen.tsx
 
-import React, { useRef, useCallback, useEffect, useMemo } from "react";
+import React, {
+  useRef,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   View,
   FlatList,
@@ -9,7 +15,6 @@ import {
   ActivityIndicator,
   RefreshControl,
   StatusBar,
-  Alert,
   Text,
   StyleSheet,
 } from "react-native";
@@ -22,6 +27,7 @@ import ChatInput from "../components/chat/ChatMessage/ChatInput";
 import ReplyIndicator from "../components/chat/ChatMessage/ReplyIndicator";
 import MessageItem from "../components/chat/ChatMessage/MessageItem";
 import DateSeparator from "../components/chat/ChatMessage/DateSeparator";
+import ForwardModal from "../components/chat/ChatMessage/ForwardModal";
 import AudioManager from "../../lib/utils/AudioManager";
 import {
   formatMessageTime,
@@ -56,10 +62,12 @@ const MemoizedMessageItem = React.memo(MessageItem, (prev, next) => {
     prev.item._id === next.item._id &&
     prev.item.status === next.item.status &&
     prev.item.reactions === next.item.reactions &&
+    prev.item.isForwarded === next.item.isForwarded &&
     prev.isOwnMessage === next.isOwnMessage &&
     prev.showAvatar === next.showAvatar &&
     prev.showTime === next.showTime &&
-    prev.highlightedMessageId === next.highlightedMessageId
+    prev.highlightedMessageId === next.highlightedMessageId &&
+    prev.onForward === next.onForward
   );
 });
 
@@ -70,6 +78,11 @@ const MemoizedMessageItem = React.memo(MessageItem, (prev, next) => {
 export default function ChatScreen() {
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<any>(null);
+
+  // ─── Forward Modal State ──────────────────────────────────────────────────
+
+  const [forwardModalVisible, setForwardModalVisible] = useState(false);
+  const [forwardMessage, setForwardMessage] = useState<Message | null>(null);
 
   // ─── State & Handlers from custom hook ──────────────────────────────────────
 
@@ -115,8 +128,9 @@ export default function ChatScreen() {
     handleScroll,
     initialScrollToBottom,
     enableAutoScroll,
-    isCleared, 
+    isCleared,
     clearedAt,
+    roomId,
   } = useChatScreen(flatListRef);
 
   // ---------------------------------------------------------------------------
@@ -183,6 +197,64 @@ export default function ChatScreen() {
   }, [messages]);
 
   // ---------------------------------------------------------------------------
+  // Forward Handler
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Opens the ForwardModal with the selected message data.
+   * Sets the message to forward and makes the modal visible.
+   */
+  const handleForward = useCallback((message: Message) => {
+    if (!message._id) return;
+    setForwardMessage(message);
+    setForwardModalVisible(true);
+  }, []);
+
+  /**
+   * Closes the ForwardModal and resets forward state.
+   */
+  const handleForwardClose = useCallback(() => {
+    setForwardModalVisible(false);
+    // Delay clearing forwardMessage to avoid UI flicker during modal close animation
+    setTimeout(() => {
+      setForwardMessage(null);
+    }, 300);
+  }, []);
+
+  /**
+   * Called when forwarding is successful.
+   * Shows a brief confirmation or performs any additional actions.
+   */
+  const handleForwardSuccess = useCallback((data: any) => {
+    console.log(`Message forwarded to ${data?.forwardedCount || 0} chat(s)`);
+    // Optional: Refresh messages or show a toast notification
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Forward Message Data Preparation
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Prepares the message data object for the ForwardModal.
+   * Extracts only the necessary fields from the selected message.
+   */
+  const forwardMessageData = useMemo(() => {
+    if (!forwardMessage) return null;
+
+    return {
+      _id: forwardMessage._id,
+      message: forwardMessage.message || "",
+      type: forwardMessage.type || "text",
+      mediaUrl: forwardMessage.mediaUrl,
+      mediaName: forwardMessage.mediaName,
+      senderName: forwardMessage.senderName,
+      duration: forwardMessage.duration,
+      thumbnailUrl: forwardMessage.thumbnailUrl,
+      locationData: forwardMessage.locationData,
+    };
+  }, [forwardMessage]);
+
+  // ---------------------------------------------------------------------------
   // Callbacks
   // ---------------------------------------------------------------------------
 
@@ -247,9 +319,7 @@ export default function ChatScreen() {
             onReaction={handleReaction}
             onReply={handleReply}
             onDelete={handleDelete}
-            onForward={() =>
-              Alert.alert("Forward", "Forward feature coming soon!")
-            }
+            onForward={() => handleForward(item)}
             currentUserId={user?.id}
             highlightedMessageId={highlightedMessageId || undefined}
             onScrollToMessage={handleScrollToMessage}
@@ -266,6 +336,7 @@ export default function ChatScreen() {
       handleReaction,
       handleReply,
       handleDelete,
+      handleForward,
       highlightedMessageId,
       handleScrollToMessage,
       registerMessageRef,
@@ -380,6 +451,17 @@ export default function ChatScreen() {
           onLocationShared={handleLocationShared}
         />
       </KeyboardAvoidingView>
+
+      {/* Forward Modal */}
+      {forwardMessageData && (
+        <ForwardModal
+          visible={forwardModalVisible}
+          onClose={handleForwardClose}
+          onSuccess={handleForwardSuccess}
+          messageData={forwardMessageData}
+          currentRoomId={roomId}
+        />
+      )}
     </SafeAreaView>
   );
 }

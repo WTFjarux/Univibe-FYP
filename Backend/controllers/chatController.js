@@ -32,6 +32,12 @@ const formatMessage = (msg, currentUserId) => ({
   duration: msg.duration,
   thumbnailUrl: msg.thumbnailUrl,
   locationData: msg.locationData,
+  // Forwarding fields
+  isForwarded: msg.isForwarded || false,
+  originalMessageId: msg.originalMessageId || null,
+  originalSenderId: msg.originalSenderId || null,
+  originalSenderName: msg.originalSenderName || null,
+  forwardedAt: msg.forwardedAt || null,
   replyTo: msg.replyTo?.messageId
     ? {
         messageId: msg.replyTo.messageId,
@@ -403,6 +409,232 @@ exports.markMessageAsDelivered = async (req, res) => {
     res.json({ success: true, data: msg });
   } catch (e) {
     res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// -----------------------------------------------------------------------------
+// Forwarding Messages
+// -----------------------------------------------------------------------------
+/**
+ * Forward a message to multiple chats
+ * POST /api/chat/messages/forward
+ */
+exports.forwardMessage = async (req, res) => {
+  try {
+    const { messageId, targetChatIds } = req.body;
+    const userId = req.user.id;
+
+    // Validation
+    if (
+      !messageId ||
+      !targetChatIds ||
+      !Array.isArray(targetChatIds) ||
+      targetChatIds.length === 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "messageId and targetChatIds (non-empty array) are required",
+      });
+    }
+
+    // Limit batch size
+    if (targetChatIds.length > 10) {
+      return res.status(400).json({
+        success: false,
+        message: "Maximum 10 chats can be forwarded to at once",
+      });
+    }
+
+    // Fetch original message
+    const originalMessage = await Message.findById(messageId)
+      .populate("sender", "name")
+      .lean();
+
+    if (!originalMessage) {
+      return res.status(404).json({
+        success: false,
+        message: "Original message not found",
+      });
+    }
+
+    // Check if the original message is deleted
+    if (originalMessage.isDeleted) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot forward a deleted message",
+      });
+    }
+
+    // Verify user has access to the original message
+    const originalRoom = await ChatRoom.findOne({
+      roomId: originalMessage.roomId,
+    });
+    if (!originalRoom) {
+      return res.status(404).json({
+        success: false,
+        message: "Original chat room not found",
+      });
+    }
+
+    const isParticipant = originalRoom.participants.some(
+      (p) => p.userId.toString() === userId,
+    );
+    if (!isParticipant) {
+      return res.status(403).json({
+        success: false,
+        message: "You don't have access to this message",
+      });
+    }
+
+    // Verify target chats exist and user is a participant
+    const targetRooms = await ChatRoom.find({
+      roomId: { $in: targetChatIds },
+      "participants.userId": userId,
+    }).lean();
+
+    const validRoomIds = targetRooms.map((r) => r.roomId);
+
+    if (validRoomIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid target chats found",
+      });
+    }
+
+    // Get user info for the forwarded message sender
+    const user = await User.findById(userId).select("name").lean();
+    const profile = await Profile.findOne({ user: userId })
+      .select("profilePicture")
+      .lean();
+
+    // Create forwarded messages for each valid target chat
+    const forwardedMessages = [];
+    const io = req.app.get("io");
+
+    await Promise.all(
+      validRoomIds.map(async (targetRoomId) => {
+        // Skip if it's the same room
+        if (targetRoomId === originalMessage.roomId) {
+          return;
+        }
+
+        // Build the forwarded message payload
+        const forwardedData = {
+          sender: userId,
+          senderName: user?.name || "Unknown",
+          senderAvatar: profile?.profilePicture || "",
+          roomId: targetRoomId,
+          message: originalMessage.message,
+          type: originalMessage.type,
+          isForwarded: true,
+          originalMessageId: originalMessage._id,
+          originalSenderId:
+            originalMessage.sender._id || originalMessage.sender,
+          originalSenderName:
+            originalMessage.senderName || originalMessage.sender?.name || "Unknown",
+          forwardedAt: new Date(),
+          readBy: [{ user: userId, readAt: new Date() }],
+          deliveredTo: [{ user: userId, deliveredAt: new Date() }],
+        };
+
+        // Copy type-specific content (no re-upload)
+        if (
+          originalMessage.type === "image" ||
+          originalMessage.type === "video" ||
+          originalMessage.type === "file"
+        ) {
+          // Reuse existing media URLs
+          forwardedData.mediaUrl = originalMessage.mediaUrl || "";
+          forwardedData.thumbnailUrl = originalMessage.thumbnailUrl || "";
+          forwardedData.mediaSize = originalMessage.mediaSize || 0;
+          forwardedData.mediaName = originalMessage.mediaName || "";
+          forwardedData.mediaMimeType = originalMessage.mediaMimeType || "";
+          if (originalMessage.type === "video" && originalMessage.duration) {
+            forwardedData.duration = originalMessage.duration;
+          }
+        } else if (originalMessage.type === "audio") {
+          forwardedData.mediaUrl = originalMessage.mediaUrl || "";
+          forwardedData.duration = originalMessage.duration || 0;
+          forwardedData.mediaSize = originalMessage.mediaSize || 0;
+          forwardedData.mediaMimeType = originalMessage.mediaMimeType || "";
+        } else if (originalMessage.type === "location") {
+          forwardedData.locationData = originalMessage.locationData || {};
+        }
+
+        // Handle forwarded replies
+        if (originalMessage.replyTo?.messageId) {
+          forwardedData.replyTo = {
+            messageId: originalMessage.replyTo.messageId,
+            message: originalMessage.replyTo.message,
+            senderName: originalMessage.replyTo.senderName,
+            senderId: originalMessage.replyTo.senderId,
+            type: originalMessage.replyTo.type || "text",
+            mediaUrl: originalMessage.replyTo.mediaUrl,
+            thumbnailUrl: originalMessage.replyTo.thumbnailUrl || "",
+            duration: originalMessage.replyTo.duration,
+          };
+        }
+
+        // Save the forwarded message
+        const forwardedMessage = await Message.create(forwardedData);
+        forwardedMessages.push(forwardedMessage);
+
+        // Update room's lastMessage
+        const lastMessageText = forwardedData.message?.substring(0, 100) || "";
+        await ChatRoom.findOneAndUpdate(
+          { roomId: targetRoomId },
+          {
+            lastMessage: {
+              message: lastMessageText,
+              sentAt: new Date(),
+              senderId: userId,
+              senderName: user?.name || "Unknown",
+              type: originalMessage.type,
+              readBy: [userId],
+            },
+            updatedAt: new Date(),
+            $inc: { messageCount: 1 },
+            $pull: { clearedBy: { user: userId } },
+          },
+        );
+
+        // Emit real-time event for each forwarded message
+        if (io) {
+          const populatedMessage = await Message.findById(forwardedMessage._id)
+            .populate("sender", "name avatar")
+            .populate("readBy.user", "name avatar")
+            .lean();
+
+          const formattedMsg = formatMessage(populatedMessage, userId);
+
+          // Emit to the target room
+          io.to(targetRoomId).emit("receive_message", formattedMsg);
+
+          console.log(`Message forwarded to room ${targetRoomId}`);
+        }
+      }),
+    );
+
+    // Filter out null values (skipped same-room forwards)
+    const successfulForwards = forwardedMessages.filter(Boolean);
+
+    res.json({
+      success: true,
+      message: `Message forwarded to ${successfulForwards.length} chat(s)`,
+      data: {
+        forwardedCount: successfulForwards.length,
+        forwardedMessages: successfulForwards.map((msg) =>
+          formatMessage(msg, userId),
+        ),
+      },
+    });
+  } catch (e) {
+    console.error("forwardMessage error:", e);
+    res.status(500).json({
+      success: false,
+      message: "Failed to forward message",
+      error: process.env.NODE_ENV === "development" ? e.message : undefined,
+    });
   }
 };
 

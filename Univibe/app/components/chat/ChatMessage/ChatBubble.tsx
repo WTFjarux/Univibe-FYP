@@ -56,6 +56,12 @@ interface Message {
     thumbnailUrl?: string;
     duration?: number;
   };
+  // Forwarding fields
+  isForwarded?: boolean;
+  originalMessageId?: string;
+  originalSenderId?: string;
+  originalSenderName?: string;
+  forwardedAt?: string;
 }
 
 interface ChatBubbleProps {
@@ -81,7 +87,7 @@ interface ChatBubbleProps {
 }
 
 // -----------------------------------------------------------------------------
-// Component
+// Main Component
 // -----------------------------------------------------------------------------
 
 export default function ChatBubble({
@@ -147,6 +153,8 @@ export default function ChatBubble({
   const isMediaType = ["image", "video", "file", "location"].includes(
     message.type || "",
   );
+
+  const isForwarded = message.isForwarded === true;
 
   const getAvatarSource = () => {
     if (avatarError) return DEFAULT_AVATAR;
@@ -288,7 +296,50 @@ export default function ChatBubble({
     setVideoPlayerVisible(true);
   };
 
+  /**
+   * Builds the forwarded label text.
+   * - "You forwarded" - when the current user forwarded this message
+   * - "Forwarded" - when receiving a forwarded message from someone else
+   */
+  const getForwardedLabel = (): string => {
+    if (!isForwarded) return "";
+
+    const senderId = getSenderId();
+
+    if (senderId === currentUserId) {
+      return "You forwarded";
+    }
+
+    return "Forwarded";
+  };
+
+  /**
+   * Renders the forwarded indicator label OUTSIDE the bubble.
+   * Positioned above the bubble, aligned based on message ownership.
+   */
+  const renderForwardedLabel = () => {
+    if (!isForwarded) return null;
+
+    const label = getForwardedLabel();
+    if (!label) return null;
+
+    return (
+      <View
+        style={[
+          styles.forwardedLabelContainer,
+          isOwnMessage ? styles.forwardedLabelOwn : styles.forwardedLabelOther,
+        ]}
+      >
+        <Ionicons name="arrow-redo" size={11} color="#8E8E93" />
+        <Text style={styles.forwardedLabelText} numberOfLines={1}>
+          {label}
+        </Text>
+      </View>
+    );
+  };
+
   const renderMessageContent = () => {
+    // Media messages (image, video, file, location)
     if (isMediaType) {
       return (
         <AttachmentMessage
@@ -324,6 +375,7 @@ export default function ChatBubble({
       );
     }
 
+    // Sending audio
     if (
       message.type === "audio" &&
       (message.status === "sending" || !message.mediaUrl)
@@ -362,20 +414,20 @@ export default function ChatBubble({
       );
     }
 
+    // Audio message
     if (message.type === "audio") {
       return (
-        <View style={styles.audioMessageContainer}>
-          <AudioPlayer
-            audioUrl={message.mediaUrl || ""}
-            duration={message.duration || 0}
-            isOwnMessage={isOwnMessage}
-            messageId={message._id}
-            onPlayed={onAudioPlayed}
-          />
-        </View>
+        <AudioPlayer
+          audioUrl={message.mediaUrl || ""}
+          duration={message.duration || 0}
+          isOwnMessage={isOwnMessage}
+          messageId={message._id}
+          onPlayed={onAudioPlayed}
+        />
       );
     }
 
+    // Text message
     return (
       <Text
         style={[
@@ -454,6 +506,9 @@ export default function ChatBubble({
                 onScrollToMessage={onScrollToMessage}
               />
             )}
+
+            {/* Forwarded label OUTSIDE the bubble */}
+            {renderForwardedLabel()}
 
             <Pressable
               onLongPress={handleLongPress}
@@ -557,17 +612,20 @@ export default function ChatBubble({
         fileName={fileViewerName}
         fileSize={fileViewerSize}
         onClose={() => setFileViewerVisible(false)}
-
       />
     </>
   );
 }
 
+// -----------------------------------------------------------------------------
+// Styles
+// -----------------------------------------------------------------------------
+
 const styles = StyleSheet.create({
   messageWrapper: {
     marginVertical: 4,
     borderRadius: 16,
-    overflow: "hidden",
+    overflow: "visible",
     position: "relative",
   },
   highlightBackground: {
@@ -618,6 +676,29 @@ const styles = StyleSheet.create({
   },
   ownMessageText: { color: "#fff" },
   otherMessageText: { color: "#000" },
+
+  // Forwarded label — OUTSIDE the bubble
+  forwardedLabelContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 3,
+    paddingHorizontal: 12,
+    gap: 4,
+  },
+  forwardedLabelOwn: {
+    alignSelf: "flex-end",
+  },
+  forwardedLabelOther: {
+    alignSelf: "flex-start",
+  },
+  forwardedLabelText: {
+    fontSize: 11,
+    fontFamily: "SofiaSans-Regular",
+    fontStyle: "italic",
+    color: "#8E8E93",
+    flexShrink: 1,
+  },
+
   audioMessageContainer: { minWidth: 200, maxWidth: 250 },
   audioLoadingContainer: {
     flexDirection: "row",

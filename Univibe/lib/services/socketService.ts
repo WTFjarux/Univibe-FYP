@@ -34,6 +34,33 @@ interface Message {
   };
 }
 
+interface ForwardMessageData {
+  messageId: string;
+  targetChatIds: string[];
+}
+
+interface ForwardMessageSuccessData {
+  success: boolean;
+  message: string;
+  data: {
+    forwardedCount: number;
+    forwardedMessages: Message[];
+    forwardedToRooms: string[];
+  };
+}
+
+interface ForwardMessageErrorData {
+  success: boolean;
+  message: string;
+}
+
+interface MessageForwardedToRoomData {
+  message: Message;
+  roomId: string;
+  forwardedBy: string;
+  forwardedByName: string;
+}
+
 interface UserStatus {
   userId: string;
   userInfo?: any;
@@ -268,6 +295,26 @@ class SocketService {
     this.socket.on("room_joined", (data: RoomData) => {
       this.emitEvent("room_joined", data);
     });
+
+    // Forwarding events
+    this.socket.on(
+      "forward_message_success",
+      (data: ForwardMessageSuccessData) => {
+        this.emitEvent("forward_message_success", data);
+      },
+    );
+
+    this.socket.on("forward_message_error", (data: ForwardMessageErrorData) => {
+      this.emitEvent("forward_message_error", data);
+      this.emitEvent("message_error", data);
+    });
+
+    this.socket.on(
+      "message_forwarded_to_room",
+      (data: MessageForwardedToRoomData) => {
+        this.emitEvent("message_forwarded_to_room", data);
+      },
+    );
 
     // Read receipts
     this.socket.on("messages_read", (data: ReadReceiptData) => {
@@ -565,6 +612,24 @@ class SocketService {
   ): void {
     if (this.socket && this.isConnected) {
       this.socket.emit("get_messages", { roomId, limit, before });
+    }
+  }
+
+  /**
+   * Forwards a message to multiple chats via socket
+   */
+  forwardMessage(messageId: string, targetChatIds: string[]): void {
+    if (this.socket && this.isConnected) {
+      this.socket.emit("forward_message", {
+        messageId,
+        targetChatIds,
+      });
+    } else {
+      this.emitEvent("socket_error", {
+        message: "Socket not connected",
+        action: "forward_message",
+      });
+      this.connect();
     }
   }
 

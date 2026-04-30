@@ -37,6 +37,10 @@ router.delete("/room/:roomId/history", ctrl.deleteChatHistory);
 
 router.get("/messages/:roomId", ctrl.getMessageHistory);
 router.get("/messages/:roomId/light", ctrl.getMessagesLight);
+
+// Forward message 
+router.post("/messages/forward", ctrl.forwardMessage);
+
 router.delete("/message/:messageId", ctrl.deleteMessage);
 router.post("/message/:messageId/read", ctrl.markMessageAsRead);
 router.post("/message/:messageId/delivered", ctrl.markMessageAsDelivered);

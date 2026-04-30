@@ -1,11 +1,12 @@
 /**
  * socket/handlers/chatHandler.js — Real-time Chat Event Handlers
- * Updated: Added clear_chat event and clearedAt filtering for message history
+ * Updated: Added forwarding events and support for forwarded messages
  */
 
 const Message = require("../../models/Message");
 const ChatRoom = require("../../models/ChatRoom");
 const Profile = require("../../models/Profile");
+const User = require("../../models/User");
 const {
   getDirectRoomId,
   addUserToRoom,
@@ -40,6 +41,11 @@ const EVENTS = {
   CLEAR_CHAT: "clear_chat",
   CHAT_CLEARED: "chat_cleared",
   CHAT_RESTORED: "chat_restored",
+  // Forwarding events
+  FORWARD_MESSAGE: "forward_message",
+  FORWARD_MESSAGE_SUCCESS: "forward_message_success",
+  FORWARD_MESSAGE_ERROR: "forward_message_error",
+  MESSAGE_FORWARDED_TO_ROOM: "message_forwarded_to_room",
   ERROR: "error",
   MESSAGE_ERROR: "message_error",
 };
@@ -369,6 +375,247 @@ const setupChatHandlers = (io, socket) => {
       }
     },
   );
+
+  /**
+   * Forward a message to multiple chats via socket
+   * Alternative to REST API - allows real-time forwarding with immediate feedback
+   */
+  socket.on(EVENTS.FORWARD_MESSAGE, async ({ messageId, targetChatIds }) => {
+    try {
+      // Validation
+      if (
+        !messageId ||
+        !targetChatIds ||
+        !Array.isArray(targetChatIds) ||
+        targetChatIds.length === 0
+      ) {
+        socket.emit(EVENTS.FORWARD_MESSAGE_ERROR, {
+          success: false,
+          message: "messageId and targetChatIds (non-empty array) are required",
+        });
+        return;
+      }
+
+      // Limit batch size
+      if (targetChatIds.length > 10) {
+        socket.emit(EVENTS.FORWARD_MESSAGE_ERROR, {
+          success: false,
+          message: "Maximum 10 chats can be forwarded to at once",
+        });
+        return;
+      }
+
+      console.log(
+        `User ${userId} forwarding message ${messageId} to ${targetChatIds.length} chats`,
+      );
+
+      // Fetch original message
+      const originalMessage = await Message.findById(messageId)
+        .populate("sender", "name")
+        .lean();
+
+      if (!originalMessage) {
+        socket.emit(EVENTS.FORWARD_MESSAGE_ERROR, {
+          success: false,
+          message: "Original message not found",
+        });
+        return;
+      }
+
+      // Check if the original message is deleted
+      if (originalMessage.isDeleted) {
+        socket.emit(EVENTS.FORWARD_MESSAGE_ERROR, {
+          success: false,
+          message: "Cannot forward a deleted message",
+        });
+        return;
+      }
+
+      // Verify user has access to the original message
+      const originalRoom = await ChatRoom.findOne({
+        roomId: originalMessage.roomId,
+      });
+      if (!originalRoom) {
+        socket.emit(EVENTS.FORWARD_MESSAGE_ERROR, {
+          success: false,
+          message: "Original chat room not found",
+        });
+        return;
+      }
+
+      const isParticipant = originalRoom.participants.some(
+        (p) => p.userId.toString() === userId,
+      );
+      if (!isParticipant) {
+        socket.emit(EVENTS.FORWARD_MESSAGE_ERROR, {
+          success: false,
+          message: "You don't have access to this message",
+        });
+        return;
+      }
+
+      // Verify target chats exist and user is a participant
+      const targetRooms = await ChatRoom.find({
+        roomId: { $in: targetChatIds },
+        "participants.userId": userId,
+      }).lean();
+
+      const validRoomIds = targetRooms.map((r) => r.roomId);
+
+      if (validRoomIds.length === 0) {
+        socket.emit(EVENTS.FORWARD_MESSAGE_ERROR, {
+          success: false,
+          message: "No valid target chats found",
+        });
+        return;
+      }
+
+      // Get user info for the forwarded message sender
+      const userInfo = await User.findById(userId).select("name").lean();
+      const profile = await Profile.findOne({ user: userId })
+        .select("profilePicture")
+        .lean();
+
+      // Create forwarded messages for each valid target chat
+      const forwardedMessages = [];
+      const forwardedToRooms = [];
+
+      await Promise.all(
+        validRoomIds.map(async (targetRoomId) => {
+          // Skip if it's the same room
+          if (targetRoomId === originalMessage.roomId) {
+            return;
+          }
+
+          // Build the forwarded message payload
+          const forwardedData = {
+            sender: userId,
+            senderName: userInfo?.name || user?.name || "Unknown",
+            senderAvatar: profile?.profilePicture || "",
+            roomId: targetRoomId,
+            message: originalMessage.message,
+            type: originalMessage.type,
+            isForwarded: true,
+            originalMessageId: originalMessage._id,
+            originalSenderId:
+              originalMessage.sender._id || originalMessage.sender,
+            forwardedAt: new Date(),
+            readBy: [{ user: userId, readAt: new Date() }],
+            deliveredTo: [{ user: userId, deliveredAt: new Date() }],
+          };
+
+          // Copy type-specific content (no re-upload)
+          if (
+            originalMessage.type === "image" ||
+            originalMessage.type === "video" ||
+            originalMessage.type === "file"
+          ) {
+            // Reuse existing media URLs
+            forwardedData.mediaUrl = originalMessage.mediaUrl || "";
+            forwardedData.thumbnailUrl = originalMessage.thumbnailUrl || "";
+            forwardedData.mediaSize = originalMessage.mediaSize || 0;
+            forwardedData.mediaName = originalMessage.mediaName || "";
+            forwardedData.mediaMimeType = originalMessage.mediaMimeType || "";
+            if (originalMessage.type === "video" && originalMessage.duration) {
+              forwardedData.duration = originalMessage.duration;
+            }
+          } else if (originalMessage.type === "audio") {
+            forwardedData.mediaUrl = originalMessage.mediaUrl || "";
+            forwardedData.duration = originalMessage.duration || 0;
+            forwardedData.mediaSize = originalMessage.mediaSize || 0;
+            forwardedData.mediaMimeType = originalMessage.mediaMimeType || "";
+          } else if (originalMessage.type === "location") {
+            forwardedData.locationData = originalMessage.locationData || {};
+          }
+
+          // Handle forwarded replies
+          if (originalMessage.replyTo?.messageId) {
+            forwardedData.replyTo = {
+              messageId: originalMessage.replyTo.messageId,
+              message: originalMessage.replyTo.message,
+              senderName: originalMessage.replyTo.senderName,
+              senderId: originalMessage.replyTo.senderId,
+              type: originalMessage.replyTo.type || "text",
+              mediaUrl: originalMessage.replyTo.mediaUrl,
+              thumbnailUrl: originalMessage.replyTo.thumbnailUrl || "",
+              duration: originalMessage.replyTo.duration,
+            };
+          }
+
+          // Save the forwarded message
+          const forwardedMessage = await Message.create(forwardedData);
+          forwardedMessages.push(forwardedMessage);
+
+          // Update room's lastMessage
+          const lastMessageText =
+            forwardedData.message?.substring(0, 100) || "";
+          await ChatRoom.findOneAndUpdate(
+            { roomId: targetRoomId },
+            {
+              lastMessage: {
+                message: lastMessageText,
+                sentAt: new Date(),
+                senderId: userId,
+                senderName: userInfo?.name || user?.name || "Unknown",
+                type: originalMessage.type,
+                readBy: [userId],
+              },
+              updatedAt: new Date(),
+              $inc: { messageCount: 1 },
+              $pull: { clearedBy: { user: userId } },
+            },
+          );
+
+          // Populate and format the message for socket emission
+          const populatedMessage = await Message.findById(forwardedMessage._id)
+            .populate("sender", "name avatar")
+            .populate("readBy.user", "name avatar")
+            .lean();
+
+          // Emit to the target room
+          socket
+            .to(targetRoomId)
+            .emit(EVENTS.RECEIVE_MESSAGE, populatedMessage);
+
+          // Also emit a specific forwarded message event
+          socket.to(targetRoomId).emit(EVENTS.MESSAGE_FORWARDED_TO_ROOM, {
+            message: populatedMessage,
+            roomId: targetRoomId,
+            forwardedBy: userId,
+            forwardedByName: userInfo?.name || user?.name || "Unknown",
+          });
+
+          forwardedToRooms.push(targetRoomId);
+
+          console.log(`Message forwarded to room ${targetRoomId}`);
+        }),
+      );
+
+      // Filter out null values (skipped same-room forwards)
+      const successfulForwards = forwardedMessages.filter(Boolean);
+
+      // Notify the sender of success
+      socket.emit(EVENTS.FORWARD_MESSAGE_SUCCESS, {
+        success: true,
+        message: `Message forwarded to ${successfulForwards.length} chat(s)`,
+        data: {
+          forwardedCount: successfulForwards.length,
+          forwardedMessages: successfulForwards,
+          forwardedToRooms: forwardedToRooms,
+        },
+      });
+
+      console.log(
+        `User ${userId} forwarded message ${messageId} to ${successfulForwards.length} chats`,
+      );
+    } catch (error) {
+      console.error("Forward message error:", error);
+      socket.emit(EVENTS.FORWARD_MESSAGE_ERROR, {
+        success: false,
+        message: error.message || "Failed to forward message",
+      });
+    }
+  });
 
   /**
    * Mark all messages in a room as read

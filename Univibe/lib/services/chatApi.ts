@@ -112,6 +112,27 @@ class ChatApiService {
     return response.data;
   }
 
+  /**
+   * Forwards a message to multiple chats
+   */
+  async forwardMessage(
+    messageId: string,
+    targetChatIds: string[],
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: {
+      forwardedCount: number;
+      forwardedMessages: Message[];
+    };
+  }> {
+    const response = await api.post("/chat/messages/forward", {
+      messageId,
+      targetChatIds,
+    });
+    return response.data;
+  }
+
   async deleteMessage(
     messageId: string,
   ): Promise<{ success: boolean; message?: string }> {

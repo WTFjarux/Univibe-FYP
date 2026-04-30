@@ -59,6 +59,11 @@ export interface Message {
   groupId?: string;
   groupIndex?: number;
   groupTotal?: number;
+  isForwarded?: boolean;
+  originalMessageId?: string;
+  originalSenderId?: string;
+  originalSenderName?: string;
+  forwardedAt?: string;
 }
 
 export interface ReplyToData {

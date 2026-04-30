@@ -4,6 +4,7 @@
  * All static methods for Message model.
  * Loaded into the schema to keep Message.js clean.
  * Updated: Added clearedAt support for per-user chat history deletion.
+ * Updated: Added forwarding fields to getMessagesLight select.
  */
 module.exports = function (messageSchema) {
   // ── HELPER ────────────────────────────────────────────────
@@ -132,7 +133,7 @@ module.exports = function (messageSchema) {
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .select(
-        "_id sender senderName roomId message type createdAt mediaUrl mediaName mediaSize duration thumbnailUrl replyTo reactions readBy tempId locationData",
+        "_id sender senderName senderAvatar roomId message type createdAt status mediaUrl mediaName mediaSize mediaMimeType duration thumbnailUrl locationData replyTo reactions readBy deliveredTo tempId isForwarded originalMessageId originalSenderId originalSenderName forwardedAt",
       )
       .populate("sender", "name avatar")
       .populate("reactions.user", "name")
