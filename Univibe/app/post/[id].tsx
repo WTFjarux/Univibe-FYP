@@ -1,5 +1,11 @@
 // app/post/[id].tsx
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from "react";
 import {
   View,
   Text,
@@ -11,27 +17,28 @@ import {
   KeyboardAvoidingView,
   Platform,
   Share,
+  Dimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { useAuth } from "../../lib/contexts/AuthContext";
+import { useAuth } from "@/lib/contexts/AuthContext";
 import {
   getPostById,
   getPostComments,
-  addComment,
-  addReply,
   toggleLike,
-  toggleCommentLike,
-  deleteComment,
-  updateComment,
   deletePost,
   Post,
   Comment,
-} from "../../lib/services/postService";
-import PostCard from "../components/Feed/Post/PostCard";
-import CommentItem from "../components/Feed/Comment/CommentItem";
-import CommentInput from "../components/Feed/Comment/CommentInput";
+  getFullImageUrl,
+} from "@/lib/services/postService";
+import PostPreview from "@/app/components/Feed/Comment/PostPreview";
+import CommentItem from "@/app/components/Feed/Comment/CommentItem";
+import CommentInput from "@/app/components/Feed/Comment/CommentInput";
+import ImageModal from "@/app/components/Feed/Comment/ImageModal";
+import useComments from "@/app/components/Feed/Comment/useComments";
+
+const { width: screenWidth } = Dimensions.get("window");
 
 export default function PostDetailScreen() {
   const { id, openComments } = useLocalSearchParams<{
@@ -41,26 +48,48 @@ export default function PostDetailScreen() {
   const router = useRouter();
   const { token, user, profile } = useAuth();
 
+  // Post state
   const [post, setPost] = useState<Post | null>(null);
-  const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [commentText, setCommentText] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [isAnonymous, setIsAnonymous] = useState(false);
+  const [isPostLiked, setIsPostLiked] = useState(false);
+  const [postLikesCount, setPostLikesCount] = useState(0);
+
+  // Image modal state
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [imageModalVisible, setImageModalVisible] = useState(false);
+
+  // Comments state
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [totalComments, setTotalComments] = useState(0);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [replyingTo, setReplyingTo] = useState<{
-    commentId: string;
-    username: string;
-    mentionUsername: string;
-    isAnonymous: boolean;
-  } | null>(null);
+  const [commentText, setCommentText] = useState("");
+  const [isAnonymous, setIsAnonymous] = useState(false);
+  const [isAnyCommentEditing, setIsAnyCommentEditing] = useState(false);
+
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<any>(null);
+  const isFetchingRef = useRef(false);
 
-  const loadPost = async () => {
+  // ✅ Ref to track if we're currently liking (prevent double taps and flickers)
+  const isLikingRef = useRef(false);
+
+  // Use the existing useComments hook
+  const {
+    submitting,
+    replyingTo,
+    setReplyingTo,
+    handleSubmit: submitComment,
+    handleLike: commentLikeHandler,
+    handleDelete: commentDeleteHandler,
+    handleReport: commentReportHandler,
+    handleEdit: commentEditHandler,
+  } = useComments(id, comments, setComments, setTotalComments, setPost, user);
+
+  // ===== Post Loading =====
+  const loadPost = useCallback(async () => {
     if (!id) {
       setError("Invalid post ID");
       setLoading(false);
@@ -71,13 +100,14 @@ export default function PostDetailScreen() {
       const response = await getPostById(id);
       if (response.success && response.post) {
         setPost(response.post);
+        setIsPostLiked(response.post.isLiked || false);
+        setPostLikesCount(response.post.likes?.length || 0);
         setError(null);
       } else {
         setError("Post not found or has been deleted");
       }
     } catch (error: any) {
       console.error("Error loading post:", error);
-      // Check if it's a 404 error
       if (
         error.message?.includes("404") ||
         error.message?.includes("Failed to fetch post: 404")
@@ -89,112 +119,81 @@ export default function PostDetailScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
 
-  const loadComments = async (pageNum = 1, shouldAppend = false) => {
-    // Don't try to load comments if post doesn't exist
-    if (error && error.includes("no longer exists")) return;
-    if (isLoadingMore) return;
+  // ===== Comments Loading =====
+  const loadComments = useCallback(
+    async (pageNum = 1, shouldAppend = false) => {
+      if (error && error.includes("no longer exists")) return;
+      if (isFetchingRef.current && pageNum > 1) return;
 
-    if (shouldAppend) {
-      setIsLoadingMore(true);
-    }
+      if (shouldAppend) {
+        setIsLoadingMore(true);
+      }
 
-    try {
-      const response = await getPostComments(id, pageNum, 20);
-      if (response.success) {
-        const newComments = response.comments;
-        setComments((prev) =>
-          shouldAppend ? [...prev, ...newComments] : newComments,
-        );
-        setHasMore(response.pagination.pages > pageNum);
-        setPage(pageNum);
+      try {
+        const response = await getPostComments(id, pageNum, 20);
+        if (response.success) {
+          const newComments = response.comments;
+          setComments((prev) =>
+            shouldAppend ? [...prev, ...newComments] : newComments,
+          );
+          setTotalComments(response.pagination?.total || newComments.length);
+          setHasMore(response.pagination?.pages > pageNum);
+          setPage(pageNum);
 
-        if (
-          openComments === "true" &&
-          pageNum === 1 &&
-          newComments.length > 0
-        ) {
-          setTimeout(() => {
-            flatListRef.current?.scrollToIndex({ index: 0, animated: true });
-          }, 500);
+          if (
+            openComments === "true" &&
+            pageNum === 1 &&
+            newComments.length > 0
+          ) {
+            setTimeout(() => {
+              flatListRef.current?.scrollToIndex({ index: 0, animated: true });
+            }, 500);
+          }
+        }
+      } catch (error: any) {
+        console.error("Error loading comments:", error);
+      } finally {
+        if (shouldAppend) {
+          setIsLoadingMore(false);
         }
       }
+    },
+    [id, error, openComments],
+  );
+
+  // ===== Post Actions =====
+  const handlePostLike = useCallback(async () => {
+    // ✅ Prevent multiple rapid taps
+    if (isLikingRef.current || !token || !post) return;
+
+    isLikingRef.current = true;
+
+    // ✅ Optimistic update
+    const newLikedState = !isPostLiked;
+    setIsPostLiked(newLikedState);
+    setPostLikesCount((prev) => (newLikedState ? prev + 1 : prev - 1));
+
+    try {
+      const response = await toggleLike(id);
+      // ✅ Sync with server response
+      setIsPostLiked(response.isLiked);
+      setPostLikesCount(response.likes);
     } catch (error: any) {
-      console.error("Error loading comments:", error);
-      // Don't set error state for comments, just log it
+      // ✅ Revert on error
+      setIsPostLiked(!newLikedState);
+      setPostLikesCount((prev) => (newLikedState ? prev - 1 : prev + 1));
     } finally {
-      if (shouldAppend) {
-        setIsLoadingMore(false);
-      }
+      isLikingRef.current = false;
     }
-  };
+  }, [token, post, isPostLiked, id]);
 
-  const handleSubmit = async () => {
-    if (!commentText.trim()) return;
-    if (error && error.includes("no longer exists")) {
-      Alert.alert("Error", "Cannot comment on a post that no longer exists");
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      if (replyingTo) {
-        await addReply(
-          id,
-          replyingTo.commentId,
-          commentText.trim(),
-          isAnonymous,
-        );
-      } else {
-        await addComment(id, commentText.trim(), isAnonymous);
-      }
-
-      setCommentText("");
-      setReplyingTo(null);
-      setIsAnonymous(false);
-      await loadComments(1, false);
-
-      // Update post comment count
-      setPost((prev) =>
-        prev ? { ...prev, commentCount: (prev.commentCount || 0) + 1 } : null,
-      );
-
-      setTimeout(() => {
-        flatListRef.current?.scrollToIndex({ index: 0, animated: true });
-      }, 300);
-    } catch (error) {
-      Alert.alert("Error", "Failed to post comment");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleLike = async () => {
-    if (!post) return;
-    try {
-      const response = await toggleLike(post._id);
-      setPost((prev) =>
-        prev
-          ? {
-              ...prev,
-              likes: response.isLiked
-                ? [...(prev.likes || []), { _id: user?.id }]
-                : prev.likes?.filter((like: any) => like._id !== user?.id),
-              isLiked: response.isLiked,
-            }
-          : null,
-      );
-    } catch (error) {
-      Alert.alert("Error", "Failed to like post");
-    }
-  };
-
-  const handleEditPost = () => {
+  const handleEditPost = useCallback(() => {
     router.push(`/post/edit/${post?._id}`);
-  };
+  }, [post?._id, router]);
 
-  const handleDeletePost = async () => {
+  const handleDeletePost = useCallback(async () => {
     if (!post) return;
 
     Alert.alert(
@@ -217,166 +216,63 @@ export default function PostDetailScreen() {
         },
       ],
     );
-  };
+  }, [post, router]);
 
-  const handleRepost = async () => {
-    if (!post) return;
-    Alert.alert("Coming Soon", "Repost feature coming soon!");
-  };
-
-  const handleShare = async () => {
-    if (!post) return;
-
-    try {
-      await Share.share({
-        message: `${post.content}\n\nCheck out this post on Univibe!`,
+  // ===== Comment Actions =====
+  const handleCommentReply = useCallback(
+    (
+      commentId: string,
+      displayName: string,
+      username: string,
+      isAnonymousReply: boolean = false,
+    ) => {
+      setReplyingTo({
+        commentId,
+        username: displayName,
+        mentionUsername: username,
+        isAnonymous: isAnonymousReply,
       });
-    } catch (error) {
-      Alert.alert("Error", "Failed to share post");
-    }
-  };
+      setCommentText(`@${username} `);
+      setIsAnonymous(false);
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+    },
+    [setReplyingTo],
+  );
 
-  const handleSavePost = () => {
-    Alert.alert("Saved", "Post saved to your bookmarks");
-  };
-
-  const handleReportPost = () => {
-    Alert.alert(
-      "Report Submitted",
-      "Thank you for reporting this post. Our team will review it.",
-    );
-  };
-
-  const handleHidePost = () => {
-    Alert.alert("Post Hidden", "You won't see this post anymore");
-    router.back();
-  };
-
-  const handleCopyLink = () => {
-    Alert.alert("Link Copied", "Post link copied to clipboard");
-  };
-
-  const handleMuteUser = () => {
-    Alert.alert("User Muted", "You won't see posts from this user anymore");
-    router.back();
-  };
-
-  const handleBlockUser = () => {
-    Alert.alert("User Blocked", "You won't see posts from this user anymore");
-    router.back();
-  };
-
-  const handleCommentLike = async (commentId: string) => {
-    try {
-      const response = await toggleCommentLike(id, commentId);
-      setComments((prev) =>
-        prev.map((comment) =>
-          comment._id === commentId
-            ? {
-                ...comment,
-                likes: response.isLiked
-                  ? [...(comment.likes || []), user?.id || ""]
-                  : comment.likes?.filter((like) => like !== user?.id),
-                isLiked: response.isLiked,
-                likeCount: response.likes,
-              }
-            : comment,
-        ),
-      );
-    } catch (error) {
-      Alert.alert("Error", "Failed to like comment");
-    }
-  };
-
-  const handleCommentUpdate = async (commentId: string, content: string) => {
-    try {
-      const response = await updateComment(id, commentId, content);
-      if (response.success) {
-        setComments((prev) =>
-          prev.map((comment) =>
-            comment._id === commentId
-              ? {
-                  ...comment,
-                  content: response.comment.content,
-                  isEdited: true,
-                }
-              : comment,
-          ),
-        );
-      }
-    } catch (error) {
-      Alert.alert("Error", "Failed to update comment");
-    }
-  };
-
-  const handleCommentDelete = async (commentId: string) => {
-    Alert.alert(
-      "Delete Comment",
-      "Are you sure you want to delete this comment?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const response = await deleteComment(id, commentId);
-              if (response.success) {
-                setComments((prev) => prev.filter((c) => c._id !== commentId));
-                setPost((prev) =>
-                  prev
-                    ? { ...prev, commentCount: (prev.commentCount || 1) - 1 }
-                    : null,
-                );
-              }
-            } catch (error) {
-              Alert.alert("Error", "Failed to delete comment");
-            }
-          },
-        },
-      ],
-    );
-  };
-
-  const handleCommentReport = async (commentId: string) => {
-    Alert.alert("Report", "Report submitted. We'll review it shortly.");
-  };
-
-  const handleCommentReply = (
-    commentId: string,
-    displayName: string,
-    username: string,
-    isAnonymous: boolean = false,
-  ) => {
-    setReplyingTo({
-      commentId,
-      username: displayName,
-      mentionUsername: username,
-      isAnonymous,
-    });
-    setCommentText(`@${username} `);
-    setIsAnonymous(false);
-    setTimeout(() => {
-      inputRef.current?.focus();
-    }, 100);
-  };
-
-  const handleCancelReply = () => {
+  const handleCancelReply = useCallback(() => {
     setReplyingTo(null);
     setCommentText("");
     setIsAnonymous(false);
-  };
+  }, [setReplyingTo]);
 
-  const handleAnonymousToggle = () => {
-    setIsAnonymous(!isAnonymous);
-  };
+  const onSubmitComment = useCallback(() => {
+    submitComment(commentText, isAnonymous, () => {
+      setCommentText("");
+      setReplyingTo(null);
+      setIsAnonymous(false);
+    });
+  }, [commentText, isAnonymous, submitComment, setReplyingTo]);
 
-  const loadMoreComments = () => {
+  // ===== Image Handling =====
+  const handleImagePress = useCallback((index: number) => {
+    setSelectedImageIndex(index);
+    setImageModalVisible(true);
+  }, []);
+
+  const handleModalScroll = useCallback((event: any) => {
+    const index = Math.round(event.nativeEvent.contentOffset.x / screenWidth);
+    setSelectedImageIndex(index);
+  }, []);
+
+  const loadMoreComments = useCallback(() => {
     if (hasMore && !isLoadingMore && comments.length > 0 && !error) {
       loadComments(page + 1, true);
     }
-  };
+  }, [hasMore, isLoadingMore, comments.length, error, page, loadComments]);
 
+  // ===== Effects =====
   useEffect(() => {
     if (token && id) {
       setLoading(true);
@@ -386,40 +282,75 @@ export default function PostDetailScreen() {
       setLoading(false);
       setError("Please login to view this post");
     }
-  }, [id, token]);
+  }, [id, token, loadPost]);
 
-  // Load comments only after post is successfully loaded
   useEffect(() => {
     if (post && !error) {
       loadComments(1, false);
     }
-  }, [post]);
+  }, [post, error, loadComments]);
 
-  const renderFooterLoader = () => {
-    if (!isLoadingMore) return null;
-    return <ActivityIndicator style={styles.footerLoader} color="#8b5cf6" />;
-  };
-
+  // ===== Render Functions =====
   const renderCommentItem = useCallback(
     ({ item }: { item: Comment }) => (
       <CommentItem
         comment={item}
         postId={post?._id || ""}
-        postAuthorId={post?.user._id || ""}
+        postAuthorId={post?.user?._id || ""}
         isAnonymousPost={post?.isAnonymous || false}
         onReply={handleCommentReply}
-        onLike={handleCommentLike}
-        onUpdate={handleCommentUpdate}
-        onDelete={handleCommentDelete}
-        onReport={handleCommentReport}
+        onLike={commentLikeHandler}
+        onUpdate={commentEditHandler}
+        onDelete={commentDeleteHandler}
+        onReport={commentReportHandler}
         currentUserId={user?.id || ""}
-        onEditStateChange={() => {}}
+        onEditStateChange={setIsAnyCommentEditing}
       />
     ),
-    [post, user?.id],
+    [
+      post?._id,
+      post?.user?._id,
+      post?.isAnonymous,
+      user?.id,
+      handleCommentReply,
+      commentLikeHandler,
+      commentEditHandler,
+      commentDeleteHandler,
+      commentReportHandler,
+    ],
   );
 
-  // Show error state for deleted/missing post
+  // ✅ Memoize PostPreview to prevent re-renders on like
+  const renderPostHeader = useMemo(() => {
+    if (!post) return null;
+    return (
+      <PostPreview
+        post={post}
+        isLiked={isPostLiked}
+        likesCount={postLikesCount}
+        onLikePress={handlePostLike}
+        onImagePress={handleImagePress}
+      />
+    );
+  }, [post, isPostLiked, postLikesCount, handlePostLike, handleImagePress]);
+
+  const renderFooterLoader = useCallback(() => {
+    if (!isLoadingMore) return null;
+    return <ActivityIndicator style={styles.footerLoader} color="#8b5cf6" />;
+  }, [isLoadingMore]);
+
+  const renderEmptyComments = useCallback(() => {
+    if (loading) return null;
+    return (
+      <View style={styles.emptyContainer}>
+        <Ionicons name="chatbubbles-outline" size={48} color="#9ca3af" />
+        <Text style={styles.emptyTitle}>No comments yet</Text>
+        <Text style={styles.emptyText}>Be the first to comment!</Text>
+      </View>
+    );
+  }, [loading]);
+
+  // ===== Error States =====
   if (
     error &&
     (error.includes("no longer exists") || error.includes("deleted"))
@@ -447,7 +378,6 @@ export default function PostDetailScreen() {
     );
   }
 
-  // Show loading state
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -456,7 +386,6 @@ export default function PostDetailScreen() {
     );
   }
 
-  // Show other errors
   if (error) {
     return (
       <SafeAreaView style={styles.container}>
@@ -499,6 +428,13 @@ export default function PostDetailScreen() {
     );
   }
 
+  // ===== Prepare images for ImageModal =====
+  const postImages =
+    post.images?.map((img) => ({
+      url: getFullImageUrl(img.url),
+    })) || [];
+
+  // ===== Main Render =====
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
@@ -506,6 +442,7 @@ export default function PostDetailScreen() {
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
       >
+        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
             onPress={() => router.back()}
@@ -517,55 +454,51 @@ export default function PostDetailScreen() {
           <View style={{ width: 40 }} />
         </View>
 
+        {/* Comments List with PostPreview as header */}
         <FlatList
           ref={flatListRef}
           data={comments}
           keyExtractor={(item) => item._id}
           renderItem={renderCommentItem}
-          ListHeaderComponent={
-            <View style={styles.postContainer}>
-              <PostCard
-                post={post}
-                onLikePress={handleLike}
-                onCommentPress={() => {}}
-                onRepostPress={handleRepost}
-                onSharePress={handleShare}
-                onEdit={handleEditPost}
-                onDelete={handleDeletePost}
-                onSave={handleSavePost}
-                onReport={handleReportPost}
-                onHide={handleHidePost}
-                onCopyLink={handleCopyLink}
-                onMuteUser={handleMuteUser}
-                onBlockUser={handleBlockUser}
-              />
-              <View style={styles.commentsHeader}>
-                <Text style={styles.commentsTitle}>
-                  Comments ({post.commentCount || 0})
-                </Text>
-              </View>
-            </View>
-          }
-          ListFooterComponent={renderFooterLoader()}
+          ListHeaderComponent={renderPostHeader}
+          ListEmptyComponent={renderEmptyComments}
+          ListFooterComponent={renderFooterLoader}
           onEndReached={loadMoreComments}
           onEndReachedThreshold={0.3}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="always"
+          // ✅ Remove extraData to prevent full list re-renders
+          // The PostPreview handles its own state updates
         />
 
-        <CommentInput
-          ref={inputRef}
-          value={commentText}
-          onChangeText={setCommentText}
-          onSubmit={handleSubmit}
-          isAnonymous={isAnonymous}
-          onAnonymousToggle={handleAnonymousToggle}
-          isSubmitting={submitting}
-          replyingTo={replyingTo}
-          onCancelReply={handleCancelReply}
-          placeholder="Write a comment..."
-        />
+        {/* Comment Input */}
+        {!isAnyCommentEditing && (
+          <CommentInput
+            ref={inputRef}
+            value={commentText}
+            onChangeText={setCommentText}
+            onSubmit={onSubmitComment}
+            isAnonymous={isAnonymous}
+            onAnonymousToggle={() => setIsAnonymous(!isAnonymous)}
+            isSubmitting={submitting}
+            replyingTo={replyingTo}
+            onCancelReply={handleCancelReply}
+            placeholder="Write a comment..."
+          />
+        )}
+
+        {/* Image Modal */}
+        {imageModalVisible && postImages.length > 0 && (
+          <ImageModal
+            visible={imageModalVisible}
+            onClose={() => setImageModalVisible(false)}
+            images={postImages}
+            selectedIndex={selectedImageIndex}
+            onScroll={handleModalScroll}
+          />
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -574,7 +507,7 @@ export default function PostDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#fff",
   },
   keyboardView: {
     flex: 1,
@@ -583,14 +516,14 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#fff",
   },
   errorContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     padding: 24,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#fff",
   },
   errorIconCircle: {
     width: 100,
@@ -660,22 +593,23 @@ const styles = StyleSheet.create({
   },
   listContent: {
     flexGrow: 1,
-    paddingBottom: 16,
   },
-  postContainer: {
-    marginBottom: 8,
-    paddingHorizontal: 16,
+  emptyContainer: {
+    paddingVertical: 48,
+    alignItems: "center",
   },
-  commentsHeader: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#f8fafc",
-  },
-  commentsTitle: {
-    fontSize: 18,
+  emptyTitle: {
+    fontSize: 16,
     fontWeight: "600",
-    fontFamily: "SofiaSans-Bold",
     color: "#111827",
+    fontFamily: "SofiaSans-Bold",
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  emptyText: {
+    fontSize: 14,
+    fontFamily: "SofiaSans-Regular",
+    color: "#6b7280",
   },
   footerLoader: {
     paddingVertical: 20,

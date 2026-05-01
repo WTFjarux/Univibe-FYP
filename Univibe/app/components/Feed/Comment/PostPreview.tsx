@@ -1,3 +1,5 @@
+// app/components/Feed/Comment/PostPreview.tsx
+
 import React, { useState } from "react";
 import {
   View,
@@ -8,12 +10,16 @@ import {
   Dimensions,
   ScrollView,
   ImageSourcePropType,
+  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router"; // ✅ Import useRouter
 import { Post } from "@/lib/services/postService";
 import { formatTimeAgo } from "@/lib/utils/formatTime";
 import { getFullImageUrl, formatUserDisplay } from "@/lib/services/postService";
 import { API_BASE_URL } from "@/constants/ipConstants";
+import { useAuth } from "@/lib/contexts/AuthContext"; // ✅ Import useAuth
+import SharePostModal from "@/app/components/Feed/Post/SharePostModal";
 
 const { width: screenWidth } = Dimensions.get("window");
 const imageWidth = screenWidth - 32;
@@ -53,12 +59,36 @@ const PostPreview: React.FC<PostPreviewProps> = ({
   onLikePress,
   onImagePress,
 }) => {
+  const router = useRouter(); // ✅ Router for navigation
+  const { user: currentUser } = useAuth(); // ✅ Current user for profile check
+
   const [avatarError, setAvatarError] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [shareModalVisible, setShareModalVisible] = useState(false);
   const isScrollingRef = React.useRef(false);
 
   const userDisplay = formatUserDisplay(post);
   const postImages = post.images?.map((img) => getFullImageUrl(img.url)) || [];
+
+  // ✅ Handle profile navigation
+  const handleProfilePress = () => {
+    // Don't navigate for anonymous posts
+    if (post.isAnonymous) return;
+
+    const userId = post.user?._id?.toString();
+    if (!userId) return;
+
+    // Check if it's the current user's own profile
+    if (userId === currentUser?.id?.toString()) {
+      router.push("/(tabs)/profile");
+    } else {
+      router.push(`/profile/${userId}`);
+    }
+  };
+
+  const handleShareSuccess = (data: any) => {
+    Alert.alert("Shared", "Post shared successfully!");
+  };
 
   const renderPostAvatar = () => {
     if (post.isAnonymous) {
@@ -71,11 +101,13 @@ const PostPreview: React.FC<PostPreviewProps> = ({
 
     if (avatarError) {
       return (
-        <View style={[styles.avatar, styles.fallbackAvatar]}>
-          <Text style={styles.fallbackAvatarText}>
-            {userDisplay.name.charAt(0).toUpperCase()}
-          </Text>
-        </View>
+        <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7}>
+          <View style={[styles.avatar, styles.fallbackAvatar]}>
+            <Text style={styles.fallbackAvatarText}>
+              {userDisplay.name.charAt(0).toUpperCase()}
+            </Text>
+          </View>
+        </TouchableOpacity>
       );
     }
 
@@ -83,15 +115,21 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     const imageSource = getProfileImageSource(profileImageUrl);
 
     if (imageSource === DEFAULT_AVATAR) {
-      return <Image source={DEFAULT_AVATAR} style={styles.avatar} />;
+      return (
+        <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7}>
+          <Image source={DEFAULT_AVATAR} style={styles.avatar} />
+        </TouchableOpacity>
+      );
     }
 
     return (
-      <Image
-        source={imageSource}
-        style={styles.avatar}
-        onError={() => setAvatarError(true)}
-      />
+      <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7}>
+        <Image
+          source={imageSource}
+          style={styles.avatar}
+          onError={() => setAvatarError(true)}
+        />
+      </TouchableOpacity>
     );
   };
 
@@ -126,93 +164,134 @@ const PostPreview: React.FC<PostPreviewProps> = ({
   };
 
   return (
-    <View style={styles.postCard}>
-      {/* User Info */}
-      <View style={styles.userRow}>
-        {renderPostAvatar()}
-        <View style={styles.userInfo}>
-          <View style={styles.nameContainer}>
-            <Text style={styles.userName}>{userDisplay.name}</Text>
-          </View>
-          <Text style={styles.timestamp}>{formatTimeAgo(post.createdAt)}</Text>
-        </View>
-      </View>
-
-      {/* Post Text */}
-      <Text style={styles.postText}>{post.content}</Text>
-
-      {/* Images */}
-      {postImages.length > 0 && (
-        <View style={styles.imagesWrapper}>
-          <ScrollView
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            onScrollBeginDrag={() => {
-              isScrollingRef.current = true;
-            }}
-            onScrollEndDrag={() => {
-              isScrollingRef.current = false;
-            }}
-            onMomentumScrollEnd={(e) => {
-              const index = Math.round(
-                e.nativeEvent.contentOffset.x / imageWidth,
-              );
-              setCurrentImageIndex(index);
-              isScrollingRef.current = false;
-            }}
-            scrollEventThrottle={16}
-          >
-            {postImages.map((url, index) => (
+    <>
+      <View style={styles.postCard}>
+        {/* User Info */}
+        <View style={styles.userRow}>
+          {renderPostAvatar()}
+          <View style={styles.userInfo}>
+            <View style={styles.nameContainer}>
+              {/* ✅ Name is now pressable for profile navigation */}
               <TouchableOpacity
-                key={index}
-                onPress={() => onImagePress(index)}
-                activeOpacity={0.9}
+                onPress={handleProfilePress}
+                disabled={post.isAnonymous}
+                activeOpacity={0.7}
               >
-                <Image
-                  source={{ uri: url }}
-                  style={[
-                    styles.image,
-                    { width: imageWidth, height: imageHeight },
-                  ]}
-                  resizeMode="cover"
-                />
+                <Text style={styles.userName}>{userDisplay.name}</Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
-          {renderDots()}
-          {renderCounter()}
+            </View>
+            <Text style={styles.timestamp}>
+              {formatTimeAgo(post.createdAt)}
+            </Text>
+          </View>
         </View>
-      )}
 
-      {/* Stats with Like Button */}
-      <View style={styles.stats}>
-        <TouchableOpacity
-          style={styles.stat}
-          onPress={onLikePress}
-          activeOpacity={0.7}
-        >
-          <Ionicons
-            name={isLiked ? "heart" : "heart-outline"}
-            size={18}
-            color={isLiked ? "#ef4444" : "#6b7280"}
-          />
-          <Text style={[styles.statText, isLiked && styles.statTextActive]}>
-            {likesCount || 0}
-          </Text>
-        </TouchableOpacity>
+        {/* Post Text */}
+        <Text style={styles.postText}>{post.content}</Text>
 
-        <View style={styles.stat}>
-          <Ionicons name="chatbubble-outline" size={18} color="#6b7280" />
-          <Text style={styles.statText}>{post.commentCount || 0}</Text>
+        {/* Images */}
+        {postImages.length > 0 && (
+          <View style={styles.imagesWrapper}>
+            <ScrollView
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onScrollBeginDrag={() => {
+                isScrollingRef.current = true;
+              }}
+              onScrollEndDrag={() => {
+                isScrollingRef.current = false;
+              }}
+              onMomentumScrollEnd={(e) => {
+                const index = Math.round(
+                  e.nativeEvent.contentOffset.x / imageWidth,
+                );
+                setCurrentImageIndex(index);
+                isScrollingRef.current = false;
+              }}
+              scrollEventThrottle={16}
+            >
+              {postImages.map((url, index) => (
+                <TouchableOpacity
+                  key={index}
+                  onPress={() => onImagePress(index)}
+                  activeOpacity={0.9}
+                >
+                  <Image
+                    source={{ uri: url }}
+                    style={[
+                      styles.image,
+                      { width: imageWidth, height: imageHeight },
+                    ]}
+                    resizeMode="cover"
+                  />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            {renderDots()}
+            {renderCounter()}
+          </View>
+        )}
+
+        {/* Stats with Like, Comment, and Share Buttons */}
+        <View style={styles.stats}>
+          <TouchableOpacity
+            style={styles.stat}
+            onPress={onLikePress}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name={isLiked ? "heart" : "heart-outline"}
+              size={18}
+              color={isLiked ? "#ef4444" : "#6b7280"}
+            />
+            <Text style={[styles.statText, isLiked && styles.statTextActive]}>
+              {likesCount || 0}
+            </Text>
+          </TouchableOpacity>
+
+          <View style={styles.stat}>
+            <Ionicons name="chatbubble-outline" size={18} color="#6b7280" />
+            <Text style={styles.statText}>{post.commentCount || 0}</Text>
+          </View>
+
+          {/* Share button */}
+          <TouchableOpacity
+            style={styles.stat}
+            onPress={() => setShareModalVisible(true)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="share-outline" size={18} color="#6b7280" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Comments Header */}
+        <View style={styles.commentsHeader}>
+          <Text style={styles.commentsTitle}>Comments</Text>
         </View>
       </View>
 
-      {/* Comments Header */}
-      <View style={styles.commentsHeader}>
-        <Text style={styles.commentsTitle}>Comments</Text>
-      </View>
-    </View>
+      {/* Share Post Modal */}
+      <SharePostModal
+        visible={shareModalVisible}
+        onClose={() => setShareModalVisible(false)}
+        onSuccess={handleShareSuccess}
+        postId={post._id}
+        postContent={post.content}
+        postImage={
+          post.images?.[0]?.url
+            ? getFullImageUrl(post.images[0].url)
+            : undefined
+        }
+        postAuthorName={userDisplay.name}
+        postAuthorAvatar={
+          post.user?.profilePicture
+            ? getFullImageUrl(post.user.profilePicture)
+            : undefined
+        }
+        isAnonymous={post.isAnonymous}
+      />
+    </>
   );
 };
 

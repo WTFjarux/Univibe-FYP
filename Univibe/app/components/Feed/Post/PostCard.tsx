@@ -1,4 +1,4 @@
-// app/components/Feed/Post/PostCard.tsx - Complete Updated Version
+// app/components/Feed/Post/PostCard.tsx
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
@@ -10,11 +10,11 @@ import {
   ScrollView,
   NativeScrollEvent,
   NativeSyntheticEvent,
-  Alert,
   ImageSourcePropType,
+  Pressable,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useRouter, usePathname } from "expo-router";
 import { Post, getFullImageUrl } from "@/lib/services/postService";
 import { formatTimeAgo } from "@/lib/utils/formatTime";
 import PostOptionsModal from "./PostOptionsModal";
@@ -28,8 +28,10 @@ type IconName = React.ComponentProps<typeof Ionicons>["name"];
 interface PostCardProps {
   post: Post;
   compact?: boolean;
+  disableNavigation?: boolean;
   hideActions?: boolean;
   hideTime?: boolean;
+  onImagePress?: (index: number) => void;
   onLikePress: (postId: string) => void;
   onCommentPress: (postId: string) => void;
   onRepostPress: (postId: string) => void;
@@ -48,8 +50,10 @@ interface PostCardProps {
 const PostCard: React.FC<PostCardProps> = ({
   post,
   compact = false,
+  disableNavigation = false,
   hideActions = false,
   hideTime = false,
+  onImagePress,
   onLikePress,
   onCommentPress,
   onRepostPress,
@@ -65,6 +69,7 @@ const PostCard: React.FC<PostCardProps> = ({
   onProfilePress,
 }) => {
   const router = useRouter();
+  const pathname = usePathname(); // ✅ Get current route
   const { user, profile } = useAuth();
 
   // ===== State Management =====
@@ -169,7 +174,21 @@ const PostCard: React.FC<PostCardProps> = ({
 
   const postImages = getPostImages();
 
-  // ===== Navigation =====
+  // ✅ ===== Navigation Guard =====
+  const isAlreadyOnPostDetail = pathname === "/post/[id]";
+
+  const handlePostNavigation = useCallback(() => {
+    // ✅ Don't navigate if navigation is disabled
+    if (disableNavigation) return;
+    // ✅ Don't navigate if already on post detail
+    if (isAlreadyOnPostDetail) return;
+    // ✅ Don't navigate in compact mode
+    if (compact) return;
+
+    router.push({ pathname: "/post/[id]", params: { id: post._id } });
+  }, [disableNavigation, isAlreadyOnPostDetail, compact, post._id, router]);
+
+  // ===== Profile Navigation =====
   const handleUserPress = useCallback(() => {
     try {
       const userId = getUserIdForNavigation();
@@ -188,11 +207,6 @@ const PostCard: React.FC<PostCardProps> = ({
       console.error("Navigation error in PostCard:", error);
     }
   }, [currentUserId, getUserIdForNavigation, onProfilePress, router]);
-
-  // Navigate to post detail for BOTH compact and feed mode
-  const handlePostPress = useCallback(() => {
-    router.push({ pathname: "/post/[id]", params: { id: post._id } });
-  }, [post._id, router]);
 
   // ===== Image Carousel =====
   const handleScroll = useCallback(
@@ -325,15 +339,21 @@ const PostCard: React.FC<PostCardProps> = ({
     }
 
     return (
-      <Image
-        source={{ uri: image.url }}
-        style={[
-          styles.postImage,
-          { width: containerWidth, height: imageHeight },
-        ]}
-        resizeMode="cover"
-        onError={() => handleImageError(0)}
-      />
+      <TouchableOpacity activeOpacity={0.95} onPress={() => onImagePress?.(0)}>
+        <Image
+          source={{ uri: image.url }}
+          style={[
+            styles.postImage,
+            {
+              width: containerWidth,
+              height: imageHeight,
+              // 👈 Ensure image doesn't overflow
+            },
+          ]}
+          resizeMode="cover"
+          onError={() => handleImageError(0)}
+        />
+      </TouchableOpacity>
     );
   }, [
     containerWidth,
@@ -342,6 +362,7 @@ const PostCard: React.FC<PostCardProps> = ({
     imageHeight,
     compact,
     handleImageError,
+    onImagePress,
   ]);
 
   const renderMultipleImages = useCallback(() => {
@@ -357,6 +378,7 @@ const PostCard: React.FC<PostCardProps> = ({
           onScroll={handleScroll}
           scrollEventThrottle={16}
           decelerationRate="fast"
+          nestedScrollEnabled={true}
           style={{ width: containerWidth }}
         >
           {postImages.map((image, index) => {
@@ -381,16 +403,21 @@ const PostCard: React.FC<PostCardProps> = ({
               );
             }
             return (
-              <Image
+              <TouchableOpacity
                 key={index}
-                source={{ uri: image.url }}
-                style={[
-                  styles.postImage,
-                  { width: containerWidth, height: imageHeight },
-                ]}
-                resizeMode="cover"
-                onError={() => handleImageError(index)}
-              />
+                activeOpacity={0.95}
+                onPress={() => onImagePress?.(index)} // 👈 Call onImagePress with index
+              >
+                <Image
+                  source={{ uri: image.url }}
+                  style={[
+                    styles.postImage,
+                    { width: containerWidth, height: imageHeight },
+                  ]}
+                  resizeMode="cover"
+                  onError={() => handleImageError(index)}
+                />
+              </TouchableOpacity>
             );
           })}
         </ScrollView>
@@ -406,6 +433,7 @@ const PostCard: React.FC<PostCardProps> = ({
     handleScroll,
     handleImageError,
     renderIndicators,
+    onImagePress,
   ]);
 
   const renderAvatar = useCallback(() => {
@@ -490,28 +518,44 @@ const PostCard: React.FC<PostCardProps> = ({
   const visibilityIconName = getVisibilityIconName();
   const visibilityBadgeColor = getVisibilityBadgeColor();
 
-  // ===== Main Render =====
+  // ===== ✅ Main Render - No outer TouchableOpacity =====
   return (
-    <TouchableOpacity
+    <View
       style={[styles.postCard, compact && styles.compactPostCard]}
-      onPress={handlePostPress}
-      activeOpacity={0.8}
       onLayout={(event) => {
         const { width } = event.nativeEvent.layout;
         setContainerWidth(width);
       }}
     >
-      {/* Post Header */}
+      {/* ✅ Post Header */}
       <View style={[styles.postHeader, compact && styles.compactPostHeader]}>
-        {renderAvatar()}
+        {/* ✅ Avatar - Pressable for profile navigation */}
+        <Pressable
+          onPress={(e) => {
+            e.stopPropagation();
+            handleUserPress();
+          }}
+          disabled={compact}
+        >
+          {renderAvatar()}
+        </Pressable>
 
         <View style={styles.postUserInfo}>
           <View style={styles.postUser}>
-            <Text
-              style={[styles.postUserName, compact && styles.compactUserName]}
+            {/* ✅ Name - Pressable for profile navigation */}
+            <Pressable
+              onPress={(e) => {
+                e.stopPropagation();
+                handleUserPress();
+              }}
+              disabled={compact || post.isAnonymous}
             >
-              {getUserDisplayName()}
-            </Text>
+              <Text
+                style={[styles.postUserName, compact && styles.compactUserName]}
+              >
+                {getUserDisplayName()}
+              </Text>
+            </Pressable>
 
             {post.user?.verified && !compact && (
               <Ionicons name="checkmark-circle" size={16} color="#10b981" />
@@ -541,26 +585,28 @@ const PostCard: React.FC<PostCardProps> = ({
             )}
           </View>
 
-          {/* Only show username and time if not hidden */}
-          {hideTime ? (
-            <Text
-              style={[
-                styles.postUserDetails,
-                compact && styles.compactUserDetails,
-              ]}
-            >
-              @{getUserDisplayHandle()}
-            </Text>
-          ) : (
-            <Text
-              style={[
-                styles.postUserDetails,
-                compact && styles.compactUserDetails,
-              ]}
-            >
-              @{getUserDisplayHandle()} • {formatTimeAgo(post.createdAt)}
-            </Text>
-          )}
+          {/* ✅ Username and time - Clickable for post navigation */}
+          <Pressable onPress={handlePostNavigation}>
+            {hideTime ? (
+              <Text
+                style={[
+                  styles.postUserDetails,
+                  compact && styles.compactUserDetails,
+                ]}
+              >
+                @{getUserDisplayHandle()}
+              </Text>
+            ) : (
+              <Text
+                style={[
+                  styles.postUserDetails,
+                  compact && styles.compactUserDetails,
+                ]}
+              >
+                @{getUserDisplayHandle()} • {formatTimeAgo(post.createdAt)}
+              </Text>
+            )}
+          </Pressable>
         </View>
 
         {!compact && (
@@ -569,22 +615,25 @@ const PostCard: React.FC<PostCardProps> = ({
               e.stopPropagation();
               handleMorePress();
             }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Ionicons name="ellipsis-horizontal" size={20} color="#9ca3af" />
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Post Content */}
+      {/* ✅ Post Content - Clickable for navigation */}
       {!compact && post.content ? (
-        <Text style={styles.postContent}>{post.content}</Text>
+        <Pressable onPress={handlePostNavigation}>
+          <Text style={styles.postContent}>{post.content}</Text>
+        </Pressable>
       ) : compact && post.content ? (
         <Text style={styles.compactPostContent} numberOfLines={2}>
           {post.content}
         </Text>
       ) : null}
 
-      {/* Post Images */}
+      {/* ✅ Post Images - Fully isolated from navigation touch */}
       {postImages.length > 0 && containerWidth > 0 && (
         <View style={[styles.imagesContainer, compact && { marginBottom: 0 }]}>
           {postImages.length === 1
@@ -601,7 +650,7 @@ const PostCard: React.FC<PostCardProps> = ({
         </View>
       )}
 
-      {/* Post Actions - Hidden when hideActions is true */}
+      {/* Post Actions */}
       {!hideActions && (
         <View
           style={[styles.postActions, compact && styles.compactPostActions]}
@@ -679,7 +728,7 @@ const PostCard: React.FC<PostCardProps> = ({
         </View>
       )}
 
-      {/* Post Options Modal - only in non-compact mode */}
+      {/* Post Options Modal */}
       {!compact && (
         <PostOptionsModal
           visible={optionsVisible}
@@ -700,11 +749,11 @@ const PostCard: React.FC<PostCardProps> = ({
           userId={post.user?._id}
         />
       )}
-    </TouchableOpacity>
+    </View>
   );
 };
 
-// ===== Styles =====
+// ===== Styles (unchanged) =====
 const styles = StyleSheet.create({
   postCard: {
     backgroundColor: "white",
@@ -814,6 +863,7 @@ const styles = StyleSheet.create({
   },
   postImage: {
     backgroundColor: "#f3f4f6",
+    borderRadius: 12,
   },
   multiImageContainer: {
     position: "relative",
