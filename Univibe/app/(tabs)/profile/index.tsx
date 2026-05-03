@@ -1,4 +1,4 @@
-// app/(tabs)/profile/index.tsx - Fixed infinite loading
+// app/(tabs)/profile/index.tsx - Fixed infinite loading, removed repost
 
 import React, {
   useRef,
@@ -311,10 +311,8 @@ export default function ProfileScreen() {
           post._id === postId
             ? {
                 ...post,
-                likes: response.isLiked
-                  ? [...(post.likes || []), { _id: user?.id || "current-user" }]
-                  : post.likes?.filter((like: any) => like._id !== user?.id),
                 isLiked: response.isLiked,
+                likeCount: response.likes,
               }
             : post,
         ),
@@ -334,10 +332,6 @@ export default function ProfileScreen() {
       pathname: "/components/Feed/Comment/CommentsScreen",
       params: { postId },
     });
-  };
-
-  const handleRepost = (postId: string) => {
-    Alert.alert("Repost", "Repost feature coming soon!");
   };
 
   const handleShare = (postId: string) => {
@@ -467,7 +461,7 @@ export default function ProfileScreen() {
     }
   }, [profile, fetchPostCount, fetchConnectionCount]);
 
-  // Load posts only when switching to posts tab and posts haven't been loaded yet
+  // Load posts only when switching to posts tab
   useEffect(() => {
     if (
       activeTab === "posts" &&
@@ -487,11 +481,10 @@ export default function ProfileScreen() {
     fetchUserPosts,
   ]);
 
-  // Refresh on screen focus (but don't reload everything)
+  // Refresh on screen focus
   useFocusEffect(
     useCallback(() => {
       if (user?.id && initialLoadDone.current && !refreshInProgress.current) {
-        // Refresh counts in background (don't show loading)
         fetchPostCount();
         fetchConnectionCount();
       }
@@ -550,7 +543,6 @@ export default function ProfileScreen() {
       if (!result.canceled && result.assets?.[0]?.uri) {
         const success = await uploadProfileImage(result.assets[0].uri);
         if (success) {
-          // Invalidate profile cache
           await profileCache.clear("my_profile");
           await loadProfile();
           await refreshUserProfile();
@@ -623,9 +615,7 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleImagePress = () => {
-    openUploadModal();
-  };
+  const handleImagePress = () => openUploadModal();
 
   // ============ COVER PHOTO HANDLERS ============
 
@@ -776,7 +766,7 @@ export default function ProfileScreen() {
     [activeTab, postCount],
   );
 
-  // Memoize posts props
+  // Memoize posts props (NO repost)
   const postsProps = useMemo(
     () => ({
       posts,
@@ -787,7 +777,6 @@ export default function ProfileScreen() {
       hasMore: hasMorePosts,
       onLikePress: handleLike,
       onCommentPress: handleComment,
-      onRepostPress: handleRepost,
       onSharePress: handleShare,
       onEdit: handleEditPost,
       onDelete: handleDeletePost,
@@ -805,14 +794,12 @@ export default function ProfileScreen() {
   const aboutContentOnly = useMemo(
     () => (
       <View style={styles.aboutContent}>
-        {/* Cache indicator */}
         {isCached && (
           <View style={cacheStyles.cacheIndicator}>
             <Ionicons name="cloud-outline" size={12} color="#9ca3af" />
             <Text style={cacheStyles.cacheText}>Loaded from cache</Text>
           </View>
         )}
-
         <ProfileInfo profile={profile} user={user} />
         <ProfileStats
           stats={{
@@ -833,9 +820,7 @@ export default function ProfileScreen() {
             </View>
             <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
           </TouchableOpacity>
-
           <View style={menuStyles.divider} />
-
           <TouchableOpacity
             style={menuStyles.menuItem}
             onPress={() =>
@@ -849,9 +834,7 @@ export default function ProfileScreen() {
             </View>
             <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
           </TouchableOpacity>
-
           <View style={menuStyles.divider} />
-
           <TouchableOpacity
             style={menuStyles.menuItem}
             onPress={() =>
@@ -865,9 +848,7 @@ export default function ProfileScreen() {
             </View>
             <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
           </TouchableOpacity>
-
           <View style={menuStyles.divider} />
-
           <TouchableOpacity
             style={menuStyles.menuItem}
             onPress={handleLogoutConfirm}
@@ -940,8 +921,6 @@ export default function ProfileScreen() {
           {profileTabs}
           {aboutContentOnly}
         </ScrollView>
-
-        {/* Modals */}
         <UploadModal
           visible={uploadModal}
           onClose={closeUploadModal}
@@ -957,7 +936,6 @@ export default function ProfileScreen() {
           viewLabel="View Profile Picture"
           deleteLabel="Remove Profile Picture"
         />
-
         <UploadModal
           visible={coverModal}
           onClose={closeCoverModal}
@@ -969,7 +947,6 @@ export default function ProfileScreen() {
           title="Cover Photo"
           viewLabel="View Cover Photo"
         />
-
         <ImageViewModal
           visible={viewPhotoModal}
           imageUri={profile?.profilePicture}
@@ -977,7 +954,6 @@ export default function ProfileScreen() {
           title="Profile Picture"
           isCoverPhoto={false}
         />
-
         <ImageViewModal
           visible={coverViewModal}
           imageUri={profile?.coverPhoto}
@@ -992,14 +968,12 @@ export default function ProfileScreen() {
   // Posts tab
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      {/* Cache indicator for posts tab */}
       {isCached && (
         <View style={cacheStyles.cacheHeader}>
           <Ionicons name="cloud-outline" size={12} color="#9ca3af" />
           <Text style={cacheStyles.cacheHeaderText}>Loaded from cache</Text>
         </View>
       )}
-
       <MemoizedProfilePosts
         {...postsProps}
         listHeaderComponent={
@@ -1009,8 +983,6 @@ export default function ProfileScreen() {
           </>
         }
       />
-
-      {/* Modals */}
       <UploadModal
         visible={uploadModal}
         onClose={closeUploadModal}
@@ -1026,7 +998,6 @@ export default function ProfileScreen() {
         viewLabel="View Profile Picture"
         deleteLabel="Remove Profile Picture"
       />
-
       <UploadModal
         visible={coverModal}
         onClose={closeCoverModal}
@@ -1038,7 +1009,6 @@ export default function ProfileScreen() {
         title="Cover Photo"
         viewLabel="View Cover Photo"
       />
-
       <ImageViewModal
         visible={viewPhotoModal}
         imageUri={profile?.profilePicture}
@@ -1046,7 +1016,6 @@ export default function ProfileScreen() {
         title="Profile Picture"
         isCoverPhoto={false}
       />
-
       <ImageViewModal
         visible={coverViewModal}
         imageUri={profile?.coverPhoto}
@@ -1078,11 +1047,7 @@ const menuStyles = StyleSheet.create({
     paddingHorizontal: 18,
     alignItems: "center",
   },
-  menuItemContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-  },
+  menuItemContent: { flexDirection: "row", alignItems: "center", flex: 1 },
   menuText: {
     fontSize: 18,
     color: "#374151",
@@ -1090,17 +1055,11 @@ const menuStyles = StyleSheet.create({
     marginLeft: 12,
     fontFamily: "SofiaSans-Regular",
   },
-  divider: {
-    height: 1,
-    backgroundColor: "#f3f4f6",
-    marginLeft: 52,
-  },
+  divider: { height: 1, backgroundColor: "#f3f4f6", marginLeft: 52 },
 });
 
 const scrollStyles = StyleSheet.create({
-  scrollContent: {
-    paddingBottom: 20,
-  },
+  scrollContent: { paddingBottom: 20 },
 });
 
 const cacheStyles = StyleSheet.create({

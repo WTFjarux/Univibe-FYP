@@ -1,7 +1,7 @@
 // Univibe/lib/AuthContext.tsx
 /**
  * Authentication Context
- * Manages user authentication state, token handling, and profile data
+ * Manages user authentication state, token handling, profile data, and socket connection
  */
 
 import React, {
@@ -10,7 +10,9 @@ import React, {
   useContext,
   useEffect,
   useRef,
+  useCallback,
 } from "react";
+import socketService from "../services/socketService";
 import { jwtDecode } from "jwt-decode";
 import { AppState, AppStateStatus } from "react-native";
 import * as SecureStore from "expo-secure-store";
@@ -84,6 +86,52 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const isAuthenticated =
     !!token && !!user?.isEmailVerified && !!user?.profileComplete;
   const appState = useRef(AppState.currentState);
+  const socketConnectedRef = useRef(false);
+
+  // ============================================
+  // SOCKET CONNECTION MANAGEMENT
+  // ============================================
+
+  /**
+   * Connect socket when user is authenticated and profile is complete.
+   * Only connects once to avoid duplicate connections.
+   */
+  const connectSocket = useCallback(async () => {
+    if (socketConnectedRef.current) {
+      console.log("🔌 Socket already connected, skipping");
+      return;
+    }
+
+    const currentToken = token || (await SecureStore.getItemAsync("authToken"));
+
+    if (!currentToken) {
+      console.log("🔌 No token available for socket connection");
+      return;
+    }
+
+    try {
+      const socket = await socketService.connect();
+      if (socket) {
+        socketConnectedRef.current = true;
+        console.log("🟢 Socket connected via AuthContext");
+      }
+    } catch (error) {
+      console.error("❌ Failed to connect socket:", error);
+    }
+  }, [token]);
+
+  /**
+   * Disconnect socket on logout
+   */
+  const disconnectSocket = useCallback(() => {
+    socketService.disconnect();
+    socketConnectedRef.current = false;
+    console.log("🔴 Socket disconnected via AuthContext");
+  }, []);
+
+  // ============================================
+  // INITIALIZATION
+  // ============================================
 
   // Initialize auth state on mount
   useEffect(() => {
@@ -125,13 +173,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           } catch (error) {
             // Silent fail
           }
+
+          // ✅ Reconnect socket when app returns to foreground
+          if (isAuthenticated) {
+            connectSocket();
+          }
         }
         appState.current = nextAppState;
       },
     );
 
     return () => subscription.remove();
-  }, [token]);
+  }, [token, isAuthenticated, connectSocket]);
 
   // ============================================
   // TOKEN MANAGEMENT
@@ -245,16 +298,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   /**
-   * Check if user has ACTUALLY completed profile setup
-   * Default profile has major: "Undecided" - so completed profile won't
+   * Check if user has completed profile setup
    */
   const hasCompletedProfile = (profileData: any, userData?: any): boolean => {
-    // Most reliable: user.profileComplete flag from backend
     if (userData?.profileComplete === true) return true;
     if (profileData?.user?.profileComplete === true) return true;
     if (profileData?.data?.user?.profileComplete === true) return true;
 
-    // Fallback: check if profile has been customized
     const p = profileData?.data?.profile || profileData?.profile || profileData;
     if (p?.major && p.major !== "Undecided" && p?.username) return true;
 
@@ -287,16 +337,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
-  /**
-   * Legacy refresh method
-   */
   const refreshProfile = async () => {
     await fetchUserProfile();
   };
 
-  /**
-   * Load profile if token exists
-   */
   const loadProfile = async () => {
     if (!token) return;
     await fetchUserProfile();
@@ -308,7 +352,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
   /**
    * Check and restore authentication state on app start
-   * Keeps token even if profile incomplete (routing layers handle redirection)
    */
   const checkAuthState = async () => {
     try {
@@ -331,7 +374,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         return;
       }
 
-      // Block unverified users
       if (!decoded.isEmailVerified) {
         console.log("🔐 Email not verified, clearing session");
         await clearAuthData();
@@ -353,12 +395,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           iat: decoded.iat,
         });
 
-        // Fetch profile to check completion status
         const profileData = await fetchUserProfile();
 
         if (hasCompletedProfile(profileData, { profileComplete: false })) {
           console.log("🔐 Profile complete, full access granted");
           setUser((prev) => (prev ? { ...prev, profileComplete: true } : null));
+
+          // ✅ Connect socket when profile is complete
+          connectSocket();
         } else {
           console.log("🔐 Profile incomplete, user needs setup");
           setUser((prev) =>
@@ -489,6 +533,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         });
 
         await fetchUserProfile();
+
+        // ✅ Connect socket after successful login
+        if (responseData.user?.profileComplete) {
+          connectSocket();
+        }
+
         console.log(
           "🔐 Login successful, profileComplete:",
           responseData.user?.profileComplete,
@@ -505,7 +555,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
   /**
    * Register new user account
-   * No token stored - user must verify email first
    */
   const signup = async (name: string, email: string, password: string) => {
     try {
@@ -548,6 +597,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       if (response?.success === true) {
         await fetchUserProfile();
         setUser((prev) => (prev ? { ...prev, profileComplete: true } : null));
+
+        // ✅ Connect socket after profile setup
+        connectSocket();
+
         return response;
       } else {
         throw new Error(response?.message || "Profile creation failed");
@@ -564,6 +617,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
    */
   const logout = async () => {
     try {
+      // ✅ Disconnect socket before clearing auth data
+      disconnectSocket();
+
       await clearAuthData();
       console.log("🔐 Logout successful");
     } catch (error) {

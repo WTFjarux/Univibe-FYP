@@ -151,7 +151,6 @@ export default function PublicProfileScreen() {
   const goBack = () => router.back();
 
   // Start chat with user
-
   const startChat = async () => {
     if (!profile) return;
 
@@ -160,17 +159,13 @@ export default function PublicProfileScreen() {
         `${API_BASE_URL}/api/chat/room/${profile.user._id}`,
         {
           method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { Authorization: `Bearer ${token}` },
         },
       );
       const data = await response.json();
 
       if (data.success) {
-        // Get the full profile picture URL
         const avatarUrl = profile.profilePicture || "";
-
         router.push({
           pathname: "/screens/ChatScreen",
           params: {
@@ -238,19 +233,18 @@ export default function PublicProfileScreen() {
         const backendStatus = response.data.status as string;
         let status: ConnectionStatus = "not_connected";
 
-        if (backendStatus === "connected") {
-          status = "connected";
-        } else if (
+        if (backendStatus === "connected") status = "connected";
+        else if (
           backendStatus === "pending_sent" ||
           backendStatus === "request_sent"
-        ) {
+        )
           status = "pending_sent";
-        } else if (
+        else if (
           backendStatus === "pending_received" ||
           backendStatus === "request_received"
-        ) {
+        )
           status = "pending_received";
-        }
+
         setConnectionStatus(status);
       }
     } catch (error) {
@@ -294,10 +288,7 @@ export default function PublicProfileScreen() {
           stats: profileData.stats || { posts: 0, connections: 0, groups: 0 },
         });
 
-        if (!isOwnProfile) {
-          await loadConnectionStatus();
-        }
-
+        if (!isOwnProfile) await loadConnectionStatus();
         await loadProfilePosts(1, false);
       } else {
         showInfoBar(response.message || "Failed to load profile", "error");
@@ -314,7 +305,6 @@ export default function PublicProfileScreen() {
 
   const onRefresh = async () => {
     if (!token) return;
-
     setRefreshing(true);
     await loadProfile();
     setRefreshing(false);
@@ -329,7 +319,7 @@ export default function PublicProfileScreen() {
     }
   };
 
-  // Handle like action
+  // ✅ FIXED: Handle like action - uses likeCount instead of likes array
   const handleLike = async (postId: string) => {
     if (!token) {
       showInfoBar("Please login to like posts", "info");
@@ -344,15 +334,8 @@ export default function PublicProfileScreen() {
           post._id === postId
             ? {
                 ...post,
-                likes: response.isLiked
-                  ? [
-                      ...(post.likes || []),
-                      { _id: currentUser?.id || "current-user" },
-                    ]
-                  : post.likes?.filter(
-                      (like: any) => like._id !== currentUser?.id,
-                    ),
                 isLiked: response.isLiked,
+                likeCount: response.likes,
               }
             : post,
         ),
@@ -368,19 +351,10 @@ export default function PublicProfileScreen() {
       showInfoBar("Please login to comment", "info");
       return;
     }
-
     router.push({
       pathname: "/components/Feed/Comment/CommentsScreen",
       params: { postId },
     });
-  };
-
-  const handleRepost = (postId: string) => {
-    if (!token) {
-      showInfoBar("Please login to repost", "info");
-      return;
-    }
-    showInfoBar("Repost feature coming soon!", "info");
   };
 
   const handleShare = (postId: string) => {
@@ -424,11 +398,7 @@ export default function PublicProfileScreen() {
   };
 
   const handleHidePost = (postId: string) => {
-    setHiddenPosts((prev) => {
-      const newSet = new Set(prev);
-      newSet.add(postId);
-      return newSet;
-    });
+    setHiddenPosts((prev) => new Set(prev).add(postId));
     setPosts((prev) => prev.filter((post) => post._id !== postId));
     showInfoBar("Post hidden, you won't see this post anymore", "info");
   };
@@ -438,11 +408,7 @@ export default function PublicProfileScreen() {
   };
 
   const handleMuteUser = (userId: string) => {
-    setMutedUsers((prev) => {
-      const newSet = new Set(prev);
-      newSet.add(userId);
-      return newSet;
-    });
+    setMutedUsers((prev) => new Set(prev).add(userId));
     setPosts((prev) => prev.filter((post) => post.user?._id !== userId));
     showInfoBar(
       "User muted, you won't see posts from this user anymore",
@@ -451,11 +417,7 @@ export default function PublicProfileScreen() {
   };
 
   const handleBlockUser = (userId: string) => {
-    setBlockedUsers((prev) => {
-      const newSet = new Set(prev);
-      newSet.add(userId);
-      return newSet;
-    });
+    setBlockedUsers((prev) => new Set(prev).add(userId));
     setPosts((prev) => prev.filter((post) => post.user?._id !== userId));
     showInfoBar(
       "User blocked, you won't see posts from this user anymore",
@@ -463,7 +425,7 @@ export default function PublicProfileScreen() {
     );
   };
 
-  // Handle cancel connection request (for received requests)
+  // Handle cancel connection request
   const handleCancelConnectionRequest = async () => {
     if (!profile) return;
     setConnectionLoading(true);
@@ -492,20 +454,16 @@ export default function PublicProfileScreen() {
     }
   };
 
-  // Handle connection action with confirmation for remove connection
+  // Handle connection action
   const handleConnectionAction = async () => {
     if (!profile) return;
 
-    // Show confirmation alert for removing connection
     if (connectionStatus === "connected") {
       Alert.alert(
         "Remove Connection",
         `Are you sure you want to remove your connection with ${profile.fullName}?`,
         [
-          {
-            text: "Cancel",
-            style: "cancel",
-          },
+          { text: "Cancel", style: "cancel" },
           {
             text: "Remove",
             style: "destructive",
@@ -544,7 +502,6 @@ export default function PublicProfileScreen() {
                   );
                 }
               } catch (error: any) {
-                console.error("Remove connection error:", error);
                 showInfoBar(
                   error.message || "Failed to remove connection",
                   "error",
@@ -559,9 +516,7 @@ export default function PublicProfileScreen() {
       return;
     }
 
-    // For other actions (send request, cancel request, accept request)
     setConnectionLoading(true);
-
     try {
       switch (connectionStatus) {
         case "not_connected":
@@ -602,7 +557,6 @@ export default function PublicProfileScreen() {
             );
           }
           break;
-
         case "pending_sent":
           const cancelResponse =
             await connectionService.cancelConnectionRequest(profile.user._id);
@@ -616,7 +570,6 @@ export default function PublicProfileScreen() {
             );
           }
           break;
-
         case "pending_received":
           const acceptResponse =
             await connectionService.acceptConnectionRequest(profile.user._id);
@@ -645,23 +598,18 @@ export default function PublicProfileScreen() {
           break;
       }
     } catch (error: any) {
-      console.error("Connection action error:", error);
       showInfoBar(error.message || "Failed to process request", "error");
     } finally {
       setConnectionLoading(false);
     }
   };
 
-  // Reload profile when screen comes into focus
   useFocusEffect(
     useCallback(() => {
-      if (token) {
-        loadProfile();
-      }
+      if (token) loadProfile();
     }, [id, token]),
   );
 
-  // Get button config
   const getConnectionButtonConfig = () => {
     switch (connectionStatus) {
       case "connected":
@@ -714,55 +662,39 @@ export default function PublicProfileScreen() {
     profileComplete: profile?.user.profileComplete,
   };
 
-  // Render info bar from bottom
   const renderInfoBar = () => {
     if (!infoMessage) return null;
-
-    const backgroundColor =
+    const bg =
       infoType === "success"
         ? "#10b981"
         : infoType === "error"
           ? "#ef4444"
           : "#8b5cf6";
-
-    const iconName =
+    const icon =
       infoType === "success"
         ? "checkmark-circle"
         : infoType === "error"
           ? "alert-circle"
           : "information-circle";
-
     return (
       <Animated.View
         style={[
           publicStyles.infoBar,
-          {
-            backgroundColor,
-            transform: [{ translateY: slideAnim }],
-          },
+          { backgroundColor: bg, transform: [{ translateY: slideAnim }] },
         ]}
       >
-        <Ionicons name={iconName} size={20} color="#fff" />
+        <Ionicons name={icon} size={20} color="#fff" />
         <Text style={publicStyles.infoBarText}>{infoMessage}</Text>
       </Animated.View>
     );
   };
 
-  // Render posts header
-  const renderPostsHeader = () => (
-    <View style={publicStyles.postsHeader}>
-      <Text style={publicStyles.postsTitle}>Posts</Text>
-    </View>
-  );
-
-  // Render post item
   const renderPost = ({ item }: { item: Post }) => (
     <View style={publicStyles.postCardContainer}>
       <PostCard
         post={item}
         onLikePress={handleLike}
         onCommentPress={handleComment}
-        onRepostPress={handleRepost}
         onSharePress={handleShare}
         onEdit={handleEditPost}
         onDelete={handleDeletePost}
@@ -775,27 +707,6 @@ export default function PublicProfileScreen() {
       />
     </View>
   );
-
-  // Render empty posts state
-  const renderEmptyPosts = () => (
-    <View style={publicStyles.emptyPostsContainer}>
-      <Ionicons name="document-text-outline" size={48} color="#d1d5db" />
-      <Text style={publicStyles.emptyPostsTitle}>No posts yet</Text>
-      <Text style={publicStyles.emptyPostsText}>
-        {viewerStatus.isConnected
-          ? "This user hasn't posted anything yet."
-          : "Be the first to connect and see their posts!"}
-      </Text>
-    </View>
-  );
-
-  // Render footer loader
-  const renderFooterLoader = () => {
-    if (!postsLoading) return null;
-    return (
-      <ActivityIndicator style={publicStyles.footerLoader} color="#8b5cf6" />
-    );
-  };
 
   if (loading && !profile) {
     return (
@@ -857,12 +768,10 @@ export default function PublicProfileScreen() {
               onCoverPhotoPress={() => {}}
               isPublicView={true}
             />
-
             <View style={styles.content}>
               {!isOwnProfile && (
                 <View style={publicStyles.connectionButtonContainer}>
                   {connectionStatus === "pending_received" ? (
-                    // Show accept and cancel buttons side by side
                     <View style={publicStyles.acceptCancelContainer}>
                       <TouchableOpacity
                         style={[
@@ -887,7 +796,6 @@ export default function PublicProfileScreen() {
                           </>
                         )}
                       </TouchableOpacity>
-
                       <TouchableOpacity
                         style={publicStyles.cancelButton}
                         onPress={handleCancelConnectionRequest}
@@ -901,7 +809,6 @@ export default function PublicProfileScreen() {
                       </TouchableOpacity>
                     </View>
                   ) : (
-                    // Show connection and message buttons side by side
                     <View style={publicStyles.buttonsRow}>
                       <TouchableOpacity
                         style={[
@@ -937,8 +844,6 @@ export default function PublicProfileScreen() {
                           </>
                         )}
                       </TouchableOpacity>
-
-                      {/* Message Button - Always show for non-own profiles */}
                       <TouchableOpacity
                         style={[
                           publicStyles.connectionButton,
@@ -960,7 +865,6 @@ export default function PublicProfileScreen() {
                   )}
                 </View>
               )}
-
               <ProfileInfo profile={profile} user={profile.user} />
               <ProfileStats
                 stats={{
@@ -969,19 +873,40 @@ export default function PublicProfileScreen() {
                   groups: profile.stats?.groups || 0,
                 }}
               />
-              {renderPostsHeader()}
+              <View style={publicStyles.postsHeader}>
+                <Text style={publicStyles.postsTitle}>Posts</Text>
+              </View>
             </View>
           </>
         }
-        ListFooterComponent={renderFooterLoader()}
+        ListFooterComponent={
+          postsLoading ? (
+            <ActivityIndicator
+              style={publicStyles.footerLoader}
+              color="#8b5cf6"
+            />
+          ) : null
+        }
         ListEmptyComponent={
-          posts.length === 0 && !postsLoading ? renderEmptyPosts() : null
+          posts.length === 0 && !postsLoading ? (
+            <View style={publicStyles.emptyPostsContainer}>
+              <Ionicons
+                name="document-text-outline"
+                size={48}
+                color="#d1d5db"
+              />
+              <Text style={publicStyles.emptyPostsTitle}>No posts yet</Text>
+              <Text style={publicStyles.emptyPostsText}>
+                {viewerStatus.isConnected
+                  ? "This user hasn't posted anything yet."
+                  : "Be the first to connect and see their posts!"}
+              </Text>
+            </View>
+          ) : null
         }
         onEndReached={loadMorePosts}
         onEndReachedThreshold={0.3}
       />
-
-      {/* Info bar rendered at the bottom of the screen */}
       {renderInfoBar()}
     </SafeAreaView>
   );
@@ -998,10 +923,7 @@ const publicStyles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#e5e7eb",
   },
-  backButton: {
-    padding: 8,
-    marginLeft: -8,
-  },
+  backButton: { padding: 8, marginLeft: -8 },
   headerTitle: {
     fontSize: 18,
     fontWeight: "600",
@@ -1036,17 +958,9 @@ const publicStyles = StyleSheet.create({
     textAlign: "left",
     lineHeight: 20,
   },
-  connectionButtonContainer: {
-    paddingHorizontal: 20,
-    marginBottom: 16,
-  },
-  buttonsRow: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  flexButton: {
-    flex: 1,
-  },
+  connectionButtonContainer: { paddingHorizontal: 20, marginBottom: 16 },
+  buttonsRow: { flexDirection: "row", gap: 12 },
+  flexButton: { flex: 1 },
   connectionButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -1070,9 +984,7 @@ const publicStyles = StyleSheet.create({
     fontWeight: "600",
   },
   connectedButtonText: { color: "#10b981" },
-  messageButton: {
-    backgroundColor: "#3b82f6",
-  },
+  messageButton: { backgroundColor: "#3b82f6" },
   acceptCancelContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -1088,14 +1000,8 @@ const publicStyles = StyleSheet.create({
     borderRadius: 25,
     gap: 8,
   },
-  cancelButton: {
-    padding: 4,
-    borderRadius: 20,
-  },
-  postsHeader: {
-    marginTop: 16,
-    paddingHorizontal: 20,
-  },
+  cancelButton: { padding: 4, borderRadius: 20 },
+  postsHeader: { marginTop: 16, paddingHorizontal: 20 },
   postsTitle: {
     fontSize: 24,
     fontWeight: "bold",
@@ -1119,14 +1025,7 @@ const publicStyles = StyleSheet.create({
     textAlign: "center",
     marginTop: 4,
   },
-  footerLoader: {
-    paddingVertical: 20,
-  },
-  flatListContent: {
-    paddingBottom: 20,
-  },
-  postCardContainer: {
-    padding: 16,
-    marginBottom: 8,
-  },
+  footerLoader: { paddingVertical: 20 },
+  flatListContent: { paddingBottom: 20 },
+  postCardContainer: { padding: 16, marginBottom: 8 },
 });

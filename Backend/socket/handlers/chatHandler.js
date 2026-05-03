@@ -1,6 +1,17 @@
 /**
  * socket/handlers/chatHandler.js — Real-time Chat Event Handlers
- * Updated: Added forwarding events and support for forwarded messages
+ *
+ * CHAT CLEAR LOGIC:
+ * - clearedAt timestamp stored per user in ChatRoom.clearedBy
+ * - Messages with createdAt > clearedAt are visible
+ * - Messages with createdAt < clearedAt are hidden
+ * - clearedBy entries are NEVER auto-removed
+ * - Each user has independent clearedAt timestamps
+ *
+ * MESSAGE DELIVERY:
+ * - io.to(`user_X`) - Direct delivery to recipient's personal room
+ * - socket.to(roomId) - Broadcast to other sockets in the room
+ * - socket.emit - Instant feedback to sender
  */
 
 const Message = require("../../models/Message");
@@ -40,8 +51,6 @@ const EVENTS = {
   REACTION_REMOVED: "reaction_removed",
   CLEAR_CHAT: "clear_chat",
   CHAT_CLEARED: "chat_cleared",
-  CHAT_RESTORED: "chat_restored",
-  // Forwarding events
   FORWARD_MESSAGE: "forward_message",
   FORWARD_MESSAGE_SUCCESS: "forward_message_success",
   FORWARD_MESSAGE_ERROR: "forward_message_error",
@@ -54,17 +63,15 @@ const setupChatHandlers = (io, socket) => {
   const userId = socket.userId;
   const user = socket.user;
 
-  /**
-   * Join a chat room
-   */
+  // ===========================================================================
+  // JOIN ROOM
+  // ===========================================================================
   socket.on(EVENTS.JOIN_ROOM, async ({ roomId, otherUserId = null }) => {
     try {
       let finalRoomId = roomId;
-
       if (!finalRoomId && otherUserId) {
         finalRoomId = getDirectRoomId(userId, otherUserId);
       }
-
       if (!finalRoomId) {
         socket.emit(EVENTS.ERROR, { message: "Room ID is required" });
         return;
@@ -73,6 +80,7 @@ const setupChatHandlers = (io, socket) => {
       socket.join(finalRoomId);
       addUserToRoom(userId, finalRoomId);
 
+      // Find or create chat room
       let chatRoom = await ChatRoom.findOne({ roomId: finalRoomId });
       if (!chatRoom) {
         const otherId =
@@ -99,7 +107,7 @@ const setupChatHandlers = (io, socket) => {
         await chatRoom.save();
       }
 
-      // Send cleared status along with room_joined
+      // Send cleared status for this user
       const clearedAt = chatRoom.getClearTimestamp
         ? chatRoom.getClearTimestamp(userId)
         : null;
@@ -107,42 +115,35 @@ const setupChatHandlers = (io, socket) => {
       socket.emit("room_joined", {
         roomId: finalRoomId,
         success: true,
-        clearedAt: clearedAt,
+        clearedAt,
         isCleared: !!clearedAt,
       });
 
-      // Notify others in the room that this user joined
-      socket.to(finalRoomId).emit("user_joined_room", {
-        userId,
-        roomId: finalRoomId,
-      });
-
-      console.log(`User ${user?.name || userId} joined room: ${finalRoomId}`);
+      socket
+        .to(finalRoomId)
+        .emit("user_joined_room", { userId, roomId: finalRoomId });
     } catch (error) {
       console.error("Error joining room:", error);
       socket.emit(EVENTS.ERROR, { message: "Failed to join room" });
     }
   });
 
-  /**
-   * Leave a chat room
-   */
+  // ===========================================================================
+  // LEAVE ROOM
+  // ===========================================================================
   socket.on(EVENTS.LEAVE_ROOM, ({ roomId }) => {
     try {
       socket.leave(roomId);
       removeUserFromRoom(userId, roomId);
       socket.emit("room_left", { roomId, success: true });
-      console.log(`User ${user?.name || userId} left room: ${roomId}`);
     } catch (error) {
       console.error("Error leaving room:", error);
     }
   });
 
-  /**
-   * Clear chat history for current user
-   * Sets clearedAt timestamp - old messages stay hidden
-   * Other participant sees all messages as normal
-   */
+  // ===========================================================================
+  // CLEAR CHAT - Sets clearedAt timestamp for current user only
+  // ===========================================================================
   socket.on(EVENTS.CLEAR_CHAT, async ({ roomId }) => {
     try {
       if (!roomId) {
@@ -156,7 +157,6 @@ const setupChatHandlers = (io, socket) => {
         return;
       }
 
-      // Verify user is a participant
       const isParticipant = room.participants.some(
         (p) => p.userId.toString() === userId,
       );
@@ -167,37 +167,23 @@ const setupChatHandlers = (io, socket) => {
 
       const clearedAt = new Date();
 
-      // Remove any existing clearedBy entry for this user
+      // Replace existing clearedBy entry for this user
       room.clearedBy = room.clearedBy.filter(
         (entry) => entry.user.toString() !== userId,
       );
-
-      // Add new clearedBy entry
-      room.clearedBy.push({
-        user: userId,
-        clearedAt,
-        restoreOnNewMessage: true,
-      });
-
+      room.clearedBy.push({ user: userId, clearedAt });
       await room.save();
 
-      // Notify the clearing user
-      socket.emit(EVENTS.CHAT_CLEARED, {
-        roomId,
-        success: true,
-        clearedAt,
-      });
-
-      console.log(`Chat ${roomId} cleared for user ${userId}`);
+      socket.emit(EVENTS.CHAT_CLEARED, { roomId, success: true, clearedAt });
     } catch (error) {
       console.error("Clear chat error:", error);
       socket.emit(EVENTS.ERROR, { message: "Failed to clear chat" });
     }
   });
 
-  /**
-   * Send a message with auto-restore for cleared chats
-   */
+  // ===========================================================================
+  // SEND MESSAGE
+  // ===========================================================================
   socket.on(
     EVENTS.SEND_MESSAGE,
     async ({
@@ -211,30 +197,18 @@ const setupChatHandlers = (io, socket) => {
     }) => {
       try {
         if (!roomId || (!message && type !== "audio")) {
-          const errorResponse = {
+          socket.emit(EVENTS.MESSAGE_ERROR, {
             success: false,
             error: "Room ID and message content are required",
-          };
-          if (tempId) errorResponse.tempId = tempId;
-          socket.emit(EVENTS.MESSAGE_ERROR, errorResponse);
+            tempId,
+          });
           return;
         }
 
-        console.log(`Sending ${type} message to room: ${roomId}`);
-
-        // Check if sender had cleared this chat
         const room = await ChatRoom.findOne({ roomId });
-        let wasCleared = false;
-
-        if (room) {
-          const clearedEntry = room.clearedBy.find(
-            (entry) => entry.user.toString() === userId,
-          );
-          wasCleared = !!clearedEntry;
-        }
-
         const profile = await Profile.findOne({ user: userId });
 
+        // Build message data
         const messageData = {
           sender: userId,
           senderName: user?.name || "Unknown",
@@ -250,24 +224,22 @@ const setupChatHandlers = (io, socket) => {
 
         if (type === "audio") {
           if (!mediaUrl) {
-            const errorResponse = {
+            socket.emit(EVENTS.MESSAGE_ERROR, {
               success: false,
               error: "Audio message requires mediaUrl",
-            };
-            if (tempId) errorResponse.tempId = tempId;
-            socket.emit(EVENTS.MESSAGE_ERROR, errorResponse);
+              tempId,
+            });
             return;
           }
           messageData.mediaUrl = mediaUrl;
           messageData.duration = duration || 0;
         }
 
+        // Attach reply data
         if (replyTo?.messageId) {
-          // Fetch the original message to get its thumbnailUrl
           const originalMsg = await Message.findById(replyTo.messageId)
             .select("thumbnailUrl")
             .lean();
-
           messageData.replyTo = {
             messageId: replyTo.messageId,
             message: replyTo.message || "Media message",
@@ -281,22 +253,20 @@ const setupChatHandlers = (io, socket) => {
           };
         }
 
+        // Save to database
         const savedMessage = new Message(messageData);
         await savedMessage.save();
 
+        // Populate for response
         const populatedMessage = await Message.findById(savedMessage._id)
           .populate("sender", "name email avatar")
-          .populate("readBy.user", "name avatar")
           .lean();
 
-        if (tempId) {
-          populatedMessage.tempId = tempId;
-        }
+        if (tempId) populatedMessage.tempId = tempId;
 
+        // Update room metadata (do NOT touch clearedBy)
         const lastMessageText =
           type === "audio" ? "Voice message" : message?.substring(0, 100);
-
-        // Update room AND auto-restore if sender had cleared chat
         await ChatRoom.findOneAndUpdate(
           { roomId },
           {
@@ -310,61 +280,47 @@ const setupChatHandlers = (io, socket) => {
             },
             updatedAt: new Date(),
             $inc: { messageCount: 1 },
-            // Auto-restore: Remove sender from clearedBy when they send a message
-            ...(wasCleared && {
-              $pull: { clearedBy: { user: userId } },
-            }),
           },
           { upsert: true },
         );
 
-        // Delivery confirmation to sender
+        // Confirm delivery to sender
         socket.emit(EVENTS.MESSAGE_DELIVERED, {
           success: true,
           messageId: savedMessage._id,
           message: populatedMessage,
           tempId,
-          wasCleared, // Frontend can use this to know chat was auto-restored
         });
 
-        // If chat was auto-restored, notify the sender
-        if (wasCleared) {
-          socket.emit(EVENTS.CHAT_RESTORED, {
-            roomId,
-            userId,
-          });
-        }
-
-        // Broadcast to room (all other users in the room)
-        socket.to(roomId).emit(EVENTS.RECEIVE_MESSAGE, populatedMessage);
-
-        // Mark as delivered for online users
-        const otherUserId = room?.participants?.find(
+        // Deliver to recipient
+        const otherParticipant = room?.participants?.find(
           (p) => p.userId.toString() !== userId.toString(),
         );
+        if (otherParticipant) {
+          const otherId = otherParticipant.userId.toString();
 
-        if (otherUserId && isUserOnline(otherUserId.userId.toString())) {
-          await Message.findByIdAndUpdate(savedMessage._id, {
-            $addToSet: {
-              deliveredTo: {
-                user: otherUserId.userId,
-                deliveredAt: new Date(),
+          // Direct delivery to recipient's personal room
+          io.to(`user_${otherId}`).emit(
+            EVENTS.RECEIVE_MESSAGE,
+            populatedMessage,
+          );
+
+          // Broadcast to other sockets in the room (sender's other devices)
+          socket.to(roomId).emit(EVENTS.RECEIVE_MESSAGE, populatedMessage);
+
+          // Mark as delivered if recipient is online
+          if (isUserOnline(otherId)) {
+            await Message.findByIdAndUpdate(savedMessage._id, {
+              $addToSet: {
+                deliveredTo: { user: otherId, deliveredAt: new Date() },
               },
-            },
-          });
-
-          // Notify sender that message was delivered to recipient
-          socket.emit(EVENTS.MESSAGE_DELIVERED_TO_RECIPIENT, {
-            messageId: savedMessage._id,
-            recipientId: otherUserId.userId.toString(),
-          });
+            });
+            socket.emit(EVENTS.MESSAGE_DELIVERED_TO_RECIPIENT, {
+              messageId: savedMessage._id,
+              recipientId: otherId,
+            });
+          }
         }
-
-        console.log(
-          `Message sent - Room: ${roomId}, ID: ${savedMessage._id}${
-            wasCleared ? " (chat auto-restored)" : ""
-          }`,
-        );
       } catch (error) {
         console.error("Send message error:", error);
         socket.emit(EVENTS.MESSAGE_ERROR, {
@@ -376,44 +332,29 @@ const setupChatHandlers = (io, socket) => {
     },
   );
 
-  /**
-   * Forward a message to multiple chats via socket
-   * Alternative to REST API - allows real-time forwarding with immediate feedback
-   */
+  // ===========================================================================
+  // FORWARD MESSAGE
+  // ===========================================================================
   socket.on(EVENTS.FORWARD_MESSAGE, async ({ messageId, targetChatIds }) => {
     try {
-      // Validation
-      if (
-        !messageId ||
-        !targetChatIds ||
-        !Array.isArray(targetChatIds) ||
-        targetChatIds.length === 0
-      ) {
+      if (!messageId || !targetChatIds?.length) {
         socket.emit(EVENTS.FORWARD_MESSAGE_ERROR, {
           success: false,
-          message: "messageId and targetChatIds (non-empty array) are required",
+          message: "messageId and targetChatIds required",
         });
         return;
       }
-
-      // Limit batch size
       if (targetChatIds.length > 10) {
         socket.emit(EVENTS.FORWARD_MESSAGE_ERROR, {
           success: false,
-          message: "Maximum 10 chats can be forwarded to at once",
+          message: "Maximum 10 chats",
         });
         return;
       }
 
-      console.log(
-        `User ${userId} forwarding message ${messageId} to ${targetChatIds.length} chats`,
-      );
-
-      // Fetch original message
       const originalMessage = await Message.findById(messageId)
         .populate("sender", "name")
         .lean();
-
       if (!originalMessage) {
         socket.emit(EVENTS.FORWARD_MESSAGE_ERROR, {
           success: false,
@@ -421,73 +362,37 @@ const setupChatHandlers = (io, socket) => {
         });
         return;
       }
-
-      // Check if the original message is deleted
       if (originalMessage.isDeleted) {
         socket.emit(EVENTS.FORWARD_MESSAGE_ERROR, {
           success: false,
-          message: "Cannot forward a deleted message",
+          message: "Cannot forward deleted message",
         });
         return;
       }
 
-      // Verify user has access to the original message
-      const originalRoom = await ChatRoom.findOne({
-        roomId: originalMessage.roomId,
-      });
-      if (!originalRoom) {
-        socket.emit(EVENTS.FORWARD_MESSAGE_ERROR, {
-          success: false,
-          message: "Original chat room not found",
-        });
-        return;
-      }
-
-      const isParticipant = originalRoom.participants.some(
-        (p) => p.userId.toString() === userId,
-      );
-      if (!isParticipant) {
-        socket.emit(EVENTS.FORWARD_MESSAGE_ERROR, {
-          success: false,
-          message: "You don't have access to this message",
-        });
-        return;
-      }
-
-      // Verify target chats exist and user is a participant
       const targetRooms = await ChatRoom.find({
         roomId: { $in: targetChatIds },
         "participants.userId": userId,
       }).lean();
-
       const validRoomIds = targetRooms.map((r) => r.roomId);
-
-      if (validRoomIds.length === 0) {
+      if (!validRoomIds.length) {
         socket.emit(EVENTS.FORWARD_MESSAGE_ERROR, {
           success: false,
-          message: "No valid target chats found",
+          message: "No valid target chats",
         });
         return;
       }
 
-      // Get user info for the forwarded message sender
       const userInfo = await User.findById(userId).select("name").lean();
       const profile = await Profile.findOne({ user: userId })
         .select("profilePicture")
         .lean();
-
-      // Create forwarded messages for each valid target chat
       const forwardedMessages = [];
-      const forwardedToRooms = [];
 
       await Promise.all(
         validRoomIds.map(async (targetRoomId) => {
-          // Skip if it's the same room
-          if (targetRoomId === originalMessage.roomId) {
-            return;
-          }
+          if (targetRoomId === originalMessage.roomId) return;
 
-          // Build the forwarded message payload
           const forwardedData = {
             sender: userId,
             senderName: userInfo?.name || user?.name || "Unknown",
@@ -504,31 +409,21 @@ const setupChatHandlers = (io, socket) => {
             deliveredTo: [{ user: userId, deliveredAt: new Date() }],
           };
 
-          // Copy type-specific content (no re-upload)
-          if (
-            originalMessage.type === "image" ||
-            originalMessage.type === "video" ||
-            originalMessage.type === "file"
-          ) {
-            // Reuse existing media URLs
+          if (["image", "video", "file"].includes(originalMessage.type)) {
             forwardedData.mediaUrl = originalMessage.mediaUrl || "";
             forwardedData.thumbnailUrl = originalMessage.thumbnailUrl || "";
             forwardedData.mediaSize = originalMessage.mediaSize || 0;
             forwardedData.mediaName = originalMessage.mediaName || "";
             forwardedData.mediaMimeType = originalMessage.mediaMimeType || "";
-            if (originalMessage.type === "video" && originalMessage.duration) {
+            if (originalMessage.type === "video")
               forwardedData.duration = originalMessage.duration;
-            }
           } else if (originalMessage.type === "audio") {
             forwardedData.mediaUrl = originalMessage.mediaUrl || "";
             forwardedData.duration = originalMessage.duration || 0;
-            forwardedData.mediaSize = originalMessage.mediaSize || 0;
-            forwardedData.mediaMimeType = originalMessage.mediaMimeType || "";
           } else if (originalMessage.type === "location") {
             forwardedData.locationData = originalMessage.locationData || {};
           }
 
-          // Handle forwarded replies
           if (originalMessage.replyTo?.messageId) {
             forwardedData.replyTo = {
               messageId: originalMessage.replyTo.messageId,
@@ -542,153 +437,132 @@ const setupChatHandlers = (io, socket) => {
             };
           }
 
-          // Save the forwarded message
           const forwardedMessage = await Message.create(forwardedData);
           forwardedMessages.push(forwardedMessage);
 
-          // Update room's lastMessage
-          const lastMessageText =
-            forwardedData.message?.substring(0, 100) || "";
           await ChatRoom.findOneAndUpdate(
             { roomId: targetRoomId },
             {
               lastMessage: {
-                message: lastMessageText,
+                message: forwardedData.message?.substring(0, 100) || "",
                 sentAt: new Date(),
                 senderId: userId,
-                senderName: userInfo?.name || user?.name || "Unknown",
+                senderName: userInfo?.name || "Unknown",
                 type: originalMessage.type,
                 readBy: [userId],
               },
               updatedAt: new Date(),
               $inc: { messageCount: 1 },
-              $pull: { clearedBy: { user: userId } },
             },
           );
 
-          // Populate and format the message for socket emission
-          const populatedMessage = await Message.findById(forwardedMessage._id)
+          const populated = await Message.findById(forwardedMessage._id)
             .populate("sender", "name avatar")
             .populate("readBy.user", "name avatar")
             .lean();
 
-          // Emit to the target room
-          socket
-            .to(targetRoomId)
-            .emit(EVENTS.RECEIVE_MESSAGE, populatedMessage);
-
-          // Also emit a specific forwarded message event
-          socket.to(targetRoomId).emit(EVENTS.MESSAGE_FORWARDED_TO_ROOM, {
-            message: populatedMessage,
+          io.to(targetRoomId).emit(EVENTS.RECEIVE_MESSAGE, populated);
+          socket.emit(EVENTS.MESSAGE_FORWARDED_TO_ROOM, {
+            message: populated,
             roomId: targetRoomId,
             forwardedBy: userId,
-            forwardedByName: userInfo?.name || user?.name || "Unknown",
+            forwardedByName: userInfo?.name || "Unknown",
           });
-
-          forwardedToRooms.push(targetRoomId);
-
-          console.log(`Message forwarded to room ${targetRoomId}`);
         }),
       );
 
-      // Filter out null values (skipped same-room forwards)
-      const successfulForwards = forwardedMessages.filter(Boolean);
-
-      // Notify the sender of success
+      const successful = forwardedMessages.filter(Boolean);
       socket.emit(EVENTS.FORWARD_MESSAGE_SUCCESS, {
         success: true,
-        message: `Message forwarded to ${successfulForwards.length} chat(s)`,
+        message: `Forwarded to ${successful.length} chat(s)`,
         data: {
-          forwardedCount: successfulForwards.length,
-          forwardedMessages: successfulForwards,
-          forwardedToRooms: forwardedToRooms,
+          forwardedCount: successful.length,
+          forwardedMessages: successful,
         },
       });
-
-      console.log(
-        `User ${userId} forwarded message ${messageId} to ${successfulForwards.length} chats`,
-      );
     } catch (error) {
       console.error("Forward message error:", error);
       socket.emit(EVENTS.FORWARD_MESSAGE_ERROR, {
         success: false,
-        message: error.message || "Failed to forward message",
+        message: error.message || "Failed to forward",
       });
     }
   });
 
-  /**
-   * Mark all messages in a room as read
-   * Only marks messages after user's clearedAt timestamp
-   */
+  // ===========================================================================
+  // MARK ALL MESSAGES READ
+  // ===========================================================================
   socket.on(EVENTS.MARK_READ, async ({ roomId }) => {
     try {
       if (!roomId) return;
 
-      console.log(`User ${userId} marking room ${roomId} as read`);
+      // Find unread messages from OTHER users before marking
+      const unreadMessages = await Message.find({
+        roomId,
+        sender: { $ne: userId },
+        "readBy.user": { $ne: userId },
+        isDeleted: false,
+      })
+        .select("sender")
+        .lean();
 
-      // Mark all messages as read in database (respects clearedAt internally)
+      // Collect unique sender IDs to notify
+      const sendersToNotify = [
+        ...new Set(unreadMessages.map((msg) => msg.sender.toString())),
+      ];
+
+      // Mark all messages as read
       const modifiedCount = await Message.markRoomAsRead(roomId, userId);
 
       // Update room's lastMessage.readBy
       const room = await ChatRoom.findOne({ roomId });
-      if (room?.lastMessage) {
-        if (!room.lastMessage.readBy) {
-          room.lastMessage.readBy = [];
-        }
-        if (
-          !room.lastMessage.readBy.some(
-            (id) => id.toString() === userId.toString(),
-          )
-        ) {
-          room.lastMessage.readBy.push(userId);
-          await room.save();
-        }
+      if (
+        room?.lastMessage &&
+        !room.lastMessage.readBy?.some(
+          (id) => id.toString() === userId.toString(),
+        )
+      ) {
+        room.lastMessage.readBy = room.lastMessage.readBy || [];
+        room.lastMessage.readBy.push(userId);
+        await room.save();
       }
 
-      // Broadcast to room
-      socket.to(roomId).emit(EVENTS.MESSAGES_READ, {
-        roomId,
-        userId,
-        readAt: new Date(),
-      });
+      // ✅ Broadcast to room (other sockets in the room)
+      socket
+        .to(roomId)
+        .emit(EVENTS.MESSAGES_READ, { roomId, userId, readAt: new Date() });
 
-      console.log(`Broadcast messages_read to room ${roomId} (except sender)`);
+      // ✅ Also notify each sender directly (even if they left the room)
+      sendersToNotify.forEach((senderId) => {
+        io.to(`user_${senderId}`).emit(EVENTS.MESSAGES_READ, {
+          roomId,
+          userId,
+          readAt: new Date(),
+        });
+      });
 
       // Acknowledge to reader
-      socket.emit(EVENTS.MESSAGES_MARKED_READ, {
-        roomId,
-        modifiedCount,
-      });
-
-      console.log(
-        `User ${userId} read ${modifiedCount} messages in room ${roomId}`,
-      );
+      socket.emit(EVENTS.MESSAGES_MARKED_READ, { roomId, modifiedCount });
     } catch (error) {
       console.error("Mark read error:", error);
-      socket.emit(EVENTS.ERROR, { message: "Failed to mark messages as read" });
     }
   });
 
-  /**
-   * Mark a single message as read
-   */
+  // ===========================================================================
+  // MARK SINGLE MESSAGE READ
+  // ===========================================================================
   socket.on(EVENTS.MARK_MESSAGE_READ, async ({ messageId }) => {
     try {
       const message = await Message.markMessageAsRead(messageId, userId);
-
       if (message) {
         const senderId = message.sender.toString();
         if (senderId !== userId) {
-          // Broadcast to room AND direct notification
           io.to(message.roomId).emit(EVENTS.MESSAGE_READ, {
             messageId,
             roomId: message.roomId,
             userId,
             readAt: new Date(),
           });
-
-          // Direct notification as fallback
           const senderSocketId = getUserSocketId(senderId);
           if (senderSocketId) {
             io.to(senderSocketId).emit(EVENTS.MESSAGE_READ, {
@@ -699,7 +573,6 @@ const setupChatHandlers = (io, socket) => {
             });
           }
         }
-
         socket.emit("message_marked_read", { messageId });
       }
     } catch (error) {
@@ -707,38 +580,33 @@ const setupChatHandlers = (io, socket) => {
     }
   });
 
-  /**
-   * Handle audio played confirmation
-   */
+  // ===========================================================================
+  // AUDIO PLAYED
+  // ===========================================================================
   socket.on(EVENTS.AUDIO_PLAYED, async ({ messageId, roomId }) => {
     try {
       await Message.findByIdAndUpdate(messageId, { isPlayed: true });
-
       socket.to(roomId).emit(EVENTS.AUDIO_PLAYED, {
         userId,
         messageId,
         roomId,
         playedAt: new Date(),
       });
-
-      console.log(`Audio ${messageId} played by user ${userId}`);
     } catch (error) {
-      console.error("Error marking audio as played:", error);
+      console.error("Audio played error:", error);
     }
   });
 
-  /**
-   * Delete a message
-   */
+  // ===========================================================================
+  // DELETE MESSAGE
+  // ===========================================================================
   socket.on(EVENTS.DELETE_MESSAGE, async ({ messageId, roomId }) => {
     try {
       const message = await Message.findById(messageId);
-
       if (!message) {
         socket.emit(EVENTS.ERROR, { message: "Message not found" });
         return;
       }
-
       if (message.sender.toString() !== userId) {
         socket.emit(EVENTS.ERROR, { message: "Not authorized" });
         return;
@@ -755,28 +623,24 @@ const setupChatHandlers = (io, socket) => {
         deletedBy: userId,
         timestamp: new Date(),
       });
-
-      console.log(`Message ${messageId} deleted in room ${roomId}`);
     } catch (error) {
-      console.error("Error deleting message:", error);
-      socket.emit(EVENTS.ERROR, { message: "Failed to delete message" });
+      console.error("Delete message error:", error);
     }
   });
 
-  /**
-   * Add reaction to a message
-   */
+  // ===========================================================================
+  // ADD REACTION
+  // ===========================================================================
   socket.on(EVENTS.ADD_REACTION, async ({ messageId, reaction }) => {
     try {
       const message = await Message.findById(messageId);
       if (!message) return;
 
-      const existingIndex =
+      const idx =
         message.reactions?.findIndex((r) => r.user.toString() === userId) ?? -1;
-
-      if (existingIndex !== -1) {
-        message.reactions[existingIndex].reaction = reaction;
-        message.reactions[existingIndex].createdAt = new Date();
+      if (idx !== -1) {
+        message.reactions[idx].reaction = reaction;
+        message.reactions[idx].createdAt = new Date();
       } else {
         message.reactions = message.reactions || [];
         message.reactions.push({
@@ -785,7 +649,6 @@ const setupChatHandlers = (io, socket) => {
           createdAt: new Date(),
         });
       }
-
       await message.save();
 
       io.to(message.roomId).emit(EVENTS.REACTION_ADDED, {
@@ -799,9 +662,9 @@ const setupChatHandlers = (io, socket) => {
     }
   });
 
-  /**
-   * Remove reaction from a message
-   */
+  // ===========================================================================
+  // REMOVE REACTION
+  // ===========================================================================
   socket.on(EVENTS.REMOVE_REACTION, async ({ messageId }) => {
     try {
       const message = await Message.findById(messageId);
@@ -810,7 +673,6 @@ const setupChatHandlers = (io, socket) => {
       message.reactions = (message.reactions || []).filter(
         (r) => r.user.toString() !== userId,
       );
-
       await message.save();
 
       io.to(message.roomId).emit(EVENTS.REACTION_REMOVED, {
@@ -823,30 +685,26 @@ const setupChatHandlers = (io, socket) => {
     }
   });
 
-  /**
-   * Handle typing indicators
-   */
+  // ===========================================================================
+  // TYPING INDICATORS
+  // ===========================================================================
   socket.on(EVENTS.TYPING, ({ roomId }) => {
-    socket.to(roomId).emit(EVENTS.TYPING, {
-      userId,
-      userName: user?.name,
-      roomId,
-    });
+    socket
+      .to(roomId)
+      .emit(EVENTS.TYPING, { userId, userName: user?.name, roomId });
   });
 
   socket.on(EVENTS.STOP_TYPING, ({ roomId }) => {
     socket.to(roomId).emit(EVENTS.STOP_TYPING, { userId, roomId });
   });
 
-  /**
-   * Get message history with clearedAt filtering
-   * Messages created before user's clearedAt are not returned
-   */
+  // ===========================================================================
+  // GET MESSAGE HISTORY (with clearedAt filter)
+  // ===========================================================================
   socket.on(
     EVENTS.GET_MESSAGES,
     async ({ roomId, limit = 50, before = null }) => {
       try {
-        // Get user's clearedAt timestamp for this room
         const room = await ChatRoom.findOne({ roomId })
           .select("clearedBy")
           .lean();
@@ -855,20 +713,13 @@ const setupChatHandlers = (io, socket) => {
         );
         const clearedAt = clearedEntry ? clearedEntry.clearedAt : null;
 
-        let query = {
-          roomId,
-          isDeleted: false,
-          deletedFor: { $ne: userId },
-        };
-
-        // Apply clearedAt filter - only show messages after clear timestamp
+        // Build query with clearedAt filter
+        let query = { roomId, isDeleted: false, deletedFor: { $ne: userId } };
         if (clearedAt) {
           query.createdAt = { $gt: clearedAt };
           if (before) {
             const beforeDate = new Date(before);
-            if (beforeDate > clearedAt) {
-              query.createdAt.$lt = beforeDate;
-            }
+            if (beforeDate > clearedAt) query.createdAt.$lt = beforeDate;
           }
         } else if (before) {
           query.createdAt = { $lt: new Date(before) };
@@ -884,9 +735,7 @@ const setupChatHandlers = (io, socket) => {
         const formattedMessages = messages.map((msg) => ({
           ...msg,
           formattedDuration: msg.duration
-            ? `${Math.floor(msg.duration / 60)}:${(msg.duration % 60)
-                .toString()
-                .padStart(2, "0")}`
+            ? `${Math.floor(msg.duration / 60)}:${(msg.duration % 60).toString().padStart(2, "0")}`
             : null,
         }));
 
@@ -894,11 +743,11 @@ const setupChatHandlers = (io, socket) => {
           roomId,
           messages: formattedMessages.reverse(),
           hasMore: messages.length === limit,
-          clearedAt: clearedAt,
+          clearedAt,
           isCleared: !!clearedAt,
         });
       } catch (error) {
-        console.error("Error getting message history:", error);
+        console.error("Get messages error:", error);
         socket.emit(EVENTS.ERROR, { message: "Failed to get message history" });
       }
     },

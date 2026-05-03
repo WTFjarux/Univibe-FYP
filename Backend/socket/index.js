@@ -14,29 +14,45 @@ const { setupCallHandlers } = require("./handlers/callHandler");
  */
 const initializeSocketIO = (io) => {
   io.on("connection", (socket) => {
+    const userId = socket.userId;
+    const userName = socket.user?.name || "Unknown";
+
     console.log(
-      `🔌 New socket connection: ${socket.id} for user ${socket.user?.name || socket.userId}`,
+      `🔌 New socket connection: ${socket.id} for user ${userName} (${userId})`,
     );
 
-    // Setup all handlers
+    // Join user's personal room for targeted events
+    if (userId) {
+      socket.join(`user_${userId}`);
+    }
+
+    // ✅ IMPORTANT: Setup user handlers FIRST
+    // This marks the user as online BEFORE any room joins happen
+    const cleanup = setupUserHandlers(io, socket);
+
+    // Setup chat and call handlers AFTER user is registered
     setupChatHandlers(io, socket);
     setupCallHandlers(io, socket);
-    const { handleDisconnect } = setupUserHandlers(io, socket);
 
     // Handle disconnection
     socket.on("disconnect", async () => {
-      if (handleDisconnect) {
-        await handleDisconnect();
+      try {
+        if (cleanup) {
+          await cleanup();
+        }
+      } catch (error) {
+        console.error(`Error during disconnect for ${userId}:`, error);
       }
-      console.log(`🔌 Socket disconnected: ${socket.id}`);
+      console.log(`🔌 Socket disconnected: ${socket.id} (${userName})`);
     });
 
     // Error handling
     socket.on("error", (error) => {
-      console.error(`Socket error for ${socket.userId}:`, error);
+      console.error(`Socket error for ${userId}:`, error.message);
     });
   });
 
+  console.log("✅ Socket.IO initialized and listening for connections");
   return io;
 };
 

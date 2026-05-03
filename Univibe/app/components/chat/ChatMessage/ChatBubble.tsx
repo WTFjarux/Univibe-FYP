@@ -1,12 +1,11 @@
 // app/components/chat/ChatMessage/ChatBubble.tsx
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
   Image,
   StyleSheet,
-  Share,
   Pressable,
   ActivityIndicator,
   Animated,
@@ -14,6 +13,8 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
+import { Post } from "../../../../lib/services/postService";
 import AudioPlayer from "./AudioPlayer";
 import AttachmentMessage from "./AttachmentMessage";
 import ChatImageViewer from "./ChatImageViewer";
@@ -57,13 +58,11 @@ interface Message {
     thumbnailUrl?: string;
     duration?: number;
   };
-  // Forwarding fields
   isForwarded?: boolean;
   originalMessageId?: string;
   originalSenderId?: string;
   originalSenderName?: string;
   forwardedAt?: string;
-  // Shared post
   sharedPost?: {
     postId: string;
     postContent?: string;
@@ -120,6 +119,8 @@ export default function ChatBubble({
   highlightedMessageId,
   onScrollToMessage,
 }: ChatBubbleProps) {
+  const router = useRouter();
+
   const [showOptions, setShowOptions] = useState(false);
   const [optionsPosition, setOptionsPosition] = useState({ x: 0, y: 0 });
   const [selectedReaction, setSelectedReaction] = useState<string | null>(null);
@@ -166,9 +167,7 @@ export default function ChatBubble({
   const isMediaType = ["image", "video", "file", "location"].includes(
     message.type || "",
   );
-
   const isPostType = message.type === "post" && message.sharedPost;
-
   const isForwarded = message.isForwarded === true;
 
   const getAvatarSource = () => {
@@ -183,7 +182,6 @@ export default function ChatBubble({
   const currentUserReaction = message.reactions?.find(
     (r) => r.userId === currentUserId,
   )?.reaction;
-
   const reactionGroups = message.reactions?.reduce(
     (acc, r) => {
       acc[r.reaction] = (acc[r.reaction] || 0) + 1;
@@ -224,23 +222,20 @@ export default function ChatBubble({
 
   const getMessageStatusIcon = () => {
     if (!isOwnMessage) return null;
-    if (message.status === "sending") {
+    if (message.status === "sending")
       return <ActivityIndicator size={10} color="#8E8E93" />;
-    }
-    if (isMessageRead() || message.status === "read") {
+    if (isMessageRead() || message.status === "read")
       return (
         <View style={styles.statusIconContainer}>
           <Ionicons name="checkmark-done" size={14} color="#34C759" />
         </View>
       );
-    }
-    if (isMessageDelivered() || message.status === "delivered") {
+    if (isMessageDelivered() || message.status === "delivered")
       return (
         <View style={styles.statusIconContainer}>
           <Ionicons name="checkmark-done" size={14} color="#8E8E93" />
         </View>
       );
-    }
     return (
       <View style={styles.statusIconContainer}>
         <Ionicons name="checkmark" size={14} color="#8E8E93" />
@@ -285,16 +280,13 @@ export default function ChatBubble({
   const handleForward = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (onForward) onForward(message);
-    else await Share.share({ message: message.message });
     setShowOptions(false);
   };
 
   const handleReaction = (reaction: string, shouldRemove?: boolean) => {
-    if (shouldRemove) {
+    if (shouldRemove)
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } else {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
+    else Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelectedReaction(shouldRemove ? null : reaction);
     if (onReaction) onReaction(message._id, reaction, shouldRemove);
     setShowOptions(false);
@@ -311,24 +303,23 @@ export default function ChatBubble({
     setVideoPlayerVisible(true);
   };
 
-  /**
-   * Builds the forwarded label text.
-   */
+  const handleSharedPostPress = useCallback(() => {
+    if (message.sharedPost?.postId) {
+      router.push({
+        pathname: "/post/[id]",
+        params: { id: message.sharedPost.postId },
+      });
+    }
+  }, [message.sharedPost?.postId, router]);
+
   const getForwardedLabel = (): string => {
     if (!isForwarded) return "";
-    const senderId = getSenderId();
-    if (senderId === currentUserId) return "You forwarded";
+    if (getSenderId() === currentUserId) return "You forwarded";
     return "Forwarded";
   };
 
-  /**
-   * Renders the forwarded indicator label OUTSIDE the bubble.
-   */
   const renderForwardedLabel = () => {
     if (!isForwarded) return null;
-    const label = getForwardedLabel();
-    if (!label) return null;
-
     return (
       <View
         style={[
@@ -338,18 +329,14 @@ export default function ChatBubble({
       >
         <Ionicons name="arrow-redo" size={11} color="#8E8E93" />
         <Text style={styles.forwardedLabelText} numberOfLines={1}>
-          {label}
+          {getForwardedLabel()}
         </Text>
       </View>
     );
   };
 
-  /**
-   * Builds a Post object from sharedPost data for the PostCard component.
-   */
-  const buildPostFromSharedData = () => {
+  const buildPostFromSharedData = (): Post | null => {
     if (!message.sharedPost || !message.sharedPost.postId) return null;
-
     return {
       _id: message.sharedPost.postId,
       user: {
@@ -358,6 +345,7 @@ export default function ChatBubble({
         username: message.sharedPost.isAnonymous
           ? "anonymous"
           : message.sharedPost.postAuthorUsername || "user",
+        email: null,
         profilePicture: message.sharedPost.postAuthorAvatar || "",
         verified: false,
       },
@@ -373,69 +361,81 @@ export default function ChatBubble({
             },
           ]
         : [],
-      likes: [],
-      comments: [],
-      reposts: [],
       tags: [],
-      mentions: [],
       campus: "",
       visibility: "campus" as const,
-      isPinned: false,
-      isEdited: false,
-      createdAt: message.sharedPost.postCreatedAt || new Date().toISOString(),
-      updatedAt: "",
-      __v: 0,
       isAnonymous: message.sharedPost.isAnonymous || false,
+      isEdited: false,
+      editedAt: null,
+      createdAt: message.sharedPost.postCreatedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isLiked: false,
+      likeCount: 0,
       commentCount: 0,
     };
   };
 
   const renderMessageContent = () => {
-    // Shared Post message
     if (isPostType) {
       const postData = buildPostFromSharedData();
       if (!postData) return null;
-
       const hasMessage = message.message && message.message.trim().length > 0;
 
       return (
         <View style={styles.postMessageContainer}>
-          <PostCard
-            post={postData}
-            compact={true}
-            hideActions={true}
-            hideTime={true}
-            onLikePress={() => {}}
-            onCommentPress={() => {}}
-            onRepostPress={() => {}}
-            onSharePress={() => {}}
-          />
+          {/* ✅ Long press on the entire shared post area */}
+          <Pressable
+            onPress={handleSharedPostPress}
+            onLongPress={handleLongPress}
+            delayLongPress={300}
+            style={{ width: "100%" }}
+          >
+            {/* ✅ pointerEvents="none" prevents PostCard from stealing touches */}
+            <View pointerEvents="none">
+              <PostCard
+                post={postData}
+                compact={true}
+                disableNavigation={true}
+                hideActions={true}
+                hideTime={true}
+                onLikePress={() => {}}
+                onCommentPress={() => {}}
+
+                onSharePress={() => {}}
+              />
+            </View>
+          </Pressable>
           {hasMessage && (
-            <View
-              style={[
-                styles.messageBubble,
-                isOwnMessage
-                  ? styles.ownMessageBubble
-                  : styles.otherMessageBubble,
-              ]}
+            <Pressable
+              onPress={handleSharedPostPress}
+              onLongPress={handleLongPress}
+              delayLongPress={300}
             >
-              <Text
+              <View
                 style={[
-                  styles.messageText,
+                  styles.messageBubble,
                   isOwnMessage
-                    ? styles.ownMessageText
-                    : styles.otherMessageText,
+                    ? styles.ownMessageBubble
+                    : styles.otherMessageBubble,
                 ]}
               >
-                {message.message}
-              </Text>
-            </View>
+                <Text
+                  style={[
+                    styles.messageText,
+                    isOwnMessage
+                      ? styles.ownMessageText
+                      : styles.otherMessageText,
+                  ]}
+                >
+                  {message.message}
+                </Text>
+              </View>
+            </Pressable>
           )}
         </View>
       );
     }
 
-    // Media messages (image, video, file, location)
     if (isMediaType) {
       return (
         <AttachmentMessage
@@ -471,7 +471,6 @@ export default function ChatBubble({
       );
     }
 
-    // Sending audio
     if (
       message.type === "audio" &&
       (message.status === "sending" || !message.mediaUrl)
@@ -510,7 +509,6 @@ export default function ChatBubble({
       );
     }
 
-    // Audio message
     if (message.type === "audio") {
       return (
         <View style={styles.audioMessageContainer}>
@@ -525,7 +523,6 @@ export default function ChatBubble({
       );
     }
 
-    // Text message
     return (
       <Text
         style={[
@@ -566,7 +563,6 @@ export default function ChatBubble({
             },
           ]}
         />
-
         <View
           style={[
             styles.messageRow,
@@ -582,10 +578,8 @@ export default function ChatBubble({
               />
             </View>
           )}
-
           {!isOwnMessage && !showAvatar && <View style={styles.avatarSpacer} />}
           {isOwnMessage && <View style={styles.avatarSpacer} />}
-
           <View style={styles.messageContent}>
             {message.replyTo && (
               <ReplyPreview
@@ -604,10 +598,7 @@ export default function ChatBubble({
                 onScrollToMessage={onScrollToMessage}
               />
             )}
-
-            {/* Forwarded label OUTSIDE the bubble */}
             {renderForwardedLabel()}
-
             <Pressable
               onLongPress={handleLongPress}
               delayLongPress={300}
@@ -624,7 +615,6 @@ export default function ChatBubble({
             >
               {renderMessageContent()}
             </Pressable>
-
             {reactionGroups && Object.keys(reactionGroups).length > 0 && (
               <View
                 style={[
@@ -642,7 +632,6 @@ export default function ChatBubble({
                 ))}
               </View>
             )}
-
             {showTime && (
               <View
                 style={[
@@ -660,7 +649,6 @@ export default function ChatBubble({
           </View>
         </View>
       </View>
-
       <ChatMessageOptionsModal
         visible={showOptions}
         onClose={() => setShowOptions(false)}
@@ -672,29 +660,18 @@ export default function ChatBubble({
         isOwnMessage={isOwnMessage}
         position={optionsPosition}
         selectedReaction={currentUserReaction || selectedReaction}
-        message={{
-          _id: message._id,
-          message: message.message,
-          type: message.type,
-          mediaUrl: message.mediaUrl,
-          thumbnailUrl: message.thumbnailUrl,
-          senderName: message.senderName,
-          replyTo: getReplyDataForModal(),
-          createdAt: message.createdAt,
-          duration: message.duration,
-        }}
+        message={message}
         getFullImageUrl={getFullImageUrl}
         formatTime={formatTime}
         currentUserId={currentUserId}
+        DEFAULT_AVATAR={DEFAULT_AVATAR}
       />
-
       <ChatImageViewer
         visible={imageViewerVisible}
         images={viewerImages}
         initialIndex={viewerIndex}
         onClose={() => setImageViewerVisible(false)}
       />
-
       <ChatVideoPlayer
         visible={videoPlayerVisible}
         uri={videoPlayerUri || ""}
@@ -703,7 +680,6 @@ export default function ChatBubble({
           setVideoPlayerUri(null);
         }}
       />
-
       <ChatFileViewer
         visible={fileViewerVisible}
         fileUrl={fileViewerUrl}
@@ -714,10 +690,6 @@ export default function ChatBubble({
     </>
   );
 }
-
-// -----------------------------------------------------------------------------
-// Styles
-// -----------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
   messageWrapper: {
@@ -774,8 +746,6 @@ const styles = StyleSheet.create({
   },
   ownMessageText: { color: "#fff" },
   otherMessageText: { color: "#000" },
-
-  // Message bubble for shared post
   messageBubble: {
     marginTop: 8,
     paddingHorizontal: 12,
@@ -793,11 +763,7 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     borderBottomLeftRadius: 4,
   },
-  postMessageContainer: {
-    width: 260,
-    maxWidth: "100%",
-  },
-
+  postMessageContainer: { width: 260, maxWidth: "100%" },
   forwardedLabelContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -805,12 +771,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     gap: 4,
   },
-  forwardedLabelOwn: {
-    alignSelf: "flex-end",
-  },
-  forwardedLabelOther: {
-    alignSelf: "flex-start",
-  },
+  forwardedLabelOwn: { alignSelf: "flex-end" },
+  forwardedLabelOther: { alignSelf: "flex-start" },
   forwardedLabelText: {
     fontSize: 11,
     fontFamily: "SofiaSans-Regular",
@@ -818,7 +780,6 @@ const styles = StyleSheet.create({
     color: "#8E8E93",
     flexShrink: 1,
   },
-
   audioMessageContainer: { minWidth: 150, maxWidth: 250 },
   audioLoadingContainer: {
     flexDirection: "row",

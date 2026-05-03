@@ -1,4 +1,5 @@
 // hooks/chatScreen/useChatMessages.ts
+// Message state management: cache, pagination, optimistic updates, real-time additions
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import chatApi from "../../lib/services/chatApi";
@@ -18,10 +19,10 @@ interface CacheEntry {
 }
 
 const messageCache = new Map<string, CacheEntry>();
-
-const CACHE_TTL = 10 * 60 * 1000;
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 const INITIAL_LIMIT = 30;
 const PAGINATION_LIMIT = 30;
+const MAX_PROCESSED_IDS = 200;
 
 // -----------------------------------------------------------------------------
 // Hook
@@ -48,21 +49,19 @@ export const useChatMessages = ({
   const [isCleared, setIsCleared] = useState(false);
   const [clearedAt, setClearedAt] = useState<string | null>(null);
 
-  // Refs for the latest cleared state values (used inside updateCache closure)
+  // Refs to avoid stale closures in cache updates
   const isClearedRef = useRef(isCleared);
   const clearedAtRef = useRef(clearedAt);
+  const isMountedRef = useRef(true);
+  const pendingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+  const processedIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     isClearedRef.current = isCleared;
     clearedAtRef.current = clearedAt;
   }, [isCleared, clearedAt]);
-
-  const pendingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
-    new Map(),
-  );
-
-  const processedIdsRef = useRef<Set<string>>(new Set());
-  const isMountedRef = useRef(true);
 
   useEffect(() => {
     return () => {
@@ -73,7 +72,7 @@ export const useChatMessages = ({
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Cache
+  // Cache Helpers
   // ---------------------------------------------------------------------------
 
   const getCache = useCallback((): CacheEntry | undefined => {
@@ -119,27 +118,21 @@ export const useChatMessages = ({
 
     for (let i = msgs.length - 1; i >= 0; i--) {
       const msg = msgs[i];
-
-      let key: string;
-      if (!isTempId(msg._id) && msg._id) {
-        key = msg._id;
-      } else if (msg.tempId) {
-        key = msg.tempId;
-      } else {
-        key = `unknown-${i}-${msg.createdAt}`;
-      }
+      const key =
+        !isTempId(msg._id) && msg._id
+          ? msg._id
+          : msg.tempId || `unknown-${i}-${msg.createdAt}`;
 
       if (!seen.has(key)) {
         seen.add(key);
         result.unshift(msg);
       }
     }
-
     return result;
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Load Messages
+  // Load Messages (initial + pagination)
   // ---------------------------------------------------------------------------
 
   const loadMessages = useCallback(
@@ -149,22 +142,19 @@ export const useChatMessages = ({
       const cached = getCache();
       const now = Date.now();
 
+      // Return cached data if fresh
       if (!forceRefresh && cached && now - cached.timestamp < CACHE_TTL) {
         if (isMountedRef.current) {
           setMessages(cached.messages);
           setHasMore(cached.hasMore);
-
-          // Restore cleared state from cache
           setIsCleared(cached.isCleared || false);
           setClearedAt(cached.clearedAt || null);
 
           processedIdsRef.current.clear();
           cached.messages.forEach((msg) => {
-            if (msg._id && !isTempId(msg._id)) {
+            if (msg._id && !isTempId(msg._id))
               processedIdsRef.current.add(msg._id);
-            }
           });
-
           setLoading(false);
         }
         return;
@@ -178,30 +168,25 @@ export const useChatMessages = ({
           const optimisticMessages = forceRefresh
             ? []
             : getOptimisticFromCache();
-
-          const combined = [...serverMessages, ...optimisticMessages];
-          const finalMessages = deduplicateMessages(combined);
+          const finalMessages = deduplicateMessages([
+            ...serverMessages,
+            ...optimisticMessages,
+          ]);
 
           processedIdsRef.current.clear();
           finalMessages.forEach((msg) => {
-            if (msg._id && !isTempId(msg._id)) {
+            if (msg._id && !isTempId(msg._id))
               processedIdsRef.current.add(msg._id);
-            }
           });
 
           setMessages(finalMessages);
           setHasMore(response.data.hasMore);
-
-          // Store cleared state
-          const serverIsCleared = response.data.isCleared || false;
-          const serverClearedAt = response.data.clearedAt || null;
-          setIsCleared(serverIsCleared);
-          setClearedAt(serverClearedAt);
-
-          // Update cache (isCleared/clearedAt picked up via refs on next render)
+          setIsCleared(response.data.isCleared || false);
+          setClearedAt(response.data.clearedAt || null);
           updateCache(finalMessages, response.data.hasMore);
         }
       } catch (error) {
+        // Fallback to cache on error
         if (cached && isMountedRef.current) {
           setMessages(cached.messages);
           setHasMore(cached.hasMore);
@@ -225,10 +210,6 @@ export const useChatMessages = ({
     ],
   );
 
-  // ---------------------------------------------------------------------------
-  // Pagination
-  // ---------------------------------------------------------------------------
-
   const loadOlderMessages = useCallback(async () => {
     if (
       !token ||
@@ -251,30 +232,27 @@ export const useChatMessages = ({
 
       if (response.success && isMountedRef.current) {
         const olderMessages: Message[] = response.data.messages || [];
-
         olderMessages.forEach((msg) => {
           if (msg._id) processedIdsRef.current.add(msg._id);
         });
 
         setMessages((prev) => {
-          const optimisticMessages = prev.filter(
+          const optimistic = prev.filter(
             (msg) => msg.status === "sending" || isTempId(msg._id),
           );
-
-          const combined = [...olderMessages.reverse(), ...prev];
-          const finalMessages = deduplicateMessages(combined);
+          const finalMessages = deduplicateMessages([
+            ...olderMessages.reverse(),
+            ...prev,
+          ]);
           updateCache(finalMessages, response.data.hasMore);
           return finalMessages;
         });
-
         setHasMore(response.data.hasMore);
       }
     } catch (error) {
       // Silently fail
     } finally {
-      if (isMountedRef.current) {
-        setLoadingMore(false);
-      }
+      if (isMountedRef.current) setLoadingMore(false);
     }
   }, [
     token,
@@ -285,10 +263,6 @@ export const useChatMessages = ({
     updateCache,
     deduplicateMessages,
   ]);
-
-  // ---------------------------------------------------------------------------
-  // Refresh
-  // ---------------------------------------------------------------------------
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -303,7 +277,7 @@ export const useChatMessages = ({
     (tempId: string, messageData: Partial<Message>) => {
       const optimisticMessage: Message = {
         _id: tempId,
-        tempId: tempId,
+        tempId,
         sender: userId || "",
         senderName: userName || "You",
         message: messageData.message || "",
@@ -317,10 +291,6 @@ export const useChatMessages = ({
         duration: messageData.duration,
         replyTo: messageData.replyTo,
         reactions: [],
-        groupId: messageData.groupId,
-        groupIndex: messageData.groupIndex,
-        groupTotal: messageData.groupTotal,
-        locationData: messageData.locationData,
         readBy: [{ user: userId || "", readAt: new Date().toISOString() }],
         deliveredTo: [
           { user: userId || "", deliveredAt: new Date().toISOString() },
@@ -332,7 +302,6 @@ export const useChatMessages = ({
         updateCache(updated, hasMore);
         return updated;
       });
-
       return optimisticMessage;
     },
     [userId, userName, roomId, hasMore, updateCache],
@@ -353,7 +322,6 @@ export const useChatMessages = ({
         updateCache(filtered, hasMore);
         return filtered;
       });
-
       processedIdsRef.current.delete(tempId);
     },
     [hasMore, updateCache],
@@ -368,6 +336,7 @@ export const useChatMessages = ({
       }
 
       setMessages((prev) => {
+        // Already confirmed via real-time
         if (messageId && prev.some((msg) => msg._id === messageId)) {
           const updated = prev.filter(
             (msg) => msg._id !== tempId && msg.tempId !== tempId,
@@ -379,105 +348,70 @@ export const useChatMessages = ({
         const tempIndex = prev.findIndex(
           (msg) => msg._id === tempId || msg.tempId === tempId,
         );
+        if (tempIndex === -1) return prev;
 
-        if (tempIndex === -1) {
-          if (
-            serverData &&
-            messageId &&
-            !prev.some((msg) => msg._id === messageId)
-          ) {
-            const newMessage = {
-              ...serverData,
-              _id: messageId,
-              status: "sent" as const,
-              readBy: [
-                { user: userId || "", readAt: new Date().toISOString() },
-              ],
-              deliveredTo: [
-                { user: userId || "", deliveredAt: new Date().toISOString() },
-              ],
-            } as Message;
-            const updated = [...prev, newMessage];
-            updateCache(updated, hasMore);
-            processedIdsRef.current.add(messageId);
-            return updated;
-          }
-          return prev;
-        }
-
-        const existingMsg = prev[tempIndex];
         const confirmedMessage: Message = {
-          ...existingMsg,
+          ...prev[tempIndex],
           ...serverData,
           _id: messageId,
           tempId: undefined,
           status: "sent" as const,
-          mediaUrl: serverData?.mediaUrl || existingMsg.mediaUrl,
-          mediaName: serverData?.mediaName || existingMsg.mediaName,
-          mediaSize: serverData?.mediaSize || existingMsg.mediaSize,
-          duration: serverData?.duration ?? existingMsg.duration,
-          thumbnailUrl: serverData?.thumbnailUrl || existingMsg.thumbnailUrl,
-          locationData: serverData?.locationData || existingMsg.locationData,
-          reactions: existingMsg.reactions || [],
-          groupId: serverData?.groupId || existingMsg.groupId,
-          groupIndex: serverData?.groupIndex ?? existingMsg.groupIndex,
-          groupTotal: serverData?.groupTotal ?? existingMsg.groupTotal,
-          readBy: existingMsg.readBy || [
-            { user: userId || "", readAt: new Date().toISOString() },
-          ],
-          deliveredTo: existingMsg.deliveredTo || [
-            { user: userId || "", deliveredAt: new Date().toISOString() },
-          ],
         };
 
         const updated = [...prev];
         updated[tempIndex] = confirmedMessage;
-
         updateCache(updated, hasMore);
         if (messageId) processedIdsRef.current.add(messageId);
-
         return updated;
       });
     },
-    [hasMore, updateCache, userId],
+    [hasMore, updateCache],
   );
 
   // ---------------------------------------------------------------------------
-  // Real-Time Handlers
+  // Real-Time Message Handlers
   // ---------------------------------------------------------------------------
 
   const addMessage = useCallback(
     (message: Message) => {
       if (!message._id) return;
 
+      // Block duplicates synchronously
       if (processedIdsRef.current.has(message._id)) return;
+      processedIdsRef.current.add(message._id);
+      console.log(
+        `📥 addMessage: id=${message._id}, status=${message.status}, sender=${typeof message.sender === "string" ? message.sender : message.sender?._id}`,
+      );
+
+      // Prevent unbounded growth
+      if (processedIdsRef.current.size > MAX_PROCESSED_IDS) {
+        const entries = [...processedIdsRef.current];
+        processedIdsRef.current = new Set(entries.slice(-100));
+      }
 
       setMessages((prev) => {
-        const exists = prev.some((msg) => msg._id === message._id);
-        if (exists) return prev;
+        if (prev.some((msg) => msg._id === message._id)) return prev;
 
+        // Remove matching optimistic messages
         const filtered = prev.filter((msg) => {
           if (msg.status === "sending" || isTempId(msg._id)) {
-            const isMatch =
+            const senderId =
+              typeof msg.sender === "string" ? msg.sender : msg.sender?._id;
+            const newSenderId =
+              typeof message.sender === "string"
+                ? message.sender
+                : message.sender?._id;
+            return !(
               msg.message === message.message &&
               msg.type === message.type &&
-              (typeof msg.sender === "string"
-                ? msg.sender
-                : msg.sender?._id) ===
-                (typeof message.sender === "string"
-                  ? message.sender
-                  : message.sender?._id);
-
-            return !isMatch;
+              senderId === newSenderId
+            );
           }
           return true;
         });
 
-        processedIdsRef.current.add(message._id);
-
         const updated = [...filtered, { ...message, status: "sent" as const }];
         updateCache(updated, hasMore);
-
         return updated;
       });
     },
@@ -504,16 +438,13 @@ export const useChatMessages = ({
         updateCache(updated, hasMore);
         return updated;
       });
-
-      if (messageId) {
-        processedIdsRef.current.delete(messageId);
-      }
+      if (messageId) processedIdsRef.current.delete(messageId);
     },
     [hasMore, updateCache],
   );
 
   // ---------------------------------------------------------------------------
-  // Pending Timeouts
+  // Utilities
   // ---------------------------------------------------------------------------
 
   const setPendingTimeout = useCallback(
@@ -522,10 +453,6 @@ export const useChatMessages = ({
     },
     [],
   );
-
-  // ---------------------------------------------------------------------------
-  // Cleanup
-  // ---------------------------------------------------------------------------
 
   const clearAllPending = useCallback(() => {
     pendingTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));

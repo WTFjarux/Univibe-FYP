@@ -34,7 +34,7 @@ interface PostCardProps {
   onImagePress?: (index: number) => void;
   onLikePress: (postId: string) => void;
   onCommentPress: (postId: string) => void;
-  onRepostPress: (postId: string) => void;
+
   onSharePress: (postId: string) => void;
   onEdit?: (postId: string) => void;
   onDelete?: (postId: string) => void;
@@ -56,7 +56,7 @@ const PostCard: React.FC<PostCardProps> = ({
   onImagePress,
   onLikePress,
   onCommentPress,
-  onRepostPress,
+
   onSharePress,
   onEdit,
   onDelete,
@@ -69,7 +69,7 @@ const PostCard: React.FC<PostCardProps> = ({
   onProfilePress,
 }) => {
   const router = useRouter();
-  const pathname = usePathname(); // ✅ Get current route
+  const pathname = usePathname();
   const { user, profile } = useAuth();
 
   // ===== State Management =====
@@ -82,12 +82,15 @@ const PostCard: React.FC<PostCardProps> = ({
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
 
+  // ✅ FIXED: Use likeCount for feed posts, fallback to likes array for detail view
   const [displayCommentCount, setDisplayCommentCount] = useState(
-    post.commentCount || post.comments?.length || 0,
+    post.commentCount || 0,
   );
 
   const [isLiked, setIsLiked] = useState(post.isLiked || false);
-  const [likesCount, setLikesCount] = useState(post.likes?.length || 0);
+  const [likesCount, setLikesCount] = useState(
+    post.likeCount ?? post.likes?.length ?? 0,
+  );
 
   const scrollViewRef = useRef<ScrollView>(null);
   const imageHeight = compact ? 160 : 400;
@@ -97,15 +100,15 @@ const PostCard: React.FC<PostCardProps> = ({
     return null;
   }
 
-  // ===== Sync with Post Props =====
+  // ===== ✅ FIXED: Sync with Post Props =====
   useEffect(() => {
-    setDisplayCommentCount(post.commentCount || post.comments?.length || 0);
-  }, [post.commentCount, post.comments?.length]);
+    setDisplayCommentCount(post.commentCount || 0);
+  }, [post.commentCount]);
 
   useEffect(() => {
     setIsLiked(post.isLiked || false);
-    setLikesCount(post.likes?.length || 0);
-  }, [post.isLiked, post.likes?.length]);
+    setLikesCount(post.likeCount ?? post.likes?.length ?? 0);
+  }, [post.isLiked, post.likeCount, post.likes?.length]);
 
   // ===== Event Listeners =====
   useEffect(() => {
@@ -151,16 +154,16 @@ const PostCard: React.FC<PostCardProps> = ({
     if (post.isAnonymous && post.originalUser) {
       return currentUserId === post.originalUser._id?.toString();
     }
-    return currentUserId === post.user?._id?.toString();
+    return currentUserId === (post.user?._id ?? null)?.toString();
   }, [currentUserId, post.isAnonymous, post.originalUser, post.user]);
 
   const ownPost = isOwnPost();
 
   const getUserIdForNavigation = useCallback((): string | null => {
     if (post.isAnonymous && post.originalUser) {
-      return post.originalUser._id?.toString();
+      return post.originalUser._id?.toString() ?? null;
     }
-    return post.user?._id?.toString();
+    return post.user?._id ?? null;
   }, [post.isAnonymous, post.originalUser, post.user]);
 
   // ===== Image Handling =====
@@ -174,19 +177,14 @@ const PostCard: React.FC<PostCardProps> = ({
 
   const postImages = getPostImages();
 
-  // ✅ ===== Navigation Guard =====
+  // ===== Navigation Guard =====
   const isAlreadyOnPostDetail = pathname === "/post/[id]";
 
   const handlePostNavigation = useCallback(() => {
-    // ✅ Don't navigate if navigation is disabled
     if (disableNavigation) return;
-    // ✅ Don't navigate if already on post detail
     if (isAlreadyOnPostDetail) return;
-    // ✅ Don't navigate in compact mode
-    if (compact) return;
-
     router.push({ pathname: "/post/[id]", params: { id: post._id } });
-  }, [disableNavigation, isAlreadyOnPostDetail, compact, post._id, router]);
+  }, [disableNavigation, isAlreadyOnPostDetail, post._id, router]);
 
   // ===== Profile Navigation =====
   const handleUserPress = useCallback(() => {
@@ -344,11 +342,7 @@ const PostCard: React.FC<PostCardProps> = ({
           source={{ uri: image.url }}
           style={[
             styles.postImage,
-            {
-              width: containerWidth,
-              height: imageHeight,
-              // 👈 Ensure image doesn't overflow
-            },
+            { width: containerWidth, height: imageHeight },
           ]}
           resizeMode="cover"
           onError={() => handleImageError(0)}
@@ -406,7 +400,7 @@ const PostCard: React.FC<PostCardProps> = ({
               <TouchableOpacity
                 key={index}
                 activeOpacity={0.95}
-                onPress={() => onImagePress?.(index)} // 👈 Call onImagePress with index
+                onPress={() => onImagePress?.(index)}
               >
                 <Image
                   source={{ uri: image.url }}
@@ -518,18 +512,14 @@ const PostCard: React.FC<PostCardProps> = ({
   const visibilityIconName = getVisibilityIconName();
   const visibilityBadgeColor = getVisibilityBadgeColor();
 
-  // ===== ✅ Main Render - No outer TouchableOpacity =====
+  // ===== Main Render =====
   return (
     <View
       style={[styles.postCard, compact && styles.compactPostCard]}
-      onLayout={(event) => {
-        const { width } = event.nativeEvent.layout;
-        setContainerWidth(width);
-      }}
+      onLayout={(event) => setContainerWidth(event.nativeEvent.layout.width)}
     >
-      {/* ✅ Post Header */}
+      {/* Post Header */}
       <View style={[styles.postHeader, compact && styles.compactPostHeader]}>
-        {/* ✅ Avatar - Pressable for profile navigation */}
         <Pressable
           onPress={(e) => {
             e.stopPropagation();
@@ -542,7 +532,6 @@ const PostCard: React.FC<PostCardProps> = ({
 
         <View style={styles.postUserInfo}>
           <View style={styles.postUser}>
-            {/* ✅ Name - Pressable for profile navigation */}
             <Pressable
               onPress={(e) => {
                 e.stopPropagation();
@@ -585,27 +574,16 @@ const PostCard: React.FC<PostCardProps> = ({
             )}
           </View>
 
-          {/* ✅ Username and time - Clickable for post navigation */}
           <Pressable onPress={handlePostNavigation}>
-            {hideTime ? (
-              <Text
-                style={[
-                  styles.postUserDetails,
-                  compact && styles.compactUserDetails,
-                ]}
-              >
-                @{getUserDisplayHandle()}
-              </Text>
-            ) : (
-              <Text
-                style={[
-                  styles.postUserDetails,
-                  compact && styles.compactUserDetails,
-                ]}
-              >
-                @{getUserDisplayHandle()} • {formatTimeAgo(post.createdAt)}
-              </Text>
-            )}
+            <Text
+              style={[
+                styles.postUserDetails,
+                compact && styles.compactUserDetails,
+              ]}
+            >
+              @{getUserDisplayHandle()}
+              {!hideTime && ` • ${formatTimeAgo(post.createdAt)}`}
+            </Text>
           </Pressable>
         </View>
 
@@ -622,18 +600,20 @@ const PostCard: React.FC<PostCardProps> = ({
         )}
       </View>
 
-      {/* ✅ Post Content - Clickable for navigation */}
+      {/* Post Content */}
       {!compact && post.content ? (
         <Pressable onPress={handlePostNavigation}>
           <Text style={styles.postContent}>{post.content}</Text>
         </Pressable>
       ) : compact && post.content ? (
-        <Text style={styles.compactPostContent} numberOfLines={2}>
-          {post.content}
-        </Text>
+        <Pressable onPress={handlePostNavigation}>
+          <Text style={styles.compactPostContent} numberOfLines={2}>
+            {post.content}
+          </Text>
+        </Pressable>
       ) : null}
 
-      {/* ✅ Post Images - Fully isolated from navigation touch */}
+      {/* Post Images */}
       {postImages.length > 0 && containerWidth > 0 && (
         <View style={[styles.imagesContainer, compact && { marginBottom: 0 }]}>
           {postImages.length === 1
@@ -706,18 +686,6 @@ const PostCard: React.FC<PostCardProps> = ({
                 style={styles.postAction}
                 onPress={(e) => {
                   e.stopPropagation();
-                  onRepostPress(post._id);
-                }}
-              >
-                <Ionicons name="repeat-outline" size={20} color="#6b7280" />
-                <Text style={styles.postActionText}>
-                  {post.reposts?.length || 0}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.postAction}
-                onPress={(e) => {
-                  e.stopPropagation();
                   onSharePress(post._id);
                 }}
               >
@@ -746,14 +714,14 @@ const PostCard: React.FC<PostCardProps> = ({
           onShare={onSharePress}
           onMuteUser={onMuteUser}
           onBlockUser={onBlockUser}
-          userId={post.user?._id}
+          userId={post.user?._id ?? undefined}
         />
       )}
     </View>
   );
 };
 
-// ===== Styles (unchanged) =====
+// ===== Styles =====
 const styles = StyleSheet.create({
   postCard: {
     backgroundColor: "white",
@@ -802,9 +770,7 @@ const styles = StyleSheet.create({
     borderColor: "#e5e7eb",
     borderStyle: "dashed",
   },
-  postUserInfo: {
-    flex: 1,
-  },
+  postUserInfo: { flex: 1 },
   postUser: {
     flexDirection: "row",
     alignItems: "center",
@@ -817,17 +783,13 @@ const styles = StyleSheet.create({
     color: "#111827",
     fontFamily: "SofiaSans-Bold",
   },
-  compactUserName: {
-    fontSize: 13,
-  },
+  compactUserName: { fontSize: 13 },
   postUserDetails: {
     fontSize: 13,
     color: "#6b7280",
     fontFamily: "SofiaSans-Regular",
   },
-  compactUserDetails: {
-    fontSize: 11,
-  },
+  compactUserDetails: { fontSize: 11 },
   visibilityBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -837,10 +799,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginLeft: 4,
   },
-  visibilityBadgeText: {
-    fontSize: 10,
-    fontFamily: "SofiaSans-Regular",
-  },
+  visibilityBadgeText: { fontSize: 10, fontFamily: "SofiaSans-Regular" },
   postContent: {
     fontSize: 15,
     lineHeight: 20,
@@ -857,17 +816,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     fontFamily: "SofiaSans-Regular",
   },
-  imagesContainer: {
-    position: "relative",
-    marginBottom: 12,
-  },
-  postImage: {
-    backgroundColor: "#f3f4f6",
-    borderRadius: 12,
-  },
-  multiImageContainer: {
-    position: "relative",
-  },
+  imagesContainer: { position: "relative", marginBottom: 12 },
+  postImage: { backgroundColor: "#f3f4f6", borderRadius: 12 },
+  multiImageContainer: { position: "relative" },
   indicatorsContainer: {
     position: "absolute",
     bottom: 16,
@@ -895,11 +846,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  imageErrorText: {
-    color: "#9ca3af",
-    fontSize: 14,
-    marginTop: 8,
-  },
+  imageErrorText: { color: "#9ca3af", fontSize: 14, marginTop: 8 },
   imageCounter: {
     position: "absolute",
     top: 12,
@@ -912,10 +859,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
   },
-  imageCounterText: {
-    color: "white",
-    fontSize: 12,
-  },
+  imageCounterText: { color: "white", fontSize: 12 },
   postActions: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -925,28 +869,16 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "#f3f4f6",
   },
-  compactPostActions: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    gap: 16,
-  },
-  postAction: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
+  compactPostActions: { paddingHorizontal: 10, paddingVertical: 6, gap: 16 },
+  postAction: { flexDirection: "row", alignItems: "center", gap: 6 },
   postActionText: {
     fontSize: 14,
     fontFamily: "SofiaSans-Regular",
     color: "#6b7280",
     minWidth: 24,
   },
-  compactActionText: {
-    fontSize: 11,
-  },
-  likedText: {
-    color: "#ef4444",
-  },
+  compactActionText: { fontSize: 11 },
+  likedText: { color: "#ef4444" },
 });
 
 export default React.memo(PostCard);

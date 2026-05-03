@@ -22,7 +22,7 @@ const setupSocketIO = (server) => {
     // Connection settings
     pingTimeout: 60000,
     pingInterval: 25000,
-    transports: ["websocket", "polling"],
+    transports: ["websocket"],
   });
 
   // Apply authentication middleware

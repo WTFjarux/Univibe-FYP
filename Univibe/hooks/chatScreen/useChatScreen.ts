@@ -246,111 +246,121 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   onMessageDeliveredRef.current = (data: any) => {
     const { tempId, messageId, message: messageData, success, type } = data;
 
-    // Other user read all messages in the room — bulk update statuses
+    // ===========================================================================
+    // Bulk read receipt: other user marked all messages as read
+    // Only process if the reader is NOT the current user
+    // ===========================================================================
     if (type === "messages_read") {
-      setMessagesRef.current((prev: Message[]) => {
-        const updated = prev.map((msg) => {
+      // Ignore our own read events - they don't mean the other person read our messages
+      if (data.userId === userRef.current?.id) return;
+
+      setMessagesRef.current((prev: Message[]) =>
+        prev.map((msg) => {
           const senderId =
             typeof msg.sender === "string" ? msg.sender : msg.sender?._id;
 
-          if (senderId === userRef.current?.id && msg.status !== "read") {
-            const existingReadBy = msg.readBy || [];
-            const alreadyRead = existingReadBy.some((r: any) => {
-              const readUserId = typeof r === "string" ? r : r.user || r.userId;
-              return readUserId?.toString() === data.userId?.toString();
-            });
+          // Only update messages WE sent that the OTHER user hasn't already read
+          if (senderId !== userRef.current?.id || msg.status === "read")
+            return msg;
 
-            if (!alreadyRead) {
-              return {
-                ...msg,
-                status: "read" as const,
-                readBy: [
-                  ...existingReadBy,
-                  {
-                    user: data.userId,
-                    readAt: data.readAt || new Date().toISOString(),
-                  },
-                ],
-              };
-            }
-          }
-          return msg;
-        });
+          const existingReadBy = msg.readBy || [];
+          const alreadyRead = existingReadBy.some((r: any) => {
+            const id = typeof r === "string" ? r : r.user || r.userId;
+            return id?.toString() === data.userId?.toString();
+          });
 
-        return updated;
-      });
-      return;
-    }
+          if (alreadyRead) return msg;
 
-    // Other user read a single message — update that message only
-    if (type === "message_read") {
-      setMessagesRef.current((prev: Message[]) =>
-        prev.map((msg) => {
-          if (msg._id === data.messageId && msg.status !== "read") {
-            const existingReadBy = msg.readBy || [];
-            const alreadyRead = existingReadBy.some((r: any) => {
-              const readUserId = typeof r === "string" ? r : r.user || r.userId;
-              return readUserId?.toString() === data.userId?.toString();
-            });
-
-            if (!alreadyRead) {
-              return {
-                ...msg,
-                status: "read" as const,
-                readBy: [
-                  ...existingReadBy,
-                  {
-                    user: data.userId,
-                    readAt: data.readAt || new Date().toISOString(),
-                  },
-                ],
-              };
-            }
-          }
-          return msg;
+          return {
+            ...msg,
+            status: "read" as const,
+            readBy: [
+              ...existingReadBy,
+              {
+                user: data.userId,
+                readAt: data.readAt || new Date().toISOString(),
+              },
+            ],
+          };
         }),
       );
       return;
     }
 
-    // Message was delivered to the recipient's device
+    // ===========================================================================
+    // Single message read: other user read a specific message
+    // ===========================================================================
+    if (type === "message_read") {
+      if (data.userId === userRef.current?.id) return;
+
+      setMessagesRef.current((prev: Message[]) =>
+        prev.map((msg) => {
+          if (msg._id !== data.messageId || msg.status === "read") return msg;
+
+          const existingReadBy = msg.readBy || [];
+          const alreadyRead = existingReadBy.some((r: any) => {
+            const id = typeof r === "string" ? r : r.user || r.userId;
+            return id?.toString() === data.userId?.toString();
+          });
+
+          if (alreadyRead) return msg;
+
+          return {
+            ...msg,
+            status: "read" as const,
+            readBy: [
+              ...existingReadBy,
+              {
+                user: data.userId,
+                readAt: data.readAt || new Date().toISOString(),
+              },
+            ],
+          };
+        }),
+      );
+      return;
+    }
+
+    // ===========================================================================
+    // Message delivered to recipient's device
+    // ===========================================================================
     if (type === "message_delivered_to_recipient") {
       setMessagesRef.current((prev: Message[]) =>
         prev.map((msg) => {
-          if (msg._id === data.messageId && msg.status === "sent") {
-            const existingDelivered = msg.deliveredTo || [];
-            const alreadyDelivered = existingDelivered.some((r: any) => {
-              const dUserId = typeof r === "string" ? r : r.user || r.userId;
-              return dUserId?.toString() === data.recipientId?.toString();
-            });
+          if (msg._id !== data.messageId || msg.status !== "sent") return msg;
 
-            if (!alreadyDelivered) {
-              return {
-                ...msg,
-                status: "delivered" as const,
-                deliveredTo: [
-                  ...existingDelivered,
-                  {
-                    user: data.recipientId,
-                    deliveredAt: new Date().toISOString(),
-                  },
-                ],
-              };
-            }
-          }
-          return msg;
+          const existingDelivered = msg.deliveredTo || [];
+          const alreadyDelivered = existingDelivered.some((r: any) => {
+            const id = typeof r === "string" ? r : r.user || r.userId;
+            return id?.toString() === data.recipientId?.toString();
+          });
+
+          if (alreadyDelivered) return msg;
+
+          return {
+            ...msg,
+            status: "delivered" as const,
+            deliveredTo: [
+              ...existingDelivered,
+              { user: data.recipientId, deliveredAt: new Date().toISOString() },
+            ],
+          };
         }),
       );
       return;
     }
 
-    // Optimistic message was rejected by the server — remove it
+    // ===========================================================================
+    // Optimistic message rejection
+    // ===========================================================================
     if (success === false) {
       if (tempId) removeOptimisticMessageRef.current(tempId);
       return;
     }
 
-    // Optimistic message was confirmed — replace temp with real message
+    // ===========================================================================
+    // Optimistic message confirmation
+    // ===========================================================================
     if (tempId) {
       confirmOptimisticMessageRef.current(tempId, messageId, messageData);
     }

@@ -242,7 +242,7 @@ class ChatApiService {
           const percent = Math.round(
             (progressEvent.loaded * 100) / progressEvent.total,
           );
-          console.log(`Upload progress: ${percent}%`);
+
         }
       },
     });

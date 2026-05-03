@@ -21,7 +21,6 @@ const notificationSchema = new mongoose.Schema(
         "connection_accepted",
         "comment",
         "like",
-        "repost",
         "mention",
         "event_rsvp", // For RSVP notifications
         "event_interest", // For interest notifications

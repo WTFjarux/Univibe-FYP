@@ -700,7 +700,7 @@ exports.sharePost = async (req, res) => {
       });
     }
 
-    // Fetchh Post details
+    // Fetch Post details
     const Post = require("../models/Post");
     const post = await Post.findById(postId)
       .populate("user", "name username")
@@ -712,6 +712,12 @@ exports.sharePost = async (req, res) => {
         message: "Post not found",
       });
     }
+
+    // ✅ ADD THIS: Fetch post author's profile to get avatar
+    const postAuthorId = post.user?._id || post.user;
+    const authorProfile = await Profile.findOne({ user: postAuthorId })
+      .select("profilePicture")
+      .lean();
 
     // Verify target chats
     const targetRooms = await ChatRoom.find({
@@ -755,14 +761,17 @@ exports.sharePost = async (req, res) => {
             postId: post._id,
             postContent: post.content ? post.content.substring(0, 200) : "",
             postImage: postImage,
-            postAuthorId: post.user?._id || post.user,
+            postAuthorId: postAuthorId,
             postAuthorName: post.isAnonymous
               ? "Anonymous"
               : post.user?.name || "Unknown",
             postAuthorUsername: post.isAnonymous
               ? "anonymous"
               : post.user?.username || "user",
-            postAuthorAvatar: post.isAnonymous ? "" : post.user?.avatar || "",
+            // ✅ FIXED: Get avatar from Profile model
+            postAuthorAvatar: post.isAnonymous
+              ? ""
+              : authorProfile?.profilePicture || "",
             isAnonymous: post.isAnonymous || false,
             postCreatedAt: post.createdAt,
           },

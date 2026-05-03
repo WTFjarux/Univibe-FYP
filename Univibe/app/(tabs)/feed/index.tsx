@@ -1,5 +1,5 @@
 // app/(tabs)/feed/index.tsx
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -9,7 +9,6 @@ import {
   Alert,
   TouchableOpacity,
   Animated,
-  StyleSheet,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -25,13 +24,15 @@ import SharePostModal from "@/app/components/Feed/Post/SharePostModal";
 
 // Services
 import {
-  getPosts,
   toggleLike,
   deletePost,
   restorePost,
   Post,
   getFullImageUrl,
 } from "../../../lib/services/postService";
+
+// Feed hook
+import { useFeed } from "../../../hooks/useFeed";
 
 // Styles
 import styles from "@/app/components/Feed/styles";
@@ -49,26 +50,32 @@ export default function FeedScreen() {
   const router = useRouter();
   const { token, user } = useAuth();
 
-  // State
-  const [activeFilter, setActiveFilter] = useState("all");
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Feed hook
+  const {
+    activeFeed,
+    currentFeed,
+    switchFeed,
+    refresh: refreshFeed,
+    loadMore: loadMoreFeed,
+    addNewPost,
+    removePost,
+    updatePost,
+    refreshOnFocus,
+    forceRefresh,
+    markNeedsRefresh,
+  } = useFeed();
 
-  // Share post modal state
+  // Share modal
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [sharePost, setSharePost] = useState<Post | null>(null);
 
-  // User interaction states
+  // User interactions
   const [savedPosts, setSavedPosts] = useState<Set<string>>(new Set());
   const [hiddenPosts, setHiddenPosts] = useState<Set<string>>(new Set());
   const [mutedUsers, setMutedUsers] = useState<Set<string>>(new Set());
   const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
 
-  // Info bar state
+  // Info bar
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [infoType, setInfoType] = useState<"success" | "error" | "info">(
     "info",
@@ -79,15 +86,31 @@ export default function FeedScreen() {
     undefined,
   );
 
-  // Filters
   const filters = [
-    { id: "all", label: "All" },
     { id: "campus", label: "Campus" },
     { id: "connections", label: "Connections" },
     { id: "anonymous", label: "Anonymous" },
   ];
 
-  // Show info bar message from bottom with undo option
+  // Filtered posts
+  const visiblePosts = currentFeed.posts.filter(
+    (post) =>
+      !hiddenPosts.has(post._id) &&
+      !mutedUsers.has(post.user?._id || "") &&
+      !blockedUsers.has(post.user?._id || ""),
+  );
+
+  // ============ SCREEN FOCUS - Refresh when returning ============
+  useFocusEffect(
+    useCallback(() => {
+      if (token) {
+        refreshOnFocus();
+      }
+    }, [token, refreshOnFocus]),
+  );
+
+  // ============ INFO BAR ============
+
   const showInfoBar = (
     message: string,
     type: "success" | "error" | "info" = "info",
@@ -98,10 +121,7 @@ export default function FeedScreen() {
     setInfoType(type);
     setUndoAction(action || null);
 
-    if (undoTimeoutRef.current) {
-      clearTimeout(undoTimeoutRef.current);
-      undoTimeoutRef.current = undefined;
-    }
+    if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
 
     Animated.sequence([
       Animated.timing(slideAnim, {
@@ -132,17 +152,12 @@ export default function FeedScreen() {
         setInfoMessage(null);
         setUndoAction(null);
         slideAnim.setValue(100);
-        undoTimeoutRef.current = undefined;
       }, 5000);
     }
   };
 
-  // Hide info bar
   const hideInfoBar = () => {
-    if (undoTimeoutRef.current) {
-      clearTimeout(undoTimeoutRef.current);
-      undoTimeoutRef.current = undefined;
-    }
+    if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
     Animated.timing(slideAnim, {
       toValue: 100,
       duration: 300,
@@ -154,7 +169,6 @@ export default function FeedScreen() {
     });
   };
 
-  // Undo action
   const handleUndo = async () => {
     if (!undoAction) return;
 
@@ -162,179 +176,87 @@ export default function FeedScreen() {
       case "mute":
         if (undoAction.userId) {
           setMutedUsers((prev) => {
-            const newSet = new Set(prev);
-            newSet.delete(undoAction.userId!);
-            return newSet;
+            const n = new Set(prev);
+            n.delete(undoAction.userId!);
+            return n;
           });
-          fetchPosts(activeFilter, 1);
           showInfoBar(
             `User ${undoAction.userName || "muted"} unmuted`,
             "success",
           );
         }
         break;
-
       case "block":
         if (undoAction.userId) {
           setBlockedUsers((prev) => {
-            const newSet = new Set(prev);
-            newSet.delete(undoAction.userId!);
-            return newSet;
+            const n = new Set(prev);
+            n.delete(undoAction.userId!);
+            return n;
           });
-          fetchPosts(activeFilter, 1);
           showInfoBar(
             `User ${undoAction.userName || "blocked"} unblocked`,
             "success",
           );
         }
         break;
-
       case "hide":
-        if (undoAction.postId && undoAction.post) {
+        if (undoAction.postId) {
           setHiddenPosts((prev) => {
-            const newSet = new Set(prev);
-            newSet.delete(undoAction.postId!);
-            return newSet;
+            const n = new Set(prev);
+            n.delete(undoAction.postId!);
+            return n;
           });
-          setPosts((prev) => {
-            const newPosts = [...prev, undoAction.post!];
-            return newPosts.sort(
-              (a, b) =>
-                new Date(b.createdAt).getTime() -
-                new Date(a.createdAt).getTime(),
-            );
-          });
-          showInfoBar("Post restored", "success");
+          showInfoBar("Post restored to feed", "success");
         }
         break;
-
       case "save":
         if (undoAction.postId) {
           setSavedPosts((prev) => {
-            const newSet = new Set(prev);
-            newSet.delete(undoAction.postId!);
-            return newSet;
+            const n = new Set(prev);
+            n.delete(undoAction.postId!);
+            return n;
           });
           showInfoBar("Post removed from saved items", "info");
         }
         break;
-
       case "delete":
         if (undoAction.postId && undoAction.deletedPost) {
           try {
             await restorePost(undoAction.postId);
-            setPosts((prev) => {
-              if (prev.some((p) => p._id === undoAction.postId)) {
-                return prev;
-              }
-              const newPosts = [...prev, undoAction.deletedPost!];
-              return newPosts.sort(
-                (a, b) =>
-                  new Date(b.createdAt).getTime() -
-                  new Date(a.createdAt).getTime(),
-              );
-            });
+            addNewPost(undoAction.deletedPost);
             showInfoBar("Post restored successfully", "success");
           } catch (error: any) {
-            console.error("Error restoring post:", error);
             showInfoBar(error.message || "Failed to restore post", "error");
           }
         }
         break;
     }
-
     hideInfoBar();
   };
 
-  /**
-   * Fetch posts from API with current filter and pagination
-   */
-  const fetchPosts = async (filter = activeFilter, pageNum = 1) => {
-    try {
-      setError(null);
-      const response = await getPosts(filter, pageNum);
-
-      const filteredPosts = response.posts.filter(
-        (post) =>
-          !hiddenPosts.has(post._id) &&
-          !mutedUsers.has(post.user?._id || "") &&
-          !blockedUsers.has(post.user?._id || ""),
-      );
-
-      if (pageNum === 1) {
-        setPosts(filteredPosts);
-      } else {
-        setPosts((prev) => [...prev, ...filteredPosts]);
-      }
-
-      setHasMore(response.pagination?.pages > pageNum);
-    } catch (error: any) {
-      console.error("Error fetching posts:", error);
-      setError(error.message || "Failed to load posts");
-
-      if (
-        error.message?.includes("401") ||
-        error.message?.includes("unauthorized") ||
-        error.message?.includes("token")
-      ) {
-        Alert.alert("Session Expired", "Please login again to continue", [
-          {
-            text: "Login",
-            onPress: () => router.replace("/(auth)/login"),
-          },
-        ]);
-      }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  // Initial load
-  useEffect(() => {
-    if (token) {
-      fetchPosts();
-    } else {
-      setLoading(false);
-      setError("Please login to view posts");
-    }
-  }, [token]);
-
-  // Refresh on focus
-  useFocusEffect(
-    useCallback(() => {
-      if (token) {
-        fetchPosts(activeFilter, 1);
-      }
-    }, [activeFilter, token]),
-  );
-
-  const onRefresh = () => {
-    if (token) {
-      setRefreshing(true);
-      setPage(1);
-      fetchPosts(activeFilter, 1);
-    }
-  };
+  // ============ FEED ACTIONS ============
 
   const handleFilterChange = (filterId: string) => {
-    if (token) {
-      setActiveFilter(filterId);
-      setPage(1);
-      setLoading(true);
-      fetchPosts(filterId, 1);
-    }
+    if (token) switchFeed(filterId as "campus" | "connections" | "anonymous");
   };
 
-  const loadMore = () => {
-    if (token && !loading && hasMore) {
-      const nextPage = page + 1;
-      setPage(nextPage);
-      fetchPosts(activeFilter, nextPage);
-    }
-  };
+  const onRefresh = useCallback(() => {
+    if (token) refreshFeed();
+  }, [token, refreshFeed]);
 
-  // ============ POST INTERACTION HANDLERS ============
+  const handleScroll = useCallback(
+    ({ nativeEvent }: any) => {
+      const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
+      const isCloseToBottom =
+        layoutMeasurement.height + contentOffset.y >= contentSize.height - 100;
+      if (isCloseToBottom && currentFeed.hasMore && !currentFeed.loadingMore) {
+        loadMoreFeed();
+      }
+    },
+    [currentFeed.hasMore, currentFeed.loadingMore, loadMoreFeed],
+  );
+
+  // ============ POST INTERACTIONS ============
 
   const handleLike = async (postId: string) => {
     if (!token) {
@@ -342,24 +264,26 @@ export default function FeedScreen() {
       return;
     }
 
+    const post = visiblePosts.find((p) => p._id === postId);
+    if (post) {
+      updatePost(postId, {
+        isLiked: !post.isLiked,
+        likeCount: post.isLiked ? post.likeCount - 1 : post.likeCount + 1,
+      });
+    }
+
     try {
       const response = await toggleLike(postId);
-
-      setPosts((prev) =>
-        prev.map((post) =>
-          post._id === postId
-            ? {
-                ...post,
-                likes: response.isLiked
-                  ? [...(post.likes || []), { _id: user?.id || "current-user" }]
-                  : post.likes?.filter((like: any) => like._id !== user?.id),
-                isLiked: response.isLiked,
-              }
-            : post,
-        ),
-      );
+      updatePost(postId, {
+        isLiked: response.isLiked,
+        likeCount: response.likes,
+      });
     } catch (error: any) {
-      console.error("Error liking post:", error);
+      if (post)
+        updatePost(postId, {
+          isLiked: post.isLiked,
+          likeCount: post.likeCount,
+        });
       showInfoBar(error.message || "Failed to like post", "error");
     }
   };
@@ -369,53 +293,36 @@ export default function FeedScreen() {
       showInfoBar("Please login to comment", "info");
       return;
     }
-
     router.push({
       pathname: "/components/Feed/Comment/CommentsScreen",
       params: { postId },
     });
   };
 
-  const handleRepost = (postId: string) => {
-    if (!token) {
-      showInfoBar("Please login to repost", "info");
-      return;
-    }
-    showInfoBar("Repost feature coming soon!", "info");
-  };
 
-  // UPDATED: Open SharePostModal instead of showing info
+
   const handleShare = (postId: string) => {
     if (!token) {
       showInfoBar("Please login to share posts", "info");
       return;
     }
-
-    const post = posts.find((p) => p._id === postId);
+    const post = visiblePosts.find((p) => p._id === postId);
     if (post) {
       setSharePost(post);
       setShareModalVisible(true);
     }
   };
 
-  // ============ PROFILE NAVIGATION HANDLER ============
-
-  const handleProfilePressFromPost = (userId: string) => {
-    if (!token) {
-      showInfoBar("Please login to view profiles", "info");
-      return;
-    }
-
-    if (userId === user?.id) {
-      router.push("/(tabs)/profile");
-    } else {
-      router.push(`/profile/${userId}`);
-    }
+  const handleProfilePress = (userId: string) => {
+    if (!token || !userId) return;
+    router.push(userId === user?.id ? "/(tabs)/profile" : `/profile/${userId}`);
   };
 
-  // ============ POST OPTION HANDLERS ============
+  // ============ POST OPTIONS ============
 
   const handleEditPost = (postId: string) => {
+    // Mark that feed needs refresh when returning from edit
+    markNeedsRefresh();
     router.push({
       pathname: "/components/Feed/Post/EditPost",
       params: { postId },
@@ -423,181 +330,105 @@ export default function FeedScreen() {
   };
 
   const handleDeletePost = async (postId: string) => {
-    const postToDelete = posts.find((p) => p._id === postId);
+    const postToDelete = visiblePosts.find((p) => p._id === postId);
     if (!postToDelete) return;
 
-    try {
-      setPosts((prev) => prev.filter((p) => p._id !== postId));
-      showInfoBar(
-        "Post deleted",
-        "info",
-        {
-          type: "delete",
-          postId,
-          deletedPost: postToDelete,
-        },
-        true,
-      );
+    removePost(postId);
+    showInfoBar(
+      "Post deleted",
+      "info",
+      { type: "delete", postId, deletedPost: postToDelete },
+      true,
+    );
 
+    try {
       await deletePost(postId);
     } catch (error: any) {
-      console.error("Error deleting post:", error);
-      setPosts((prev) => {
-        if (prev.some((p) => p._id === postId)) return prev;
-        const newPosts = [...prev, postToDelete];
-        return newPosts.sort(
-          (a, b) =>
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-        );
-      });
+      addNewPost(postToDelete);
       showInfoBar(error.message || "Failed to delete post", "error");
     }
   };
 
   const handleSavePost = (postId: string) => {
-    const wasSaved = savedPosts.has(postId);
-
     setSavedPosts((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(postId)) {
-        newSet.delete(postId);
+      const n = new Set(prev);
+      if (n.has(postId)) {
+        n.delete(postId);
+        showInfoBar("Post removed from saved", "info");
       } else {
-        newSet.add(postId);
+        n.add(postId);
+        showInfoBar("Post saved", "success", { type: "save", postId }, true);
       }
-      return newSet;
+      return n;
     });
-
-    if (!wasSaved) {
-      showInfoBar(
-        "Post saved to your items",
-        "success",
-        { type: "save", postId },
-        true,
-      );
-    } else {
-      showInfoBar("Post removed from saved items", "info");
-    }
   };
 
-  const handleReportPost = (postId: string) => {
+  const handleReportPost = () => {
     Alert.alert(
       "Report Post",
-      "Are you sure you want to report this post? We'll review it and take appropriate action.",
+      "We'll review this post and take appropriate action.",
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Report",
           style: "destructive",
-          onPress: () => {
-            showInfoBar("Thank you for reporting this post", "success");
-          },
+          onPress: () => showInfoBar("Thank you for reporting", "success"),
         },
       ],
     );
   };
 
   const handleHidePost = (postId: string) => {
-    const postToHide = posts.find((p) => p._id === postId);
-    if (!postToHide) return;
-
-    setHiddenPosts((prev) => {
-      const newSet = new Set(prev);
-      newSet.add(postId);
-      return newSet;
-    });
-    setPosts((prev) => prev.filter((p) => p._id !== postId));
-    showInfoBar(
-      "Post hidden",
-      "info",
-      { type: "hide", postId, post: postToHide },
-      true,
-    );
+    setHiddenPosts((prev) => new Set(prev).add(postId));
+    showInfoBar("Post hidden", "info", { type: "hide", postId }, true);
   };
 
-  const handleCopyLink = (postId: string) => {
-    showInfoBar("Post link copied to clipboard", "success");
-  };
-
+  const handleCopyLink = () =>
+    showInfoBar("Link copied to clipboard", "success");
   const handleMuteUser = (userId: string, userName?: string) => {
-    const displayName = userName || "this user";
-
-    setMutedUsers((prev) => {
-      const newSet = new Set(prev);
-      newSet.add(userId);
-      return newSet;
-    });
-    setPosts((prev) => prev.filter((post) => post.user?._id !== userId));
+    if (!userId) return;
+    setMutedUsers((prev) => new Set(prev).add(userId));
     showInfoBar(
-      `User ${displayName} muted`,
+      `User ${userName || "muted"} muted`,
       "info",
-      { type: "mute", userId, userName: displayName },
+      { type: "mute", userId, userName },
       true,
     );
   };
-
   const handleBlockUser = (userId: string, userName?: string) => {
-    const displayName = userName || "this user";
-
-    setBlockedUsers((prev) => {
-      const newSet = new Set(prev);
-      newSet.add(userId);
-      return newSet;
-    });
-    setPosts((prev) => prev.filter((post) => post.user?._id !== userId));
+    if (!userId) return;
+    setBlockedUsers((prev) => new Set(prev).add(userId));
     showInfoBar(
-      `User ${displayName} blocked`,
+      `User ${userName || "blocked"} blocked`,
       "info",
-      { type: "block", userId, userName: displayName },
+      { type: "block", userId, userName },
       true,
     );
   };
 
-  // ============ UI ACTION HANDLERS ============
+  // ============ UI ACTIONS ============
 
   const handleCreatePost = () => {
     if (!token) {
       showInfoBar("Please login to create posts", "info");
       return;
     }
+    // Mark that feed needs refresh when returning
+    markNeedsRefresh();
     router.push("/components/Feed/Post/create");
-  };
-
-  const handleNotifications = () => {
-    if (!token) {
-      showInfoBar("Please login to view notifications", "info");
-      return;
-    }
-    router.push("/screens/notifications");
-  };
-
-  const handleProfilePress = () => {
-    router.push("/(tabs)/profile");
-  };
-
-  // ============ SHARE MODAL HANDLERS ============
-
-  const handleShareModalClose = () => {
-    setShareModalVisible(false);
-    setTimeout(() => setSharePost(null), 300);
-  };
-
-  const handleShareSuccess = (data: any) => {
-    showInfoBar("Post shared successfully", "success");
   };
 
   // ============ RENDER HELPERS ============
 
   const renderInfoBar = () => {
     if (!infoMessage) return null;
-
-    const backgroundColor =
+    const bg =
       infoType === "success"
         ? "#10b981"
         : infoType === "error"
           ? "#ef4444"
           : "#8b5cf6";
-
-    const iconName =
+    const icon =
       infoType === "success"
         ? "checkmark-circle"
         : infoType === "error"
@@ -608,13 +439,10 @@ export default function FeedScreen() {
       <Animated.View
         style={[
           styles.infoBar,
-          {
-            backgroundColor,
-            transform: [{ translateY: slideAnim }],
-          },
+          { backgroundColor: bg, transform: [{ translateY: slideAnim }] },
         ]}
       >
-        <Ionicons name={iconName as any} size={20} color="#fff" />
+        <Ionicons name={icon as any} size={20} color="#fff" />
         <Text style={styles.infoBarText}>{infoMessage}</Text>
         {undoAction && (
           <TouchableOpacity onPress={handleUndo} style={styles.undoButton}>
@@ -625,185 +453,165 @@ export default function FeedScreen() {
     );
   };
 
-  const renderLoginPrompt = () => (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.centered}>
-        <Ionicons name="log-in-outline" size={64} color="#9ca3af" />
-        <Text style={styles.errorText}>Please login to view the feed</Text>
-        <TouchableOpacity
-          style={styles.loginButton}
-          onPress={() => router.replace("/(auth)/login")}
-        >
-          <Text style={styles.loginButtonText}>Login</Text>
-        </TouchableOpacity>
-      </View>
-    </SafeAreaView>
-  );
-
-  const renderLoading = () => (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#8b5cf6" />
-      </View>
-    </SafeAreaView>
-  );
-
-  const renderEmptyState = () => (
-    <View style={styles.emptyState}>
-      <Ionicons name="newspaper-outline" size={64} color="#9ca3af" />
-      <Text style={styles.emptyStateText}>No posts yet</Text>
-      <Text style={styles.emptyStateSubtext}>
-        Be the first to share something on campus!
-      </Text>
-      <TouchableOpacity
-        style={styles.createFirstPostButton}
-        onPress={handleCreatePost}
-      >
-        <Text style={styles.createFirstPostText}>Create First Post</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderError = () => (
-    <View style={styles.errorContainer}>
-      <Text style={styles.errorText}>{error}</Text>
-      <TouchableOpacity
-        style={styles.retryButton}
-        onPress={() => fetchPosts(activeFilter, 1)}
-      >
-        <Text style={styles.retryButtonText}>Retry</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  // Get share post data for the modal
-  const getSharePostData = () => {
-    if (!sharePost) return null;
-    return {
-      postId: sharePost._id,
-      postContent: sharePost.content || "",
-      postImage: sharePost.images?.[0]?.url
-        ? getFullImageUrl(sharePost.images[0].url)
-        : "",
-      postAuthorName: sharePost.isAnonymous
-        ? "Anonymous"
-        : sharePost.user?.name || "Unknown",
-      postAuthorAvatar: sharePost.user?.profilePicture || "",
-      isAnonymous: sharePost.isAnonymous || false,
-    };
+  const renderFooter = () => {
+    if (currentFeed.loadingMore)
+      return (
+        <View style={{ padding: 20 }}>
+          <ActivityIndicator size="small" color="#8b5cf6" />
+        </View>
+      );
+    if (!currentFeed.hasMore && visiblePosts.length > 0)
+      return (
+        <View style={styles.endMessage}>
+          <Text style={styles.endMessageText}>No more posts to load</Text>
+        </View>
+      );
+    return null;
   };
 
-  const sharePostData = getSharePostData();
+  const sharePostData = sharePost
+    ? {
+        postId: sharePost._id,
+        postContent: sharePost.content || "",
+        postImage: sharePost.images?.[0]?.url
+          ? getFullImageUrl(sharePost.images[0].url)
+          : "",
+        postAuthorName: sharePost.isAnonymous
+          ? "Anonymous"
+          : sharePost.user?.name || "Unknown",
+        postAuthorAvatar: sharePost.user?.profilePicture || "",
+        isAnonymous: sharePost.isAnonymous || false,
+      }
+    : null;
 
-  // Early returns for auth and loading states
-  if (!token) return renderLoginPrompt();
-  if (loading && posts.length === 0) return renderLoading();
+  // ============ AUTH CHECKS ============
+
+  if (!token) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
+          <Ionicons name="log-in-outline" size={64} color="#9ca3af" />
+          <Text style={styles.errorText}>Please login to view the feed</Text>
+          <TouchableOpacity
+            style={styles.loginButton}
+            onPress={() => router.replace("/(auth)/login")}
+          >
+            <Text style={styles.loginButtonText}>Login</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (currentFeed.loading && visiblePosts.length === 0) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#8b5cf6" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ============ MAIN RENDER ============
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={currentFeed.refreshing}
+            onRefresh={onRefresh}
+            colors={["#8b5cf6"]}
+            tintColor="#8b5cf6"
+          />
         }
-        onScroll={({ nativeEvent }) => {
-          const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
-          const isCloseToBottom =
-            layoutMeasurement.height + contentOffset.y >=
-            contentSize.height - 50;
-
-          if (isCloseToBottom && hasMore && !loading) {
-            loadMore();
-          }
-        }}
+        onScroll={handleScroll}
         scrollEventThrottle={400}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Header */}
-        <FeedHeader
-          onNotificationPress={handleNotifications}
-          onProfilePress={handleProfilePress}
-        />
-
-        {/* Create Post Button */}
+        <FeedHeader onProfilePress={() => router.push("/(tabs)/profile")} />
         <CreatePostButton onPress={handleCreatePost} />
-
-        {/* Filter Tabs */}
         <FilterTabs
           filters={filters}
-          activeFilter={activeFilter}
+          activeFilter={activeFeed}
           onFilterChange={handleFilterChange}
         />
 
-        {/* Error Display */}
-        {error && renderError()}
-
-        {/* Posts List */}
-        <View style={styles.postsContainer}>
-          {posts.length === 0 && !loading
-            ? renderEmptyState()
-            : posts.map((post) => (
-                <PostCard
-                  key={post._id}
-                  post={post}
-                  onLikePress={handleLike}
-                  onCommentPress={handleComment}
-                  onRepostPress={handleRepost}
-                  onSharePress={handleShare}
-                  onEdit={handleEditPost}
-                  onDelete={handleDeletePost}
-                  onSave={handleSavePost}
-                  onReport={handleReportPost}
-                  onHide={handleHidePost}
-                  onCopyLink={handleCopyLink}
-                  onMuteUser={(userId) =>
-                    handleMuteUser(
-                      userId,
-                      post.user?.name || post.user?.username,
-                    )
-                  }
-                  onBlockUser={(userId) =>
-                    handleBlockUser(
-                      userId,
-                      post.user?.name || post.user?.username,
-                    )
-                  }
-                  onProfilePress={handleProfilePressFromPost}
-                />
-              ))}
-        </View>
-
-        {/* Loading Indicator */}
-        {loading && posts.length > 0 && (
-          <ActivityIndicator style={styles.loader} color="#8b5cf6" />
-        )}
-
-        {/* End of Feed Message */}
-        {!hasMore && posts.length > 0 && (
-          <View style={styles.endMessage}>
-            <Text style={styles.endMessageText}>No more posts to load</Text>
+        {currentFeed.error && visiblePosts.length === 0 && (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>{currentFeed.error}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={onRefresh}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
           </View>
         )}
 
-        {/* Add extra padding at bottom */}
+        <View style={styles.postsContainer}>
+          {visiblePosts.length === 0 && !currentFeed.loading ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="newspaper-outline" size={64} color="#9ca3af" />
+              <Text style={styles.emptyStateText}>No posts yet</Text>
+              <Text style={styles.emptyStateSubtext}>
+                {activeFeed === "connections"
+                  ? "Connect with more people to see their posts"
+                  : "Be the first to share something on campus!"}
+              </Text>
+              <TouchableOpacity
+                style={styles.createFirstPostButton}
+                onPress={handleCreatePost}
+              >
+                <Text style={styles.createFirstPostText}>
+                  Create First Post
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            visiblePosts.map((post) => (
+              <PostCard
+                key={post._id}
+                post={post}
+                onLikePress={handleLike}
+                onCommentPress={handleComment}
+
+                onSharePress={handleShare}
+                onEdit={handleEditPost}
+                onDelete={handleDeletePost}
+                onSave={handleSavePost}
+                onReport={handleReportPost}
+                onHide={handleHidePost}
+                onCopyLink={handleCopyLink}
+                onMuteUser={(userId) =>
+                  handleMuteUser(userId, post.user?.name || post.user?.username)
+                }
+                onBlockUser={(userId) =>
+                  handleBlockUser(
+                    userId,
+                    post.user?.name || post.user?.username,
+                  )
+                }
+                onProfilePress={handleProfilePress}
+              />
+            ))
+          )}
+        </View>
+
+        {renderFooter()}
         <View style={styles.bottomPadding} />
       </ScrollView>
 
-      {/* Info bar rendered at the bottom */}
       {renderInfoBar()}
 
-      {/* Share Post Modal */}
       {sharePostData && (
         <SharePostModal
           visible={shareModalVisible}
-          onClose={handleShareModalClose}
-          onSuccess={handleShareSuccess}
-          postId={sharePostData.postId}
-          postContent={sharePostData.postContent}
-          postImage={sharePostData.postImage}
-          postAuthorName={sharePostData.postAuthorName}
-          postAuthorAvatar={sharePostData.postAuthorAvatar}
-          isAnonymous={sharePostData.isAnonymous}
+          onClose={() => {
+            setShareModalVisible(false);
+            setTimeout(() => setSharePost(null), 300);
+          }}
+          onSuccess={() => showInfoBar("Post shared successfully", "success")}
+          {...sharePostData}
         />
       )}
     </SafeAreaView>

@@ -16,12 +16,14 @@ const { initializeSocketIO } = require("./socket");
 
 // Routes
 const authRoutes = require("./routes/authRoutes");
+const userRoutes = require("./routes/userRoutes");
 const profileRoutes = require("./routes/profileRoutes");
 const postRoutes = require("./routes/postRoutes");
 const connectionRoutes = require("./routes/connectionRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const eventRoutes = require("./routes/eventRoutes");
 const chatRoutes = require("./routes/chatRoutes");
+const feedRoutes = require("./routes/feedRoutes");
 
 // Connect to database
 connectDB();
@@ -40,6 +42,7 @@ app.set("io", io);
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+app.use("/api/users", userRoutes);
 
 // Serve uploaded files statically
 app.use(
@@ -72,6 +75,7 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api/auth", authRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/posts", postRoutes);
+app.use("/api/feed", feedRoutes);
 app.use("/api/connections", connectionRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/events", eventRoutes);

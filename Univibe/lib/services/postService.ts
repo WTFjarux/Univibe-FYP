@@ -1,10 +1,6 @@
-// lib/services/postService.ts - Fixed cache issues
+// lib/services/postService.ts
 import * as SecureStore from "expo-secure-store";
 import { API_BASE_URL } from "../../constants/ipConstants";
-import { postCache } from "../cache/postCache";
-
-// Default avatar constant
-export const DEFAULT_AVATAR = "default-avatar";
 
 // ============================================
 // INTERFACES
@@ -13,12 +9,12 @@ export const DEFAULT_AVATAR = "default-avatar";
 export interface Post {
   _id: string;
   user: {
-    _id: string;
+    _id: string | null;
     name: string;
     username: string;
-    profilePicture: string;
+    email: string | null;
     verified: boolean;
-    email?: string;
+    profilePicture: string | null;
   };
   originalUser?: {
     _id: string;
@@ -29,30 +25,44 @@ export interface Post {
   images: Array<{
     filename: string;
     url: string;
-    path: string;
+    path?: string;
     mimetype: string;
     size: number;
   }>;
-  likes: any[];
-  comments: any[];
-  reposts: any[];
   tags: string[];
-  mentions: any[];
   campus: string;
-  visibility: string;
-  isPinned: boolean;
+  visibility: "campus" | "connections";
+  isAnonymous: boolean;
   isEdited: boolean;
-  editedAt?: string;
+  editedAt?: string | null;
   createdAt: string;
   updatedAt: string;
-  __v: number;
-  isLiked?: boolean;
-  isReposted?: boolean;
-  isAnonymous?: boolean;
-  commentCount?: number;
+  isLiked: boolean;
+  isOwner?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+
+  // Counts (denormalized)
+  likeCount: number;
+  commentCount: number;
+
+  // Only populated in single post view
+  likes?: Array<{
+    _id: string;
+    name: string;
+    username: string;
+  }>;
+  comments?: any[];
+  reposts?: any[];
+  mentions?: any[];
   recentComments?: Comment[];
+
+  // Legacy fields for backward compatibility
+  isPinned?: boolean;
+  isReposted?: boolean;
   isDeleted?: boolean;
   deletedAt?: string;
+  __v?: number;
 }
 
 export interface Comment {
@@ -84,16 +94,26 @@ export interface Comment {
   replyCount?: number;
 }
 
-export interface PostsResponse {
+export interface LikeResponse {
   success: boolean;
-  posts: Post[];
-  currentCampus?: string;
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    pages: number;
+  likes: number;
+  isLiked: boolean;
+}
+
+export interface DeletePostResponse {
+  success: boolean;
+  message: string;
+  post?: {
+    _id: string;
+    isDeleted: boolean;
+    deletedAt?: string;
   };
+}
+
+export interface RestorePostResponse {
+  success: boolean;
+  message: string;
+  post?: Post;
 }
 
 export interface CommentsResponse {
@@ -113,28 +133,6 @@ export interface CommentThreadResponse {
   thread: Comment;
 }
 
-export interface LikeResponse {
-  success: boolean;
-  likes: number;
-  isLiked: boolean;
-}
-
-export interface ReplyCountResponse {
-  success: boolean;
-  replyCount: number;
-}
-
-export interface CommentLikesResponse {
-  success: boolean;
-  likeCount: number;
-  likes: Array<{
-    _id: string;
-    name: string;
-    username: string;
-    profilePicture?: string;
-  }>;
-}
-
 export interface ProfilePostsResponse {
   success: boolean;
   data?: {
@@ -151,22 +149,6 @@ export interface ProfilePostsResponse {
     };
   };
   message?: string;
-}
-
-export interface DeletePostResponse {
-  success: boolean;
-  message: string;
-  post?: {
-    _id: string;
-    isDeleted: boolean;
-    deletedAt?: string;
-  };
-}
-
-export interface RestorePostResponse {
-  success: boolean;
-  message: string;
-  post?: Post;
 }
 
 // ============================================
@@ -188,33 +170,11 @@ const buildApiUrl = (endpoint: string): string => {
   if (!baseUrl.endsWith("/")) {
     baseUrl += "/";
   }
-
   let cleanEndpoint = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
-
   if (!baseUrl.includes("/api/") && !cleanEndpoint.startsWith("api/")) {
     cleanEndpoint = `api/${cleanEndpoint}`;
   }
-
   return `${baseUrl}${cleanEndpoint}`;
-};
-
-const getFileExtension = (uri: string): string => {
-  const filename = uri.split("/").pop() || "";
-  const ext = filename.split(".").pop()?.toLowerCase() || "";
-  return ext || "jpg";
-};
-
-const getMimeTypeFromExtension = (extension: string): string => {
-  const mimeTypes: Record<string, string> = {
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    png: "image/png",
-    gif: "image/gif",
-    webp: "image/webp",
-    heic: "image/heic",
-    heif: "image/heif",
-  };
-  return mimeTypes[extension] || "image/jpeg";
 };
 
 export const getFullImageUrl = (url: string): string => {
@@ -229,141 +189,12 @@ export const getFullImageUrl = (url: string): string => {
 };
 
 // ============================================
-// POST FUNCTIONS WITH CACHING
+// POST CRUD OPERATIONS (No feed logic)
 // ============================================
 
-export const getProfilePosts = async (
-  userId: string,
-  page: number = 1,
-  limit: number = 10,
-  forceRefresh: boolean = false,
-): Promise<ProfilePostsResponse> => {
-  try {
-    const token = await getAuthToken();
-    if (!token) {
-      return { success: false, message: "No authentication token" };
-    }
-
-    const cacheKey = `profile_posts_${userId}_page_${page}_limit_${limit}`;
-
-    if (!forceRefresh) {
-      const cached = postCache.getFromMemory(cacheKey);
-      if (cached) return { ...cached, _cached: true };
-
-      const stored = await postCache.getFromStorage(cacheKey);
-      if (stored) return { ...stored, _cached: true };
-    }
-
-    const response = await fetch(
-      `${API_BASE_URL}/api/posts/profile/${userId}?page=${page}&limit=${limit}`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      },
-    );
-
-    const result = await response.json();
-
-    if (result.success) {
-      await postCache.saveToStorage(cacheKey, result);
-    }
-
-    return result;
-  } catch (error) {
-    console.error("Error fetching profile posts:", error);
-    return { success: false, message: "Failed to fetch posts" };
-  }
-};
-
-export const getPosts = async (
-  filter: string = "all",
-  page: number = 1,
-  limit: number = 10,
-  forceRefresh: boolean = false,
-): Promise<PostsResponse> => {
-  try {
-    const token = await getAuthToken();
-
-    const cacheKey = `posts_filter_${filter}_page_${page}_limit_${limit}`;
-
-    if (!forceRefresh) {
-      const cached = postCache.getFromMemory(cacheKey);
-      if (cached) return cached;
-
-      const stored = await postCache.getFromStorage(cacheKey);
-      if (stored) return stored;
-    }
-
-    const params = new URLSearchParams({
-      filter,
-      page: page.toString(),
-      limit: limit.toString(),
-    });
-
-    const url = `${buildApiUrl("posts")}?${params.toString()}`;
-
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        await SecureStore.deleteItemAsync("authToken");
-        throw new Error("Session expired. Please login again.");
-      }
-      throw new Error(`Failed to fetch posts: ${response.status}`);
-    }
-
-    const result = await response.json();
-
-    if (result.success) {
-      await postCache.saveToStorage(cacheKey, result);
-    }
-
-    return result;
-  } catch (error) {
-    console.error("Error fetching posts:", error);
-    throw error;
-  }
-};
-
-export const toggleLike = async (postId: string): Promise<LikeResponse> => {
-  try {
-    const token = await getAuthToken();
-    const url = buildApiUrl(`posts/${postId}/like`);
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to toggle like: ${response.status}`);
-    }
-
-    const result = await response.json();
-
-    if (result.success) {
-      await postCache.invalidatePostsCache();
-      await postCache.clear(`post_${postId}`);
-    }
-
-    return result;
-  } catch (error) {
-    console.error("Error toggling like:", error);
-    throw error;
-  }
-};
-
+/**
+ * Create a new post
+ */
 export const createPost = async (
   content: string,
   images: any[] = [],
@@ -375,7 +206,6 @@ export const createPost = async (
     const url = buildApiUrl("posts");
 
     const formData = new FormData();
-
     formData.append("content", content.trim());
     formData.append("visibility", visibility);
     formData.append("isAnonymous", isAnonymous.toString());
@@ -384,19 +214,22 @@ export const createPost = async (
       for (let i = 0; i < images.length; i++) {
         const image = images[i];
         const uri = image.uri;
-
-        const ext = getFileExtension(uri);
-        const mimeType = getMimeTypeFromExtension(ext);
+        const ext =
+          uri.split("/").pop()?.split(".").pop()?.toLowerCase() || "jpg";
+        const mimeType =
+          ext === "png"
+            ? "image/png"
+            : ext === "gif"
+              ? "image/gif"
+              : "image/jpeg";
         const filename =
           uri.split("/").pop() || `post_${Date.now()}_${i}.${ext}`;
 
-        const fileObject = {
+        formData.append("images", {
           uri: uri,
           name: filename,
           type: mimeType,
-        };
-
-        formData.append("images", fileObject as any);
+        } as any);
       }
     }
 
@@ -416,37 +249,26 @@ export const createPost = async (
       } catch {
         errorDetail = await response.text();
       }
-
       throw new Error(
         `Failed to create post: ${response.status} - ${errorDetail}`,
       );
     }
 
-    const result = await response.json();
-
-    if (result.success) {
-      await postCache.invalidatePostsCache();
-    }
-
-    return result;
+    return await response.json();
   } catch (error: any) {
     console.error("Error creating post:", error.message || error);
     throw error;
   }
 };
 
-// ============================================
-// FIXED: getPostById - DON'T cache when viewing comments
-// ============================================
+/**
+ * Get a single post by ID
+ */
 export const getPostById = async (
   postId: string,
-  forceRefresh: boolean = false,
 ): Promise<{ success: boolean; post: Post }> => {
   try {
     const token = await getAuthToken();
-
-    // ALWAYS fetch fresh - comment counts change frequently
-    // The cache was causing stale commentCount values
     const url = buildApiUrl(`posts/${postId}`);
 
     const response = await fetch(url, {
@@ -460,20 +282,47 @@ export const getPostById = async (
       throw new Error(`Failed to fetch post: ${response.status}`);
     }
 
-    const result = await response.json();
-
-    // Update cache with fresh data
-    if (result.success) {
-      await postCache.saveToStorage(`post_${postId}`, result);
-    }
-
-    return result;
+    return await response.json();
   } catch (error) {
     console.error("Error fetching post:", error);
     throw error;
   }
 };
 
+/**
+ * Update a post
+ */
+export const updatePost = async (
+  postId: string,
+  formData: FormData,
+): Promise<{ success: boolean; message: string; post: Post }> => {
+  try {
+    const token = await getAuthToken();
+    const url = buildApiUrl(`posts/${postId}`);
+
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || "Failed to update post");
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("Error updating post:", error);
+    throw error;
+  }
+};
+
+/**
+ * Delete a post (soft delete)
+ */
 export const deletePost = async (
   postId: string,
 ): Promise<DeletePostResponse> => {
@@ -493,20 +342,16 @@ export const deletePost = async (
       throw new Error(`Failed to delete post: ${response.status}`);
     }
 
-    const result = await response.json();
-
-    if (result.success) {
-      await postCache.invalidatePostsCache();
-      await postCache.clear(`post_${postId}`);
-    }
-
-    return result;
+    return await response.json();
   } catch (error) {
     console.error("Error deleting post:", error);
     throw error;
   }
 };
 
+/**
+ * Restore a soft-deleted post
+ */
 export const restorePost = async (
   postId: string,
 ): Promise<RestorePostResponse> => {
@@ -534,19 +379,16 @@ export const restorePost = async (
       throw new Error(errorMessage);
     }
 
-    const result = await response.json();
-
-    if (result.success) {
-      await postCache.invalidatePostsCache();
-    }
-
-    return result;
+    return await response.json();
   } catch (error) {
     console.error("Error restoring post:", error);
     throw error;
   }
 };
 
+/**
+ * Permanently delete a post
+ */
 export const permanentlyDeletePost = async (
   postId: string,
 ): Promise<{ success: boolean; message: string }> => {
@@ -566,73 +408,95 @@ export const permanentlyDeletePost = async (
       throw new Error(`Failed to permanently delete post: ${response.status}`);
     }
 
-    const result = await response.json();
-
-    if (result.success) {
-      await postCache.invalidatePostsCache();
-      await postCache.clear(`post_${postId}`);
-    }
-
-    return result;
+    return await response.json();
   } catch (error) {
     console.error("Error permanently deleting post:", error);
     throw error;
   }
 };
 
-export const updatePost = async (
-  postId: string,
-  formData: FormData,
-): Promise<{ success: boolean; message: string; post: Post }> => {
+// ============================================
+// POST INTERACTIONS
+// ============================================
+
+/**
+ * Toggle like on a post
+ */
+export const toggleLike = async (postId: string): Promise<LikeResponse> => {
   try {
     const token = await getAuthToken();
-    const url = buildApiUrl(`posts/${postId}`);
+    const url = buildApiUrl(`posts/${postId}/like`);
 
     const response = await fetch(url, {
-      method: "PUT",
+      method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
       },
-      body: formData,
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || "Failed to update post");
+      throw new Error(`Failed to toggle like: ${response.status}`);
     }
 
-    const result = await response.json();
-
-    if (result.success) {
-      await postCache.invalidatePostsCache();
-      await postCache.clear(`post_${postId}`);
-    }
-
-    return result;
+    return await response.json();
   } catch (error) {
-    console.error("Error updating post:", error);
+    console.error("Error toggling like:", error);
     throw error;
   }
 };
 
+// ============================================
+// PROFILE POSTS (Kept here as it's user-specific)
+// ============================================
+
+/**
+ * Get posts for a specific user's profile
+ */
+export const getProfilePosts = async (
+  userId: string,
+  page: number = 1,
+  limit: number = 10,
+): Promise<ProfilePostsResponse> => {
+  try {
+    const token = await getAuthToken();
+    if (!token) {
+      return { success: false, message: "No authentication token" };
+    }
+
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: limit.toString(),
+    });
+
+    const url = `${buildApiUrl(`posts/user/${userId}`)}?${params.toString()}`;
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    const result = await response.json();
+    return result;
+  } catch (error) {
+    console.error("Error fetching profile posts:", error);
+    return { success: false, message: "Failed to fetch posts" };
+  }
+};
+
+/**
+ * Search posts
+ */
 export const searchPosts = async (
   query: string,
   page: number = 1,
   limit: number = 10,
-  forceRefresh: boolean = false,
-): Promise<PostsResponse> => {
+): Promise<{ success: boolean; posts: Post[] }> => {
   try {
     const token = await getAuthToken();
-
-    const cacheKey = `search_posts_${query}_page_${page}_limit_${limit}`;
-
-    if (!forceRefresh) {
-      const cached = postCache.getFromMemory(cacheKey);
-      if (cached) return cached;
-
-      const stored = await postCache.getFromStorage(cacheKey);
-      if (stored) return stored;
-    }
 
     const params = new URLSearchParams({
       q: query,
@@ -653,13 +517,7 @@ export const searchPosts = async (
       throw new Error(`Failed to search posts: ${response.status}`);
     }
 
-    const result = await response.json();
-
-    if (result.success) {
-      await postCache.saveToStorage(cacheKey, result);
-    }
-
-    return result;
+    return await response.json();
   } catch (error) {
     console.error("Error searching posts:", error);
     throw error;
@@ -667,124 +525,17 @@ export const searchPosts = async (
 };
 
 // ============================================
-// REPOST FUNCTIONS
-// ============================================
-
-export const repostPost = async (
-  postId: string,
-): Promise<{ success: boolean; message: string; data: Post }> => {
-  try {
-    const token = await getAuthToken();
-    const url = buildApiUrl(`posts/repost/${postId}`);
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || "Failed to repost");
-    }
-
-    const result = await response.json();
-
-    if (result.success) {
-      await postCache.invalidatePostsCache();
-    }
-
-    return result;
-  } catch (error) {
-    console.error("Error reposting:", error);
-    throw error;
-  }
-};
-
-// ============================================
-// FEED FUNCTIONS WITH CACHING
-// ============================================
-
-export const getFeed = async (
-  filter: "campus" | "connections" = "campus",
-  page: number = 1,
-  limit: number = 10,
-  forceRefresh: boolean = false,
-): Promise<{
-  success: boolean;
-  data: Post[];
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    pages: number;
-  };
-}> => {
-  try {
-    const token = await getAuthToken();
-
-    const cacheKey = `feed_${filter}_page_${page}_limit_${limit}`;
-
-    if (!forceRefresh) {
-      const cached = postCache.getFromMemory(cacheKey);
-      if (cached) return cached;
-
-      const stored = await postCache.getFromStorage(cacheKey);
-      if (stored) return stored;
-    }
-
-    const params = new URLSearchParams({
-      filter,
-      page: page.toString(),
-      limit: limit.toString(),
-    });
-
-    const url = `${buildApiUrl("posts/feed")}?${params.toString()}`;
-
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        await SecureStore.deleteItemAsync("authToken");
-        throw new Error("Session expired. Please login again.");
-      }
-      throw new Error(`Failed to fetch feed: ${response.status}`);
-    }
-
-    const result = await response.json();
-
-    if (result.success) {
-      await postCache.saveToStorage(cacheKey, result);
-    }
-
-    return result;
-  } catch (error) {
-    console.error("Error fetching feed:", error);
-    throw error;
-  }
-};
-
-// ============================================
-// COMMENT FUNCTIONS - NO CACHING
+// COMMENT OPERATIONS
 // ============================================
 
 export const getPostComments = async (
   postId: string,
   page: number = 1,
   limit: number = 20,
-  forceRefresh: boolean = false,
 ): Promise<CommentsResponse> => {
   try {
     const token = await getAuthToken();
 
-    // NEVER cache comments
     const params = new URLSearchParams({
       page: page.toString(),
       limit: limit.toString(),
@@ -804,8 +555,7 @@ export const getPostComments = async (
       throw new Error(error.error || "Failed to fetch comments");
     }
 
-    const result = await response.json();
-    return result;
+    return await response.json();
   } catch (error) {
     console.error("Error fetching comments:", error);
     throw error;
@@ -835,16 +585,7 @@ export const addComment = async (
       throw new Error(error.error || "Failed to add comment");
     }
 
-    const result = await response.json();
-
-    if (result.success) {
-      // Clear ALL related caches
-      await postCache.clear(`post_${postId}`);
-      await postCache.invalidateCommentsCache(postId);
-      await postCache.invalidatePostsCache();
-    }
-
-    return result;
+    return await response.json();
   } catch (error) {
     console.error("Error adding comment:", error);
     throw error;
@@ -875,16 +616,7 @@ export const addReply = async (
       throw new Error(error.error || "Failed to add reply");
     }
 
-    const result = await response.json();
-
-    if (result.success) {
-      // Clear ALL related caches
-      await postCache.clear(`post_${postId}`);
-      await postCache.invalidateCommentsCache(postId);
-      await postCache.invalidatePostsCache();
-    }
-
-    return result;
+    return await response.json();
   } catch (error) {
     console.error("Error adding reply:", error);
     throw error;
@@ -894,12 +626,9 @@ export const addReply = async (
 export const getCommentThread = async (
   postId: string,
   commentId: string,
-  forceRefresh: boolean = false,
 ): Promise<CommentThreadResponse> => {
   try {
     const token = await getAuthToken();
-
-    // No caching for comment threads
     const url = buildApiUrl(`posts/${postId}/comments/${commentId}`);
 
     const response = await fetch(url, {
@@ -914,8 +643,7 @@ export const getCommentThread = async (
       throw new Error(error.error || "Failed to fetch comment thread");
     }
 
-    const result = await response.json();
-    return result;
+    return await response.json();
   } catch (error) {
     console.error("Error fetching comment thread:", error);
     throw error;
@@ -943,13 +671,7 @@ export const toggleCommentLike = async (
       throw new Error(error.error || "Failed to toggle comment like");
     }
 
-    const result = await response.json();
-
-    if (result.success) {
-      await postCache.invalidateCommentsCache(postId);
-    }
-
-    return result;
+    return await response.json();
   } catch (error) {
     console.error("Error toggling comment like:", error);
     throw error;
@@ -979,13 +701,7 @@ export const updateComment = async (
       throw new Error(error.error || "Failed to update comment");
     }
 
-    const result = await response.json();
-
-    if (result.success) {
-      await postCache.invalidateCommentsCache(postId);
-    }
-
-    return result;
+    return await response.json();
   } catch (error) {
     console.error("Error updating comment:", error);
     throw error;
@@ -1013,32 +729,11 @@ export const deleteComment = async (
       throw new Error(error.error || "Failed to delete comment");
     }
 
-    const result = await response.json();
-
-    if (result.success) {
-      await postCache.clear(`post_${postId}`);
-      await postCache.invalidateCommentsCache(postId);
-      await postCache.invalidatePostsCache();
-    }
-
-    return result;
+    return await response.json();
   } catch (error) {
     console.error("Error deleting comment:", error);
     throw error;
   }
-};
-
-// ============================================
-// CACHE MANAGEMENT
-// ============================================
-
-export const clearPostCache = async (): Promise<void> => {
-  await postCache.clearAll();
-};
-
-export const invalidatePostCache = async (postId: string): Promise<void> => {
-  await postCache.clear(`post_${postId}`);
-  await postCache.invalidatePostsCache();
 };
 
 // ============================================
@@ -1055,6 +750,17 @@ export const formatUserDisplay = (
     name: post.user?.name || "User",
     username: post.user?.username ? `@${post.user.username}` : "@user",
   };
+};
+
+export const getVisibilityLabel = (visibility: string): string => {
+  switch (visibility) {
+    case "campus":
+      return "Campus";
+    case "connections":
+      return "Connections";
+    default:
+      return visibility;
+  }
 };
 
 export const formatCommentUserDisplay = (
@@ -1091,28 +797,6 @@ export const formatCommentTimestamp = (createdAt: string): string => {
   return date.toLocaleDateString();
 };
 
-export const getVisibilityLabel = (visibility: string): string => {
-  switch (visibility) {
-    case "campus":
-      return "Campus";
-    case "connections":
-      return "Connections";
-    default:
-      return visibility;
-  }
-};
-
-export const getVisibilityIcon = (visibility: string): string => {
-  switch (visibility) {
-    case "campus":
-      return "school-outline";
-    case "connections":
-      return "people-outline";
-    default:
-      return "globe-outline";
-  }
-};
-
 export const isCommentFromPostAuthor = (
   comment: Comment,
   postUserId: string,
@@ -1127,42 +811,13 @@ export const getCommentDepthColor = (depth: number): string => {
   return colors[Math.min(depth - 1, colors.length - 1)];
 };
 
-export const formatCommentContent = (
-  content: string,
-  depth: number,
-): string => {
-  if (depth === 1) return content;
-  const indent = "  ".repeat(depth - 1);
-  return `${indent}↳ ${content}`;
+export const getVisibilityIcon = (visibility: string): string => {
+  switch (visibility) {
+    case "campus":
+      return "school-outline";
+    case "connections":
+      return "people-outline";
+    default:
+      return "globe-outline";
+  }
 };
-
-// ============================================
-// TYPE GUARDS
-// ============================================
-
-export function areRepliesPopulated(
-  replies: string[] | Comment[],
-): replies is Comment[] {
-  return replies.length > 0 && typeof replies[0] !== "string";
-}
-
-export function getPopulatedReplies(comment: Comment): Comment[] {
-  if (Array.isArray(comment.replies) && comment.replies.length > 0) {
-    const firstReply = comment.replies[0];
-    if (typeof firstReply !== "string") {
-      return comment.replies as Comment[];
-    }
-  }
-  return [];
-}
-
-export function hasReplies(comment: Comment): boolean {
-  return Array.isArray(comment.replies) && comment.replies.length > 0;
-}
-
-export function getReplyCount(comment: Comment): number {
-  if (Array.isArray(comment.replies)) {
-    return comment.replies.length;
-  }
-  return 0;
-}

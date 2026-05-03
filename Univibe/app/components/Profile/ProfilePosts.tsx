@@ -13,7 +13,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import PostCard from "../Feed/Post/PostCard";
-import { Post } from "@/lib/postService";
+import { Post } from "../../../lib/services/postService";
 
 interface ProfilePostsProps {
   posts: Post[];
@@ -24,7 +24,7 @@ interface ProfilePostsProps {
   hasMore: boolean;
   onLikePress: (postId: string) => void;
   onCommentPress: (postId: string) => void;
-  onRepostPress: (postId: string) => void;
+
   onSharePress: (postId: string) => void;
   onEdit?: (postId: string) => void;
   onDelete?: (postId: string) => void;
@@ -46,7 +46,7 @@ export default function ProfilePosts({
   hasMore,
   onLikePress,
   onCommentPress,
-  onRepostPress,
+
   onSharePress,
   onEdit,
   onDelete,
@@ -103,7 +103,7 @@ export default function ProfilePosts({
             post={item}
             onLikePress={onLikePress}
             onCommentPress={onCommentPress}
-            onRepostPress={onRepostPress}
+
             onSharePress={onSharePress}
             onEdit={onEdit}
             onDelete={onDelete}

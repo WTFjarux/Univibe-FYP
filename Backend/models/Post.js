@@ -77,10 +77,10 @@ const postSchema = new mongoose.Schema(
       required: true,
     },
 
-    // SIMPLIFIED VISIBILITY - Only campus and connections
+    // SIMPLIFIED VISIBILITY -  campus and connections
     visibility: {
       type: String,
-      enum: ["campus", "connections"], // Removed: "following", "private"
+      enum: ["campus", "connections"], 
       default: "campus",
     },
 
