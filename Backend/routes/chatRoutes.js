@@ -87,6 +87,8 @@ router.delete("/message/:messageId/react", ctrl.removeReaction);
 
 router.get("/user-profile/:otherUserId", ctrl.getOtherUserProfile);
 
+router.get("/unread-count", protect, ctrl.getUnreadChatCount);
+
 // -----------------------------------------------------------------------------
 // Error handling
 // -----------------------------------------------------------------------------

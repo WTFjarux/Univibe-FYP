@@ -1,4 +1,3 @@
-// Backend/models/Notification.js
 const mongoose = require("mongoose");
 
 const notificationSchema = new mongoose.Schema(
@@ -22,10 +21,10 @@ const notificationSchema = new mongoose.Schema(
         "comment",
         "like",
         "mention",
-        "event_rsvp", // For RSVP notifications
-        "event_interest", // For interest notifications
-        "event_invite", // For event invitations
-        "event_reminder", // For event reminders
+        "event_rsvp",
+        "event_interest",
+        "event_invite",
+        "event_reminder",
       ],
       required: true,
     },
@@ -43,12 +42,21 @@ const notificationSchema = new mongoose.Schema(
     },
     targetModel: {
       type: String,
-      enum: ["Post", "Comment", "Event", "User"], // Add "Event" here
+      enum: ["Post", "Comment", "Event", "User"],
     },
     read: {
       type: Boolean,
       default: false,
       index: true,
+    },
+    lastInteractionAt: {
+      type: Date,
+      default: Date.now,
+      index: true, // Important for sorting performance
+    },
+    metadata: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
     },
   },
   {
@@ -58,6 +66,7 @@ const notificationSchema = new mongoose.Schema(
 
 // Index for efficient queries
 notificationSchema.index({ recipient: 1, createdAt: -1 });
+notificationSchema.index({ recipient: 1, lastInteractionAt: -1 });
 notificationSchema.index({ recipient: 1, read: 1 });
 
 module.exports = mongoose.model("Notification", notificationSchema);

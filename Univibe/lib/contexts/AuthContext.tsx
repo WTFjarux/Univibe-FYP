@@ -92,10 +92,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   // SOCKET CONNECTION MANAGEMENT
   // ============================================
 
-  /**
-   * Connect socket when user is authenticated and profile is complete.
-   * Only connects once to avoid duplicate connections.
-   */
   const connectSocket = useCallback(async () => {
     if (socketConnectedRef.current) {
       return;
@@ -109,15 +105,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
 
     try {
+      // Decode token to get user ID
+      let userId = user?.id;
+      if (!userId && currentToken) {
+        try {
+          const decoded = jwtDecode<CustomJwtPayload>(currentToken);
+          userId = decoded.id;
+        } catch (e) {
+          // silent
+        }
+      }
+
       const socket = await socketService.connect();
       if (socket) {
         socketConnectedRef.current = true;
         console.log("🟢 Socket connected via AuthContext");
+
+        // Join personal notification room
+        if (userId) {
+          socketService.emit("join_room", {
+            roomId: `user_${userId}`,
+            type: "notification",
+          });
+        }
       }
     } catch (error) {
       console.error("❌ Failed to connect socket:", error);
     }
-  }, [token]);
+  }, [token, user?.id]);
 
   /**
    * Disconnect socket on logout
@@ -355,8 +370,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const checkAuthState = async () => {
     try {
       const storedToken = await SecureStore.getItemAsync("authToken");
-      console.log("🔐 Checking auth state, token exists:", !!storedToken);
-
       if (!storedToken) {
         console.log("🔐 No token found, user not authenticated");
         setIsLoading(false);
@@ -397,7 +410,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         const profileData = await fetchUserProfile();
 
         if (hasCompletedProfile(profileData, { profileComplete: false })) {
-          console.log("🔐 Profile complete, full access granted");
           setUser((prev) => (prev ? { ...prev, profileComplete: true } : null));
 
           // ✅ Connect socket when profile is complete

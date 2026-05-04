@@ -658,6 +658,14 @@ class ChatApiService {
     const response = await api.get(`/chat/user-profile/${userId}`);
     return response.data;
   }
+
+  /**
+   * Get total unread message count across all chats
+   */
+  async getUnreadChatCount(): Promise<{ success: boolean; count?: number }> {
+    const response = await api.get("/chat/unread-count");
+    return response.data;
+  }
 }
 
 // -----------------------------------------------------------------------------

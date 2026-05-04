@@ -32,6 +32,15 @@ interface NotificationItemProps {
       profilePicture?: string;
     };
     targetId?: string;
+    metadata?: {
+      isGrouped?: boolean;
+      count?: number;
+      likers?: Array<{
+        userId: string;
+        name: string;
+        profilePicture?: string;
+      }>;
+    };
   };
   onMarkAsRead: (id: string) => void;
   onMarkAsUnread: (id: string) => void;
@@ -52,6 +61,18 @@ export default function NotificationItem({
     // Only mark as read if it's unread
     if (!notification.read) {
       onMarkAsRead(notification._id);
+    }
+
+    // For grouped like notifications
+    if (notification.metadata?.isGrouped && notification.targetId) {
+      router.push({
+        pathname: "/post/[id]",
+        params: {
+          id: notification.targetId,
+          showLikes: "true",
+        },
+      });
+      return;
     }
 
     switch (notification.type) {
@@ -149,6 +170,119 @@ export default function NotificationItem({
 
     switch (notification.type) {
       case "like":
+        // Check if it's a grouped notification
+        if (notification.metadata?.isGrouped) {
+          const likers = notification.metadata?.likers || [];
+
+          // Parse message to bold the names
+          const renderLikeMessage = () => {
+            const message = notification.message;
+
+            if (likers.length === 1) {
+              return (
+                <Text style={styles.messageText}>
+                  <Text style={styles.boldName}>{likers[0].name}</Text>
+                  <Text style={!notification.read && styles.unreadText}>
+                    {" "}
+                    liked your post
+                  </Text>
+                </Text>
+              );
+            } else if (likers.length === 2) {
+              return (
+                <Text style={styles.messageText}>
+                  <Text style={styles.boldName}>{likers[0].name}</Text>
+                  <Text style={!notification.read && styles.unreadText}>
+                    {" "}
+                    and{" "}
+                  </Text>
+                  <Text style={styles.boldName}>{likers[1].name}</Text>
+                  <Text style={!notification.read && styles.unreadText}>
+                    {" "}
+                    liked your post
+                  </Text>
+                </Text>
+              );
+            } else {
+              const othersCount = likers.length - 2;
+              return (
+                <Text style={styles.messageText}>
+                  <Text style={styles.boldName}>{likers[0].name}</Text>
+                  <Text style={!notification.read && styles.unreadText}>
+                    {", "}
+                  </Text>
+                  <Text style={styles.boldName}>{likers[1].name}</Text>
+                  <Text style={!notification.read && styles.unreadText}>
+                    {" "}
+                    and {othersCount} other{othersCount > 1 ? "s" : ""} liked
+                    your post
+                  </Text>
+                </Text>
+              );
+            }
+          };
+
+          return (
+            <View style={styles.groupedLikeContent}>
+              {/* Stacked Avatars */}
+              <View style={styles.stackedAvatarsContainer}>
+                <View style={styles.stackedAvatars}>
+                  {likers.slice(0, 2).map((liker, index) => (
+                    <View
+                      key={liker.userId}
+                      style={[
+                        styles.stackedAvatarWrapper,
+                        index === 0 && styles.firstAvatar,
+                        index === 1 && styles.secondAvatar,
+                      ]}
+                    >
+                      {liker.profilePicture ? (
+                        <Image
+                          source={{
+                            uri: getFullImageUrl(liker.profilePicture),
+                          }}
+                          style={[styles.stackedAvatar, styles.avatarBorder]}
+                        />
+                      ) : (
+                        <Image
+                          source={DEFAULT_AVATAR}
+                          style={[styles.stackedAvatar, styles.avatarBorder]}
+                        />
+                      )}
+                    </View>
+                  ))}
+                  {likers.length > 2 && (
+                    <View
+                      style={[styles.stackedAvatarWrapper, styles.thirdAvatar]}
+                    >
+                      <View style={styles.moreAvatar}>
+                        <Ionicons name="heart" size={10} color="#ef4444" />
+                      </View>
+                    </View>
+                  )}
+                </View>
+
+                {/* Small Heart Icon Overlay */}
+                <View style={styles.likeIconOverlay}>
+                  <Ionicons name="heart" size={10} color="#fff" />
+                </View>
+              </View>
+
+              {/* Message */}
+              <View style={styles.groupedLikeTextContainer}>
+                {renderLikeMessage()}
+                <Text style={styles.time}>
+                  {getTimeAgo(notification.createdAt)}
+                </Text>
+              </View>
+
+              {/* Unread indicator */}
+              {!notification.read && <View style={styles.unreadIndicator} />}
+            </View>
+          );
+        }
+
+        // Fallback for old individual notifications
         return (
           <Text style={styles.messageText}>
             <Text style={styles.boldName}>{senderName}</Text>
@@ -194,6 +328,18 @@ export default function NotificationItem({
           </Text>
         );
       case "connection_accepted":
+        // Check if this is a notification for the accepter
+        if (notification.message.includes("You are now connected with")) {
+          return (
+            <Text style={styles.messageText}>
+              <Text style={!notification.read && styles.unreadText}>
+                You are now connected with{" "}
+              </Text>
+              <Text style={styles.boldName}>{notification.sender.name}</Text>
+            </Text>
+          );
+        }
+        // Original message for the requester
         return (
           <Text style={styles.messageText}>
             <Text style={styles.boldName}>{senderName}</Text>
@@ -218,6 +364,7 @@ export default function NotificationItem({
 
   const smallIcon = getSmallIconConfig();
   const formattedMessage = getFormattedMessage();
+  const isGroupedLike = notification.metadata?.isGrouped;
 
   const OptionsMenu = () => (
     <View style={styles.optionsMenu}>
@@ -271,49 +418,60 @@ export default function NotificationItem({
             !notification.read && styles.unreadContainer,
           ]}
         >
-          {/* Profile Photo with Small Icon Overlay */}
-          <View style={styles.avatarWrapper}>
-            <TouchableOpacity
-              onPress={() => router.push(`/profile/${notification.sender._id}`)}
-            >
-              {notification.sender.profilePicture && !imageError ? (
-                <Image
-                  source={{
-                    uri: getFullImageUrl(notification.sender.profilePicture),
-                  }}
-                  style={styles.avatar}
-                  onError={() => setImageError(true)}
-                />
-              ) : (
-                <Image source={DEFAULT_AVATAR} style={styles.avatar} />
-              )}
-            </TouchableOpacity>
+          {isGroupedLike ? (
+            // For grouped likes, the avatars are already in the formatted message
+            <View style={styles.contentContainer}>{formattedMessage}</View>
+          ) : (
+            <>
+              {/* Profile Photo with Small Icon Overlay */}
+              <View style={styles.avatarWrapper}>
+                <TouchableOpacity
+                  onPress={() =>
+                    router.push(`/profile/${notification.sender._id}`)
+                  }
+                >
+                  {notification.sender.profilePicture && !imageError ? (
+                    <Image
+                      source={{
+                        uri: getFullImageUrl(
+                          notification.sender.profilePicture,
+                        ),
+                      }}
+                      style={styles.avatar}
+                      onError={() => setImageError(true)}
+                    />
+                  ) : (
+                    <Image source={DEFAULT_AVATAR} style={styles.avatar} />
+                  )}
+                </TouchableOpacity>
 
-            {/* Small Notification Icon Overlay */}
-            <View
-              style={[
-                styles.smallIconContainer,
-                { backgroundColor: smallIcon.bg },
-              ]}
-            >
-              <Ionicons
-                name={smallIcon.name as any}
-                size={12}
-                color={smallIcon.color}
-              />
-            </View>
-          </View>
+                {/* Small Notification Icon Overlay */}
+                <View
+                  style={[
+                    styles.smallIconContainer,
+                    { backgroundColor: smallIcon.bg },
+                  ]}
+                >
+                  <Ionicons
+                    name={smallIcon.name as any}
+                    size={12}
+                    color={smallIcon.color}
+                  />
+                </View>
+              </View>
 
-          {/* Content */}
-          <View style={styles.contentContainer}>
-            {formattedMessage}
-            <Text style={styles.time}>
-              {getTimeAgo(notification.createdAt)}
-            </Text>
-          </View>
+              {/* Content */}
+              <View style={styles.contentContainer}>
+                {formattedMessage}
+                <Text style={styles.time}>
+                  {getTimeAgo(notification.createdAt)}
+                </Text>
+              </View>
 
-          {/* Unread indicator */}
-          {!notification.read && <View style={styles.unreadIndicator} />}
+              {/* Unread indicator */}
+              {!notification.read && <View style={styles.unreadIndicator} />}
+            </>
+          )}
 
           {/* Options button */}
           <TouchableOpacity
@@ -443,5 +601,75 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "SofiaSans-Regular",
     color: "#ef4444",
+  },
+  // Grouped like styles
+  groupedLikeContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  stackedAvatarsContainer: {
+    position: "relative",
+    marginRight: 12,
+  },
+  stackedAvatars: {
+    width: 52,
+    height: 52,
+    position: "relative",
+  },
+  stackedAvatarWrapper: {
+    position: "absolute",
+  },
+  stackedAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#f3f4f6",
+  },
+  avatarBorder: {
+    borderWidth: 2,
+    borderColor: "white",
+  },
+  firstAvatar: {
+    top: 0,
+    left: 0,
+    zIndex: 2,
+  },
+  secondAvatar: {
+    top: 16,
+    left: 16,
+    zIndex: 1,
+  },
+  thirdAvatar: {
+    top: 16,
+    left: 16,
+    zIndex: 0,
+  },
+  moreAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#fee2e2",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "white",
+  },
+  likeIconOverlay: {
+    position: "absolute",
+    bottom: -2,
+    right: -4,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#ef4444",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "white",
+    zIndex: 10,
+  },
+  groupedLikeTextContainer: {
+    flex: 1,
   },
 });

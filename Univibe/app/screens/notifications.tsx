@@ -1,5 +1,11 @@
 // app/notifications.tsx
-import React, { useState, useCallback, useMemo, useRef } from "react";
+import React, {
+  useState,
+  useCallback,
+  useMemo,
+  useRef,
+  useEffect,
+} from "react";
 import {
   View,
   Text,
@@ -18,7 +24,9 @@ import { connectionService } from "../../lib/services/connectionService";
 import {
   notificationService,
   Notification,
+  listenForNotifications,
 } from "../../lib/services/notificationService";
+import socketService from "../../lib/services/socketService";
 import NotificationItem from "../components/Notifications/notificationItem";
 import PendingRequestItem from "../components/Notifications/pendingRequestItem";
 import DateSectionHeader from "../components/Notifications/dateSectionHeader";
@@ -51,7 +59,39 @@ export default function NotificationsScreen() {
     id: string;
     data: Notification;
   } | null>(null);
-  const slideAnim = useRef(new Animated.Value(100)).current; // Start below screen
+  const slideAnim = useRef(new Animated.Value(100)).current;
+
+  // ===== REAL-TIME SOCKET LISTENER =====
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    const cleanup = listenForNotifications(
+      (newNotification: Notification) => {
+        setNotifications((prev) => {
+          if (newNotification.metadata?.isGrouped) {
+            const filtered = prev.filter(
+              (n) =>
+                !(
+                  n.metadata?.isGrouped &&
+                  n.targetId === newNotification.targetId
+                ),
+            );
+            return [newNotification, ...filtered];
+          }
+          return [newNotification, ...prev];
+        });
+      },
+      (count: number) => {
+        setUnreadCount(count);
+      },
+    );
+
+    return () => {
+      cleanup();
+    };
+  }, [token]);
 
   // Show info bar message from bottom
   const showInfoBar = (

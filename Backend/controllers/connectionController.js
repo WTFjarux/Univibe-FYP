@@ -2,54 +2,57 @@
 const User = require("../models/User");
 const Profile = require("../models/Profile");
 const Notification = require("../models/Notification");
+const notificationController = require("./notificationController");
 
 // ============================================
-// NOTIFICATION HELPER
+// SOCKET HELPER
 // ============================================
 
 /**
- * Create a notification for connection events
+ * Emit notification via socket and update unread count
  */
-const createConnectionNotification = async (
-  recipientId,
-  senderId,
-  type,
-  title,
-  message,
-) => {
-  try {
-    const notification = new Notification({
-      recipient: recipientId,
-      sender: senderId,
-      type,
-      title,
-      message,
-      targetId: null,
-      targetModel: null,
-    });
-    await notification.save();
-    return notification;
-  } catch (error) {
-    console.error("Create notification error:", error);
-    return null;
-  }
-};
+const emitConnectionNotification = async (io, recipientId, notification) => {
+  if (!io || !notification) return;
 
-/**
- * Delete pending connection request notifications
- */
-const deletePendingConnectionNotifications = async (recipientId, senderId) => {
   try {
-    const result = await Notification.deleteMany({
+    const roomId = `user_${recipientId}`;
+
+    // Populate sender details
+    const populatedNotification = await Notification.findById(notification._id)
+      .populate("sender", "name username email")
+      .lean();
+
+    if (populatedNotification) {
+      // Enrich sender with profile picture
+      const senderProfile = await Profile.findOne({
+        user: populatedNotification.sender._id,
+      })
+        .select("profilePicture fullName")
+        .lean();
+
+      if (senderProfile) {
+        populatedNotification.sender = {
+          ...populatedNotification.sender,
+          profilePicture: senderProfile.profilePicture || null,
+          fullName: senderProfile.fullName || populatedNotification.sender.name,
+        };
+      }
+
+      io.to(roomId).emit("notification:new", {
+        notification: populatedNotification,
+      });
+    }
+
+    // Emit updated unread count
+    const unreadCount = await Notification.countDocuments({
       recipient: recipientId,
-      sender: senderId,
-      type: "connection_request",
       read: false,
     });
-    return result.deletedCount;
+    io.to(roomId).emit("notification:unreadCount", { count: unreadCount });
+
+    console.log(`📢 Connection notification sent to ${roomId}`);
   } catch (error) {
-    console.error("Delete pending notifications error:", error);
-    return 0;
+    console.error("Emit connection notification error:", error);
   }
 };
 
@@ -64,6 +67,7 @@ exports.sendConnectionRequest = async (req, res) => {
   try {
     const senderId = req.user._id;
     const { userId: receiverId } = req.params;
+    const io = req.app.get("io");
 
     if (senderId.toString() === receiverId) {
       return res.status(400).json({
@@ -103,16 +107,32 @@ exports.sendConnectionRequest = async (req, res) => {
       await sender.acceptConnectionRequest(receiverId);
 
       // Delete any pending notifications first
-      await deletePendingConnectionNotifications(receiverId, senderId);
+      await notificationController.deletePendingConnectionNotifications(
+        receiverId,
+        senderId,
+      );
 
-      // Create notification for auto-accept
-      await createConnectionNotification(
+      // Create notification for the other user (they sent the original request)
+      const notif1 = await notificationController.createNotification(
         receiverId,
         senderId,
         "connection_accepted",
         "Connection Accepted",
         `${sender.name} accepted your connection request`,
       );
+
+      // Create notification for the sender (current user)
+      const notif2 = await notificationController.createNotification(
+        senderId,
+        receiverId,
+        "connection_accepted",
+        "Connection Accepted",
+        `You are now connected with ${receiver.name}`,
+      );
+
+      // Emit socket events for both users
+      await emitConnectionNotification(io, receiverId, notif1);
+      await emitConnectionNotification(io, senderId, notif2);
 
       return res.status(200).json({
         success: true,
@@ -127,7 +147,10 @@ exports.sendConnectionRequest = async (req, res) => {
     }
 
     // Delete any existing pending notification before creating new one
-    await deletePendingConnectionNotifications(receiverId, senderId);
+    await notificationController.deletePendingConnectionNotifications(
+      receiverId,
+      senderId,
+    );
 
     // Send new request
     sender.connectionRequestsSent.push(receiverId);
@@ -137,13 +160,16 @@ exports.sendConnectionRequest = async (req, res) => {
     await receiver.save();
 
     // Create notification for the receiver
-    await createConnectionNotification(
+    const notif = await notificationController.createNotification(
       receiverId,
       senderId,
       "connection_request",
       "Connection Request",
       `${sender.name} wants to connect with you`,
     );
+
+    // Emit socket event to receiver
+    await emitConnectionNotification(io, receiverId, notif);
 
     res.status(200).json({
       success: true,
@@ -169,6 +195,7 @@ exports.acceptConnectionRequest = async (req, res) => {
   try {
     const userId = req.user._id;
     const { requestId } = req.params;
+    const io = req.app.get("io");
 
     const user = await User.findById(userId);
     if (!user) {
@@ -195,19 +222,35 @@ exports.acceptConnectionRequest = async (req, res) => {
     }
 
     // Delete pending notification before accepting
-    await deletePendingConnectionNotifications(userId, requestId);
+    await notificationController.deletePendingConnectionNotifications(
+      userId,
+      requestId,
+    );
 
     // Accept the connection
     await user.acceptConnectionRequest(requestId);
 
-    // Create notification for the requester
-    await createConnectionNotification(
+    // Create notification for the requester (User 1)
+    const notif1 = await notificationController.createNotification(
       requestId,
       userId,
       "connection_accepted",
       "Connection Accepted",
       `${user.name} accepted your connection request`,
     );
+
+    // Create notification for the accepter (User 2)
+    const notif2 = await notificationController.createNotification(
+      userId,
+      requestId,
+      "connection_accepted",
+      "Connection Accepted",
+      `You are now connected with ${requester.name}`,
+    );
+
+    // Emit socket events for both users
+    await emitConnectionNotification(io, requestId, notif1);
+    await emitConnectionNotification(io, userId, notif2);
 
     // Get updated counts
     const updatedUser = await User.findById(userId).select("connectionCount");
@@ -256,7 +299,10 @@ exports.rejectConnectionRequest = async (req, res) => {
     }
 
     // Delete pending notification before rejecting
-    await deletePendingConnectionNotifications(userId, requestId);
+    await notificationController.deletePendingConnectionNotifications(
+      userId,
+      requestId,
+    );
 
     await user.rejectConnectionRequest(requestId);
 
@@ -309,7 +355,10 @@ exports.cancelConnectionRequest = async (req, res) => {
     }
 
     // Delete pending notification before cancelling
-    await deletePendingConnectionNotifications(requestId, userId);
+    await notificationController.deletePendingConnectionNotifications(
+      requestId,
+      userId,
+    );
 
     // Remove from sender's sent list
     user.connectionRequestsSent = user.connectionRequestsSent.filter(
@@ -364,6 +413,13 @@ exports.removeConnection = async (req, res) => {
       });
     }
 
+    // Delete ALL connection-related notifications between these two users
+    await notificationController.deleteAllConnectionNotificationsBetweenUsers(
+      userId,
+      connectionId,
+    );
+
+    // Remove the connection
     await user.removeConnection(connectionId);
 
     // Get updated counts
@@ -400,10 +456,11 @@ exports.deletePendingConnectionNotifications = async (req, res) => {
     const userId = req.user._id;
     const { senderId } = req.params;
 
-    const deletedCount = await deletePendingConnectionNotifications(
-      userId,
-      senderId,
-    );
+    const deletedCount =
+      await notificationController.deletePendingConnectionNotifications(
+        userId,
+        senderId,
+      );
 
     res.status(200).json({
       success: true,
@@ -478,7 +535,6 @@ exports.getConnections = async (req, res) => {
     const paginatedConnections = user.connections.slice(skip, skip + limit);
     const connectionIds = paginatedConnections.map((conn) => conn._id);
 
-    // Get profile pictures
     const profiles = await Profile.find({ user: { $in: connectionIds } })
       .select("user profilePicture fullName")
       .lean();
@@ -494,7 +550,6 @@ exports.getConnections = async (req, res) => {
     const connectionsWithDetails = paginatedConnections.map((connection) => {
       const connectionObj = connection.toObject();
       const profileData = profileMap[connectionObj._id.toString()];
-
       return {
         ...connectionObj,
         fullName: profileData?.fullName || connectionObj.name,
@@ -554,7 +609,6 @@ exports.getPendingRequests = async (req, res) => {
     );
     const requesterIds = paginatedRequests.map((req) => req._id);
 
-    // Get profile pictures
     const profiles = await Profile.find({ user: { $in: requesterIds } })
       .select("user profilePicture fullName")
       .lean();
@@ -570,7 +624,6 @@ exports.getPendingRequests = async (req, res) => {
     const requestsWithDetails = paginatedRequests.map((request) => {
       const requestObj = request.toObject();
       const profileData = profileMap[requestObj._id.toString()];
-
       return {
         ...requestObj,
         fullName: profileData?.fullName || requestObj.name,
@@ -606,7 +659,6 @@ exports.getPendingRequests = async (req, res) => {
 exports.getConnectionCount = async (req, res) => {
   try {
     const { userId } = req.params;
-
     const user = await User.findById(userId).select("connectionCount");
     if (!user) {
       return res.status(404).json({
@@ -614,12 +666,9 @@ exports.getConnectionCount = async (req, res) => {
         message: "User not found",
       });
     }
-
     res.status(200).json({
       success: true,
-      data: {
-        connectionCount: user.connectionCount,
-      },
+      data: { connectionCount: user.connectionCount },
     });
   } catch (error) {
     console.error("Get connection count error:", error);
@@ -652,12 +701,10 @@ exports.getMutualConnections = async (req, res) => {
     const mutualConnectionIds = await currentUser.getMutualConnections(userId);
     const paginatedIds = mutualConnectionIds.slice(skip, skip + limit);
 
-    // Get user details
     const mutualConnections = await User.find({ _id: { $in: paginatedIds } })
       .select("name username email")
       .lean();
 
-    // Get profile pictures
     const profiles = await Profile.find({ user: { $in: paginatedIds } })
       .select("user profilePicture fullName")
       .lean();
@@ -713,7 +760,6 @@ exports.getConnectionSuggestions = async (req, res) => {
     const suggestions = await User.getConnectionSuggestions(userId, limit);
     const suggestionIds = suggestions.map((s) => s._id);
 
-    // Get profile pictures
     const profiles = await Profile.find({ user: { $in: suggestionIds } })
       .select("user profilePicture fullName bio major year")
       .lean();

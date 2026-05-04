@@ -52,6 +52,45 @@ const deletePendingConnectionNotifications = async (recipientId, senderId) => {
 };
 
 /**
+ * Delete ALL connection-related notifications between two users
+ * This cleans up both connection_request and connection_accepted notifications
+ * when two users disconnect
+ */
+const deleteAllConnectionNotificationsBetweenUsers = async (
+  userId1,
+  userId2,
+) => {
+  try {
+    const result = await Notification.deleteMany({
+      $or: [
+        // All connection notifications from user1 to user2
+        {
+          recipient: userId1,
+          sender: userId2,
+          type: { $in: ["connection_request", "connection_accepted"] },
+        },
+        // All connection notifications from user2 to user1
+        {
+          recipient: userId2,
+          sender: userId1,
+          type: { $in: ["connection_request", "connection_accepted"] },
+        },
+      ],
+    });
+    console.log(
+      `Deleted ${result.deletedCount} connection notifications between users ${userId1} and ${userId2}`,
+    );
+    return result.deletedCount;
+  } catch (error) {
+    console.error(
+      "Delete all connection notifications between users error:",
+      error,
+    );
+    return 0;
+  }
+};
+
+/**
  * Get all notifications for current user
  */
 exports.getNotifications = async (req, res) => {
@@ -62,7 +101,7 @@ exports.getNotifications = async (req, res) => {
 
     const notifications = await Notification.find({ recipient: userId })
       .populate("sender", "name username email")
-      .sort({ createdAt: -1 })
+      .sort({ lastInteractionAt: -1 }) // Changed from createdAt to lastInteractionAt
       .skip(skip)
       .limit(parseInt(limit))
       .lean();
@@ -81,18 +120,59 @@ exports.getNotifications = async (req, res) => {
       };
     });
 
-    const enrichedNotifications = notifications.map((notification) => ({
-      ...notification,
-      sender: {
-        ...notification.sender,
-        profilePicture:
-          profileMap[notification.sender._id.toString()]?.profilePicture ||
-          null,
-        fullName:
-          profileMap[notification.sender._id.toString()]?.fullName ||
-          notification.sender.name,
-      },
-    }));
+    // Get profile pictures for likers in grouped notifications
+    const allLikerIds = [];
+    notifications.forEach((notification) => {
+      if (notification.metadata?.isGrouped && notification.metadata?.likers) {
+        notification.metadata.likers.forEach((liker) => {
+          allLikerIds.push(liker.userId);
+        });
+      }
+    });
+
+    // Fetch profiles for likers
+    let likerProfileMap = {};
+    if (allLikerIds.length > 0) {
+      const likerProfiles = await Profile.find({ user: { $in: allLikerIds } })
+        .select("user profilePicture")
+        .lean();
+
+      likerProfiles.forEach((profile) => {
+        likerProfileMap[profile.user.toString()] = profile.profilePicture;
+      });
+    }
+
+    const enrichedNotifications = notifications.map((notification) => {
+      // Enrich sender
+      const enrichedNotification = {
+        ...notification,
+        sender: {
+          ...notification.sender,
+          profilePicture:
+            profileMap[notification.sender._id.toString()]?.profilePicture ||
+            null,
+          fullName:
+            profileMap[notification.sender._id.toString()]?.fullName ||
+            notification.sender.name,
+        },
+      };
+
+      // Enrich likers in metadata
+      if (
+        enrichedNotification.metadata?.isGrouped &&
+        enrichedNotification.metadata?.likers
+      ) {
+        enrichedNotification.metadata = {
+          ...enrichedNotification.metadata,
+          likers: enrichedNotification.metadata.likers.map((liker) => ({
+            ...liker,
+            profilePicture: likerProfileMap[liker.userId.toString()] || null,
+          })),
+        };
+      }
+
+      return enrichedNotification;
+    });
 
     const total = await Notification.countDocuments({ recipient: userId });
     const unreadCount = await Notification.countDocuments({
@@ -301,5 +381,9 @@ exports.getUnreadCount = async (req, res) => {
   }
 };
 
-// Export helper for use in other controllers
+// Export helpers for use in other controllers
 exports.createNotification = createNotification;
+exports.deletePendingConnectionNotifications =
+  deletePendingConnectionNotifications;
+exports.deleteAllConnectionNotificationsBetweenUsers =
+  deleteAllConnectionNotificationsBetweenUsers;

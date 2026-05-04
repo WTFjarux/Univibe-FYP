@@ -198,9 +198,7 @@ const setupChatHandlers = (io, socket) => {
         });
       }
 
-      console.log(
-        `User ${userId} joined room ${finalRoomId} (${chatRoom.type})`,
-      );
+      
     } catch (error) {
       console.error("Error joining room:", error);
       socket.emit(EVENTS.ERROR, { message: "Failed to join room" });
@@ -799,6 +797,22 @@ const setupChatHandlers = (io, socket) => {
       console.error("Mark message read error:", error);
     }
   });
+
+  const emitUnreadChatCount = async (io, userId) => {
+    const Chat = require("../../models/Chat");
+    const Message = require("../../models/Message");
+
+    const chats = await Chat.find({ participants: userId }).select("_id");
+    const chatIds = chats.map((c) => c._id);
+
+    const unreadCount = await Message.countDocuments({
+      chat: { $in: chatIds },
+      sender: { $ne: userId },
+      readBy: { $ne: userId },
+    });
+
+    io.to(`user_${userId}`).emit("unreadChatCount", { count: unreadCount });
+  };
 
   // ===========================================================================
   // AUDIO PLAYED

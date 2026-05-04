@@ -141,9 +141,12 @@ async function fetchReplies(commentId, userId, post, profilePictureMap) {
         profilePictureMap[reply.user._id.toString()] || null;
     }
 
+    // Fix: Compare with the likes array properly - they should be ObjectIds in lean()
     reply.isLiked =
-      reply.likes?.some((likeId) => likeId.toString() === userId.toString()) ||
-      false;
+      reply.likes?.some((likeId) => {
+        if (!likeId) return false;
+        return likeId.toString() === userId.toString();
+      }) || false;
 
     reply.replies = await fetchReplies(
       reply._id,
@@ -155,7 +158,6 @@ async function fetchReplies(commentId, userId, post, profilePictureMap) {
 
   return replies;
 }
-
 /**
  * Get all child comments recursively (for deletion)
  */
@@ -268,7 +270,8 @@ exports.addComment = async (req, res) => {
       const commenter = await User.findById(userId);
       const truncatedContent =
         content.length > 50 ? content.substring(0, 50) + "..." : content;
-      await createCommentNotification(
+
+      const notification = await createCommentNotification(
         post.user,
         userId,
         "comment",
@@ -277,6 +280,40 @@ exports.addComment = async (req, res) => {
         postId,
         "Post",
       );
+
+      // Emit socket event
+      const io = req.app.get("io");
+      if (io && notification) {
+        const populatedNotif = await Notification.findById(notification._id)
+          .populate("sender", "name username email")
+          .lean();
+
+        if (populatedNotif) {
+          const senderProfile = await Profile.findOne({ user: userId })
+            .select("profilePicture fullName")
+            .lean();
+
+          if (senderProfile) {
+            populatedNotif.sender = {
+              ...populatedNotif.sender,
+              profilePicture: senderProfile.profilePicture || null,
+              fullName: senderProfile.fullName || populatedNotif.sender.name,
+            };
+          }
+
+          io.to(`user_${post.user}`).emit("notification:new", {
+            notification: populatedNotif,
+          });
+
+          const unreadCount = await Notification.countDocuments({
+            recipient: post.user,
+            read: false,
+          });
+          io.to(`user_${post.user}`).emit("notification:unreadCount", {
+            count: unreadCount,
+          });
+        }
+      }
     }
 
     const userProfile = await Profile.findOne({ user: userId })
@@ -401,7 +438,8 @@ exports.addReply = async (req, res) => {
       const replier = await User.findById(userId);
       const truncatedContent =
         content.length > 50 ? content.substring(0, 50) + "..." : content;
-      await createCommentNotification(
+
+      const notification = await createCommentNotification(
         parentComment.user,
         userId,
         "comment",
@@ -410,6 +448,40 @@ exports.addReply = async (req, res) => {
         postId,
         "Post",
       );
+
+      // Emit socket event
+      const io = req.app.get("io");
+      if (io && notification) {
+        const populatedNotif = await Notification.findById(notification._id)
+          .populate("sender", "name username email")
+          .lean();
+
+        if (populatedNotif) {
+          const senderProfile = await Profile.findOne({ user: userId })
+            .select("profilePicture fullName")
+            .lean();
+
+          if (senderProfile) {
+            populatedNotif.sender = {
+              ...populatedNotif.sender,
+              profilePicture: senderProfile.profilePicture || null,
+              fullName: senderProfile.fullName || populatedNotif.sender.name,
+            };
+          }
+
+          io.to(`user_${parentComment.user}`).emit("notification:new", {
+            notification: populatedNotif,
+          });
+
+          const unreadCount = await Notification.countDocuments({
+            recipient: parentComment.user,
+            read: false,
+          });
+          io.to(`user_${parentComment.user}`).emit("notification:unreadCount", {
+            count: unreadCount,
+          });
+        }
+      }
     }
 
     await reply.populate({
@@ -671,9 +743,11 @@ exports.toggleCommentLike = async (req, res) => {
     const liked = comment.toggleLike(userId);
     await comment.save();
 
+    // Return just the IDs, not populated
     res.json({
       success: true,
       likes: comment.likes.length,
+      likesArray: comment.likes, // Send the raw likes array (just ObjectIds)
       isLiked: liked,
     });
   } catch (error) {

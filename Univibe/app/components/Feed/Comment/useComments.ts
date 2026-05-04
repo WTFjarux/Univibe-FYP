@@ -107,16 +107,44 @@ const toggleLikeInTree = (
   commentId: string,
   userId: string,
 ): Comment[] => {
+  if (!userId) return comments;
+
   return comments.map((comment) => {
     if (comment._id === commentId) {
-      const userLiked = comment.likes?.some(
-        (id: any) => id.toString() === userId,
-      );
+      const likesArray = (comment.likes || []).filter((id: any) => id != null);
+
+      const userLiked = likesArray.some((id: any) => {
+        if (!id) return false;
+        if (typeof id === "object" && id !== null && id._id) {
+          return id._id.toString() === userId;
+        }
+        if (typeof id === "string") {
+          return id === userId;
+        }
+        if (id.toString && typeof id.toString === "function") {
+          return id.toString() === userId;
+        }
+        return false;
+      });
+
+      const newLikes = userLiked
+        ? likesArray.filter((id: any) => {
+            if (!id) return false;
+            let idStr = "";
+            if (typeof id === "object" && id !== null && id._id) {
+              idStr = id._id.toString();
+            } else if (typeof id === "string") {
+              idStr = id;
+            } else if (id.toString && typeof id.toString === "function") {
+              idStr = id.toString();
+            }
+            return idStr !== userId;
+          })
+        : [...likesArray, userId];
+
       return {
         ...comment,
-        likes: userLiked
-          ? comment.likes?.filter((id: any) => id.toString() !== userId) || []
-          : [...(comment.likes || []), userId],
+        likes: newLikes,
         isLiked: !userLiked,
       };
     }
@@ -251,14 +279,17 @@ export const useComments = (
       return;
     }
 
+    const userId = user.id;
+    if (!userId) return;
+
     // Optimistic update
-    setComments((prev) => toggleLikeInTree(prev, commentId, user._id));
+    setComments((prev) => toggleLikeInTree(prev, commentId, userId));
 
     try {
       await toggleCommentLike(postId, commentId);
     } catch (error: any) {
       // Revert on error
-      setComments((prev) => toggleLikeInTree(prev, commentId, user._id));
+      setComments((prev) => toggleLikeInTree(prev, commentId, userId));
       Alert.alert("Error", error.message || "Failed to like comment");
     }
   };

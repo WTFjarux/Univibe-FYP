@@ -1,5 +1,5 @@
 // app/(tabs)/home/index.tsx
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -11,7 +11,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Link, useFocusEffect, useRouter } from "expo-router";
 import { useAuth } from "../../lib/contexts/AuthContext";
-import { notificationService } from "../../lib/services/notificationService";
+import chatApi from "../../lib/services/chatApi";
+import {
+  notificationService,
+  listenForNotifications,
+} from "../../lib/services/notificationService";
+import socketService from "../../lib/services/socketService";
 
 export default function HomeScreen() {
   const { token } = useAuth();
@@ -19,47 +24,95 @@ export default function HomeScreen() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
 
-  // Fetch unread notification count
-  const fetchUnreadCount = async () => {
+  // Debounce ref for chat count fetch
+  const chatCountDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
+  // ===== REAL-TIME NOTIFICATION COUNT =====
+  useEffect(() => {
     if (!token) return;
 
+    const cleanup = listenForNotifications(
+      () => {},
+      (count: number) => {
+        setUnreadCount(count);
+      },
+    );
+
+    return () => cleanup();
+  }, [token]);
+
+  // ===== REAL-TIME CHAT UNREAD COUNT (DEBOUNCED) =====
+  useEffect(() => {
+    if (!token) return;
+
+    const debouncedFetchChatCount = () => {
+      if (chatCountDebounceRef.current) {
+        clearTimeout(chatCountDebounceRef.current);
+      }
+      chatCountDebounceRef.current = setTimeout(() => {
+        fetchUnreadChatCount();
+      }, 1000); // Wait 1 second before fetching
+    };
+
+    socketService.on("receive_message", debouncedFetchChatCount);
+    socketService.on("messages_read", debouncedFetchChatCount);
+    socketService.on("messages_marked_read", debouncedFetchChatCount);
+    socketService.on("chat_cleared", debouncedFetchChatCount);
+
+    return () => {
+      if (chatCountDebounceRef.current) {
+        clearTimeout(chatCountDebounceRef.current);
+      }
+      socketService.off("receive_message", debouncedFetchChatCount);
+      socketService.off("messages_read", debouncedFetchChatCount);
+      socketService.off("messages_marked_read", debouncedFetchChatCount);
+      socketService.off("chat_cleared", debouncedFetchChatCount);
+    };
+  }, [token]);
+
+  // Fetch notification count
+  const fetchNotificationCount = async () => {
+    if (!token) return;
     try {
       const response = await notificationService.getUnreadCount();
       if (response.success && response.count !== undefined) {
         setUnreadCount(response.count);
       }
     } catch (error) {
-      console.error("Error fetching unread count:", error);
+      console.error("Error fetching notification count:", error);
     }
   };
 
-  // Fetch unread chat count (you can implement this later)
+  // Fetch chat unread count from API
   const fetchUnreadChatCount = async () => {
-    // This will be implemented when you add unread message tracking
-    // For now, set to 0
-    setUnreadChatCount(0);
+    if (!token) return;
+    try {
+      const data = await chatApi.getUnreadChatCount();
+      if (data.success && data.count !== undefined) {
+        setUnreadChatCount(data.count);
+      }
+    } catch (error) {
+      console.error("Error fetching unread chat count:", error);
+    }
   };
 
   // Refresh counts when screen is focused
   useFocusEffect(
     useCallback(() => {
-      fetchUnreadCount();
+      fetchNotificationCount();
       fetchUnreadChatCount();
     }, [token]),
   );
 
-  // Also fetch on mount
-  useEffect(() => {
-    fetchUnreadCount();
-    fetchUnreadChatCount();
-  }, [token]);
-
-  // Handle chat press - navigate to ChatListScreen
+  // Handle chat press
   const handleChatPress = () => {
+    setUnreadChatCount(0);
     router.push("/screens/ChatListScreen");
   };
 
-  // Mock data for campus moments (stories)
+  // Mock data
   const campusMoments = [
     {
       id: 1,
@@ -98,7 +151,6 @@ export default function HomeScreen() {
     },
   ];
 
-  // Mock data for upcoming events
   const upcomingEvents = [
     {
       id: 1,
@@ -126,9 +178,7 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header with Chat left, Univibe center, Notifications right */}
         <View style={styles.header}>
-          {/* Chat Icon - Left (Navigate to ChatListScreen) */}
           <TouchableOpacity style={styles.iconButton} onPress={handleChatPress}>
             <Ionicons name="chatbubble-outline" size={28} color="#374151" />
             {unreadChatCount > 0 && (
@@ -140,10 +190,8 @@ export default function HomeScreen() {
             )}
           </TouchableOpacity>
 
-          {/* Univibe Logo - Center */}
           <Text style={styles.logoText}>UNIVIBE</Text>
 
-          {/* Notification Icon - Right with badge */}
           <Link href="/screens/notifications" asChild>
             <TouchableOpacity style={styles.iconButton}>
               <Ionicons
@@ -162,7 +210,7 @@ export default function HomeScreen() {
           </Link>
         </View>
 
-        {/* Campus Moments Section (Stories Style) */}
+        {/* Campus Moments */}
         <View style={styles.momentsSection}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Campus Moments</Text>
@@ -170,13 +218,11 @@ export default function HomeScreen() {
               <Text style={styles.seeAllText}>See All</Text>
             </TouchableOpacity>
           </View>
-
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             style={styles.storiesContainer}
           >
-            {/* Add Your Story */}
             <TouchableOpacity style={styles.storyCard}>
               <View style={[styles.storyRing, styles.addStoryRing]}>
                 <View style={styles.addStoryContainer}>
@@ -185,8 +231,6 @@ export default function HomeScreen() {
               </View>
               <Text style={styles.storyName}>Add Your Moment</Text>
             </TouchableOpacity>
-
-            {/* Campus Moments Stories */}
             {campusMoments.map((moment) => (
               <TouchableOpacity key={moment.id} style={styles.storyCard}>
                 <View
@@ -209,7 +253,7 @@ export default function HomeScreen() {
           </ScrollView>
         </View>
 
-        {/* Track My Events Section */}
+        {/* Events */}
         <View style={styles.eventsSection}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Track My Events</Text>
@@ -219,7 +263,6 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </Link>
           </View>
-
           {upcomingEvents.map((event) => (
             <TouchableOpacity key={event.id} style={styles.eventCard}>
               <View style={styles.eventDate}>
@@ -258,11 +301,9 @@ export default function HomeScreen() {
   );
 }
 
+// ... styles remain the same
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f8fafc",
-  },
+  container: { flex: 1, backgroundColor: "#f8fafc" },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -278,10 +319,7 @@ const styles = StyleSheet.create({
     color: "#111827",
     letterSpacing: 1,
   },
-  iconButton: {
-    position: "relative",
-    padding: 8,
-  },
+  iconButton: { position: "relative", padding: 8 },
   badge: {
     position: "absolute",
     top: 0,
@@ -294,39 +332,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 4,
   },
-  badgeText: {
-    color: "white",
-    fontSize: 10,
-    fontWeight: "600",
-  },
-  momentsSection: {
-    marginBottom: 24,
-    paddingHorizontal: 20,
-  },
+  badgeText: { color: "white", fontSize: 10, fontWeight: "600" },
+  momentsSection: { marginBottom: 24, paddingHorizontal: 20 },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 16,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#111827",
-  },
-  seeAllText: {
-    fontSize: 14,
-    color: "#8b5cf6",
-    fontWeight: "500",
-  },
-  storiesContainer: {
-    flexDirection: "row",
-  },
-  storyCard: {
-    alignItems: "center",
-    marginRight: 16,
-    width: 70,
-  },
+  sectionTitle: { fontSize: 18, fontWeight: "600", color: "#111827" },
+  seeAllText: { fontSize: 14, color: "#8b5cf6", fontWeight: "500" },
+  storiesContainer: { flexDirection: "row" },
+  storyCard: { alignItems: "center", marginRight: 16, width: 70 },
   storyRing: {
     width: 70,
     height: 70,
@@ -336,11 +353,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#f0f0f0",
     marginBottom: 8,
   },
-  unviewedRing: {
-    borderWidth: 2,
-    borderColor: "#8b5cf6",
-    padding: 2,
-  },
+  unviewedRing: { borderWidth: 2, borderColor: "#8b5cf6", padding: 2 },
   addStoryRing: {
     borderWidth: 1.5,
     borderColor: "#d1d5db",
@@ -362,20 +375,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  avatarText: {
-    color: "white",
-    fontSize: 24,
-    fontWeight: "600",
-  },
-  storyName: {
-    fontSize: 12,
-    color: "#374151",
-    textAlign: "center",
-  },
-  eventsSection: {
-    paddingHorizontal: 20,
-    marginBottom: 40,
-  },
+  avatarText: { color: "white", fontSize: 24, fontWeight: "600" },
+  storyName: { fontSize: 12, color: "#374151", textAlign: "center" },
+  eventsSection: { paddingHorizontal: 20, marginBottom: 40 },
   eventCard: {
     backgroundColor: "white",
     borderRadius: 12,
@@ -404,32 +406,15 @@ const styles = StyleSheet.create({
     color: "#8b5cf6",
     textAlign: "center",
   },
-  eventDetails: {
-    flex: 1,
-  },
+  eventDetails: { flex: 1 },
   eventName: {
     fontSize: 16,
     fontWeight: "600",
     color: "#111827",
     marginBottom: 4,
   },
-  eventMeta: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  eventMetaText: {
-    fontSize: 12,
-    color: "#6b7280",
-    marginLeft: 4,
-  },
-  eventAttendees: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  attendeesText: {
-    fontSize: 11,
-    color: "#8b5cf6",
-    marginLeft: 4,
-  },
+  eventMeta: { flexDirection: "row", alignItems: "center", marginBottom: 4 },
+  eventMetaText: { fontSize: 12, color: "#6b7280", marginLeft: 4 },
+  eventAttendees: { flexDirection: "row", alignItems: "center" },
+  attendeesText: { fontSize: 11, color: "#8b5cf6", marginLeft: 4 },
 });

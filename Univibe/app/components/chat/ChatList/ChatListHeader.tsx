@@ -24,7 +24,7 @@ export default function ChatListHeader({
   return (
     <View style={styles.container}>
       {/* Title */}
-      <Text style={styles.title}>Chats</Text>
+      <Text style={styles.title}>Messages</Text>
 
       {/* Action Buttons */}
       <View style={styles.actions}>

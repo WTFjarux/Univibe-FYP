@@ -1183,3 +1183,54 @@ exports.getOtherUserProfile = async (req, res) => {
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
+
+/**
+ * Get total unread message count across all chats for current user
+ */
+exports.getUnreadChatCount = async (req, res) => {
+  try {
+    const userId = req.user._id || req.user.id;
+
+    // Find all chat rooms the user is part of
+    const rooms = await ChatRoom.find({
+      "participants.userId": userId,
+      isActive: { $ne: false },
+    }).select("roomId clearedBy participants");
+
+    let totalUnread = 0;
+
+    for (const room of rooms) {
+      // Check if user has cleared this chat
+      const clearedEntry = (room.clearedBy || []).find(
+        (c) => c.user.toString() === userId.toString(),
+      );
+      const clearedAt = clearedEntry ? clearedEntry.clearedAt : null;
+
+      const unreadQuery = {
+        roomId: room.roomId,
+        sender: { $ne: userId },
+        "readBy.user": { $ne: userId },
+        isDeleted: false,
+        deletedFor: { $ne: userId },
+      };
+
+      if (clearedAt) {
+        unreadQuery.createdAt = { $gt: clearedAt };
+      }
+
+      const count = await Message.countDocuments(unreadQuery);
+      totalUnread += count;
+    }
+
+    res.json({
+      success: true,
+      count: totalUnread,
+    });
+  } catch (error) {
+    console.error("Get unread chat count error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get unread chat count",
+    });
+  }
+};

@@ -130,7 +130,7 @@ export default function CommentScreen() {
 
   const fetchComments = async (pageNum = 1, refresh = false) => {
     if (isFetchingRef.current && pageNum > 1) return;
-    
+
     if (refresh || pageNum === 1) {
       isFetchingRef.current = true;
     }
@@ -168,7 +168,7 @@ export default function CommentScreen() {
       setLoading(true);
       setComments([]);
       setTotalComments(0);
-      
+
       // Fetch post details first, then comments (sequential, not parallel)
       fetchPostDetails().then(() => {
         fetchComments(1, true);
@@ -393,11 +393,17 @@ const styles = StyleSheet.create({
   listContent: { flexGrow: 1 },
   emptyContainer: { paddingVertical: 48, alignItems: "center" },
   emptyTitle: {
-    fontSize: 16, fontWeight: "600", color: "#111827",
-    fontFamily: "SofiaSans-Bold", marginTop: 12, marginBottom: 4,
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111827",
+    fontFamily: "SofiaSans-Bold",
+    marginTop: 12,
+    marginBottom: 4,
   },
   emptyText: {
-    fontSize: 14, fontFamily: "SofiaSans-Regular", color: "#6b7280",
+    fontSize: 14,
+    fontFamily: "SofiaSans-Regular",
+    color: "#6b7280",
   },
   footerLoader: { paddingVertical: 20, alignItems: "center" },
 });

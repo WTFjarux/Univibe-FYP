@@ -1,21 +1,38 @@
 // lib/notificationService.ts
-import * as SecureStore from 'expo-secure-store';
-import { API_BASE_URL } from '../../constants/ipConstants';
-
+import * as SecureStore from "expo-secure-store";
+import { API_BASE_URL } from "../../constants/ipConstants";
+import socketService from "./socketService";
 export interface Notification {
   _id: string;
-  type: 'connection_request' | 'connection_accepted' | 'comment' | 'like' | 'repost' | 'mention';
+  type:
+    | "connection_request"
+    | "connection_accepted"
+    | "comment"
+    | "like"
+    | "repost"
+    | "mention";
   title: string;
   message: string;
   createdAt: string;
+  lastInteractionAt?: string;
   read: boolean;
   sender: {
     _id: string;
     name: string;
     username: string;
     profilePicture?: string;
+    fullName?: string;
   };
   targetId?: string;
+  metadata?: {
+    isGrouped?: boolean;
+    count?: number;
+    likers?: Array<{
+      userId: string;
+      name: string;
+      profilePicture?: string;
+    }>;
+  };
 }
 
 export interface NotificationsResponse {
@@ -35,16 +52,19 @@ export interface NotificationsResponse {
 
 const getAuthToken = async (): Promise<string | null> => {
   try {
-    const token = await SecureStore.getItemAsync('authToken');
+    const token = await SecureStore.getItemAsync("authToken");
     return token || null;
   } catch (error) {
-    console.error('Error getting auth token:', error);
+    console.error("Error getting auth token:", error);
     return null;
   }
 };
 
 export const notificationService = {
-  getNotifications: async (page: number = 1, limit: number = 20): Promise<NotificationsResponse> => {
+  getNotifications: async (
+    page: number = 1,
+    limit: number = 20,
+  ): Promise<NotificationsResponse> => {
     try {
       const token = await getAuthToken();
       if (!token) {
@@ -54,23 +74,25 @@ export const notificationService = {
       const response = await fetch(
         `${API_BASE_URL}/api/notifications?page=${page}&limit=${limit}`,
         {
-          method: 'GET',
+          method: "GET",
           headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
           },
-        }
+        },
       );
 
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error('Error fetching notifications:', error);
-      return { success: false, message: 'Failed to fetch notifications' };
+      console.error("Error fetching notifications:", error);
+      return { success: false, message: "Failed to fetch notifications" };
     }
   },
 
-  markAsRead: async (notificationId: string): Promise<{ success: boolean; message?: string }> => {
+  markAsRead: async (
+    notificationId: string,
+  ): Promise<{ success: boolean; message?: string }> => {
     try {
       const token = await getAuthToken();
       if (!token) {
@@ -80,23 +102,25 @@ export const notificationService = {
       const response = await fetch(
         `${API_BASE_URL}/api/notifications/${notificationId}/read`,
         {
-          method: 'PUT',
+          method: "PUT",
           headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
           },
-        }
+        },
       );
 
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error('Error marking as read:', error);
-      return { success: false, message: 'Failed to mark as read' };
+      console.error("Error marking as read:", error);
+      return { success: false, message: "Failed to mark as read" };
     }
   },
 
-  markAsUnread: async (notificationId: string): Promise<{ success: boolean; message?: string }> => {
+  markAsUnread: async (
+    notificationId: string,
+  ): Promise<{ success: boolean; message?: string }> => {
     try {
       const token = await getAuthToken();
       if (!token) {
@@ -106,19 +130,19 @@ export const notificationService = {
       const response = await fetch(
         `${API_BASE_URL}/api/notifications/${notificationId}/unread`,
         {
-          method: 'PUT',
+          method: "PUT",
           headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
           },
-        }
+        },
       );
 
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error('Error marking as unread:', error);
-      return { success: false, message: 'Failed to mark as unread' };
+      console.error("Error marking as unread:", error);
+      return { success: false, message: "Failed to mark as unread" };
     }
   },
 
@@ -132,23 +156,25 @@ export const notificationService = {
       const response = await fetch(
         `${API_BASE_URL}/api/notifications/read-all`,
         {
-          method: 'PUT',
+          method: "PUT",
           headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
           },
-        }
+        },
       );
 
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error('Error marking all as read:', error);
-      return { success: false, message: 'Failed to mark all as read' };
+      console.error("Error marking all as read:", error);
+      return { success: false, message: "Failed to mark all as read" };
     }
   },
 
-  deleteNotification: async (notificationId: string): Promise<{ success: boolean; message?: string }> => {
+  deleteNotification: async (
+    notificationId: string,
+  ): Promise<{ success: boolean; message?: string }> => {
     try {
       const token = await getAuthToken();
       if (!token) {
@@ -158,19 +184,19 @@ export const notificationService = {
       const response = await fetch(
         `${API_BASE_URL}/api/notifications/${notificationId}`,
         {
-          method: 'DELETE',
+          method: "DELETE",
           headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
           },
-        }
+        },
       );
 
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error('Error deleting notification:', error);
-      return { success: false, message: 'Failed to delete notification' };
+      console.error("Error deleting notification:", error);
+      return { success: false, message: "Failed to delete notification" };
     }
   },
 
@@ -178,7 +204,9 @@ export const notificationService = {
    * Delete all pending connection request notifications from a specific sender
    * This prevents duplicate/spam notifications when users cancel and resend requests
    */
-  deletePendingConnectionNotifications: async (senderId: string): Promise<{ success: boolean; message?: string; deletedCount?: number }> => {
+  deletePendingConnectionNotifications: async (
+    senderId: string,
+  ): Promise<{ success: boolean; message?: string; deletedCount?: number }> => {
     try {
       const token = await getAuthToken();
       if (!token) {
@@ -188,23 +216,30 @@ export const notificationService = {
       const response = await fetch(
         `${API_BASE_URL}/api/notifications/connection-requests/${senderId}`,
         {
-          method: 'DELETE',
+          method: "DELETE",
           headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
           },
-        }
+        },
       );
 
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error('Error deleting pending connection notifications:', error);
-      return { success: false, message: 'Failed to delete pending connection notifications' };
+      console.error("Error deleting pending connection notifications:", error);
+      return {
+        success: false,
+        message: "Failed to delete pending connection notifications",
+      };
     }
   },
 
-  getUnreadCount: async (): Promise<{ success: boolean; count?: number; message?: string }> => {
+  getUnreadCount: async (): Promise<{
+    success: boolean;
+    count?: number;
+    message?: string;
+  }> => {
     try {
       const token = await getAuthToken();
       if (!token) {
@@ -214,19 +249,48 @@ export const notificationService = {
       const response = await fetch(
         `${API_BASE_URL}/api/notifications/unread-count`,
         {
-          method: 'GET',
+          method: "GET",
           headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
           },
-        }
+        },
       );
 
       const data = await response.json();
-      return { success: data.success, count: data.count, message: data.message };
+      return {
+        success: data.success,
+        count: data.count,
+        message: data.message,
+      };
     } catch (error) {
-      console.error('Error fetching unread count:', error);
-      return { success: false, message: 'Failed to fetch unread count' };
+      console.error("Error fetching unread count:", error);
+      return { success: false, message: "Failed to fetch unread count" };
     }
   },
+};
+
+/**
+ * Listen for real-time notifications via socket
+ */
+export const listenForNotifications = (
+  onNewNotification: (notification: Notification) => void,
+  onUnreadCountUpdate: (count: number) => void,
+) => {
+  const handleNewNotification = (data: { notification: Notification }) => {
+    console.log("📢 New notification via socket:", data.notification.message);
+    onNewNotification(data.notification);
+  };
+
+  const handleUnreadCount = (data: { count: number }) => {
+    onUnreadCountUpdate(data.count);
+  };
+
+  socketService.on("notification:new", handleNewNotification);
+  socketService.on("notification:unreadCount", handleUnreadCount);
+
+  return () => {
+    socketService.off("notification:new", handleNewNotification);
+    socketService.off("notification:unreadCount", handleUnreadCount);
+  };
 };

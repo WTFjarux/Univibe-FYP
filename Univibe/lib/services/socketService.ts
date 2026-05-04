@@ -398,6 +398,18 @@ class SocketService {
       },
     );
 
+    // ===== NOTIFICATION EVENTS =====
+    this.socket.on("notification:new", (data: any) => {
+      console.log(
+        data?.notification?.message,
+      );
+      this.emitEvent("notification:new", data);
+    });
+
+    this.socket.on("notification:unreadCount", (data: any) => {
+      this.emitEvent("notification:unreadCount", data);
+    });
+
     // ===== ERROR EVENTS =====
     this.socket.on("error", (error: Error) => {
       console.error("Socket error:", error.message);

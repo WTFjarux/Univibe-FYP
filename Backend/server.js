@@ -171,6 +171,7 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`   Event Images:      /uploads/events`);
   console.log(`   Chat Audio:        /uploads/chat/audio`);
   console.log(`   Chat Attachments:  /uploads/chat/attachments`);
+  console.log(`   Group Photos:      /uploads/group-photos`);
   console.log(`\n📱 API Endpoints:`);
   console.log(`   Auth:           /api/auth`);
   console.log(`   Users:          /api/users`);

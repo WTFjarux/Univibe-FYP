@@ -471,8 +471,6 @@ exports.updatePost = async (req, res) => {
   }
 };
 
-
-
 /**
  * Get posts for a user's profile based on viewer's connection status
  * - Connected: Show all non-anonymous posts
@@ -811,6 +809,253 @@ exports.searchPosts = async (req, res) => {
 // ===================== INTERACTIONS =====================
 
 /**
+ * Handle like notification with grouping
+ * Creates or updates a grouped like notification
+ */
+/**
+ * Handle like notification with grouping
+ * Creates or updates a grouped like notification
+ * Uses lastInteractionAt for proper sorting (new likes move notification to top)
+ */
+const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
+  try {
+    const liker = await User.findById(likerId).select("name");
+    if (!liker) return;
+
+    // Get profile picture for the liker
+    const profile = await Profile.findOne({ user: likerId })
+      .select("profilePicture")
+      .lean();
+    const profilePicture = profile?.profilePicture || null;
+
+    const likerIdStr = likerId.toString();
+
+    // Check if there's already a grouped like notification for this post
+    let notification = await Notification.findOne({
+      recipient: postOwnerId,
+      type: "like",
+      targetId: postId,
+      targetModel: "Post",
+      "metadata.isGrouped": true,
+    });
+
+    if (notification) {
+      // ============================================
+      // UPDATE EXISTING GROUPED NOTIFICATION
+      // ============================================
+
+      let currentLikers = notification.metadata?.likers || [];
+
+      // Remove duplicate if user already exists (handles unlike-then-like-again)
+      currentLikers = currentLikers.filter(
+        (l) => l.userId.toString() !== likerIdStr,
+      );
+
+      // Add newest liker to the BEGINNING (most recent first)
+      currentLikers.unshift({
+        userId: likerIdStr,
+        name: liker.name,
+        profilePicture: profilePicture,
+      });
+
+      // Update notification fields
+      notification.message = getLikeMessage(currentLikers);
+      notification.read = false;
+      notification.lastInteractionAt = new Date(); // Key: triggers re-sorting to top
+      notification.sender = likerId;
+      notification.metadata = {
+        isGrouped: true,
+        count: currentLikers.length,
+        likers: currentLikers,
+      };
+
+      // Mark metadata as modified for Mongoose Mixed type
+      notification.markModified("metadata");
+      await notification.save(); // Mongoose auto-handles updatedAt via timestamps
+
+      console.log(
+        `📢 Updated like notification: ${notification.message} | lastInteractionAt: ${notification.lastInteractionAt}`,
+      );
+    } else {
+      // ============================================
+      // CREATE NEW GROUPED NOTIFICATION
+      // ============================================
+
+      // Clean up old individual like notifications for this post
+      await Notification.deleteMany({
+        recipient: postOwnerId,
+        type: "like",
+        targetId: postId,
+        targetModel: "Post",
+      });
+
+      // Create fresh grouped notification
+      notification = await Notification.create({
+        recipient: postOwnerId,
+        sender: likerId,
+        type: "like",
+        title: "New Like",
+        message: `${liker.name} liked your post`,
+        targetId: postId,
+        targetModel: "Post",
+        read: false,
+        lastInteractionAt: new Date(), // Set initial interaction time
+        metadata: {
+          isGrouped: true,
+          count: 1,
+          likers: [
+            {
+              userId: likerIdStr,
+              name: liker.name,
+              profilePicture: profilePicture,
+            },
+          ],
+        },
+      });
+
+      console.log(`📢 Created new like notification: ${notification.message}`);
+    }
+
+    // ============================================
+    // EMIT REAL-TIME SOCKET EVENT
+    // ============================================
+    if (io && notification) {
+      const populatedNotification = await Notification.findById(
+        notification._id,
+      )
+        .populate("sender", "name username email")
+        .lean();
+
+      if (populatedNotification) {
+        // Enrich sender with profile picture
+        const senderProfile = await Profile.findOne({
+          user:
+            populatedNotification.sender._id || populatedNotification.sender,
+        })
+          .select("profilePicture fullName")
+          .lean();
+
+        if (senderProfile) {
+          populatedNotification.sender = {
+            ...populatedNotification.sender,
+            profilePicture: senderProfile.profilePicture || null,
+            fullName:
+              senderProfile.fullName || populatedNotification.sender.name,
+          };
+        }
+
+        const roomId = `user_${postOwnerId}`;
+
+        // Emit to post owner's personal room
+        io.to(roomId).emit("notification:new", {
+          notification: populatedNotification,
+        });
+
+        // Emit updated unread count
+        const unreadCount = await Notification.countDocuments({
+          recipient: postOwnerId,
+          read: false,
+        });
+        io.to(roomId).emit("notification:unreadCount", {
+          count: unreadCount,
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Handle like notification error:", error);
+  }
+};
+
+/**
+ * Handle unlike notification
+ * Removes user from grouped notification or deletes if last liker
+ */
+const handleUnlikeNotification = async (postId, postOwnerId, unlikerId) => {
+  try {
+    const unlikerIdStr = unlikerId.toString();
+    console.log(
+      "Unlike - postId:",
+      postId.toString(),
+      "unlikerId:",
+      unlikerIdStr,
+    );
+
+    const existingNotification = await Notification.findOne({
+      recipient: postOwnerId,
+      type: "like",
+      targetId: postId,
+      targetModel: "Post",
+      "metadata.isGrouped": true,
+    });
+
+    if (!existingNotification) {
+      console.log("No grouped notification found");
+      return;
+    }
+
+    const currentLikers = existingNotification.metadata?.likers || [];
+    console.log(
+      "Current likers:",
+      currentLikers.map((l) => l.name),
+    );
+
+    // Remove the unliker
+    const updatedLikers = currentLikers.filter(
+      (l) => l.userId.toString() !== unlikerIdStr,
+    );
+
+    console.log(
+      "Updated likers:",
+      updatedLikers.map((l) => l.name),
+    );
+
+    if (updatedLikers.length === 0) {
+      // No more likes, delete the notification
+      console.log("No likers left, deleting notification");
+      await Notification.findByIdAndDelete(existingNotification._id);
+    } else {
+      // Update directly
+      existingNotification.metadata.likers = updatedLikers;
+      existingNotification.metadata.count = updatedLikers.length;
+      existingNotification.message = getLikeMessage(updatedLikers);
+      existingNotification.read = false;
+      existingNotification.createdAt = new Date();
+
+      // Update sender to latest liker
+      existingNotification.sender = updatedLikers[0].userId;
+
+      // Mark metadata as modified
+      existingNotification.markModified("metadata");
+
+      await existingNotification.save();
+
+      console.log(
+        "Notification updated with",
+        updatedLikers.length,
+        "likers:",
+        updatedLikers.map((l) => l.name),
+      );
+    }
+  } catch (error) {
+    console.error("Handle unlike notification error:", error);
+  }
+};
+
+/**
+ * Helper to generate like message
+ */
+const getLikeMessage = (likers) => {
+  if (!likers || likers.length === 0) return "";
+  if (likers.length === 1) {
+    return `${likers[0].name} liked your post`;
+  } else if (likers.length === 2) {
+    return `${likers[0].name} and ${likers[1].name} liked your post`;
+  } else {
+    return `${likers[0].name}, ${likers[1].name} and ${likers.length - 2} others liked your post`;
+  }
+};
+
+/**
  * Like or unlike a post
  */
 exports.toggleLike = async (req, res) => {
@@ -857,33 +1102,33 @@ exports.toggleLike = async (req, res) => {
     );
 
     const wasLiked = likeIndex === -1;
+    const io = req.app.get("io");
 
     if (wasLiked) {
+      // USER IS LIKING THE POST
       post.likes.push(req.user._id);
+      await post.save();
 
-      // Create notification for post owner (if not liking own post and post is not anonymous)
+      // Handle like notification (grouped)
       if (
         post.user.toString() !== currentUserId.toString() &&
         !post.isAnonymous
       ) {
-        const sender = await User.findById(currentUserId);
-        if (sender) {
-          await createPostNotification(
-            post.user,
-            currentUserId,
-            "like",
-            "New Like",
-            `${sender.name} liked your post`,
-            post._id,
-            "Post",
-          );
-        }
+        await handleLikeNotification(post._id, post.user, currentUserId, io);
       }
     } else {
+      // USER IS UNLIKING THE POST
       post.likes.splice(likeIndex, 1);
-    }
+      await post.save();
 
-    await post.save();
+      // Handle unlike notification
+      if (
+        post.user.toString() !== currentUserId.toString() &&
+        !post.isAnonymous
+      ) {
+        await handleUnlikeNotification(post._id, post.user, currentUserId);
+      }
+    }
 
     res.json({
       success: true,

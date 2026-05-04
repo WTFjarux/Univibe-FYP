@@ -2,6 +2,9 @@
 import * as SecureStore from "expo-secure-store";
 import { API_BASE_URL } from "../../constants/ipConstants";
 
+// Default avatar constant
+export const DEFAULT_AVATAR = "default-avatar";
+
 // ============================================
 // INTERFACES
 // ============================================
@@ -57,7 +60,7 @@ export interface Post {
   mentions?: any[];
   recentComments?: Comment[];
 
-  // Legacy fields for backward compatibility
+  // Legacy fields
   isPinned?: boolean;
   isReposted?: boolean;
   isDeleted?: boolean;
@@ -79,7 +82,7 @@ export interface Comment {
   parentComment: string | null;
   rootComment?: string | null;
   replies: Comment[] | string[];
-  likes: string[];
+  likes: Array<string | { _id: string; name?: string; username?: string }>;
   isEdited: boolean;
   editedAt?: string;
   isFromAnonymousPost: boolean;
@@ -177,6 +180,25 @@ const buildApiUrl = (endpoint: string): string => {
   return `${baseUrl}${cleanEndpoint}`;
 };
 
+const getFileExtension = (uri: string): string => {
+  const filename = uri.split("/").pop() || "";
+  const ext = filename.split(".").pop()?.toLowerCase() || "";
+  return ext || "jpg";
+};
+
+const getMimeTypeFromExtension = (extension: string): string => {
+  const mimeTypes: Record<string, string> = {
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
+    heic: "image/heic",
+    heif: "image/heif",
+  };
+  return mimeTypes[extension] || "image/jpeg";
+};
+
 export const getFullImageUrl = (url: string): string => {
   if (!url) return "";
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
@@ -189,12 +211,9 @@ export const getFullImageUrl = (url: string): string => {
 };
 
 // ============================================
-// POST CRUD OPERATIONS (No feed logic)
+// POST CRUD OPERATIONS
 // ============================================
 
-/**
- * Create a new post
- */
 export const createPost = async (
   content: string,
   images: any[] = [],
@@ -214,14 +233,8 @@ export const createPost = async (
       for (let i = 0; i < images.length; i++) {
         const image = images[i];
         const uri = image.uri;
-        const ext =
-          uri.split("/").pop()?.split(".").pop()?.toLowerCase() || "jpg";
-        const mimeType =
-          ext === "png"
-            ? "image/png"
-            : ext === "gif"
-              ? "image/gif"
-              : "image/jpeg";
+        const ext = getFileExtension(uri);
+        const mimeType = getMimeTypeFromExtension(ext);
         const filename =
           uri.split("/").pop() || `post_${Date.now()}_${i}.${ext}`;
 
@@ -261,9 +274,6 @@ export const createPost = async (
   }
 };
 
-/**
- * Get a single post by ID
- */
 export const getPostById = async (
   postId: string,
 ): Promise<{ success: boolean; post: Post }> => {
@@ -289,9 +299,6 @@ export const getPostById = async (
   }
 };
 
-/**
- * Update a post
- */
 export const updatePost = async (
   postId: string,
   formData: FormData,
@@ -320,9 +327,6 @@ export const updatePost = async (
   }
 };
 
-/**
- * Delete a post (soft delete)
- */
 export const deletePost = async (
   postId: string,
 ): Promise<DeletePostResponse> => {
@@ -349,9 +353,6 @@ export const deletePost = async (
   }
 };
 
-/**
- * Restore a soft-deleted post
- */
 export const restorePost = async (
   postId: string,
 ): Promise<RestorePostResponse> => {
@@ -386,9 +387,6 @@ export const restorePost = async (
   }
 };
 
-/**
- * Permanently delete a post
- */
 export const permanentlyDeletePost = async (
   postId: string,
 ): Promise<{ success: boolean; message: string }> => {
@@ -419,9 +417,6 @@ export const permanentlyDeletePost = async (
 // POST INTERACTIONS
 // ============================================
 
-/**
- * Toggle like on a post
- */
 export const toggleLike = async (postId: string): Promise<LikeResponse> => {
   try {
     const token = await getAuthToken();
@@ -447,12 +442,9 @@ export const toggleLike = async (postId: string): Promise<LikeResponse> => {
 };
 
 // ============================================
-// PROFILE POSTS (Kept here as it's user-specific)
+// PROFILE POSTS
 // ============================================
 
-/**
- * Get posts for a specific user's profile
- */
 export const getProfilePosts = async (
   userId: string,
   page: number = 1,
@@ -487,9 +479,6 @@ export const getProfilePosts = async (
   }
 };
 
-/**
- * Search posts
- */
 export const searchPosts = async (
   query: string,
   page: number = 1,
@@ -737,6 +726,48 @@ export const deleteComment = async (
 };
 
 // ============================================
+// TYPE GUARDS
+// ============================================
+
+/**
+ * Check if replies are populated (objects) or just IDs (strings)
+ */
+export function areRepliesPopulated(replies: string[] | Comment[]): boolean {
+  if (!Array.isArray(replies) || replies.length === 0) return false;
+  return typeof replies[0] !== "string";
+}
+
+/**
+ * Get populated replies from a comment
+ */
+export function getPopulatedReplies(comment: Comment): Comment[] {
+  if (Array.isArray(comment.replies) && comment.replies.length > 0) {
+    const firstReply = comment.replies[0];
+    if (typeof firstReply !== "string") {
+      return comment.replies as Comment[];
+    }
+  }
+  return [];
+}
+
+/**
+ * Check if a comment has replies
+ */
+export function hasReplies(comment: Comment): boolean {
+  return Array.isArray(comment.replies) && comment.replies.length > 0;
+}
+
+/**
+ * Get reply count for a comment
+ */
+export function getReplyCount(comment: Comment): number {
+  if (Array.isArray(comment.replies)) {
+    return comment.replies.length;
+  }
+  return 0;
+}
+
+// ============================================
 // UTILITY FUNCTIONS
 // ============================================
 
@@ -770,11 +801,9 @@ export const formatCommentUserDisplay = (
   if (isPostAnonymous && comment.isFromAnonymousPost) {
     return { name: "Anonymous", username: "anonymous", profilePicture: null };
   }
-
   if (comment.isAnonymous) {
     return { name: "Anonymous", username: "anonymous", profilePicture: null };
   }
-
   return {
     name: comment.user?.name || "User",
     username: comment.user?.username || "user",
@@ -789,7 +818,6 @@ export const formatCommentTimestamp = (createdAt: string): string => {
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMins / 60);
   const diffDays = Math.floor(diffHours / 24);
-
   if (diffMins < 1) return "Just now";
   if (diffMins < 60) return `${diffMins}m`;
   if (diffHours < 24) return `${diffHours}h`;
