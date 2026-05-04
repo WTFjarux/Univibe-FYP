@@ -32,7 +32,6 @@ const formatMessage = (msg, currentUserId) => ({
   duration: msg.duration,
   thumbnailUrl: msg.thumbnailUrl,
   locationData: msg.locationData,
-  // Forwarding fields
   isForwarded: msg.isForwarded || false,
   originalMessageId: msg.originalMessageId || null,
   originalSenderId: msg.originalSenderId || null,
@@ -58,7 +57,61 @@ const formatMessage = (msg, currentUserId) => ({
     userName: r.user?.name,
   })),
   readBy: (msg.readBy || []).map((r) => r.user?._id || r.user),
+  deliveredTo: (msg.deliveredTo || []).map((d) => ({
+    user: d.user?._id || d.user,
+    deliveredAt: d.deliveredAt,
+  })),
 });
+
+const areUsersConnected = async (userId1, userId2) => {
+  try {
+    const user = await User.findById(userId1).select("connections").lean();
+    if (!user || !user.connections) return false;
+    return user.connections.some(
+      (connId) => connId.toString() === userId2.toString(),
+    );
+  } catch (error) {
+    console.error("areUsersConnected error:", error.message);
+    return false;
+  }
+};
+
+const ensureRoomExists = async (roomId, userId) => {
+  let room = await ChatRoom.findOne({ roomId });
+  if (!room && roomId.startsWith("direct_")) {
+    const parts = roomId.split("_");
+    if (parts.length >= 3) {
+      const user1 = parts[1];
+      const user2 = parts[2];
+      const otherUserId = user1 === userId.toString() ? user2 : user1;
+      if (otherUserId.match(/^[0-9a-fA-F]{24}$/)) {
+        const isConnected = await areUsersConnected(userId, otherUserId);
+        if (!isConnected) return null;
+        room = await ChatRoom.create({
+          roomId,
+          type: "direct",
+          participants: [
+            {
+              userId,
+              joinedAt: new Date(),
+              role: "member",
+              lastReadAt: new Date(),
+            },
+            {
+              userId: otherUserId,
+              joinedAt: new Date(),
+              role: "member",
+              lastReadAt: new Date(),
+            },
+          ],
+          createdBy: userId,
+          messageCount: 0,
+        });
+      }
+    }
+  }
+  return room;
+};
 
 // -----------------------------------------------------------------------------
 // Room Controllers
@@ -66,107 +119,166 @@ const formatMessage = (msg, currentUserId) => ({
 
 exports.getOrCreateDirectRoom = async (req, res) => {
   try {
-    const roomId = getDirectRoomId(req.user.id, req.params.otherUserId);
+    const { otherUserId } = req.params;
+    const userId = req.user.id;
+    if (!otherUserId || !otherUserId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid user ID format" });
+    }
+    if (otherUserId === userId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Cannot create chat with yourself" });
+    }
+    const otherUser = await User.findById(otherUserId)
+      .select("_id name")
+      .lean();
+    if (!otherUser)
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    const isConnected = await areUsersConnected(userId, otherUserId);
+    if (!isConnected) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "You can only chat with your connections. Please connect first.",
+      });
+    }
+    const roomId = getDirectRoomId(userId, otherUserId);
     let room = await ChatRoom.findOne({ roomId });
-
     if (!room) {
       room = await ChatRoom.create({
         roomId,
         type: "direct",
         participants: [
           {
-            userId: req.user.id,
+            userId,
             joinedAt: new Date(),
             role: "member",
             lastReadAt: new Date(),
           },
           {
-            userId: req.params.otherUserId,
+            userId: otherUserId,
             joinedAt: new Date(),
             role: "member",
             lastReadAt: new Date(),
           },
         ],
-        createdBy: req.user.id,
+        createdBy: userId,
+        messageCount: 0,
       });
     }
-
-    // Include cleared status in response
     const clearedAt = room.getClearTimestamp
-      ? room.getClearTimestamp(req.user.id)
+      ? room.getClearTimestamp(userId)
       : null;
     const isCleared = room.isClearedByUser
-      ? room.isClearedByUser(req.user.id)
+      ? room.isClearedByUser(userId)
       : false;
-
     res.json({
       success: true,
       data: {
         roomId: room.roomId,
         type: room.type,
+        name: room.name || otherUser.name,
         isCleared,
         clearedAt,
+        isActive: room.isActive !== false,
+        createdAt: room.createdAt,
+        updatedAt: room.updatedAt,
       },
     });
   } catch (e) {
+    console.error("getOrCreateDirectRoom error:", e.message);
+    if (e.name === "ValidationError") {
+      const messages = Object.values(e.errors).map((err) => err.message);
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: messages,
+      });
+    }
+    if (e.name === "CastError")
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid ID format" });
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
 exports.getUserChatRooms = async (req, res) => {
   try {
-    const rooms = await ChatRoom.find({ "participants.userId": req.user.id })
+    const rooms = await ChatRoom.find({
+      "participants.userId": req.user.id,
+      isActive: { $ne: false },
+      $or: [{ messageCount: { $gt: 0 } }, { type: "group" }],
+    })
       .sort({ updatedAt: -1 })
       .lean();
 
     const formatted = await Promise.all(
       rooms.map(async (room) => {
-        // Get user's clearedAt for this room
         const clearedEntry = (room.clearedBy || []).find(
           (c) => c.user.toString() === req.user.id,
         );
         const clearedAt = clearedEntry ? clearedEntry.clearedAt : null;
-
-        // Build message query respecting clearedAt
         const messageQuery = {
           roomId: room.roomId,
           isDeleted: false,
           deletedFor: { $ne: req.user.id },
         };
-
-        // Only fetch messages after clearedAt if user has cleared the chat
-        if (clearedAt) {
-          messageQuery.createdAt = { $gt: clearedAt };
-        }
-
+        if (clearedAt) messageQuery.createdAt = { $gt: clearedAt };
         const lastMsg = await Message.findOne(messageQuery)
           .sort({ createdAt: -1 })
           .select("message type createdAt sender senderName readBy")
           .lean();
 
-        const other =
-          room.type === "direct"
-            ? room.participants.find((p) => p.userId.toString() !== req.user.id)
-            : null;
-
-        const otherUser = other
-          ? await User.findById(other.userId).select("name").lean()
-          : null;
-
-        const otherProfile = other
-          ? await Profile.findOne({ user: other.userId })
+        let otherUser = null,
+          otherProfile = null;
+        if (room.type === "direct") {
+          const otherParticipant = room.participants.find(
+            (p) => p.userId.toString() !== req.user.id,
+          );
+          if (otherParticipant) {
+            otherUser = await User.findById(otherParticipant.userId)
+              .select("name username")
+              .lean();
+            otherProfile = await Profile.findOne({
+              user: otherParticipant.userId,
+            })
               .select("profilePicture")
-              .lean()
-          : null;
+              .lean();
+          }
+        }
+
+        const unreadQuery = {
+          roomId: room.roomId,
+          sender: { $ne: req.user.id },
+          "readBy.user": { $ne: req.user.id },
+          isDeleted: false,
+          deletedFor: { $ne: req.user.id },
+        };
+        if (clearedAt) unreadQuery.createdAt = { $gt: clearedAt };
+        const unreadCount = await Message.countDocuments(unreadQuery);
 
         return {
           roomId: room.roomId,
           type: room.type,
-          name: otherUser?.name || room.name || "Unknown",
-          otherUserId: other?.userId?.toString() || null,
+          name:
+            room.type === "group"
+              ? room.name
+              : otherUser?.name || room.name || "Unknown",
+          groupIcon: room.groupIcon || null,
+          groupPhoto: room.groupPhoto || room.groupIcon || null, // ✅ Added
+          groupDescription: room.groupDescription || "",
+          participantCount: room.participants?.length || 0,
+          otherUserId:
+            room.type === "direct" ? otherUser?._id?.toString() || null : null,
           otherUserAvatar: otherProfile?.profilePicture || null,
           isCleared: !!clearedAt,
-          clearedAt: clearedAt,
+          clearedAt,
+          unreadCount: unreadCount || 0,
           lastMessage: lastMsg
             ? {
                 message:
@@ -181,121 +293,154 @@ exports.getUserChatRooms = async (req, res) => {
               }
             : null,
           updatedAt: lastMsg?.createdAt || room.updatedAt,
+          createdAt: room.createdAt,
           participants: room.participants.map((p) => p.userId.toString()),
+          groupSettings: room.groupSettings || null,
+          isPinned: room.isPinned || false,
+          isMuted: room.isMuted || false,
         };
       }),
     );
 
     res.json({ success: true, data: formatted });
   } catch (e) {
+    console.error("getUserChatRooms error:", e);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
 exports.getRoomDetails = async (req, res) => {
   try {
-    const room = await ChatRoom.findOne({ roomId: req.params.roomId }).lean();
-    if (!room)
+    const room = await ChatRoom.findOne({ roomId: req.params.roomId })
+      .populate("participants.userId", "name username avatar")
+      .lean();
+
+    if (!room) {
       return res
         .status(404)
         .json({ success: false, message: "Room not found" });
+    }
 
-    // Get cleared status for requesting user
+    const isParticipant = room.participants.some(
+      (p) => (p.userId?._id || p.userId).toString() === req.user.id,
+    );
+    if (!isParticipant) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Not a participant" });
+    }
+
+    // ✅ Fetch profile pictures from Profile model
+    const participantIds = room.participants.map(
+      (p) => p.userId?._id || p.userId,
+    );
+    const profiles = await Profile.find({ user: { $in: participantIds } })
+      .select("user profilePicture")
+      .lean();
+
+    // Create a map of userId -> profilePicture
+    const profilePictureMap = {};
+    profiles.forEach((p) => {
+      profilePictureMap[p.user.toString()] = p.profilePicture || "";
+    });
+
     const clearedEntry = (room.clearedBy || []).find(
       (c) => c.user.toString() === req.user.id,
     );
 
+    // ✅ Format participants with actual profile pictures
+    const formattedParticipants = room.participants.map((p) => {
+      const uid = (p.userId?._id || p.userId).toString();
+      return {
+        userId: uid,
+        name: p.userId?.name || "Unknown",
+        username: p.userId?.username || "",
+        avatar: profilePictureMap[uid] || p.userId?.avatar || "", // ✅ Profile picture
+        role: p.role || "member",
+        joinedAt: p.joinedAt,
+        lastReadAt: p.lastReadAt,
+      };
+    });
+
     let otherUser = null;
     if (room.type === "direct") {
-      const otherId = room.participants.find(
-        (p) => p.userId.toString() !== req.user.id,
+      const otherParticipant = room.participants.find(
+        (p) => (p.userId?._id || p.userId).toString() !== req.user.id,
       );
-      if (otherId) {
-        const user = await User.findById(otherId.userId).select("name").lean();
-        const profile = await Profile.findOne({ user: otherId.userId })
+      if (otherParticipant) {
+        const uid = otherParticipant.userId?._id || otherParticipant.userId;
+        const user = await User.findById(uid).select("name username").lean();
+        const profile = await Profile.findOne({ user: uid })
           .select("profilePicture")
           .lean();
-        otherUser = { ...user, avatar: profile?.profilePicture || "" };
+        otherUser = {
+          _id: user?._id,
+          name: user?.name,
+          username: user?.username,
+          avatar: profile?.profilePicture || null,
+        };
       }
     }
 
     res.json({
       success: true,
       data: {
-        ...room,
+        roomId: room.roomId,
+        type: room.type,
+        name: room.name,
+        groupIcon: room.groupIcon,
+        groupPhoto: room.groupPhoto || room.groupIcon,
+        groupDescription: room.groupDescription,
+        participantCount: room.participants?.length || 0,
+        participants: formattedParticipants, // ✅ Now includes profile pictures
+        groupSettings: room.groupSettings,
+        createdBy: room.createdBy,
+        lastMessage: room.lastMessage,
+        messageCount: room.messageCount,
         otherUser,
         isCleared: !!clearedEntry,
         clearedAt: clearedEntry ? clearedEntry.clearedAt : null,
+        updatedAt: room.updatedAt,
+        createdAt: room.createdAt,
+        isActive: room.isActive !== false,
       },
     });
   } catch (e) {
+    console.error("getRoomDetails error:", e);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
-// -----------------------------------------------------------------------------
-// Delete Chat History (NEW)
-// -----------------------------------------------------------------------------
-
-/**
- * Delete chat history for current user only.
- * Sets a clearedAt timestamp so old messages are filtered out.
- * Other participant's messages remain unaffected.
- * When a new message arrives, chat becomes visible again automatically.
- */
 exports.deleteChatHistory = async (req, res) => {
   try {
     const { roomId } = req.params;
     const userId = req.user.id;
-
-    // Find the room
     const room = await ChatRoom.findOne({ roomId });
-    if (!room) {
-      return res.status(404).json({
-        success: false,
-        message: "Chat room not found",
-      });
-    }
-
-    // Verify user is a participant
-    const isParticipant = room.participants.some(
-      (p) => p.userId.toString() === userId,
-    );
-    if (!isParticipant) {
-      return res.status(403).json({
-        success: false,
-        message: "You are not a participant in this chat",
-      });
-    }
-
-    const clearedAt = new Date();
-
-    // Remove any existing clearedBy entry for this user
+    if (!room)
+      return res
+        .status(404)
+        .json({ success: false, message: "Chat room not found" });
+    if (!room.participants.some((p) => p.userId.toString() === userId))
+      return res
+        .status(403)
+        .json({ success: false, message: "Not a participant" });
     room.clearedBy = room.clearedBy.filter(
       (entry) => entry.user.toString() !== userId,
     );
-
-    // Add new clearedBy entry
     room.clearedBy.push({
       user: userId,
-      clearedAt,
+      clearedAt: new Date(),
       restoreOnNewMessage: true,
     });
-
     await room.save();
-
     res.json({
       success: true,
       message: "Chat history deleted successfully",
       roomId,
-      clearedAt,
     });
   } catch (e) {
     console.error("deleteChatHistory error:", e);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-    });
+    res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
@@ -307,25 +452,32 @@ exports.getMessageHistory = async (req, res) => {
   try {
     const { roomId } = req.params;
     const { limit = 50, before } = req.query;
-
-    // Get clearedAt for this user
-    const room = await ChatRoom.findOne({ roomId }).select("clearedBy").lean();
-    const clearedEntry = (room?.clearedBy || []).find(
+    const room = await ChatRoom.findOne({ roomId })
+      .select("clearedBy type participants")
+      .lean();
+    if (!room)
+      return res
+        .status(404)
+        .json({ success: false, message: "Room not found" });
+    if (!room.participants.some((p) => p.userId.toString() === req.user.id))
+      return res
+        .status(403)
+        .json({ success: false, message: "Not a participant" });
+    const clearedEntry = (room.clearedBy || []).find(
       (c) => c.user.toString() === req.user.id,
     );
     const clearedAt = clearedEntry ? clearedEntry.clearedAt : null;
-
     const messages = await Message.getMessages(
       roomId,
       parseInt(limit),
       before,
       req.user.id,
     );
-
     res.json({
       success: true,
       data: {
         roomId,
+        roomType: room.type,
         messages: messages.reverse().map((m) => formatMessage(m, req.user.id)),
         hasMore: messages.length === parseInt(limit),
         clearedAt,
@@ -333,6 +485,7 @@ exports.getMessageHistory = async (req, res) => {
       },
     });
   } catch (e) {
+    console.error("getMessageHistory error:", e);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
@@ -341,25 +494,32 @@ exports.getMessagesLight = async (req, res) => {
   try {
     const { roomId } = req.params;
     const { limit = 30, before } = req.query;
-
-    // Get clearedAt for this user
-    const room = await ChatRoom.findOne({ roomId }).select("clearedBy").lean();
-    const clearedEntry = (room?.clearedBy || []).find(
+    const room = await ChatRoom.findOne({ roomId })
+      .select("clearedBy type participants")
+      .lean();
+    if (!room)
+      return res
+        .status(404)
+        .json({ success: false, message: "Room not found" });
+    if (!room.participants.some((p) => p.userId.toString() === req.user.id))
+      return res
+        .status(403)
+        .json({ success: false, message: "Not a participant" });
+    const clearedEntry = (room.clearedBy || []).find(
       (c) => c.user.toString() === req.user.id,
     );
     const clearedAt = clearedEntry ? clearedEntry.clearedAt : null;
-
     const messages = await Message.getMessagesLight(
       roomId,
       parseInt(limit),
       before,
       req.user.id,
     );
-
     res.json({
       success: true,
       data: {
         roomId,
+        roomType: room.type,
         messages: messages.reverse().map((m) => formatMessage(m, req.user.id)),
         hasMore: messages.length === parseInt(limit),
         clearedAt,
@@ -367,6 +527,7 @@ exports.getMessagesLight = async (req, res) => {
       },
     });
   } catch (e) {
+    console.error("getMessagesLight error:", e);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
@@ -383,6 +544,7 @@ exports.deleteMessage = async (req, res) => {
     await msg.save();
     res.json({ success: true, message: "Deleted" });
   } catch (e) {
+    console.error("deleteMessage error:", e);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
@@ -397,6 +559,7 @@ exports.markMessageAsRead = async (req, res) => {
       return res.status(404).json({ success: false, message: "Not found" });
     res.json({ success: true, data: msg });
   } catch (e) {
+    console.error("markMessageAsRead error:", e);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
@@ -409,6 +572,7 @@ exports.markMessageAsDelivered = async (req, res) => {
     );
     res.json({ success: true, data: msg });
   } catch (e) {
+    console.error("markMessageAsDelivered error:", e);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
@@ -416,110 +580,63 @@ exports.markMessageAsDelivered = async (req, res) => {
 // -----------------------------------------------------------------------------
 // Forwarding Messages
 // -----------------------------------------------------------------------------
-/**
- * Forward a message to multiple chats
- * POST /api/chat/messages/forward
- */
+
 exports.forwardMessage = async (req, res) => {
   try {
     const { messageId, targetChatIds } = req.body;
     const userId = req.user.id;
-
-    // Validation
     if (
       !messageId ||
       !targetChatIds ||
       !Array.isArray(targetChatIds) ||
       targetChatIds.length === 0
-    ) {
+    )
       return res.status(400).json({
         success: false,
-        message: "messageId and targetChatIds (non-empty array) are required",
+        message: "messageId and targetChatIds required",
       });
-    }
-
-    // Limit batch size
-    if (targetChatIds.length > 10) {
-      return res.status(400).json({
-        success: false,
-        message: "Maximum 10 chats can be forwarded to at once",
-      });
-    }
-
-    // Fetch original message
+    if (targetChatIds.length > 10)
+      return res
+        .status(400)
+        .json({ success: false, message: "Maximum 10 chats" });
     const originalMessage = await Message.findById(messageId)
       .populate("sender", "name")
       .lean();
-
-    if (!originalMessage) {
-      return res.status(404).json({
-        success: false,
-        message: "Original message not found",
-      });
-    }
-
-    // Check if the original message is deleted
-    if (originalMessage.isDeleted) {
-      return res.status(400).json({
-        success: false,
-        message: "Cannot forward a deleted message",
-      });
-    }
-
-    // Verify user has access to the original message
+    if (!originalMessage)
+      return res
+        .status(404)
+        .json({ success: false, message: "Original message not found" });
+    if (originalMessage.isDeleted)
+      return res
+        .status(400)
+        .json({ success: false, message: "Cannot forward deleted message" });
     const originalRoom = await ChatRoom.findOne({
       roomId: originalMessage.roomId,
     });
-    if (!originalRoom) {
-      return res.status(404).json({
-        success: false,
-        message: "Original chat room not found",
-      });
-    }
-
-    const isParticipant = originalRoom.participants.some(
-      (p) => p.userId.toString() === userId,
-    );
-    if (!isParticipant) {
-      return res.status(403).json({
-        success: false,
-        message: "You don't have access to this message",
-      });
-    }
-
-    // Verify target chats exist and user is a participant
+    if (!originalRoom)
+      return res
+        .status(404)
+        .json({ success: false, message: "Original chat room not found" });
+    if (!originalRoom.isParticipant(userId))
+      return res.status(403).json({ success: false, message: "No access" });
     const targetRooms = await ChatRoom.find({
       roomId: { $in: targetChatIds },
       "participants.userId": userId,
     }).lean();
-
     const validRoomIds = targetRooms.map((r) => r.roomId);
-
-    if (validRoomIds.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No valid target chats found",
-      });
-    }
-
-    // Get user info for the forwarded message sender
+    if (!validRoomIds.length)
+      return res
+        .status(400)
+        .json({ success: false, message: "No valid target chats" });
     const user = await User.findById(userId).select("name").lean();
     const profile = await Profile.findOne({ user: userId })
       .select("profilePicture")
       .lean();
-
-    // Create forwarded messages for each valid target chat
     const forwardedMessages = [];
     const io = req.app.get("io");
-
     await Promise.all(
       validRoomIds.map(async (targetRoomId) => {
-        // Skip if it's the same room
-        if (targetRoomId === originalMessage.roomId) {
-          return;
-        }
-
-        // Build the forwarded message payload
+        if (targetRoomId === originalMessage.roomId) return;
         const forwardedData = {
           sender: userId,
           senderName: user?.name || "Unknown",
@@ -539,32 +656,20 @@ exports.forwardMessage = async (req, res) => {
           readBy: [{ user: userId, readAt: new Date() }],
           deliveredTo: [{ user: userId, deliveredAt: new Date() }],
         };
-
-        // Copy type-specific content (no re-upload)
-        if (
-          originalMessage.type === "image" ||
-          originalMessage.type === "video" ||
-          originalMessage.type === "file"
-        ) {
-          // Reuse existing media URLs
+        if (["image", "video", "file"].includes(originalMessage.type)) {
           forwardedData.mediaUrl = originalMessage.mediaUrl || "";
           forwardedData.thumbnailUrl = originalMessage.thumbnailUrl || "";
           forwardedData.mediaSize = originalMessage.mediaSize || 0;
           forwardedData.mediaName = originalMessage.mediaName || "";
           forwardedData.mediaMimeType = originalMessage.mediaMimeType || "";
-          if (originalMessage.type === "video" && originalMessage.duration) {
+          if (originalMessage.type === "video" && originalMessage.duration)
             forwardedData.duration = originalMessage.duration;
-          }
         } else if (originalMessage.type === "audio") {
           forwardedData.mediaUrl = originalMessage.mediaUrl || "";
           forwardedData.duration = originalMessage.duration || 0;
-          forwardedData.mediaSize = originalMessage.mediaSize || 0;
-          forwardedData.mediaMimeType = originalMessage.mediaMimeType || "";
         } else if (originalMessage.type === "location") {
           forwardedData.locationData = originalMessage.locationData || {};
         }
-
-        // Handle forwarded replies
         if (originalMessage.replyTo?.messageId) {
           forwardedData.replyTo = {
             messageId: originalMessage.replyTo.messageId,
@@ -577,18 +682,13 @@ exports.forwardMessage = async (req, res) => {
             duration: originalMessage.replyTo.duration,
           };
         }
-
-        // Save the forwarded message
         const forwardedMessage = await Message.create(forwardedData);
         forwardedMessages.push(forwardedMessage);
-
-        // Update room's lastMessage
-        const lastMessageText = forwardedData.message?.substring(0, 100) || "";
         await ChatRoom.findOneAndUpdate(
           { roomId: targetRoomId },
           {
             lastMessage: {
-              message: lastMessageText,
+              message: forwardedData.message?.substring(0, 100) || "",
               sentAt: new Date(),
               senderId: userId,
               senderName: user?.name || "Unknown",
@@ -600,44 +700,31 @@ exports.forwardMessage = async (req, res) => {
             $pull: { clearedBy: { user: userId } },
           },
         );
-
-        // Emit real-time event for each forwarded message
         if (io) {
-          const populatedMessage = await Message.findById(forwardedMessage._id)
+          const populated = await Message.findById(forwardedMessage._id)
             .populate("sender", "name avatar")
-            .populate("readBy.user", "name avatar")
             .lean();
-
-          const formattedMsg = formatMessage(populatedMessage, userId);
-
-          // Emit to the target room
-          io.to(targetRoomId).emit("receive_message", formattedMsg);
-
-          console.log(`Message forwarded to room ${targetRoomId}`);
+          io.to(targetRoomId).emit(
+            "receive_message",
+            formatMessage(populated, userId),
+          );
         }
       }),
     );
-
-    // Filter out null values (skipped same-room forwards)
-    const successfulForwards = forwardedMessages.filter(Boolean);
-
+    const successful = forwardedMessages.filter(Boolean);
     res.json({
       success: true,
-      message: `Message forwarded to ${successfulForwards.length} chat(s)`,
+      message: `Forwarded to ${successful.length} chat(s)`,
       data: {
-        forwardedCount: successfulForwards.length,
-        forwardedMessages: successfulForwards.map((msg) =>
-          formatMessage(msg, userId),
-        ),
+        forwardedCount: successful.length,
+        forwardedMessages: successful.map((m) => formatMessage(m, userId)),
       },
     });
   } catch (e) {
     console.error("forwardMessage error:", e);
-    res.status(500).json({
-      success: false,
-      message: "Failed to forward message",
-      error: process.env.NODE_ENV === "development" ? e.message : undefined,
-    });
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to forward message" });
   }
 };
 
@@ -647,18 +734,48 @@ exports.forwardMessage = async (req, res) => {
 
 exports.markRoomAsRead = async (req, res) => {
   try {
-    const count = await Message.markRoomAsRead(req.params.roomId, req.user.id);
-    res.json({ success: true, modifiedCount: count });
-  } catch (e) {
-    res.status(500).json({ success: false, message: "Server error" });
+    const { roomId } = req.params;
+    const userId = req.user.id;
+    if (!roomId || !userId)
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing roomId or userId" });
+    let room = await ensureRoomExists(roomId, userId);
+    if (!room)
+      return res.json({
+        success: true,
+        message: "No room to mark as read",
+        modifiedCount: 0,
+      });
+    await ChatRoom.findOneAndUpdate(
+      { roomId },
+      { $set: { "participants.$[elem].lastReadAt": new Date() } },
+      { arrayFilters: [{ "elem.userId": userId }] },
+    );
+    const currentRoom = await ChatRoom.findOne({ roomId }).lean();
+    if (currentRoom?.lastMessage?.sender?.toString() !== userId)
+      await ChatRoom.findOneAndUpdate(
+        { roomId },
+        { $addToSet: { "lastMessage.readBy": userId } },
+      );
+    const modifiedCount = await Message.markRoomAsRead(roomId, userId);
+    res.json({ success: true, message: "Marked as read", modifiedCount });
+  } catch (error) {
+    console.error("markRoomAsRead error:", error.message);
+    res.json({
+      success: true,
+      message: "Read receipt processed",
+      modifiedCount: 0,
+    });
   }
 };
 
 exports.markRoomAsUnread = async (req, res) => {
   try {
-    const lastMsg = await Message.findOne({ roomId: req.params.roomId }).sort({
-      createdAt: -1,
-    });
+    const lastMsg = await Message.findOne({
+      roomId: req.params.roomId,
+      isDeleted: false,
+    }).sort({ createdAt: -1 });
     if (lastMsg) {
       lastMsg.readBy = lastMsg.readBy.filter(
         (r) => r.user.toString() !== req.user.id,
@@ -667,89 +784,64 @@ exports.markRoomAsUnread = async (req, res) => {
     }
     res.json({ success: true });
   } catch (e) {
+    console.error("markRoomAsUnread error:", e);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
-//-----------------------------------------------------------------------------
-// Share Post to Chat
+// -----------------------------------------------------------------------------
+// Share Post, Uploads, Audio, Reactions, User
 // -----------------------------------------------------------------------------
 
 exports.sharePost = async (req, res) => {
   try {
     const { postId, targetChatIds, comment } = req.body;
     const userId = req.user.id;
-
-    // Validation
     if (
       !postId ||
       !targetChatIds ||
       !Array.isArray(targetChatIds) ||
       targetChatIds.length === 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "postId and targetChatIds (non-empty array) are required",
-      });
-    }
-
-    if (targetChatIds.length > 10) {
-      return res.status(400).json({
-        success: false,
-        message: "Maximum 10 chats can be shared to at once",
-      });
-    }
-
-    // Fetch Post details
+    )
+      return res
+        .status(400)
+        .json({ success: false, message: "postId and targetChatIds required" });
+    if (targetChatIds.length > 10)
+      return res
+        .status(400)
+        .json({ success: false, message: "Maximum 10 chats" });
     const Post = require("../models/Post");
     const post = await Post.findById(postId)
       .populate("user", "name username")
       .lean();
-
-    if (!post) {
-      return res.status(404).json({
-        success: false,
-        message: "Post not found",
-      });
-    }
-
-    // ✅ ADD THIS: Fetch post author's profile to get avatar
+    if (!post)
+      return res
+        .status(404)
+        .json({ success: false, message: "Post not found" });
     const postAuthorId = post.user?._id || post.user;
     const authorProfile = await Profile.findOne({ user: postAuthorId })
       .select("profilePicture")
       .lean();
-
-    // Verify target chats
     const targetRooms = await ChatRoom.find({
       roomId: { $in: targetChatIds },
       "participants.userId": userId,
     }).lean();
-
     const validRoomIds = targetRooms.map((r) => r.roomId);
-
-    if (validRoomIds.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No valid target chats found",
-      });
-    }
-
+    if (!validRoomIds.length)
+      return res
+        .status(400)
+        .json({ success: false, message: "No valid target chats" });
     const user = await User.findById(userId).select("name").lean();
     const profile = await Profile.findOne({ user: userId })
       .select("profilePicture")
       .lean();
-
     const sharedMessages = [];
     const io = req.app.get("io");
-
     await Promise.all(
       validRoomIds.map(async (targetRoomId) => {
         const messageText = comment || "";
-
-        // Get first image if available
         const postImage =
           post.images && post.images.length > 0 ? post.images[0].url : "";
-
         const sharedPostData = {
           sender: userId,
           senderName: user?.name || "Unknown",
@@ -760,15 +852,14 @@ exports.sharePost = async (req, res) => {
           sharedPost: {
             postId: post._id,
             postContent: post.content ? post.content.substring(0, 200) : "",
-            postImage: postImage,
-            postAuthorId: postAuthorId,
+            postImage,
+            postAuthorId,
             postAuthorName: post.isAnonymous
               ? "Anonymous"
               : post.user?.name || "Unknown",
             postAuthorUsername: post.isAnonymous
               ? "anonymous"
               : post.user?.username || "user",
-            // ✅ FIXED: Get avatar from Profile model
             postAuthorAvatar: post.isAnonymous
               ? ""
               : authorProfile?.profilePicture || "",
@@ -778,15 +869,13 @@ exports.sharePost = async (req, res) => {
           readBy: [{ user: userId, readAt: new Date() }],
           deliveredTo: [{ user: userId, deliveredAt: new Date() }],
         };
-
         const sharedMessage = await Message.create(sharedPostData);
         sharedMessages.push(sharedMessage);
-
         await ChatRoom.findOneAndUpdate(
           { roomId: targetRoomId },
           {
             lastMessage: {
-              message: messageText,
+              message: messageText || "Shared a post",
               sentAt: new Date(),
               senderId: userId,
               senderName: user?.name || "Unknown",
@@ -798,41 +887,30 @@ exports.sharePost = async (req, res) => {
             $pull: { clearedBy: { user: userId } },
           },
         );
-
         if (io) {
-          const populatedMessage = await Message.findById(sharedMessage._id)
+          const populated = await Message.findById(sharedMessage._id)
             .populate("sender", "name avatar")
-            .populate("readBy.user", "name avatar")
             .lean();
-
           io.to(targetRoomId).emit(
             "receive_message",
-            formatMessage(populatedMessage, userId),
+            formatMessage(populated, userId),
           );
         }
       }),
     );
-
     res.json({
       success: true,
       message: `Post shared to ${sharedMessages.length} chat(s)`,
       data: {
         sharedCount: sharedMessages.length,
-        sharedMessages: sharedMessages.map((msg) => formatMessage(msg, userId)),
+        sharedMessages: sharedMessages.map((m) => formatMessage(m, userId)),
       },
     });
   } catch (e) {
     console.error("sharePost error:", e);
-    res.status(500).json({
-      success: false,
-      message: "Failed to share post",
-    });
+    res.status(500).json({ success: false, message: "Failed to share post" });
   }
 };
-
-// -----------------------------------------------------------------------------
-// Uploads
-// -----------------------------------------------------------------------------
 
 exports.uploadAudio = async (req, res) => {
   try {
@@ -849,11 +927,10 @@ exports.uploadAudio = async (req, res) => {
     } = req.body;
     if (!req.file)
       return res.status(400).json({ success: false, message: "No file" });
-
+    await ensureRoomExists(roomId, req.user.id);
     const user = await User.findById(req.user.id);
     const profile = await Profile.findOne({ user: req.user.id });
     const audioUrl = `/uploads/chat/audio/${req.file.filename}`;
-
     const data = {
       sender: req.user.id,
       senderName: user.name,
@@ -869,8 +946,7 @@ exports.uploadAudio = async (req, res) => {
       readBy: [{ user: req.user.id, readAt: new Date() }],
       deliveredTo: [{ user: req.user.id, deliveredAt: new Date() }],
     };
-
-    if (replyToId) {
+    if (replyToId)
       data.replyTo = {
         messageId: replyToId,
         message: replyToMessage,
@@ -880,18 +956,10 @@ exports.uploadAudio = async (req, res) => {
         mediaUrl: replyToMediaUrl,
         duration: parseInt(replyToDuration) || 0,
       };
-    }
-
     const msg = await Message.create(data);
-
     const io = req.app.get("io");
-    if (io) {
-      const formattedMsg = formatMessage(msg, req.user.id);
-      io.to(roomId).emit("receive_message", formattedMsg);
-      console.log(`Audio broadcast to room: ${roomId}`);
-    }
-
-    // Update room and auto-restore for sender
+    if (io)
+      io.to(roomId).emit("receive_message", formatMessage(msg, req.user.id));
     await ChatRoom.findOneAndUpdate(
       { roomId },
       {
@@ -905,18 +973,17 @@ exports.uploadAudio = async (req, res) => {
         },
         updatedAt: new Date(),
         $inc: { messageCount: 1 },
-        // Auto-restore: Remove sender from clearedBy when they send a message
         $pull: { clearedBy: { user: req.user.id } },
       },
       { upsert: true },
     );
-
     res.json({
       success: true,
       url: audioUrl,
       data: formatMessage(msg, req.user.id),
     });
   } catch (e) {
+    console.error("uploadAudio error:", e);
     res.status(500).json({ success: false, message: e.message });
   }
 };
@@ -926,8 +993,7 @@ exports.uploadAttachments = async (req, res) => {
     const { roomId } = req.body;
     const user = await User.findById(req.user.id);
     const profile = await Profile.findOne({ user: req.user.id });
-
-    // Location sharing
+    await ensureRoomExists(roomId, req.user.id);
     if (req.body.type === "location") {
       const loc =
         typeof req.body.locationData === "string"
@@ -944,14 +1010,9 @@ exports.uploadAttachments = async (req, res) => {
         readBy: [{ user: req.user.id }],
         deliveredTo: [{ user: req.user.id }],
       });
-
       const io = req.app.get("io");
-      if (io) {
-        const formattedMsg = formatMessage(msg, req.user.id);
-        io.to(roomId).emit("receive_message", formattedMsg);
-        console.log(`Location broadcast to room: ${roomId}`);
-      }
-
+      if (io)
+        io.to(roomId).emit("receive_message", formatMessage(msg, req.user.id));
       await ChatRoom.findOneAndUpdate(
         { roomId },
         {
@@ -969,26 +1030,19 @@ exports.uploadAttachments = async (req, res) => {
         },
         { upsert: true },
       );
-
       return res.json({
         success: true,
         data: [formatMessage(msg, req.user.id)],
       });
     }
-
-    // File attachments
-    if (!req.files?.length) {
+    if (!req.files?.length)
       return res.status(400).json({ success: false, message: "No files" });
-    }
-
     const messages = await Promise.all(
       req.files.map(async (file) => {
-        const isImage = file.mimetype?.startsWith("image/");
-        const isVideo = file.mimetype?.startsWith("video/");
-
-        let messageText = `File: ${file.originalname}`;
-        let messageType = "file";
-
+        const isImage = file.mimetype?.startsWith("image/"),
+          isVideo = file.mimetype?.startsWith("video/");
+        let messageText = `File: ${file.originalname}`,
+          messageType = "file";
         if (isImage) {
           messageText = "Photo";
           messageType = "image";
@@ -996,7 +1050,6 @@ exports.uploadAttachments = async (req, res) => {
           messageText = "Video";
           messageType = "video";
         }
-
         const messageData = {
           sender: req.user.id,
           senderName: user.name,
@@ -1012,41 +1065,26 @@ exports.uploadAttachments = async (req, res) => {
           readBy: [{ user: req.user.id }],
           deliveredTo: [{ user: req.user.id }],
         };
-
-        if (isVideo && file.metadata?.duration) {
+        if (isVideo && file.metadata?.duration)
           messageData.duration = Math.round(file.metadata.duration);
-        }
-
         return Message.create(messageData);
       }),
     );
-
-    // Broadcast to room
     const io = req.app.get("io");
     const formattedMessages = messages.map((m) =>
       formatMessage(m, req.user.id),
     );
-
-    if (io) {
-      formattedMessages.forEach((msg) => {
-        io.to(roomId).emit("receive_message", msg);
-        console.log(
-          `Attachment broadcast to room: ${roomId}, msg: ${msg._id}, type: ${msg.type}`,
-        );
-      });
-    }
-
+    if (io)
+      formattedMessages.forEach((msg) =>
+        io.to(roomId).emit("receive_message", msg),
+      );
     const lastMsg = messages[messages.length - 1];
-
-    let lastMessageText;
-    if (messages.length === 1) {
-      lastMessageText = lastMsg.message;
-    } else {
+    let lastMessageText = lastMsg.message;
+    if (messages.length > 1) {
       const typeCount = messages.reduce((acc, m) => {
         acc[m.type] = (acc[m.type] || 0) + 1;
         return acc;
       }, {});
-
       const parts = [];
       if (typeCount.image)
         parts.push(`${typeCount.image} photo${typeCount.image > 1 ? "s" : ""}`);
@@ -1054,10 +1092,8 @@ exports.uploadAttachments = async (req, res) => {
         parts.push(`${typeCount.video} video${typeCount.video > 1 ? "s" : ""}`);
       if (typeCount.file)
         parts.push(`${typeCount.file} file${typeCount.file > 1 ? "s" : ""}`);
-
       lastMessageText = `Sent ${parts.join(", ")}`;
     }
-
     await ChatRoom.findOneAndUpdate(
       { roomId },
       {
@@ -1075,33 +1111,22 @@ exports.uploadAttachments = async (req, res) => {
       },
       { upsert: true },
     );
-
-    res.json({
-      success: true,
-      data: formattedMessages,
-    });
+    res.json({ success: true, data: formattedMessages });
   } catch (e) {
     console.error("uploadAttachments error:", e);
     res.status(500).json({ success: false, message: e.message });
   }
 };
 
-// -----------------------------------------------------------------------------
-// Audio
-// -----------------------------------------------------------------------------
-
 exports.markAudioAsPlayed = async (req, res) => {
   try {
     await Message.markAudioAsPlayed(req.params.messageId);
     res.json({ success: true });
   } catch (e) {
+    console.error("markAudioAsPlayed error:", e);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
-
-// -----------------------------------------------------------------------------
-// Reactions
-// -----------------------------------------------------------------------------
 
 exports.addReaction = async (req, res) => {
   try {
@@ -1120,6 +1145,7 @@ exports.addReaction = async (req, res) => {
     );
     res.json({ success: true, reactions: msg?.reactions || [] });
   } catch (e) {
+    console.error("addReaction error:", e);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
@@ -1129,13 +1155,10 @@ exports.removeReaction = async (req, res) => {
     const msg = await Message.removeReaction(req.params.messageId, req.user.id);
     res.json({ success: true, reactions: msg?.reactions || [] });
   } catch (e) {
+    console.error("removeReaction error:", e);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
-
-// -----------------------------------------------------------------------------
-// User
-// -----------------------------------------------------------------------------
 
 exports.getOtherUserProfile = async (req, res) => {
   try {
@@ -1156,6 +1179,7 @@ exports.getOtherUserProfile = async (req, res) => {
       },
     });
   } catch (e) {
+    console.error("getOtherUserProfile error:", e);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };

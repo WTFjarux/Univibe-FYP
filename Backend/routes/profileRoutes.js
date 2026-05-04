@@ -68,5 +68,6 @@ router.get("/public/:userId", profileController.getPublicProfile);
 router.get("/all", profileController.getAllProfiles);
 router.get("/search", profileController.searchProfiles);
 router.get("/username/:username", profileController.getProfileByUsername);
+router.get("/search-connections", profileController.searchConnections);
 
 module.exports = router;

@@ -156,11 +156,8 @@ export default function PublicProfileScreen() {
 
     try {
       const response = await fetch(
-        `${API_BASE_URL}/api/chat/room/${profile.user._id}`,
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${token}` },
-        },
+        `${API_BASE_URL}/api/chat/direct/${profile.user._id}`,
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       const data = await response.json();
 
@@ -173,6 +170,7 @@ export default function PublicProfileScreen() {
             otherUserName: profile.fullName,
             otherUserId: profile.user._id,
             otherUserAvatar: avatarUrl,
+            isGroup: "false",
           },
         });
       } else {

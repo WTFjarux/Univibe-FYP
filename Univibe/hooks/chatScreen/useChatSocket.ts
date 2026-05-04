@@ -5,6 +5,7 @@ import socketService from "../../lib/services/socketService";
 import * as SecureStore from "expo-secure-store";
 import { API_BASE_URL } from "../../constants/ipConstants";
 import type { Message } from "../../lib/types/chat.types";
+import { Alert } from "react-native";
 
 interface UseChatSocketProps {
   roomId: string;
@@ -14,6 +15,12 @@ interface UseChatSocketProps {
   onReceiveMessage: (message: Message) => void;
   onUserOnline: () => void;
   onUserOffline: () => void;
+  onGroupUpdated?: (data: {
+    roomId: string;
+    name?: string;
+    icon?: string;
+    groupPhoto?: string;
+  }) => void;
   onMessagesRead?: (data: {
     roomId: string;
     userId: string;
@@ -52,6 +59,7 @@ export const useChatSocket = ({
   onReceiveMessage,
   onUserOnline,
   onUserOffline,
+  onGroupUpdated,
   onMessagesRead,
   onMessageRead,
   onMessageDeleted,
@@ -64,6 +72,7 @@ export const useChatSocket = ({
     onReceiveMessage,
     onUserOnline,
     onUserOffline,
+    onGroupUpdated,
     onMessagesRead,
     onMessageRead,
     onMessageDeleted,
@@ -77,6 +86,7 @@ export const useChatSocket = ({
     onReceiveMessage,
     onUserOnline,
     onUserOffline,
+    onGroupUpdated,
     onMessagesRead,
     onMessageRead,
     onMessageDeleted,
@@ -87,18 +97,15 @@ export const useChatSocket = ({
 
   const hasJoinedRef = useRef(false);
 
-  // ✅ Fetch other user's online status from the database via REST API
   const fetchOnlineStatus = async () => {
     if (!otherUserId) return;
     try {
       const token = await SecureStore.getItemAsync("authToken");
       if (!token) return;
-
       const response = await fetch(
         `${API_BASE_URL}/api/users/${otherUserId}/online-status`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
-
       if (response.ok) {
         const data = await response.json();
         if (!isMountedRef.current) return;
@@ -107,31 +114,26 @@ export const useChatSocket = ({
         }
       }
     } catch {
-      // Silent fail - socket events will handle status updates
+      // Silent fail
     }
   };
 
   useEffect(() => {
     if (!roomId) return;
 
-    // Join room once
     if (!hasJoinedRef.current) {
       hasJoinedRef.current = true;
       socketService.joinRoom(roomId, otherUserId);
-
-      // ✅ Check online status immediately when chat opens
       fetchOnlineStatus();
     }
 
     // ===== Message Handlers =====
-
     const handleMessageDelivered = (data: any) => {
       if (!isMountedRef.current) return;
       handlersRef.current.onMessageDelivered(data);
     };
 
     const handleReceiveMessage = (message: Message) => {
-
       if (!isMountedRef.current) return;
       if (message.roomId === roomId) {
         handlersRef.current.onReceiveMessage(message);
@@ -191,31 +193,32 @@ export const useChatSocket = ({
         handlersRef.current.onReactionRemoved(data);
     };
 
-    // ===== User Presence Handlers =====
+    // ===== Group Updated Handler =====
+    const handleGroupUpdated = (data: any) => {
+      if (!isMountedRef.current) return;
+      if (data.roomId === roomId) {
+        handlersRef.current.onGroupUpdated?.(data);
+      }
+    };
 
+    // ===== User Presence Handlers =====
     const handleUserOnline = (data: any) => {
       if (!isMountedRef.current) return;
-      if (data.userId === otherUserId) {
-        handlersRef.current.onUserOnline();
-      }
+      if (data.userId === otherUserId) handlersRef.current.onUserOnline();
     };
 
     const handleUserOffline = (data: any) => {
       if (!isMountedRef.current) return;
-      if (data.userId === otherUserId) {
-        handlersRef.current.onUserOffline();
-      }
+      if (data.userId === otherUserId) handlersRef.current.onUserOffline();
     };
 
     const handleUserJoinedRoom = (data: any) => {
       if (!isMountedRef.current) return;
-      if (data.roomId === roomId && data.userId === otherUserId) {
+      if (data.roomId === roomId && data.userId === otherUserId)
         handlersRef.current.onUserOnline();
-      }
     };
 
     // ===== Other Handlers =====
-
     const handleChatCleared = () => {};
     const handleChatRestored = () => {};
 
@@ -230,26 +233,29 @@ export const useChatSocket = ({
 
     const handleMessageError = (error: any) => {
       if (!isMountedRef.current) return;
+      if (error?.error?.includes("connections")) {
+        Alert.alert(
+          "Cannot Send Message",
+          "You can only message your connections. Please connect first.",
+          [{ text: "OK" }],
+        );
+      }
       if (handlersRef.current.onSocketError)
         handlersRef.current.onSocketError(error);
     };
 
     const handleSocketConnected = () => {
       if (!isMountedRef.current) return;
-      // ✅ Re-check status when socket reconnects
       fetchOnlineStatus();
     };
-
     const handleSocketDisconnected = () => {};
-
     const handleSocketError = (error: any) => {
       if (!isMountedRef.current) return;
       if (handlersRef.current.onSocketError)
         handlersRef.current.onSocketError(error);
     };
 
-    // ===== Register All Listeners =====
-
+    // ===== Register Listeners =====
     socketService.on("message_delivered", handleMessageDelivered);
     socketService.on("receive_message", handleReceiveMessage);
     socketService.on("message_read", handleMessageRead);
@@ -262,6 +268,7 @@ export const useChatSocket = ({
     );
     socketService.on("reaction_added", handleReactionAdded);
     socketService.on("reaction_removed", handleReactionRemoved);
+    socketService.on("group_updated", handleGroupUpdated); // ✅ Added
     socketService.on("user_online", handleUserOnline);
     socketService.on("user_offline", handleUserOffline);
     socketService.on("user_joined_room", handleUserJoinedRoom);
@@ -274,11 +281,9 @@ export const useChatSocket = ({
     socketService.on("socket_reconnected", handleSocketConnected);
 
     // ===== Cleanup =====
-
     return () => {
       hasJoinedRef.current = false;
       socketService.leaveRoom(roomId);
-
       socketService.off("message_delivered", handleMessageDelivered);
       socketService.off("receive_message", handleReceiveMessage);
       socketService.off("message_read", handleMessageRead);
@@ -291,6 +296,7 @@ export const useChatSocket = ({
       );
       socketService.off("reaction_added", handleReactionAdded);
       socketService.off("reaction_removed", handleReactionRemoved);
+      socketService.off("group_updated", handleGroupUpdated); // ✅ Cleanup
       socketService.off("user_online", handleUserOnline);
       socketService.off("user_offline", handleUserOffline);
       socketService.off("user_joined_room", handleUserJoinedRoom);

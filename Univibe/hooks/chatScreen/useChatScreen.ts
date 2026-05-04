@@ -21,34 +21,15 @@ import type {
   AttachmentData,
 } from "../../lib/types/chat.types";
 
-// -----------------------------------------------------------------------------
-// Hook
-// -----------------------------------------------------------------------------
-
-/**
- * Central orchestrator for the ChatScreen.
- *
- * Composes all chat sub-hooks and provides a unified interface for the screen.
- * Responsibilities:
- * - Message loading, caching, and pagination (useChatMessages)
- * - Real-time socket events (useChatSocket)
- * - Sending text, audio, attachments, and location (useMessageSender)
- * - Audio recording (useAudioRecorder)
- * - Read receipts (useChatReadReceipts)
- * - Scroll management and message highlighting (useChatScroll, useMessageScroll)
- * - Reactions, deletes, and reply threading
- */
 export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   const params = useLocalSearchParams();
   const { token, user } = useAuth();
   const isMountedRef = useRef(true);
 
   // ---------------------------------------------------------------------------
-  // Route params extracted from navigation
+  // Route params
   // ---------------------------------------------------------------------------
-
   const roomId = params.roomId as string;
-  const otherUserName = params.otherUserName as string;
   const otherUserAvatar = params.otherUserAvatar as string;
   const otherUserId =
     (params.otherUserId as string) ||
@@ -57,7 +38,6 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   // ---------------------------------------------------------------------------
   // UI state
   // ---------------------------------------------------------------------------
-
   const [socketConnected, setSocketConnected] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -66,10 +46,22 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     null,
   );
   const [forwarding, setForwarding] = useState(false);
-  // ---------------------------------------------------------------------------
-  // Messages — loading, caching, pagination, optimistic updates
-  // ---------------------------------------------------------------------------
 
+  // ✅ Real-time group state
+  const [groupName, setGroupName] = useState(params.otherUserName as string);
+  const [groupAvatar, setGroupAvatar] = useState<string | null>(
+    (params.groupPhoto as string) || null,
+  );
+
+  // Update when params change (navigating to different group)
+  useEffect(() => {
+    setGroupName(params.otherUserName as string);
+    setGroupAvatar((params.groupPhoto as string) || null);
+  }, [params.otherUserName, params.groupPhoto]);
+
+  // ---------------------------------------------------------------------------
+  // Messages
+  // ---------------------------------------------------------------------------
   const {
     messages,
     setMessages,
@@ -89,7 +81,7 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     setPendingTimeout,
     clearAllPending,
     clearCache,
-    isCleared, // NEW
+    isCleared,
     clearedAt,
   } = useChatMessages({
     token,
@@ -99,20 +91,13 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   });
 
   // ---------------------------------------------------------------------------
-  // Read receipts — marks messages as read when the user views the room
+  // Read receipts
   // ---------------------------------------------------------------------------
-
-  useChatReadReceipts({
-    token,
-    roomId,
-    userId: user?.id,
-    messages,
-  });
+  useChatReadReceipts({ token, roomId, userId: user?.id, messages });
 
   // ---------------------------------------------------------------------------
-  // Scroll management — auto-scroll, content size tracking, message highlighting
+  // Scroll management
   // ---------------------------------------------------------------------------
-
   const {
     highlightedMessageId,
     registerMessageRef,
@@ -130,15 +115,12 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   } = useChatScroll(flatListRef);
 
   // ---------------------------------------------------------------------------
-  // Message sender — text, audio, attachments, location
+  // Message sender
   // ---------------------------------------------------------------------------
-
-  // Stable socket emit wrapper to avoid dependency churn
   const emitEvent = useCallback((event: string, data: any) => {
     socketService.emit(event, data);
   }, []);
 
-  // Scrolls to the bottom of the message list and re-enables auto-scroll
   const scrollToEnd = useCallback(() => {
     enableAutoScroll();
     requestAnimationFrame(() => {
@@ -165,11 +147,9 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   const handleForwardMessage = useCallback(
     async (messageId: string, targetChatIds: string[]) => {
       if (!token) return;
-
       setForwarding(true);
       try {
         const response = await chatApi.forwardMessage(messageId, targetChatIds);
-
         if (response.success) {
           Alert.alert(
             "Success",
@@ -181,9 +161,10 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
           return null;
         }
       } catch (error: any) {
-        const message =
-          error.response?.data?.message || "Failed to forward message";
-        Alert.alert("Error", message);
+        Alert.alert(
+          "Error",
+          error.response?.data?.message || "Failed to forward message",
+        );
         return null;
       } finally {
         setForwarding(false);
@@ -195,8 +176,6 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   // ---------------------------------------------------------------------------
   // Audio recorder
   // ---------------------------------------------------------------------------
-
-  // Called when the user finishes recording a voice note
   const handleAudioReady = useCallback(
     async (uri: string, duration: number) => {
       await sendAudioMessage(
@@ -213,9 +192,8 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   const audioRecorder = useAudioRecorder(handleAudioReady);
 
   // ---------------------------------------------------------------------------
-  // Socket event handlers — stored in refs to prevent stale closures
+  // Socket event refs
   // ---------------------------------------------------------------------------
-
   const userRef = useRef(user);
   userRef.current = user;
 
@@ -231,46 +209,24 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   const addMessageRef = useRef(addMessage);
   addMessageRef.current = addMessage;
 
-  /**
-   * Handles delivery confirmations, read receipts, and optimistic
-   * message confirmations from the socket.
-   *
-   * Cases handled:
-   * - messages_read: Another user read all messages in the room
-   * - message_read: Another user read a single message
-   * - message_delivered_to_recipient: A message reached the recipient's device
-   * - success/failure: Optimistic message was confirmed or rejected by server
-   */
   const onMessageDeliveredRef = useRef<(data: any) => void>(undefined);
-
   onMessageDeliveredRef.current = (data: any) => {
     const { tempId, messageId, message: messageData, success, type } = data;
 
-    // ===========================================================================
-    // Bulk read receipt: other user marked all messages as read
-    // Only process if the reader is NOT the current user
-    // ===========================================================================
     if (type === "messages_read") {
-      // Ignore our own read events - they don't mean the other person read our messages
       if (data.userId === userRef.current?.id) return;
-
       setMessagesRef.current((prev: Message[]) =>
         prev.map((msg) => {
           const senderId =
             typeof msg.sender === "string" ? msg.sender : msg.sender?._id;
-
-          // Only update messages WE sent that the OTHER user hasn't already read
           if (senderId !== userRef.current?.id || msg.status === "read")
             return msg;
-
           const existingReadBy = msg.readBy || [];
           const alreadyRead = existingReadBy.some((r: any) => {
             const id = typeof r === "string" ? r : r.user || r.userId;
             return id?.toString() === data.userId?.toString();
           });
-
           if (alreadyRead) return msg;
-
           return {
             ...msg,
             status: "read" as const,
@@ -287,24 +243,17 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
       return;
     }
 
-    // ===========================================================================
-    // Single message read: other user read a specific message
-    // ===========================================================================
     if (type === "message_read") {
       if (data.userId === userRef.current?.id) return;
-
       setMessagesRef.current((prev: Message[]) =>
         prev.map((msg) => {
           if (msg._id !== data.messageId || msg.status === "read") return msg;
-
           const existingReadBy = msg.readBy || [];
           const alreadyRead = existingReadBy.some((r: any) => {
             const id = typeof r === "string" ? r : r.user || r.userId;
             return id?.toString() === data.userId?.toString();
           });
-
           if (alreadyRead) return msg;
-
           return {
             ...msg,
             status: "read" as const,
@@ -321,22 +270,16 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
       return;
     }
 
-    // ===========================================================================
-    // Message delivered to recipient's device
-    // ===========================================================================
     if (type === "message_delivered_to_recipient") {
       setMessagesRef.current((prev: Message[]) =>
         prev.map((msg) => {
           if (msg._id !== data.messageId || msg.status !== "sent") return msg;
-
           const existingDelivered = msg.deliveredTo || [];
           const alreadyDelivered = existingDelivered.some((r: any) => {
             const id = typeof r === "string" ? r : r.user || r.userId;
             return id?.toString() === data.recipientId?.toString();
           });
-
           if (alreadyDelivered) return msg;
-
           return {
             ...msg,
             status: "delivered" as const,
@@ -350,30 +293,36 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
       return;
     }
 
-    // ===========================================================================
-    // Optimistic message rejection
-    // ===========================================================================
     if (success === false) {
       if (tempId) removeOptimisticMessageRef.current(tempId);
       return;
     }
-
-    // ===========================================================================
-    // Optimistic message confirmation
-    // ===========================================================================
     if (tempId) {
       confirmOptimisticMessageRef.current(tempId, messageId, messageData);
     }
   };
 
-  // Handles incoming real-time messages from other users
   const onReceiveMessageRef = useRef<(message: Message) => void>(undefined);
-
   onReceiveMessageRef.current = (message: Message) => {
     addMessageRef.current(message);
   };
 
-  // Stable callback objects — prevents socket listeners from re-registering
+  // ✅ Handle real-time group updates
+  const handleGroupUpdated = useCallback(
+    (data: {
+      roomId: string;
+      name?: string;
+      icon?: string;
+      groupPhoto?: string;
+    }) => {
+      if (data.name) setGroupName(data.name);
+      if (data.icon || data.groupPhoto)
+        setGroupAvatar(data.groupPhoto || data.icon || null);
+    },
+    [],
+  );
+
+  // Stable callbacks
   const stableCallbacks = useRef({
     onMessageDelivered: (data: any) => {
       onMessageDeliveredRef.current?.(data);
@@ -383,6 +332,9 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     },
     onUserOnline: () => setIsOnline(true),
     onUserOffline: () => setIsOnline(false),
+    onGroupUpdated: (data: any) => {
+      handleGroupUpdated(data);
+    },
   }).current;
 
   useChatSocket({
@@ -393,13 +345,12 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     onReceiveMessage: stableCallbacks.onReceiveMessage,
     onUserOnline: stableCallbacks.onUserOnline,
     onUserOffline: stableCallbacks.onUserOffline,
+    onGroupUpdated: stableCallbacks.onGroupUpdated,
   });
 
   // ---------------------------------------------------------------------------
-  // Send handlers — called from the ChatInput component
+  // Send handlers
   // ---------------------------------------------------------------------------
-
-  // Sends a text message and clears any active reply
   const handleSendMessage = useCallback(
     (text: string) => {
       sendTextMessage(text, replyToMessage, () => setReplyToMessage(null));
@@ -407,7 +358,6 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     [sendTextMessage, replyToMessage],
   );
 
-  // Uploads and sends selected attachments (images, videos, files)
   const handleAttachmentsSelected = useCallback(
     async (attachments: AttachmentData[]) => {
       setAttachmentUploading(true);
@@ -416,7 +366,6 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     [sendAttachments],
   );
 
-  // Sends a shared location
   const handleLocationShared = useCallback(
     (location: AttachmentData) => {
       sendLocation(location);
@@ -427,8 +376,6 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   // ---------------------------------------------------------------------------
   // Reply handling
   // ---------------------------------------------------------------------------
-
-  // Sets a message as the reply target, shown in ReplyIndicator above the input
   const handleReply = useCallback((message: Message) => {
     setReplyToMessage({
       _id: message._id,
@@ -445,22 +392,16 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     });
   }, []);
 
-  // Cancels the active reply and clears message highlighting
   const cancelReply = useCallback(() => {
     setReplyToMessage(null);
     clearHighlight();
   }, [clearHighlight]);
 
-  // ---------------------------------------------------------------------------
-  // Scroll to message — used when tapping a reply preview
-  // ---------------------------------------------------------------------------
-
   const handleScrollToMessage = useCallback(
     (messageId: string) => {
       const messageIndex = messages.findIndex((m) => m._id === messageId);
-      if (messageIndex !== -1 && flatListRef.current) {
+      if (messageIndex !== -1 && flatListRef.current)
         scrollToMessage(messageId);
-      }
     },
     [messages, scrollToMessage],
   );
@@ -468,27 +409,18 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   // ---------------------------------------------------------------------------
   // Reactions
   // ---------------------------------------------------------------------------
-
-  /**
-   * Toggles a reaction on a message.
-   * Applies an optimistic update immediately, then syncs with the server.
-   * On failure, reloads messages from the server to restore correct state.
-   */
   const handleReaction = useCallback(
     async (messageId: string, reaction: string, shouldRemove?: boolean) => {
       if (!token) return;
-
-      // Optimistic update — apply reaction locally first
       setMessages((prev) =>
         prev.map((msg) => {
           if (msg._id !== messageId) return msg;
           const currentReactions = msg.reactions || [];
-          if (shouldRemove) {
+          if (shouldRemove)
             return {
               ...msg,
               reactions: currentReactions.filter((r) => r.userId !== user?.id),
             };
-          }
           const existingIndex = currentReactions.findIndex(
             (r) => r.userId === user?.id,
           );
@@ -514,19 +446,14 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
           };
         }),
       );
-
-      // Server sync — confirm the reaction with the backend
       try {
         const data = await chatApi.toggleReaction(
           messageId,
           reaction,
           shouldRemove,
         );
-        if (data.success) {
-          updateMessageReactions(messageId, data.reactions);
-        } else {
-          loadMessages(true);
-        }
+        if (data.success) updateMessageReactions(messageId, data.reactions);
+        else loadMessages(true);
       } catch {
         loadMessages(true);
       }
@@ -537,12 +464,9 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   // ---------------------------------------------------------------------------
   // Delete message
   // ---------------------------------------------------------------------------
-
-  // Deletes a message locally and emits a socket event for the other user
   const handleDelete = useCallback(
     async (messageId: string) => {
       if (!token) return;
-
       try {
         const data = await chatApi.deleteMessage(messageId);
         if (data.success) {
@@ -550,7 +474,7 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
           socketService.emit("delete_message", { messageId, roomId });
         }
       } catch {
-        // Silently fail
+        /* silent */
       }
     },
     [token, roomId, deleteMessage],
@@ -559,8 +483,6 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   // ---------------------------------------------------------------------------
   // Audio played
   // ---------------------------------------------------------------------------
-
-  // Marks an audio message as played on the server
   const markAudioAsPlayed = useCallback(
     async (messageId: string) => {
       if (!token) return;
@@ -570,19 +492,15 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   );
 
   // ---------------------------------------------------------------------------
-  // Connection status — event-driven via socket service events
+  // Connection status
   // ---------------------------------------------------------------------------
-
   useEffect(() => {
     setSocketConnected(socketService.getConnectionStatus());
-
     const handleConnected = () => setSocketConnected(true);
     const handleDisconnected = () => setSocketConnected(false);
-
     socketService.on("socket_connected", handleConnected);
     socketService.on("socket_reconnected", handleConnected);
     socketService.on("socket_disconnected", handleDisconnected);
-
     return () => {
       socketService.off("socket_connected", handleConnected);
       socketService.off("socket_reconnected", handleConnected);
@@ -593,8 +511,6 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
   // ---------------------------------------------------------------------------
   // Cleanup
   // ---------------------------------------------------------------------------
-
-  // Stops audio and marks component as unmounted on screen exit
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
@@ -602,75 +518,49 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     };
   }, []);
 
-  // Stops all currently playing audio (called during navigation)
   const audioCleanup = useCallback(() => {
     AudioManager.stopAllSounds();
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Return — unified interface for ChatScreen
+  // Return
   // ---------------------------------------------------------------------------
-
   return {
-    // Message data
     messages,
     loading,
     refreshing,
     loadingMore,
     hasMore,
-
-    // Connection state
     socketConnected,
     isOnline,
     uploading: uploading || attachmentUploading,
-
-    // Reply state
     replyToMessage,
-
-    // Message highlighting
     highlightedMessageId,
-
-    // Other user info
-    otherUserName,
+    otherUserName: groupName,
     otherUserId,
     otherUserAvatar,
-
-    // Current user
+    groupAvatar,
     user,
     token,
     roomId,
-
-    // Message loading
     loadMessages,
     loadOlderMessages,
     onRefresh,
-
-    // Sending
     handleSendMessage,
     handleAttachmentsSelected,
     handleLocationShared,
-
-    // Reply
     handleReply,
     cancelReply,
-
-    // Forward
     handleForwardMessage,
     forwarding,
-
-    // Reactions and deletes
     handleReaction,
     handleDelete,
-
-    // Audio
     markAudioAsPlayed,
     isRecording: audioRecorder.isRecording,
     recordingDuration: audioRecorder.recordingDuration,
     startRecording: audioRecorder.startRecording,
     stopRecording: audioRecorder.stopRecording,
     cancelRecording: audioRecorder.cancelRecording,
-
-    // Scroll
     handleScrollToMessage,
     registerMessageRef,
     initialScrollToBottom,
@@ -678,16 +568,13 @@ export const useChatScreen = (flatListRef: React.RefObject<any>) => {
     handleLayout,
     handleScroll,
     enableAutoScroll,
-
-    // Cleanup
     clearAllPending,
     clearCache,
     clearHighlight,
     cleanupScroll,
     audioCleanup,
     isMountedRef,
-
-    isCleared, // NEW
+    isCleared,
     clearedAt,
   };
 };

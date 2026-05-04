@@ -1,3 +1,5 @@
+// hooks/chatList/useChatListSocket.ts
+
 import { useEffect, useRef, useCallback } from "react";
 import socketService from "../../lib/services/socketService";
 import type {
@@ -24,15 +26,6 @@ interface UseChatListSocketProps {
 // Hook
 // -----------------------------------------------------------------------------
 
-/**
- * Manages socket event listeners for the ChatList screen.
- *
- * Uses a ref-based handler pattern to prevent stale closures:
- * - Handler refs are updated every render so callbacks always access latest state
- * - Socket listeners are registered once and delegate to the refs
- * - Connection events are monitored in real-time (no polling)
- * - Listeners are re-attached on reconnection to handle new socket instances
- */
 export const useChatListSocket = ({
   onNewMessage,
   onMessagesRead,
@@ -64,14 +57,23 @@ export const useChatListSocket = ({
   };
 
   // ---------------------------------------------------------------------------
+  // Error handler
+  // ---------------------------------------------------------------------------
+  const handleError = useCallback((error: any) => {
+    const message = error?.message || error?.error || "";
+    if (message.includes("connections") || message.includes("connect first")) {
+      console.log("Connection required:", message);
+    }
+  }, []);
+
+  // Store error handler in ref for cleanup access
+  const handleErrorRef = useRef(handleError);
+  handleErrorRef.current = handleError;
+
+  // ---------------------------------------------------------------------------
   // Listener Registration
   // ---------------------------------------------------------------------------
 
-  /**
-   * Registers all socket event listeners once.
-   * Each listener reads from handlersRef so it always calls the latest handler
-   * without needing to re-register when props change.
-   */
   const attachListeners = useCallback(() => {
     if (isListenersAttachedRef.current) return;
 
@@ -99,6 +101,17 @@ export const useChatListSocket = ({
       handlersRef.current.onChatRestored?.(data);
     };
 
+    // ✅ Group updated handler - refreshes room to get new name/photo
+    const handleGroupUpdated = (data: { roomId: string }) => {
+      if (data.roomId) {
+        handlersRef.current.onChatRestored?.({ roomId: data.roomId });
+      }
+    };
+
+    // Store group handler in ref for cleanup access
+    const groupHandlerRef = { current: handleGroupUpdated };
+    (attachListeners as any).__groupHandler = groupHandlerRef;
+
     socketService.on("receive_message", handleNewMessage);
     socketService.on("messages_read", handleMessagesRead);
     socketService.on("message_deleted", handleDelete);
@@ -106,6 +119,9 @@ export const useChatListSocket = ({
     socketService.on("reaction_removed", handleReaction);
     socketService.on("chat_cleared", handleChatCleared);
     socketService.on("chat_restored", handleChatRestored);
+    socketService.on("group_updated", handleGroupUpdated);
+    socketService.on("error", handleErrorRef.current);
+    socketService.on("socket_error", handleErrorRef.current);
 
     isListenersAttachedRef.current = true;
   }, []);
@@ -131,7 +147,6 @@ export const useChatListSocket = ({
 
     const handleReconnected = () => {
       isConnectedRef.current = true;
-      // New socket instance requires re-attaching listeners
       isListenersAttachedRef.current = false;
       attachListeners();
     };
@@ -151,7 +166,6 @@ export const useChatListSocket = ({
   // Cleanup
   // ---------------------------------------------------------------------------
 
-  /** Removes all chat list listeners on unmount */
   useEffect(() => {
     return () => {
       if (isListenersAttachedRef.current) {
@@ -162,6 +176,9 @@ export const useChatListSocket = ({
         socketService.removeAllListeners("reaction_removed");
         socketService.removeAllListeners("chat_cleared");
         socketService.removeAllListeners("chat_restored");
+        socketService.removeAllListeners("group_updated");
+        socketService.off("error", handleErrorRef.current);
+        socketService.off("socket_error", handleErrorRef.current);
         isListenersAttachedRef.current = false;
       }
     };

@@ -44,14 +44,14 @@ class FeedService {
     // Try memory cache first
     const memoryCached = feedCache.getFromMemory(feedType, cursorKey);
     if (memoryCached) {
-      console.log(`📦 Using memory cache for ${feedType} feed`);
+
       return memoryCached;
     }
 
     // Try persistent cache
     const storageCached = await feedCache.getFromStorage(feedType, cursorKey);
     if (storageCached) {
-      console.log(`💾 Using storage cache for ${feedType} feed`);
+
       return storageCached;
     }
 

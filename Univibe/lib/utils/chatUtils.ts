@@ -1,4 +1,4 @@
-// lib/utils/chatUtils.ts
+// app/lib/utils/chatUtils.ts
 
 import { profileService } from "../services/profileService";
 import { API_BASE_URL } from "../../constants/ipConstants";
@@ -15,6 +15,43 @@ import { API_BASE_URL } from "../../constants/ipConstants";
 export const getDirectRoomId = (id1: string, id2: string): string => {
   const ids = [id1.toString(), id2.toString()].sort();
   return `direct_${ids[0]}_${ids[1]}`;
+};
+
+/**
+ * Generate a unique group room ID.
+ * Format: group_<timestamp>_<random_string>
+ */
+export const generateGroupRoomId = (): string => {
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substring(2, 11);
+  return `group_${timestamp}_${random}`;
+};
+
+/**
+ * Check if a room ID belongs to a direct chat.
+ */
+export const isDirectRoom = (roomId: string): boolean => {
+  return roomId?.startsWith("direct_") ?? false;
+};
+
+/**
+ * Check if a room ID belongs to a group chat.
+ */
+export const isGroupRoom = (roomId: string): boolean => {
+  return roomId?.startsWith("group_") ?? false;
+};
+
+/**
+ * Get the room type from a room ID.
+ * Returns "direct", "group", or "unknown".
+ */
+export const getRoomTypeFromId = (
+  roomId: string,
+): "direct" | "group" | "unknown" => {
+  if (!roomId) return "unknown";
+  if (roomId.startsWith("direct_")) return "direct";
+  if (roomId.startsWith("group_")) return "group";
+  return "unknown";
 };
 
 // ============================================
@@ -157,23 +194,57 @@ export const getAvatarUrl = (avatar: string | null | undefined): string => {
   return profileService.getFullImageUrl(avatar);
 };
 
+/**
+ * Get group display icon - returns group icon URL or empty string
+ */
+export const getGroupIcon = (icon: string | null | undefined): string => {
+  if (!icon) return "";
+  return getFullImageUrl(icon);
+};
+
+/**
+ * Get display avatar for a chat room (group or direct)
+ */
+export const getChatRoomAvatar = (room: {
+  type: string;
+  groupIcon?: string | null;
+  otherUserAvatar?: string | null;
+}): string => {
+  if (room.type === "group") {
+    return room.groupIcon || "";
+  }
+  return room.otherUserAvatar || "";
+};
+
 // ============================================
 // ROOM / MESSAGE HELPERS
 // ============================================
 
 /**
- * Extract the other user's ID from a direct-message room ID
- * Room ID format: direct_user1_user2
+ * Extract the other user's ID from a direct-message room ID.
+ * ONLY works for direct chat room IDs (format: direct_user1_user2).
+ * Returns empty string for group room IDs to prevent invalid ObjectId errors.
+ *
+ * @param roomId - Room identifier (e.g., "direct_abc123_def456")
+ * @param currentUserId - Current user's MongoDB ObjectId
+ * @returns The other user's ID, or empty string if not a direct room
  */
 export const extractOtherUserIdFromRoomId = (
   roomId: string,
   currentUserId: string,
 ): string => {
   if (!roomId || !currentUserId) return "";
+
+  // ✅ Only extract from direct chat room IDs
+  if (!roomId.startsWith("direct_")) return "";
+
   const parts = roomId.split("_");
   if (parts.length >= 3) {
-    return parts[1] === currentUserId ? parts[2] : parts[1];
+    const user1 = parts[1];
+    const user2 = parts[2];
+    return user1 === currentUserId ? user2 : user1;
   }
+
   return "";
 };
 
@@ -186,6 +257,20 @@ export const getSenderId = (message: {
   return typeof message.sender === "string"
     ? message.sender
     : message.sender?._id || "";
+};
+
+/**
+ * Get sender name from a message object (handles both string and object sender)
+ */
+export const getSenderName = (message: {
+  sender: string | { _id: string; name?: string };
+  senderName?: string;
+}): string => {
+  if (message.senderName) return message.senderName;
+  if (typeof message.sender === "object" && message.sender?.name) {
+    return message.sender.name;
+  }
+  return "Unknown";
 };
 
 // ============================================
@@ -227,15 +312,17 @@ export const getMessageDisplayText = (
 ): string => {
   switch (type) {
     case "audio":
-      return "Voice message";
+      return "Sent a Voice message";
     case "image":
-      return "Photo";
+      return "Sent a Photo";
     case "video":
-      return "Video";
+      return "Sent a Video Video";
     case "file":
-      return "File";
+      return "Sent a File";
     case "location":
-      return "Location";
+      return "Sent Location";
+    case "post":
+      return message || "Shared a post";
     default:
       return message || "";
   }
@@ -249,7 +336,7 @@ export const isMediaMessage = (type: string): boolean => {
 };
 
 /**
- * Truncate message for preview (used in reply indicators)
+ * Truncate message for preview (used in reply indicators and chat list)
  */
 export const truncateMessage = (
   message: string,
@@ -258,4 +345,70 @@ export const truncateMessage = (
   if (!message) return "";
   if (message.length <= maxLength) return message;
   return message.substring(0, maxLength) + "...";
+};
+
+/**
+ * Format group member count for display.
+ * Shows "99+" for large groups.
+ */
+export const formatMemberCount = (count: number): string => {
+  if (count === 0) return "No members";
+  if (count === 1) return "1 member";
+  if (count > 99) return "99+ members";
+  return `${count} members`;
+};
+
+/**
+ * Get role display label with proper capitalization.
+ */
+export const getRoleLabel = (role: string): string => {
+  switch (role) {
+    case "owner":
+      return "Owner";
+    case "admin":
+      return "Admin";
+    case "member":
+      return "Member";
+    default:
+      return role.charAt(0).toUpperCase() + role.slice(1);
+  }
+};
+
+/**
+ * Get role badge color based on role.
+ */
+export const getRoleColor = (role: string): string => {
+  switch (role) {
+    case "owner":
+      return "#F59E0B"; // Amber
+    case "admin":
+      return "#8b5cf6"; // Purple
+    case "member":
+    default:
+      return "#8E8E93"; // Gray
+  }
+};
+
+/**
+ * Format last seen time for user online status display.
+ */
+export const formatLastSeen = (dateString: string): string => {
+  if (!dateString) return "Offline";
+
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMinutes = Math.floor(
+    (now.getTime() - date.getTime()) / (1000 * 60),
+  );
+
+  if (diffMinutes < 1) return "Just now";
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+
+  return date.toLocaleDateString();
 };

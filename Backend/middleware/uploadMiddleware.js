@@ -405,6 +405,36 @@ const videoUpload = multer({
 });
 
 // ============================================
+// Upload Group Photo Middleware
+// ============================================
+
+const groupPhotoStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, "../uploads/group-photos");
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueName = `group_${Date.now()}_${Math.random().toString(36).substr(2, 9)}${path.extname(file.originalname)}`;
+    cb(null, uniqueName);
+  },
+});
+
+const uploadGroupPhoto = multer({
+  storage: groupPhotoStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only images are allowed"));
+    }
+  },
+}).single("image");
+
+// ============================================
 // ERROR HANDLER
 // ============================================
 
@@ -744,6 +774,7 @@ module.exports = {
   uploadEventImages,
   uploadEventImage,
   uploadAndOptimizeEventImages,
+  uploadGroupPhoto,
   uploadWithErrorHandling,
   uploadAudioMessage,
   deleteAudioFileIfExists,

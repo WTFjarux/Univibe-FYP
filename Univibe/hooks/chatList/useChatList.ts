@@ -172,12 +172,13 @@ export const useChatList = (token: string | null, currentUserId?: string) => {
    */
   const handleChatRestored = useCallback(
     (data: { roomId: string }) => {
-      const exists = roomsRef.current.some((r) => r.roomId === data.roomId);
+      // ✅ Always refresh to get updated name/photo
+      refreshSingleRoom(data.roomId);
 
-      if (!exists) {
-        refreshSingleRoom(data.roomId);
-
-        if (socketService.getConnectionStatus()) {
+      // Join the room on socket if not already joined
+      if (socketService.getConnectionStatus()) {
+        const exists = roomsRef.current.some((r) => r.roomId === data.roomId);
+        if (!exists) {
           socketService.joinRoom(data.roomId);
         }
       }

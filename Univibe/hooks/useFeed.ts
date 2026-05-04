@@ -407,7 +407,6 @@ export function useFeed(): UseFeedReturn {
 
     // Only refresh if it's been more than FOCUS_REFRESH_INTERVAL
     if (now - lastTime > FOCUS_REFRESH_INTERVAL) {
-      console.log("🔄 Refreshing feed on focus");
       cursors.current[activeFeed] = null;
       pagination.current[activeFeed] = {
         hasMore: true,
@@ -417,13 +416,11 @@ export function useFeed(): UseFeedReturn {
       await feedService.invalidateFeedCache(activeFeed);
       await fetchFeed(activeFeed, "refresh");
     } else {
-      console.log("⏭️ Skipping focus refresh - recently fetched");
     }
   }, [activeFeed, fetchFeed]);
 
   // Force refresh (bypasses cooldown completely)
   const forceRefresh = useCallback(async () => {
-    console.log("💪 Force refreshing feed");
     cursors.current[activeFeed] = null;
     pagination.current[activeFeed] = {
       hasMore: true,
@@ -437,7 +434,6 @@ export function useFeed(): UseFeedReturn {
 
   // Mark that feed needs refresh (for use after creating posts)
   const markNeedsRefresh = useCallback(() => {
-    console.log("🏷️ Marked feed as needing refresh");
     needsRefresh.current = true;
   }, []);
 

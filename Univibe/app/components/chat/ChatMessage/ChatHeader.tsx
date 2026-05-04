@@ -1,16 +1,10 @@
-// app/components/chat/ChatHeader.tsx
+// app/components/chat/ChatMessage/ChatHeader.tsx
 
-import React from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  Image,
-  StyleSheet,
-  Alert,
-} from "react-native";
+import React, { useState } from "react";
+import { View, Text, TouchableOpacity, Image, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { API_BASE_URL } from "../../../../constants/ipConstants";
 
 interface ChatHeaderProps {
   otherUserName: string;
@@ -19,6 +13,10 @@ interface ChatHeaderProps {
   isOnline: boolean;
   DEFAULT_AVATAR: any;
   getFullImageUrl: (url: string) => string;
+  isGroup?: boolean;
+  participantCount?: number;
+  onGroupInfoPress?: () => void;
+  groupPhoto?: string | null; // ✅ Add this
 }
 
 export default function ChatHeader({
@@ -28,18 +26,41 @@ export default function ChatHeader({
   isOnline,
   DEFAULT_AVATAR,
   getFullImageUrl,
+  isGroup = false,
+  participantCount,
+  onGroupInfoPress,
+  groupPhoto, // ✅ Add this
 }: ChatHeaderProps) {
   const router = useRouter();
 
-  // 🔴 FIXED: Properly get avatar source with fallback
+  // Build group image URL
+  const getGroupImageSource = () => {
+    if (!groupPhoto) return null;
+    const url = groupPhoto.startsWith("http")
+      ? groupPhoto
+      : groupPhoto.startsWith("/uploads")
+        ? `${API_BASE_URL.replace("/api", "")}${groupPhoto}`
+        : `${API_BASE_URL.replace("/api", "")}/uploads/${groupPhoto}`;
+    return { uri: url };
+  };
+
+  const groupImageSource = isGroup ? getGroupImageSource() : null;
+
+  // Avatar source for direct chats
   const getAvatarSource = () => {
     if (otherUserAvatar) {
       const fullUrl = getFullImageUrl(otherUserAvatar);
-      if (fullUrl && fullUrl.length > 0) {
-        return { uri: fullUrl };
-      }
+      if (fullUrl) return { uri: fullUrl };
     }
     return DEFAULT_AVATAR;
+  };
+
+  const handleInfoPress = () => {
+    if (isGroup && onGroupInfoPress) {
+      onGroupInfoPress();
+    } else if (!isGroup && otherUserId) {
+      router.push(`/profile/${otherUserId}`);
+    }
   };
 
   return (
@@ -48,35 +69,65 @@ export default function ChatHeader({
         <Ionicons name="chevron-back" size={28} color="#007AFF" />
       </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.headerUserInfo}
-        onPress={() => router.push(`/profile/${otherUserId}`)}
-      >
+      <TouchableOpacity style={styles.headerUserInfo} onPress={handleInfoPress}>
         <View style={styles.headerAvatar}>
-          <Image source={getAvatarSource()} style={styles.headerAvatarImage} />
-          {isOnline && <View style={styles.headerOnlineDot} />}
+          {isGroup ? (
+            groupImageSource ? (
+              // ✅ Show group photo
+              <Image
+                source={groupImageSource}
+                style={styles.headerAvatarImage}
+              />
+            ) : (
+              // ✅ Fallback to people icon
+              <View style={[styles.headerAvatarImage, styles.groupAvatar]}>
+                <Ionicons name="people" size={22} color="#007AFF" />
+              </View>
+            )
+          ) : (
+            <Image
+              source={getAvatarSource()}
+              style={styles.headerAvatarImage}
+            />
+          )}
+          {!isGroup && isOnline && <View style={styles.headerOnlineDot} />}
         </View>
         <View>
           <Text style={styles.headerName}>{otherUserName}</Text>
           <Text style={styles.headerStatus}>
-            {isOnline ? "Active now" : "Offline"}
+            {isGroup
+              ? participantCount
+                ? `${participantCount} member${participantCount !== 1 ? "s" : ""}`
+                : "Group"
+              : isOnline
+                ? "Active now"
+                : "Offline"}
           </Text>
         </View>
       </TouchableOpacity>
 
       <View style={styles.headerActions}>
-        <TouchableOpacity
-          style={styles.headerAction}
-          onPress={() => Alert.alert("Call", "Coming soon")}
-        >
-          <Ionicons name="call-outline" size={24} color="#007AFF" />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.headerAction}
-          onPress={() => Alert.alert("Video Call", "Coming soon")}
-        >
-          <Ionicons name="videocam-outline" size={24} color="#007AFF" />
-        </TouchableOpacity>
+        {isGroup ? (
+          <TouchableOpacity
+            style={styles.headerAction}
+            onPress={handleInfoPress}
+          >
+            <Ionicons
+              name="information-circle-outline"
+              size={24}
+              color="#007AFF"
+            />
+          </TouchableOpacity>
+        ) : (
+          <>
+            <TouchableOpacity style={styles.headerAction}>
+              <Ionicons name="call-outline" size={24} color="#007AFF" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerAction}>
+              <Ionicons name="videocam-outline" size={24} color="#007AFF" />
+            </TouchableOpacity>
+          </>
+        )}
       </View>
     </View>
   );
@@ -105,6 +156,11 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
+    backgroundColor: "#f0f0f0",
+  },
+  groupAvatar: {
+    justifyContent: "center",
+    alignItems: "center",
     backgroundColor: "#f0f0f0",
   },
   headerOnlineDot: {

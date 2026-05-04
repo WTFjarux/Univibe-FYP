@@ -12,17 +12,24 @@ export interface ChatRoom {
   type: "direct" | "group";
   name: string;
   avatar?: string | null;
+  groupIcon?: string | null;
+  groupPhoto?: string | null;
+  groupDescription?: string;
   otherUserId?: string | null;
   otherUserAvatar?: string | null;
-  participants: string[];
+  participants: string[] | GroupParticipant[];
+  participantCount?: number;
   lastMessage: LastMessagePreview | null;
   updatedAt: string;
   createdAt: string;
   isPinned: boolean;
   isMuted: boolean;
   muteUntil?: string | null;
-  isCleared?: boolean; // Whether current user has cleared this chat
-  clearedAt?: string | null; // Timestamp when chat was cleared
+  isCleared?: boolean;
+  clearedAt?: string | null;
+  groupSettings?: GroupSettings;
+  createdBy?: string;
+  unreadCount?: number; // 🆕 Added
 }
 
 export interface LastMessagePreview {
@@ -64,6 +71,7 @@ export interface Message {
   originalSenderId?: string;
   originalSenderName?: string;
   forwardedAt?: string;
+  sharedPost?: SharedPostData; // 🆕 Added
 }
 
 export interface ReplyToData {
@@ -81,6 +89,113 @@ export interface Reaction {
   userId: string;
   reaction: string;
   createdAt: string;
+}
+
+// 🆕 Added
+export interface SharedPostData {
+  postId: string;
+  postContent: string;
+  postImage: string;
+  postAuthorId: string;
+  postAuthorName: string;
+  postAuthorUsername: string;
+  postAuthorAvatar: string;
+  isAnonymous: boolean;
+  postCreatedAt: string;
+}
+
+// ============================================
+// GROUP TYPES
+// ============================================
+
+export interface GroupSettings {
+  onlyAdminsCanSend: boolean;
+  onlyAdminsCanAddMembers: boolean;
+  onlyAdminsCanChangeInfo: boolean;
+  muteNotifications: boolean;
+}
+
+export interface GroupParticipant {
+  userId: string;
+  name: string;
+  username: string;
+  avatar?: string;
+  role: "owner" | "admin" | "member";
+  joinedAt: string;
+  lastReadAt: string;
+}
+
+export interface GroupInfo {
+  roomId: string;
+  name: string;
+  groupIcon?: string;
+  groupDescription?: string;
+  participantCount: number;
+  participants: GroupParticipant[];
+  groupSettings?: GroupSettings;
+  createdBy: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// ============================================
+// GROUP SOCKET EVENT TYPES
+// ============================================
+
+export interface GroupCreatedData {
+  roomId: string;
+  groupName: string;
+  participantCount: number;
+}
+
+export interface AddedToGroupData {
+  roomId: string;
+  groupName: string;
+  addedBy: string;
+  participantCount?: number;
+}
+
+export interface RemovedFromGroupData {
+  roomId: string;
+  groupName: string;
+  removedBy: string;
+}
+
+export interface GroupMembersAddedData {
+  roomId: string;
+  newMembers: string[];
+  addedBy: string;
+  timestamp: string;
+}
+
+export interface GroupMemberRemovedData {
+  roomId: string;
+  removedMember: string;
+  removedBy: string;
+  timestamp: string;
+}
+
+export interface GroupMemberLeftData {
+  roomId: string;
+  userId: string;
+  timestamp: string;
+}
+
+export interface GroupUpdatedData {
+  roomId: string;
+  name?: string;
+  icon?: string;
+  description?: string;
+  settings?: GroupSettings;
+  updatedBy: string;
+  timestamp?: string;
+}
+
+export interface GroupRoleChangedData {
+  roomId: string;
+  userId: string;
+  newRole: "admin" | "member";
+  changedBy: string;
 }
 
 // ============================================
@@ -117,10 +232,6 @@ export interface PendingMessage {
 // ATTACHMENT TYPES
 // ============================================
 
-/**
- * All supported attachment types
- * Used for both input selection and processed attachments
- */
 export type AttachmentType =
   | "image"
   | "video"
@@ -129,64 +240,31 @@ export type AttachmentType =
   | "location"
   | "audio";
 
-/**
- * Raw attachment data from file picker or location share
- * Type is flexible as it may come from various sources
- */
 export interface AttachmentData {
   type: AttachmentType;
   uri?: string;
   name?: string;
   size?: number;
   mimeType?: string;
-
-  // Location specific
   latitude?: number;
   longitude?: number;
   locationName?: string;
 }
 
-/**
- * Processed attachment ready for upload
- * Extends AttachmentData with processing metadata
- */
 export interface ProcessedAttachment extends AttachmentData {
-  /** Whether this attachment needs server-side compression */
   needsCompression?: boolean;
-
-  /** Original file size before any processing (in bytes) */
   originalSize?: number;
-
-  /** Video width in pixels (for compression hints) */
   videoWidth?: number;
-
-  /** Video height in pixels (for compression hints) */
   videoHeight?: number;
-
-  /** Local URI for video thumbnail preview */
   thumbnailUri?: string;
-
-  /** Video/audio duration in seconds */
   duration?: number;
 }
 
-/**
- * Video processing progress state for UI
- */
 export interface VideoProcessingState {
-  /** Whether the processing modal is visible */
   visible: boolean;
-
-  /** Progress percentage (0-100) */
   progress: number;
-
-  /** Current status message */
   message: string;
-
-  /** Name of the video being processed */
   videoName: string;
-
-  /** Original file size display string */
   originalSize: string;
 }
 
@@ -208,6 +286,7 @@ export interface MessagesResponse {
   success: boolean;
   data: {
     roomId: string;
+    roomType?: string; 
     messages: Message[];
     hasMore: boolean;
     clearedAt?: string | null;
@@ -226,6 +305,29 @@ export interface MarkReadResponse {
   success: boolean;
   message: string;
   modifiedCount: number;
+}
+
+
+export interface GroupResponse {
+  success: boolean;
+  message?: string;
+  data?: {
+    roomId: string;
+    name: string;
+    groupIcon?: string;
+    groupDescription?: string;
+    participantCount: number;
+    participants: GroupParticipant[];
+    groupSettings?: GroupSettings;
+    createdBy: string;
+    createdAt: string;
+  };
+}
+
+
+export interface GroupMembersResponse {
+  success: boolean;
+  data?: GroupParticipant[];
 }
 
 // ============================================
@@ -254,6 +356,7 @@ export interface MessageDeleteData {
   roomId: string;
   messageId: string;
   deletedBy: string;
+  timestamp?: Date;
 }
 
 export interface ChatClearedData {
@@ -272,6 +375,15 @@ export interface ReactionData {
   userId: string;
   reaction?: string;
   reactions?: Reaction[];
+}
+
+
+export interface TypingData {
+  userId: string;
+  userName: string;
+  roomId: string;
+  activeTypersCount?: number;
+  activeTypers?: Array<{ userId: string; userName: string }>;
 }
 
 // ============================================
@@ -325,6 +437,18 @@ export interface ChatListOptionsModalProps {
   item: ChatRoom | null;
   itemLayout?: ItemLayout;
   currentUserId?: string;
+}
+
+export interface ChatHeaderProps {
+  otherUserName: string;
+  otherUserId: string;
+  otherUserAvatar?: string;
+  isOnline: boolean;
+  DEFAULT_AVATAR: any;
+  getFullImageUrl: (url: string) => string;
+  isGroup?: boolean;
+  participantCount?: number;
+  onGroupInfoPress?: () => void;
 }
 
 // ============================================

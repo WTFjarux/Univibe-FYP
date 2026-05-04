@@ -63,28 +63,84 @@ const setupChatHandlers = (io, socket) => {
   const userId = socket.userId;
   const user = socket.user;
 
+  const areUsersConnected = async (userId1, userId2) => {
+    try {
+      const User = require("../../models/User");
+      const user = await User.findById(userId1).select("connections").lean();
+      if (!user || !user.connections) return false;
+      return user.connections.some(
+        (connId) => connId.toString() === userId2.toString(),
+      );
+    } catch (error) {
+      console.error("areUsersConnected error:", error.message);
+      return false;
+    }
+  };
+
   // ===========================================================================
   // JOIN ROOM
   // ===========================================================================
   socket.on(EVENTS.JOIN_ROOM, async ({ roomId, otherUserId = null }) => {
     try {
       let finalRoomId = roomId;
+
+      // For new direct chats, check connection first
       if (!finalRoomId && otherUserId) {
+        // ✅ Check if users are connected
+        const isConnected = await areUsersConnected(userId, otherUserId);
+        if (!isConnected) {
+          socket.emit(EVENTS.ERROR, {
+            message:
+              "You can only chat with your connections. Please connect first.",
+          });
+          return;
+        }
         finalRoomId = getDirectRoomId(userId, otherUserId);
       }
+
       if (!finalRoomId) {
         socket.emit(EVENTS.ERROR, { message: "Room ID is required" });
         return;
       }
 
-      socket.join(finalRoomId);
-      addUserToRoom(userId, finalRoomId);
-
-      // Find or create chat room
+      // For existing rooms, find or create
       let chatRoom = await ChatRoom.findOne({ roomId: finalRoomId });
+
+      // For group chats, verify user is a participant
+      if (chatRoom && chatRoom.type === "group") {
+        const isParticipant = chatRoom.participants.some(
+          (p) => p.userId.toString() === userId.toString(),
+        );
+        if (!isParticipant) {
+          socket.emit(EVENTS.ERROR, {
+            message: "You are not a member of this group",
+          });
+          return;
+        }
+      }
+
+      // For direct chats without existing room, create one (with connection check)
       if (!chatRoom) {
         const otherId =
-          otherUserId || finalRoomId.split("_").find((id) => id !== userId);
+          otherUserId ||
+          finalRoomId.split("_").find((id) => id !== userId.toString());
+
+        // ✅ Verify the other user is a valid ObjectId
+        if (!otherId || !otherId.match(/^[0-9a-fA-F]{24}$/)) {
+          socket.emit(EVENTS.ERROR, { message: "Invalid user ID" });
+          return;
+        }
+
+        // ✅ Check connection before creating room
+        const isConnected = await areUsersConnected(userId, otherId);
+        if (!isConnected) {
+          socket.emit(EVENTS.ERROR, {
+            message:
+              "You can only chat with your connections. Please connect first.",
+          });
+          return;
+        }
+
         chatRoom = new ChatRoom({
           roomId: finalRoomId,
           type: "direct",
@@ -103,9 +159,14 @@ const setupChatHandlers = (io, socket) => {
             },
           ],
           createdBy: userId,
+          messageCount: 0,
         });
         await chatRoom.save();
       }
+
+      // Join the socket room
+      socket.join(finalRoomId);
+      addUserToRoom(userId, finalRoomId);
 
       // Send cleared status for this user
       const clearedAt = chatRoom.getClearTimestamp
@@ -115,13 +176,31 @@ const setupChatHandlers = (io, socket) => {
       socket.emit("room_joined", {
         roomId: finalRoomId,
         success: true,
+        roomType: chatRoom.type,
+        roomName: chatRoom.name || null,
+        isGroup: chatRoom.type === "group",
         clearedAt,
         isCleared: !!clearedAt,
       });
 
-      socket
-        .to(finalRoomId)
-        .emit("user_joined_room", { userId, roomId: finalRoomId });
+      // Notify others in the room
+      if (chatRoom.type === "group") {
+        socket.to(finalRoomId).emit("user_joined_group", {
+          userId,
+          userName: user?.name || "Unknown",
+          roomId: finalRoomId,
+          roomName: chatRoom.name,
+        });
+      } else {
+        socket.to(finalRoomId).emit("user_joined_room", {
+          userId,
+          roomId: finalRoomId,
+        });
+      }
+
+      console.log(
+        `User ${userId} joined room ${finalRoomId} (${chatRoom.type})`,
+      );
     } catch (error) {
       console.error("Error joining room:", error);
       socket.emit(EVENTS.ERROR, { message: "Failed to join room" });
@@ -196,6 +275,7 @@ const setupChatHandlers = (io, socket) => {
       tempId = null,
     }) => {
       try {
+        // Validation
         if (!roomId || (!message && type !== "audio")) {
           socket.emit(EVENTS.MESSAGE_ERROR, {
             success: false,
@@ -205,7 +285,112 @@ const setupChatHandlers = (io, socket) => {
           return;
         }
 
-        const room = await ChatRoom.findOne({ roomId });
+        // ✅ For direct chats, check connection before sending
+        if (roomId.startsWith("direct_")) {
+          const parts = roomId.split("_");
+          if (parts.length >= 3) {
+            const user1 = parts[1];
+            const user2 = parts[2];
+            const otherUserId = user1 === userId.toString() ? user2 : user1;
+
+            if (otherUserId.match(/^[0-9a-fA-F]{24}$/)) {
+              const isConnected = await areUsersConnected(userId, otherUserId);
+              if (!isConnected) {
+                socket.emit(EVENTS.MESSAGE_ERROR, {
+                  success: false,
+                  error:
+                    "You can only message your connections. Please connect first.",
+                  tempId,
+                });
+                return;
+              }
+            }
+          }
+        }
+
+        // Find or create room
+        let room = await ChatRoom.findOne({ roomId });
+
+        // Create room if it doesn't exist (for first message)
+        if (!room) {
+          if (roomId.startsWith("direct_")) {
+            const parts = roomId.split("_");
+            if (parts.length >= 3) {
+              const user1 = parts[1];
+              const user2 = parts[2];
+              const otherUserId = user1 === userId.toString() ? user2 : user1;
+
+              if (!otherUserId.match(/^[0-9a-fA-F]{24}$/)) {
+                socket.emit(EVENTS.MESSAGE_ERROR, {
+                  success: false,
+                  error: "Invalid room ID",
+                  tempId,
+                });
+                return;
+              }
+
+              // ✅ Double-check connection before creating room
+              const isConnected = await areUsersConnected(userId, otherUserId);
+              if (!isConnected) {
+                socket.emit(EVENTS.MESSAGE_ERROR, {
+                  success: false,
+                  error: "You can only message your connections.",
+                  tempId,
+                });
+                return;
+              }
+
+              room = await ChatRoom.create({
+                roomId,
+                type: "direct",
+                participants: [
+                  {
+                    userId,
+                    joinedAt: new Date(),
+                    role: "member",
+                    lastReadAt: new Date(),
+                  },
+                  {
+                    userId: otherUserId,
+                    joinedAt: new Date(),
+                    role: "member",
+                    lastReadAt: new Date(),
+                  },
+                ],
+                createdBy: userId,
+                messageCount: 0,
+              });
+            }
+          } else {
+            socket.emit(EVENTS.MESSAGE_ERROR, {
+              success: false,
+              error: "Chat room not found",
+              tempId,
+            });
+            return;
+          }
+        }
+
+        // For group chats, verify permissions
+        if (room.type === "group") {
+          if (!room.isParticipant(userId)) {
+            socket.emit(EVENTS.MESSAGE_ERROR, {
+              success: false,
+              error: "Not a participant in this chat",
+              tempId,
+            });
+            return;
+          }
+          if (!room.canSendMessage(userId)) {
+            socket.emit(EVENTS.MESSAGE_ERROR, {
+              success: false,
+              error: "Only admins can send messages in this group",
+              tempId,
+            });
+            return;
+          }
+        }
+
         const profile = await Profile.findOne({ user: userId });
 
         // Build message data
@@ -219,7 +404,6 @@ const setupChatHandlers = (io, socket) => {
           readBy: [{ user: userId, readAt: new Date() }],
           deliveredTo: [{ user: userId, deliveredAt: new Date() }],
           status: "sent",
-          createdAt: new Date(),
         };
 
         if (type === "audio") {
@@ -253,7 +437,7 @@ const setupChatHandlers = (io, socket) => {
           };
         }
 
-        // Save to database
+        // Save message
         const savedMessage = new Message(messageData);
         await savedMessage.save();
 
@@ -264,9 +448,15 @@ const setupChatHandlers = (io, socket) => {
 
         if (tempId) populatedMessage.tempId = tempId;
 
-        // Update room metadata (do NOT touch clearedBy)
-        const lastMessageText =
-          type === "audio" ? "Voice message" : message?.substring(0, 100);
+        // Prepare last message text
+        let lastMessageText;
+        if (type === "audio") lastMessageText = "🎤 Voice message";
+        else if (type === "image") lastMessageText = "📷 Photo";
+        else if (type === "video") lastMessageText = "🎬 Video";
+        else if (type === "location") lastMessageText = "📍 Location";
+        else lastMessageText = message?.substring(0, 100) || "";
+
+        // Update room metadata
         await ChatRoom.findOneAndUpdate(
           { roomId },
           {
@@ -280,8 +470,8 @@ const setupChatHandlers = (io, socket) => {
             },
             updatedAt: new Date(),
             $inc: { messageCount: 1 },
+            $pull: { clearedBy: { user: userId } },
           },
-          { upsert: true },
         );
 
         // Confirm delivery to sender
@@ -292,35 +482,65 @@ const setupChatHandlers = (io, socket) => {
           tempId,
         });
 
-        // Deliver to recipient
-        const otherParticipant = room?.participants?.find(
-          (p) => p.userId.toString() !== userId.toString(),
-        );
-        if (otherParticipant) {
-          const otherId = otherParticipant.userId.toString();
+        // Message delivery based on room type
+        if (room.type === "group") {
+          // Group chat: broadcast to all in room
+          io.to(roomId).emit(EVENTS.RECEIVE_MESSAGE, populatedMessage);
 
-          // Direct delivery to recipient's personal room
-          io.to(`user_${otherId}`).emit(
-            EVENTS.RECEIVE_MESSAGE,
-            populatedMessage,
+          // Mark delivered for online participants
+          const onlineParticipants = room.participants.filter(
+            (p) =>
+              p.userId.toString() !== userId.toString() &&
+              isUserOnline(p.userId.toString()),
           );
-
-          // Broadcast to other sockets in the room (sender's other devices)
-          socket.to(roomId).emit(EVENTS.RECEIVE_MESSAGE, populatedMessage);
-
-          // Mark as delivered if recipient is online
-          if (isUserOnline(otherId)) {
+          if (onlineParticipants.length > 0) {
             await Message.findByIdAndUpdate(savedMessage._id, {
               $addToSet: {
-                deliveredTo: { user: otherId, deliveredAt: new Date() },
+                deliveredTo: {
+                  $each: onlineParticipants.map((p) => ({
+                    user: p.userId,
+                    deliveredAt: new Date(),
+                  })),
+                },
               },
             });
-            socket.emit(EVENTS.MESSAGE_DELIVERED_TO_RECIPIENT, {
-              messageId: savedMessage._id,
-              recipientId: otherId,
+            onlineParticipants.forEach((p) => {
+              socket.emit(EVENTS.MESSAGE_DELIVERED_TO_RECIPIENT, {
+                messageId: savedMessage._id,
+                recipientId: p.userId.toString(),
+              });
             });
           }
+        } else {
+          // Direct chat: deliver to recipient
+          const otherParticipant = room.participants.find(
+            (p) => p.userId.toString() !== userId.toString(),
+          );
+          if (otherParticipant) {
+            const otherId = otherParticipant.userId.toString();
+            io.to(`user_${otherId}`).emit(
+              EVENTS.RECEIVE_MESSAGE,
+              populatedMessage,
+            );
+            socket.to(roomId).emit(EVENTS.RECEIVE_MESSAGE, populatedMessage);
+
+            if (isUserOnline(otherId)) {
+              await Message.findByIdAndUpdate(savedMessage._id, {
+                $addToSet: {
+                  deliveredTo: { user: otherId, deliveredAt: new Date() },
+                },
+              });
+              socket.emit(EVENTS.MESSAGE_DELIVERED_TO_RECIPIENT, {
+                messageId: savedMessage._id,
+                recipientId: otherId,
+              });
+            }
+          }
         }
+
+        console.log(
+          `Message sent by ${userId} in ${room.type} chat ${roomId}: ${type === "audio" ? "Voice message" : message?.substring(0, 30)}`,
+        );
       } catch (error) {
         console.error("Send message error:", error);
         socket.emit(EVENTS.MESSAGE_ERROR, {

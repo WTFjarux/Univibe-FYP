@@ -14,10 +14,10 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { getAvatarUrl, formatTime } from "../../../../lib/utils/chatUtils";
 import type { ChatRoom } from "../../../../lib/types/chat.types";
-
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+import { API_BASE_URL } from "../../../../constants/ipConstants";
 
 const DEFAULT_AVATAR = require("../../../../assets/images/default-avatar.png");
+const ACCENT_COLOR = "#8b5cf6";
 
 export interface ChatItemProps {
   item: ChatRoom;
@@ -51,6 +51,9 @@ const ChatItem: React.FC<ChatItemProps> = ({
   const [avatarError, setAvatarError] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
 
+  const isGroup = item.type === "group";
+  const isMuted = item.isMuted === true;
+
   const isUnread =
     isUnreadProp !== undefined
       ? isUnreadProp
@@ -58,89 +61,88 @@ const ChatItem: React.FC<ChatItemProps> = ({
         item.lastMessage.senderId !== currentUserId &&
         !item.lastMessage.readBy.includes(currentUserId || "");
 
-  const isMuted = item.isMuted === true;
   const isLastMessageFromMe = !!(
     item.lastMessage?.senderId &&
     currentUserId &&
     item.lastMessage.senderId.toString() === currentUserId.toString()
   );
 
-  const getAvatarSource = () => {
-    if (avatarError) {
-      return DEFAULT_AVATAR;
-    }
+  const buildImageUrl = (url: string | null | undefined): string | null => {
+    if (!url) return null;
+    if (url.startsWith("http")) return url;
+    const base = API_BASE_URL.replace("/api", "");
+    if (url.startsWith("/uploads")) return `${base}${url}`;
+    return `${base}/uploads/${url}`;
+  };
 
+  const getGroupAvatarSource = () => {
+    if (avatarError) return null;
+    const url = buildImageUrl(item.groupPhoto) || buildImageUrl(item.groupIcon);
+    return url ? { uri: url } : null;
+  };
+
+  const getDirectAvatarSource = () => {
+    if (avatarError) return DEFAULT_AVATAR;
     const avatarUrl = getAvatarUrl(item.otherUserAvatar);
-    if (avatarUrl && avatarUrl.length > 0) {
-      return { uri: avatarUrl };
-    }
-
+    if (avatarUrl) return { uri: avatarUrl };
     return DEFAULT_AVATAR;
   };
 
-  const getLastMessageText = (): string => {
-    if (!item.lastMessage) return "No messages yet";
+  const groupAvatarSource = isGroup ? getGroupAvatarSource() : null;
+  const showGroupImage = isGroup && groupAvatarSource !== null;
 
-    const { type, message } = item.lastMessage;
+  const getLastMessageText = (): string => {
+    if (!item.lastMessage) return isGroup ? "Group created" : "No messages yet";
+
+    const { type, message, senderName } = item.lastMessage;
     let displayMessage = message;
 
     switch (type) {
       case "audio":
-        displayMessage = "Sent a Voice message";
+        displayMessage = "🎤 Voice message";
         break;
       case "image":
-        displayMessage = "Sent a Photo";
+        displayMessage = "📷 Photo";
         break;
       case "video":
-        displayMessage = "Sent a Video";
+        displayMessage = "🎬 Video";
         break;
       case "file":
-        displayMessage = "Sent a File";
+        displayMessage = "📎 File";
         break;
-
+      case "location":
+        displayMessage = "📍 Location";
+        break;
       case "post":
         displayMessage = message || "Shared a post";
         break;
-
-      default:
-        displayMessage = message || "No messages yet";
     }
 
-    if (isLastMessageFromMe) {
-      return `You: ${displayMessage}`;
+    if (isGroup && senderName && !isLastMessageFromMe) {
+      return `${senderName.split(" ")[0]}: ${displayMessage}`;
     }
-
-    return displayMessage;
+    if (isLastMessageFromMe) return `You: ${displayMessage}`;
+    return displayMessage || "";
   };
 
   const highlightBackground =
     isHighlighted && highlightAnim
       ? highlightAnim.interpolate({
           inputRange: [0, 1],
-          outputRange: ["transparent", "rgba(0, 122, 255, 0.12)"],
+          outputRange: ["transparent", "rgba(139, 92, 246, 0.12)"],
         })
       : "transparent";
 
   const handleLongPress = () => {
     setIsPressed(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
     setTimeout(() => {
       if (rowRef.current) {
-        rowRef.current.measure(
-          (
-            x: number,
-            y: number,
-            width: number,
-            height: number,
-            pageX: number,
-            pageY: number,
-          ) => {
-            if (pageY > 0 && height > 0) {
-              onLongPress(item, { y: pageY, height, pageX, pageY });
-            }
-          },
-        );
+        rowRef.current.measure((_x, _y, _w, height, pageX, pageY) => {
+          if (pageY > 0 && height > 0) {
+            onLongPress(item, { y: pageY, height, pageX, pageY });
+          }
+        });
       }
     }, 50);
   };
@@ -151,29 +153,40 @@ const ChatItem: React.FC<ChatItemProps> = ({
         ref={rowRef}
         style={[
           styles.wrapper,
-          isSelected &&
-            !disableSelectedStyle && {
-              backgroundColor: "transparent",
-            },
+          isSelected && !disableSelectedStyle && styles.wrapperSelected,
         ]}
       >
         <Pressable
           style={({ pressed }) => [
             styles.row,
-            pressed && !isPressed ? styles.rowPressed : null,
+            pressed && !isPressed && styles.rowPressed,
           ]}
           onPress={onPress}
           onPressIn={() => setIsPressed(false)}
           onLongPress={handleLongPress}
           delayLongPress={300}
         >
-          {/* Avatar Section */}
+          {/* Avatar */}
           <View style={styles.avatarContainer}>
-            <Image
-              source={getAvatarSource()}
-              style={[styles.avatar, item.isPinned && styles.pinnedAvatar]}
-              onError={() => setAvatarError(true)}
-            />
+            {isGroup ? (
+              showGroupImage ? (
+                <Image
+                  source={groupAvatarSource!}
+                  style={[styles.avatar, item.isPinned && styles.pinnedAvatar]}
+                  onError={() => setAvatarError(true)}
+                />
+              ) : (
+                <View style={[styles.avatar, styles.groupAvatar]}>
+                  <Ionicons name="people" size={24} color={ACCENT_COLOR} />
+                </View>
+              )
+            ) : (
+              <Image
+                source={getDirectAvatarSource()}
+                style={[styles.avatar, item.isPinned && styles.pinnedAvatar]}
+                onError={() => setAvatarError(true)}
+              />
+            )}
 
             {isMuted && (
               <View style={styles.mutedBadge}>
@@ -184,20 +197,32 @@ const ChatItem: React.FC<ChatItemProps> = ({
             {isUnread && <View style={styles.unreadDot} />}
           </View>
 
-          {/* Content Section */}
+          {/* Content */}
           <View style={styles.info}>
             <View style={styles.headerRow}>
               <View style={styles.nameRow}>
-                {item.isPinned && (
+                {isGroup && (
+                  <Ionicons
+                    name="people-outline"
+                    size={14}
+                    color="#8E8E93"
+                    style={styles.groupIcon}
+                  />
+                )}
+                {item.isPinned && !isGroup && (
                   <Ionicons
                     name="pin"
                     size={14}
-                    color="#007AFF"
+                    color={ACCENT_COLOR}
                     style={styles.pinIcon}
                   />
                 )}
                 <Text
-                  style={[styles.name, isUnread && styles.nameUnread]}
+                  style={[
+                    styles.name,
+                    isUnread && styles.nameUnread,
+                    isGroup && styles.groupName,
+                  ]}
                   numberOfLines={1}
                 >
                   {item.name}
@@ -210,7 +235,7 @@ const ChatItem: React.FC<ChatItemProps> = ({
                 <Ionicons
                   name="volume-mute"
                   size={14}
-                  color="#8E8E93"
+                  color="#C7C7CC"
                   style={styles.muteIcon}
                 />
               )}
@@ -237,57 +262,53 @@ const ChatItem: React.FC<ChatItemProps> = ({
   );
 };
 
-// ✅ ADD: React.memo with custom comparison for performance
-const MemoizedChatItem = React.memo(ChatItem, (prevProps, nextProps) => {
-  // Only re-render if these critical props changed
+const MemoizedChatItem = React.memo(ChatItem, (prev, next) => {
   return (
-    prevProps.item.roomId === nextProps.item.roomId &&
-    prevProps.item.lastMessage?.message ===
-      nextProps.item.lastMessage?.message &&
-    prevProps.item.lastMessage?.sentAt === nextProps.item.lastMessage?.sentAt &&
-    prevProps.isUnread === nextProps.isUnread &&
-    prevProps.isSelected === nextProps.isSelected &&
-    prevProps.isHighlighted === nextProps.isHighlighted &&
-    prevProps.item.isPinned === nextProps.item.isPinned &&
-    prevProps.item.isMuted === nextProps.item.isMuted
+    prev.item.roomId === next.item.roomId &&
+    prev.item.lastMessage?.message === next.item.lastMessage?.message &&
+    prev.item.lastMessage?.sentAt === next.item.lastMessage?.sentAt &&
+    prev.item.lastMessage?.senderName === next.item.lastMessage?.senderName &&
+    prev.isUnread === next.isUnread &&
+    prev.isSelected === next.isSelected &&
+    prev.isHighlighted === next.isHighlighted &&
+    prev.item.isPinned === next.item.isPinned &&
+    prev.item.isMuted === next.item.isMuted &&
+    prev.item.participantCount === next.item.participantCount &&
+    prev.item.groupPhoto === next.item.groupPhoto
   );
 });
 
 export { ChatItem, MemoizedChatItem };
 export default MemoizedChatItem;
 
-// ─── Styles (unchanged) ─────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
-  wrapper: {
-    marginHorizontal: 0,
-    width: "100%",
-  },
+  wrapper: { marginHorizontal: 0, width: "100%" },
+  wrapperSelected: { backgroundColor: "transparent" },
   row: {
     flexDirection: "row",
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#f0f0f0",
+    borderBottomColor: "#F0F0F0",
     alignItems: "center",
     width: "100%",
   },
-  rowPressed: {
-    backgroundColor: "rgba(0, 0, 0, 0.03)",
-  },
-  avatarContainer: {
-    marginRight: 15,
-    position: "relative",
-  },
+  rowPressed: { backgroundColor: "rgba(139, 92, 246, 0.04)" },
+  avatarContainer: { marginRight: 14, position: "relative" },
   avatar: {
     width: 50,
     height: 50,
     borderRadius: 25,
+    backgroundColor: "#F0F0F0",
   },
-  pinnedAvatar: {
-    borderWidth: 2,
-    borderColor: "#007AFF",
+  groupAvatar: {
+    backgroundColor: "#F5F3FF",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "#EDE9FE",
   },
+  pinnedAvatar: { borderWidth: 2, borderColor: ACCENT_COLOR },
   mutedBadge: {
     position: "absolute",
     bottom: 0,
@@ -308,43 +329,31 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: "#007AFF",
+    backgroundColor: ACCENT_COLOR,
     borderWidth: 2,
     borderColor: "#fff",
   },
-  info: { flex: 1 },
+  info: { flex: 1, justifyContent: "center" },
   headerRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 4,
   },
-  nameRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    flex: 1,
-  },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: 4, flex: 1 },
+  groupIcon: { marginRight: 2 },
   pinIcon: { marginRight: 2 },
   name: {
     fontSize: 16,
     fontWeight: "500",
     color: "#000",
     fontFamily: "SofiaSans-Medium",
-  },
-  nameUnread: {
-    fontWeight: "700",
-    fontFamily: "SofiaSans-Bold",
-  },
-  messageRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
     flex: 1,
   },
-  muteIcon: {
-    marginRight: 2,
-  },
+  groupName: { fontSize: 15 },
+  nameUnread: { fontWeight: "700", fontFamily: "SofiaSans-Bold" },
+  messageRow: { flexDirection: "row", alignItems: "center", gap: 4, flex: 1 },
+  muteIcon: { marginRight: 2 },
   lastMessage: {
     flex: 1,
     fontSize: 14,
@@ -356,9 +365,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     fontFamily: "SofiaSans-Medium",
   },
-  lastMessageMuted: {
-    color: "#C7C7CC",
-  },
+  lastMessageMuted: { color: "#C7C7CC" },
   time: {
     fontSize: 12,
     color: "#8E8E93",
@@ -366,7 +373,7 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
   },
   timeUnread: {
-    color: "#007AFF",
+    color: ACCENT_COLOR,
     fontWeight: "600",
     fontFamily: "SofiaSans-SemiBold",
   },

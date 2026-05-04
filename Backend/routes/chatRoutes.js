@@ -23,7 +23,7 @@ router.use(protect);
 // -----------------------------------------------------------------------------
 
 router.get("/rooms", ctrl.getUserChatRooms);
-router.get("/room/:otherUserId", ctrl.getOrCreateDirectRoom);
+router.get("/direct/:otherUserId", ctrl.getOrCreateDirectRoom);
 router.get("/room/:roomId", ctrl.getRoomDetails);
 router.post("/room/:roomId/read", ctrl.markRoomAsRead);
 router.post("/room/:roomId/unread", ctrl.markRoomAsUnread);

@@ -9,7 +9,6 @@ export const useImageUpload = () => {
   const [uploading, setUploading] = useState(false);
 
   const openUploadModal = useCallback(() => {
-    console.log('📱 Opening upload modal');
     setUploadModal(true);
   }, []);
 
@@ -18,7 +17,6 @@ export const useImageUpload = () => {
   }, []);
 
   const openImageViewer = useCallback(() => {
-    console.log('📱 Opening image viewer');
     setUploadModal(false);
     setViewPhotoModal(true);
   }, []);
@@ -28,8 +26,6 @@ export const useImageUpload = () => {
   }, []);
 
   const uploadProfileImage = useCallback(async (imageUri: string): Promise<boolean> => {
-    console.log('🚀 Starting image upload');
-    console.log('📤 Image URI:', imageUri.substring(0, 200));
     
     if (!imageUri) {
       Alert.alert('Error', 'No image selected');
@@ -46,14 +42,10 @@ export const useImageUpload = () => {
     setUploading(true);
     
     try {
-      console.log('📤 Uploading to server...');
       
       const result = await profileService.uploadProfilePicture(imageUri);
       
-      console.log('📤 Server response:', {
-        success: result.success,
-        message: result.message
-      });
+      
       
       if (result.success) {
         Alert.alert('Success', result.message || 'Profile picture updated successfully!');

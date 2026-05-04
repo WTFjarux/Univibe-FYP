@@ -1049,3 +1049,66 @@ exports.searchProfiles = async (req, res) => {
       .json({ success: false, message: "Failed to search profiles" });
   }
 };
+
+/**
+ * Search only within user's connections
+ * GET /api/profile/search-connections?query=xxx
+ */
+exports.searchConnections = async (req, res) => {
+  try {
+    const { query, limit = 20 } = req.query;
+    const userId = req.user.id;
+
+    if (!query || query.trim().length < 2) {
+      return res.json({ success: true, data: [] });
+    }
+
+    // Get current user's connections
+    const currentUser = await User.findById(userId)
+      .select("connections")
+      .lean();
+
+    const connectionIds = (currentUser?.connections || []).map((id) =>
+      id.toString(),
+    );
+
+    if (connectionIds.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
+
+    // Search only within connections
+    const users = await User.find({
+      _id: { $in: connectionIds },
+      $or: [
+        { name: { $regex: query, $options: "i" } },
+        { username: { $regex: query, $options: "i" } },
+      ],
+    })
+      .select("name username profilePicture")
+      .limit(parseInt(limit))
+      .lean();
+
+    // Format response same as searchProfiles for consistency
+    const profiles = await Promise.all(
+      users.map(async (user) => {
+        const profile = await Profile.findOne({ user: user._id })
+          .select("profilePicture bio")
+          .lean();
+        return {
+          user: {
+            _id: user._id,
+            name: user.name,
+            username: user.username,
+          },
+          profilePicture: profile?.profilePicture || "",
+          bio: profile?.bio || "",
+        };
+      }),
+    );
+
+    res.json({ success: true, data: profiles });
+  } catch (error) {
+    console.error("searchConnections error:", error.message);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};

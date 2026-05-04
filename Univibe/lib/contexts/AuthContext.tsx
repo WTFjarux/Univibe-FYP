@@ -98,7 +98,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
    */
   const connectSocket = useCallback(async () => {
     if (socketConnectedRef.current) {
-      console.log("🔌 Socket already connected, skipping");
       return;
     }
 

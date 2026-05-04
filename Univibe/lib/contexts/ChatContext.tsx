@@ -1,4 +1,4 @@
-// lib/ChatContext.tsx
+// lib/contexts/ChatContext.tsx
 import React, {
   createContext,
   useContext,

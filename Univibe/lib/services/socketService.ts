@@ -1,120 +1,28 @@
+// lib/services/socketService.ts
+
 import io from "socket.io-client";
 import type { Socket } from "socket.io-client";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import { API_BASE_URL } from "../../constants/ipConstants";
-
-// -----------------------------------------------------------------------------
-// Type Definitions
-// -----------------------------------------------------------------------------
-
-interface Message {
-  _id?: string;
-  messageId?: string;
-  sender: string;
-  senderName: string;
-  senderAvatar?: string;
-  roomId: string;
-  message: string;
-  type: string;
-  createdAt?: Date;
-  status?: string;
-  mediaUrl?: string;
-  duration?: number;
-  readBy?: Array<{ user: string; readAt: Date }>;
-  deliveredTo?: Array<{ user: string; deliveredAt: Date }>;
-  replyTo?: {
-    messageId: string;
-    message: string;
-    senderName: string;
-    senderId?: string;
-    type?: string;
-    mediaUrl?: string;
-    duration?: number;
-  };
-}
-
-interface ForwardMessageData {
-  messageId: string;
-  targetChatIds: string[];
-}
-interface ForwardMessageSuccessData {
-  success: boolean;
-  message: string;
-  data: {
-    forwardedCount: number;
-    forwardedMessages: Message[];
-    forwardedToRooms: string[];
-  };
-}
-interface ForwardMessageErrorData {
-  success: boolean;
-  message: string;
-}
-interface MessageForwardedToRoomData {
-  message: Message;
-  roomId: string;
-  forwardedBy: string;
-  forwardedByName: string;
-}
-interface UserStatus {
-  userId: string;
-  userInfo?: any;
-  lastSeen?: Date;
-  timestamp?: Date;
-}
-interface TypingData {
-  userId: string;
-  userName: string;
-  roomId: string;
-}
-interface RoomData {
-  roomId: string;
-  success: boolean;
-}
-interface CallData {
-  fromUserId: string;
-  fromUserInfo?: any;
-  callType?: string;
-  offer?: any;
-  answer?: any;
-  candidate?: any;
-  timestamp?: Date;
-}
-interface ReplyToData {
-  messageId: string;
-  message: string;
-  senderName: string;
-  senderId?: string;
-  type?: string;
-  mediaUrl?: string;
-  duration?: number;
-}
-interface ReadReceiptData {
-  roomId: string;
-  userId: string;
-  readAt?: string;
-}
-interface MessageReadData {
-  messageId: string;
-  roomId: string;
-  userId: string;
-  readAt?: string;
-}
-interface ReactionData {
-  messageId: string;
-  userId: string;
-  reaction?: string;
-  reactions?: any[];
-}
-interface DeleteMessageData {
-  roomId: string;
-  messageId: string;
-  deletedBy: string;
-  timestamp?: Date;
-}
-
-type EventCallback = (data: any) => void;
+import type {
+  Message,
+  SocketMessageData,
+  ReadReceiptData,
+  MessageDeleteData,
+  ReactionData,
+  ChatClearedData,
+  ChatRestoredData,
+  TypingData,
+  GroupCreatedData,
+  AddedToGroupData,
+  RemovedFromGroupData,
+  GroupMembersAddedData,
+  GroupMemberRemovedData,
+  GroupMemberLeftData,
+  GroupUpdatedData,
+  GroupRoleChangedData,
+} from "../types/chat.types";
 
 // -----------------------------------------------------------------------------
 // Socket URL Configuration
@@ -125,10 +33,63 @@ const getSocketUrl = (): string => {
   if (Platform.OS === "android" && baseUrl.includes("localhost")) {
     baseUrl = baseUrl.replace("localhost", "10.0.2.2");
   }
-  return baseUrl;
+  return baseUrl.replace(/\/$/, "");
 };
 
 const SOCKET_URL = getSocketUrl();
+
+// -----------------------------------------------------------------------------
+// Types (only socket-specific types not in chat.types)
+// -----------------------------------------------------------------------------
+
+interface ReplyToData {
+  messageId: string;
+  message: string;
+  senderName: string;
+  senderId?: string;
+  type?: string;
+  mediaUrl?: string;
+  duration?: number;
+}
+
+interface RoomData {
+  roomId: string;
+  success: boolean;
+  roomType?: string;
+  roomName?: string;
+  isGroup?: boolean;
+}
+
+interface UserStatus {
+  userId: string;
+  userInfo?: any;
+  lastSeen?: Date;
+  timestamp?: Date;
+}
+
+interface ForwardMessageSuccessData {
+  success: boolean;
+  message: string;
+  data: {
+    forwardedCount: number;
+    forwardedMessages: Message[];
+    forwardedToRooms: string[];
+  };
+}
+
+interface ForwardMessageErrorData {
+  success: boolean;
+  message: string;
+}
+
+interface MessageForwardedToRoomData {
+  message: Message;
+  roomId: string;
+  forwardedBy: string;
+  forwardedByName: string;
+}
+
+type EventCallback = (data: any) => void;
 
 // -----------------------------------------------------------------------------
 // SocketService Class
@@ -138,33 +99,43 @@ class SocketService {
   private socket: Socket | null = null;
   private isConnected: boolean = false;
   private reconnectAttempts: number = 0;
-  private maxReconnectAttempts: number = 5;
+  private maxReconnectAttempts: number = 10;
   private eventListeners: Map<string, EventCallback[]> = new Map();
   private pendingRooms: Array<{
     roomId: string;
     otherUserId: string | null;
     type: string;
   }> = [];
-  private activeRooms: Set<string> = new Set(); // ✅ Track rooms socket is currently in
+  private activeRooms: Set<string> = new Set();
   private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null;
+  private isConnecting: boolean = false;
 
   // ---------------------------------------------------------------------------
   // Connection Management
   // ---------------------------------------------------------------------------
 
   async connect(): Promise<Socket | null> {
+    if (this.isConnecting) return null;
+    if (this.socket?.connected) return this.socket;
+
+    this.isConnecting = true;
+
     try {
       const token = await SecureStore.getItemAsync("authToken");
       if (!token) {
-        if (this.connectionRetryTimeout)
+        console.log("⚠️ No auth token found, retrying in 2s...");
+        if (this.connectionRetryTimeout) {
           clearTimeout(this.connectionRetryTimeout);
-        this.connectionRetryTimeout = setTimeout(() => this.connect(), 2000);
+        }
+        this.connectionRetryTimeout = setTimeout(() => {
+          this.isConnecting = false;
+          this.connect();
+        }, 2000);
         return null;
       }
 
-      if (this.socket && this.isConnected) return this.socket;
-
       if (this.socket) {
+        this.socket.removeAllListeners();
         this.socket.disconnect();
         this.socket = null;
       }
@@ -175,13 +146,17 @@ class SocketService {
         reconnection: true,
         reconnectionAttempts: this.maxReconnectAttempts,
         reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        timeout: 10000,
+        reconnectionDelayMax: 10000,
+        timeout: 20000,
+        forceNew: true,
       });
 
       this.setupEventListeners();
+      this.isConnecting = false;
       return this.socket;
     } catch (error) {
+      console.error("❌ Socket connection error:", error);
+      this.isConnecting = false;
       return null;
     }
   }
@@ -190,12 +165,10 @@ class SocketService {
   // Room Reconnection
   // ---------------------------------------------------------------------------
 
-  /**
-   * Rejoins all previously joined rooms after a reconnection.
-   * Only emits for rooms not already active.
-   */
   rejoinRooms(): void {
     if (this.pendingRooms.length === 0) return;
+
+    console.log(`🔄 Rejoining ${this.pendingRooms.length} rooms...`);
 
     this.pendingRooms.forEach((room) => {
       if (
@@ -220,6 +193,7 @@ class SocketService {
   private setupEventListeners(): void {
     if (!this.socket) return;
 
+    // ===== CONNECTION EVENTS =====
     this.socket.on("connect", () => {
       this.isConnected = true;
       this.reconnectAttempts = 0;
@@ -236,7 +210,12 @@ class SocketService {
 
     this.socket.on("connect_error", (error: Error) => {
       this.reconnectAttempts++;
-      console.error("❌ Socket connect error:", error.message);
+      if (this.reconnectAttempts % 3 === 0) {
+        console.error(
+          `❌ Socket connect error (attempt ${this.reconnectAttempts}):`,
+          error.message,
+        );
+      }
       this.emitEvent("socket_error", error);
     });
 
@@ -247,11 +226,20 @@ class SocketService {
       this.rejoinRooms();
     });
 
+    this.socket.on("reconnect_attempt", (attemptNumber: number) => {
+      console.log(`🔄 Reconnect attempt ${attemptNumber}...`);
+    });
+
+    this.socket.on("reconnect_error", (error: Error) => {
+      console.error("❌ Reconnect error:", error.message);
+    });
+
     this.socket.on("reconnect_failed", () => {
-      console.error("❌ Socket reconnection failed");
+      console.error("❌ Socket reconnection failed after max attempts");
       this.emitEvent("socket_reconnect_failed", {});
     });
 
+    // ===== MESSAGE EVENTS =====
     this.socket.on("receive_message", (message: Message) => {
       this.emitEvent("receive_message", message);
       this.emitEvent("new_message", message);
@@ -284,13 +272,22 @@ class SocketService {
       },
     );
 
+    // ===== READ RECEIPTS (from chat.types) =====
     this.socket.on("messages_read", (data: ReadReceiptData) => {
       this.emitEvent("messages_read", data);
     });
 
-    this.socket.on("message_read", (data: MessageReadData) => {
-      this.emitEvent("message_read", data);
-    });
+    this.socket.on(
+      "message_read",
+      (data: {
+        messageId: string;
+        roomId: string;
+        userId: string;
+        readAt: string;
+      }) => {
+        this.emitEvent("message_read", data);
+      },
+    );
 
     this.socket.on(
       "messages_marked_read",
@@ -306,10 +303,12 @@ class SocketService {
       },
     );
 
-    this.socket.on("message_deleted", (data: DeleteMessageData) => {
+    // ===== MESSAGE DELETED (from chat.types) =====
+    this.socket.on("message_deleted", (data: MessageDeleteData) => {
       this.emitEvent("message_deleted", data);
     });
 
+    // ===== REACTIONS (from chat.types) =====
     this.socket.on("reaction_added", (data: ReactionData) => {
       this.emitEvent("reaction_added", data);
     });
@@ -318,20 +317,16 @@ class SocketService {
       this.emitEvent("reaction_removed", data);
     });
 
-    this.socket.on(
-      "chat_cleared",
-      (data: { roomId: string; clearedAt: string }) => {
-        this.emitEvent("chat_cleared", data);
-      },
-    );
+    // ===== CHAT CLEAR/RESTORE (from chat.types) =====
+    this.socket.on("chat_cleared", (data: ChatClearedData) => {
+      this.emitEvent("chat_cleared", data);
+    });
 
-    this.socket.on(
-      "chat_restored",
-      (data: { roomId: string; userId: string }) => {
-        this.emitEvent("chat_restored", data);
-      },
-    );
+    this.socket.on("chat_restored", (data: ChatRestoredData) => {
+      this.emitEvent("chat_restored", data);
+    });
 
+    // ===== TYPING INDICATORS (from chat.types) =====
     this.socket.on("typing", (data: TypingData) => {
       this.emitEvent("typing", data);
       this.emitEvent("user_typing", data);
@@ -342,6 +337,7 @@ class SocketService {
       this.emitEvent("user_stop_typing", data);
     });
 
+    // ===== USER PRESENCE =====
     this.socket.on("user_online", (data: UserStatus) => {
       this.emitEvent("user_online", data);
     });
@@ -357,28 +353,52 @@ class SocketService {
       },
     );
 
-    this.socket.on("call_user", (data: CallData) => {
-      this.emitEvent("incoming_call", data);
-    });
-    this.socket.on("call_accepted", (data: CallData) => {
-      this.emitEvent("call_accepted", data);
-    });
-    this.socket.on("call_rejected", (data: CallData) => {
-      this.emitEvent("call_rejected", data);
-    });
-    this.socket.on("offer", (data: CallData) => {
-      this.emitEvent("call_offer", data);
-    });
-    this.socket.on("answer", (data: CallData) => {
-      this.emitEvent("call_answer", data);
-    });
-    this.socket.on("ice_candidate", (data: CallData) => {
-      this.emitEvent("ice_candidate", data);
-    });
-    this.socket.on("end_call", (data: CallData) => {
-      this.emitEvent("call_ended", data);
+    // ===== GROUP EVENTS (from chat.types) =====
+    this.socket.on("group_created", (data: GroupCreatedData) => {
+      this.emitEvent("group_created", data);
     });
 
+    this.socket.on("added_to_group", (data: AddedToGroupData) => {
+      this.emitEvent("added_to_group", data);
+    });
+
+    this.socket.on("removed_from_group", (data: RemovedFromGroupData) => {
+      this.emitEvent("removed_from_group", data);
+    });
+
+    this.socket.on("group_members_added", (data: GroupMembersAddedData) => {
+      this.emitEvent("group_members_added", data);
+    });
+
+    this.socket.on("group_member_removed", (data: GroupMemberRemovedData) => {
+      this.emitEvent("group_member_removed", data);
+    });
+
+    this.socket.on("group_member_left", (data: GroupMemberLeftData) => {
+      this.emitEvent("group_member_left", data);
+    });
+
+    this.socket.on("group_updated", (data: GroupUpdatedData) => {
+      this.emitEvent("group_updated", data);
+    });
+
+    this.socket.on("group_role_changed", (data: GroupRoleChangedData) => {
+      this.emitEvent("group_role_changed", data);
+    });
+
+    this.socket.on(
+      "user_joined_group",
+      (data: {
+        userId: string;
+        userName: string;
+        roomId: string;
+        roomName: string;
+      }) => {
+        this.emitEvent("user_joined_group", data);
+      },
+    );
+
+    // ===== ERROR EVENTS =====
     this.socket.on("error", (error: Error) => {
       console.error("Socket error:", error.message);
       this.emitEvent("socket_error", error);
@@ -410,8 +430,11 @@ class SocketService {
   }
 
   removeAllListeners(event?: string): void {
-    if (event) this.eventListeners.delete(event);
-    else this.eventListeners.clear();
+    if (event) {
+      this.eventListeners.delete(event);
+    } else {
+      this.eventListeners.clear();
+    }
   }
 
   private emitEvent(event: string, data: any): void {
@@ -431,21 +454,16 @@ class SocketService {
   // Chat Actions
   // ---------------------------------------------------------------------------
 
-  /**
-   * Joins a chat room. Tracks in pendingRooms and activeRooms to prevent duplicates.
-   */
   joinRoom(
     roomId: string,
     otherUserId: string | null = null,
     type: string = "direct",
   ): void {
-    // Track for reconnection
     const alreadyPending = this.pendingRooms.some((r) => r.roomId === roomId);
     if (!alreadyPending) {
       this.pendingRooms.push({ roomId, otherUserId, type });
     }
 
-    // Only emit if connected AND not already in this room
     if (this.socket && this.isConnected && !this.activeRooms.has(roomId)) {
       this.activeRooms.add(roomId);
       this.socket.emit("join_room", { roomId, type, otherUserId });
@@ -454,9 +472,8 @@ class SocketService {
     }
   }
 
-  /** Leaves a chat room */
   leaveRoom(roomId: string): void {
-    this.activeRooms.delete(roomId); // ✅ Remove from active rooms
+    this.activeRooms.delete(roomId);
     if (this.socket && this.isConnected) {
       this.socket.emit("leave_room", { roomId });
       this.pendingRooms = this.pendingRooms.filter((r) => r.roomId !== roomId);
@@ -549,40 +566,67 @@ class SocketService {
   }
 
   // ---------------------------------------------------------------------------
-  // WebRTC Signaling
+  // Group Chat Methods
   // ---------------------------------------------------------------------------
 
-  callUser(
-    targetUserId: string,
-    callType: string = "video",
-    offer: any = null,
+  createGroup(
+    name: string,
+    participantIds: string[],
+    icon?: string,
+    description?: string,
+  ): void {
+    if (this.socket && this.isConnected) {
+      this.socket.emit("create_group", {
+        name,
+        participantIds,
+        icon,
+        description,
+      });
+    } else {
+      this.emitEvent("socket_error", {
+        message: "Socket not connected",
+        action: "create_group",
+      });
+      this.connect();
+    }
+  }
+
+  addGroupMembers(roomId: string, memberIds: string[]): void {
+    if (this.socket && this.isConnected)
+      this.socket.emit("add_group_members", { roomId, memberIds });
+  }
+
+  removeGroupMember(roomId: string, memberId: string): void {
+    if (this.socket && this.isConnected)
+      this.socket.emit("remove_group_member", { roomId, memberId });
+  }
+
+  leaveGroup(roomId: string): void {
+    if (this.socket && this.isConnected)
+      this.socket.emit("leave_group", { roomId });
+  }
+
+  updateGroupInfo(
+    roomId: string,
+    updates: {
+      name?: string;
+      icon?: string;
+      description?: string;
+      settings?: any;
+    },
   ): void {
     if (this.socket && this.isConnected)
-      this.socket.emit("call_user", { targetUserId, callType, offer });
+      this.socket.emit("update_group_info", { roomId, ...updates });
   }
-  acceptCall(targetUserId: string): void {
+
+  makeAdmin(roomId: string, memberId: string): void {
     if (this.socket && this.isConnected)
-      this.socket.emit("call_accepted", { targetUserId });
+      this.socket.emit("make_admin", { roomId, memberId });
   }
-  rejectCall(targetUserId: string): void {
+
+  removeAdmin(roomId: string, memberId: string): void {
     if (this.socket && this.isConnected)
-      this.socket.emit("call_rejected", { targetUserId });
-  }
-  sendOffer(targetUserId: string, offer: any): void {
-    if (this.socket && this.isConnected)
-      this.socket.emit("offer", { targetUserId, offer });
-  }
-  sendAnswer(targetUserId: string, answer: any): void {
-    if (this.socket && this.isConnected)
-      this.socket.emit("answer", { targetUserId, answer });
-  }
-  sendICECandidate(targetUserId: string, candidate: any): void {
-    if (this.socket && this.isConnected)
-      this.socket.emit("ice_candidate", { targetUserId, candidate });
-  }
-  endCall(targetUserId: string): void {
-    if (this.socket && this.isConnected)
-      this.socket.emit("end_call", { targetUserId });
+      this.socket.emit("remove_admin", { roomId, memberId });
   }
 
   // ---------------------------------------------------------------------------
@@ -599,22 +643,26 @@ class SocketService {
       clearTimeout(this.connectionRetryTimeout);
       this.connectionRetryTimeout = null;
     }
+    this.isConnecting = false;
     if (this.socket) {
+      this.socket.removeAllListeners();
       this.socket.disconnect();
       this.socket = null;
       this.isConnected = false;
     }
     this.pendingRooms = [];
-    this.activeRooms.clear(); // ✅ Clear active rooms
+    this.activeRooms.clear();
   }
 
   reconnect(): void {
     this.disconnect();
-    this.connect();
+    setTimeout(() => this.connect(), 500);
   }
+
   getConnectionStatus(): boolean {
     return this.isConnected;
   }
+
   getSocketId(): string | null {
     return this.socket?.id || null;
   }

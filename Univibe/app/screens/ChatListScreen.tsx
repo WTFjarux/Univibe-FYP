@@ -15,10 +15,11 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useAuth } from "../../lib/contexts/AuthContext";
 import { useChatList } from "../../hooks/chatList/useChatList";
 import { useChatItemAnimations } from "../../hooks/chatList/useChatItemAnimation";
-import { ChatListHeader } from "../components/chat/ChatList/ChatListHeader";
+import ChatListHeader from "../components/chat/ChatList/ChatListHeader";
 import SearchBar from "../components/chat/ChatList/SearchBar";
 import EmptyChatList from "../components/chat/ChatList/EmptyChatList";
 import NewChatModal from "../components/chat/ChatList/NewChatModal";
+import CreateGroupModal from "../components/chat/ChatList/CreateGroupModal"; // NEW
 import ChatItem from "../components/chat/ChatList/ChatItem";
 import ChatListOptionsModal from "../components/chat/ChatList/ChatListOptionsModal";
 import type { ChatRoom, ItemLayout } from "../../lib/types/chat.types";
@@ -59,6 +60,7 @@ export default function ChatListScreen() {
   });
   const [showOptionsModal, setShowOptionsModal] = useState(false);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false); // NEW
 
   // ─── Animations ──────────────────────────────────────────────────────────
 
@@ -102,6 +104,7 @@ export default function ChatListScreen() {
   /**
    * Navigates to the ChatScreen for a given room.
    * Marks the room as read before navigating if it has unread messages.
+   * Handles both direct and group chats.
    */
   const navigateToChat = useCallback(
     (room: ChatRoom) => {
@@ -111,6 +114,9 @@ export default function ChatListScreen() {
         markRoomAsRead(room.roomId);
       }
 
+      // Check if it's a group chat
+      const isGroup = room.type === "group";
+
       router.push({
         pathname: "/screens/ChatScreen",
         params: {
@@ -118,6 +124,9 @@ export default function ChatListScreen() {
           otherUserName: room.name,
           otherUserId: room.otherUserId ?? "",
           otherUserAvatar: room.otherUserAvatar ?? "",
+          isGroup: isGroup ? "true" : "false", // NEW: Pass group flag
+          participantCount: room.participantCount?.toString() || "0",
+          groupPhoto: room.groupPhoto || "", // NEW
         },
       });
     },
@@ -125,7 +134,7 @@ export default function ChatListScreen() {
   );
 
   /**
-   * Handles starting a new chat with a selected user.
+   * Handles starting a new direct chat with a selected user.
    * Navigates directly to ChatScreen with the target user's info.
    */
   const handleStartNewChat = useCallback(
@@ -145,10 +154,37 @@ export default function ChatListScreen() {
           otherUserName: userName,
           otherUserId: userId,
           otherUserAvatar: userAvatar ?? "",
+          isGroup: "false",
         },
       });
     },
     [router, user?.id],
+  );
+
+  /**
+   * Handles group creation success.
+   * Navigates to the new group chat screen.
+   */
+  const handleGroupCreated = useCallback(
+    (roomId: string, groupName: string) => {
+      setShowCreateGroupModal(false);
+
+      router.push({
+        pathname: "/screens/ChatScreen",
+        params: {
+          roomId: roomId,
+          otherUserName: groupName,
+          otherUserId: "",
+          otherUserAvatar: "",
+          isGroup: "true",
+          participantCount: "0", // Will be updated when room loads
+        },
+      });
+
+      // Refresh chat list to show the new group
+      fetchRooms();
+    },
+    [router, fetchRooms],
   );
 
   // ---------------------------------------------------------------------------
@@ -210,7 +246,7 @@ export default function ChatListScreen() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color="#8b5cf6" />
       </View>
     );
   }
@@ -224,7 +260,12 @@ export default function ChatListScreen() {
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
       <View style={styles.container}>
-        <ChatListHeader onNewChat={() => setShowNewChatModal(true)} />
+        {/* Header with New Chat and New Group buttons */}
+        <ChatListHeader
+          onNewChat={() => setShowNewChatModal(true)}
+          onNewGroup={() => setShowCreateGroupModal(true)} // NEW
+        />
+
         <SearchBar value={searchQuery} onChangeText={setSearchQuery} />
 
         <FlatList
@@ -232,7 +273,12 @@ export default function ChatListScreen() {
           keyExtractor={(item) => item.roomId}
           renderItem={renderItem}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#8b5cf6"
+              colors={["#8b5cf6"]}
+            />
           }
           ListEmptyComponent={<EmptyChatList />}
           contentContainerStyle={
@@ -251,6 +297,7 @@ export default function ChatListScreen() {
         />
       </View>
 
+      {/* New Direct Chat Modal */}
       <NewChatModal
         visible={showNewChatModal}
         onClose={() => setShowNewChatModal(false)}
@@ -259,6 +306,16 @@ export default function ChatListScreen() {
         token={token}
       />
 
+      {/* New Group Chat Modal */}
+      <CreateGroupModal
+        visible={showCreateGroupModal}
+        onClose={() => setShowCreateGroupModal(false)}
+        onGroupCreated={handleGroupCreated}
+        token={token}
+        currentUserId={user?.id}
+      />
+
+      {/* Chat Options Modal (Long Press) */}
       <ChatListOptionsModal
         visible={showOptionsModal}
         onClose={handleCloseModal}

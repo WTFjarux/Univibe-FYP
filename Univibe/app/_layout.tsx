@@ -6,7 +6,7 @@ import { SplashScreen } from "expo-router";
 import { AuthProvider } from "../lib/contexts/AuthContext";
 import { ProfileProvider } from "../lib/contexts/ProfileContext";
 import { ChatProvider } from "../lib/contexts/ChatContext";
-import { ActiveRoomProvider } from "../lib/contexts/ActiveRoomContext"; 
+import { ActiveRoomProvider } from "../lib/contexts/ActiveRoomContext";
 import { View, ActivityIndicator } from "react-native";
 import { useEffect } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -19,6 +19,8 @@ export default function RootLayout() {
     "Sofia-Regular": require("../assets/fonts/Sofia-Regular.ttf"),
     "SofiaSans-Regular": require("../assets/fonts/SofiaSans-Regular.ttf"),
     "SofiaSans-Bold": require("../assets/fonts/SofiaSans-Bold.ttf"),
+    "SofiaSans-SemiBold": require("../assets/fonts/SofiaSans-SemiBold.ttf"),
+    "SofiaSans-Medium": require("../assets/fonts/SofiaSans-Medium.ttf"),
   });
 
   useEffect(() => {
@@ -73,6 +75,14 @@ export default function RootLayout() {
                     name="screens/ChatListScreen"
                     options={{
                       headerShown: false,
+                    }}
+                  />
+                  <Stack.Screen
+                    name="screens/GroupInfoScreen"
+                    options={{
+                      headerShown: false,
+                      presentation: "modal",
+                      animation: "slide_from_bottom",
                     }}
                   />
                 </Stack>

@@ -20,7 +20,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import { useChatScreen } from "../../hooks/chatScreen/useChatScreen";
 import ChatHeader from "../components/chat/ChatMessage/ChatHeader";
 import ChatInput from "../components/chat/ChatMessage/ChatInput";
@@ -29,6 +29,7 @@ import MessageItem from "../components/chat/ChatMessage/MessageItem";
 import DateSeparator from "../components/chat/ChatMessage/DateSeparator";
 import ForwardModal from "../components/chat/ChatMessage/ForwardModal";
 import AudioManager from "../../lib/utils/AudioManager";
+
 import {
   formatMessageTime,
   formatDateSeparator,
@@ -45,6 +46,7 @@ import type { Message } from "../../lib/types/chat.types";
 // -----------------------------------------------------------------------------
 
 const DEFAULT_AVATAR = require("../../assets/images/default-avatar.png");
+const ACCENT_COLOR = "#8b5cf6";
 
 /** Maximum time gap between messages before showing a new timestamp */
 const MESSAGE_TIME_GAP_MINUTES = 5;
@@ -79,13 +81,21 @@ export default function ChatScreen() {
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<any>(null);
 
-  // ─── Forward Modal State ──────────────────────────────────────────────────
+  // ─── Navigation & Params ─────────────────────────────────────────────────
+  const router = useRouter();
+  const params = useLocalSearchParams();
 
+  // ─── Forward Modal State ──────────────────────────────────────────────────
   const [forwardModalVisible, setForwardModalVisible] = useState(false);
   const [forwardMessage, setForwardMessage] = useState<Message | null>(null);
 
-  // ─── State & Handlers from custom hook ──────────────────────────────────────
+  // ─── Group State ──────────────────────────────────────────────────────────
+  const [groupParticipantCount, setGroupParticipantCount] = useState(
+    parseInt(params.participantCount as string) || 0,
+  );
+  const isGroup = params.isGroup === "true";
 
+  // ─── State & Handlers from custom hook ──────────────────────────────────────
   const {
     messages,
     loading,
@@ -133,6 +143,17 @@ export default function ChatScreen() {
     roomId,
   } = useChatScreen(flatListRef);
 
+  // ---------------------------------------------------------------------------
+  // Group Info Handler
+  // ---------------------------------------------------------------------------
+
+  /** Navigate to group info screen */
+  const handleGroupInfoPress = useCallback(() => {
+    router.push({
+      pathname: "/screens/GroupInfoScreen",
+      params: { roomId: roomId }, 
+    });
+  }, [router, roomId]);
   // ---------------------------------------------------------------------------
   // Lifecycle Effects
   // ---------------------------------------------------------------------------
@@ -202,7 +223,6 @@ export default function ChatScreen() {
 
   /**
    * Opens the ForwardModal with the selected message data.
-   * Sets the message to forward and makes the modal visible.
    */
   const handleForward = useCallback((message: Message) => {
     if (!message._id) return;
@@ -215,7 +235,6 @@ export default function ChatScreen() {
    */
   const handleForwardClose = useCallback(() => {
     setForwardModalVisible(false);
-    // Delay clearing forwardMessage to avoid UI flicker during modal close animation
     setTimeout(() => {
       setForwardMessage(null);
     }, 300);
@@ -223,21 +242,15 @@ export default function ChatScreen() {
 
   /**
    * Called when forwarding is successful.
-   * Shows a brief confirmation or performs any additional actions.
    */
   const handleForwardSuccess = useCallback((data: any) => {
     console.log(`Message forwarded to ${data?.forwardedCount || 0} chat(s)`);
-    // Optional: Refresh messages or show a toast notification
   }, []);
 
   // ---------------------------------------------------------------------------
   // Forward Message Data Preparation
   // ---------------------------------------------------------------------------
 
-  /**
-   * Prepares the message data object for the ForwardModal.
-   * Extracts only the necessary fields from the selected message.
-   */
   const forwardMessageData = useMemo(() => {
     if (!forwardMessage) return null;
 
@@ -355,7 +368,7 @@ export default function ChatScreen() {
     if (!loadingMore) return null;
     return (
       <View style={styles.loadingMore}>
-        <ActivityIndicator size="small" color="#007AFF" />
+        <ActivityIndicator size="small" color={ACCENT_COLOR} />
       </View>
     );
   }, [loadingMore]);
@@ -382,7 +395,7 @@ export default function ChatScreen() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color={ACCENT_COLOR} />
       </View>
     );
   }
@@ -397,6 +410,10 @@ export default function ChatScreen() {
         isOnline={isOnline}
         DEFAULT_AVATAR={DEFAULT_AVATAR}
         getFullImageUrl={getFullImageUrl}
+        isGroup={isGroup}
+        participantCount={groupParticipantCount}
+        onGroupInfoPress={handleGroupInfoPress}
+        groupPhoto={params.groupPhoto as string}
       />
       <KeyboardAvoidingView
         style={styles.kav}
@@ -426,7 +443,12 @@ export default function ChatScreen() {
             autoscrollToTopThreshold: 10,
           }}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={ACCENT_COLOR}
+              colors={[ACCENT_COLOR]}
+            />
           }
           contentContainerStyle={
             messages.length === 0 ? styles.emptyList : styles.listContent
@@ -506,7 +528,7 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: 18,
-    fontWeight: "600" as const,
+    fontWeight: "600",
     color: "#333",
     marginBottom: 10,
     fontFamily: "SofiaSans-Bold",
@@ -514,7 +536,7 @@ const styles = StyleSheet.create({
   emptySubtitle: {
     fontSize: 14,
     color: "#999",
-    textAlign: "center" as const,
+    textAlign: "center",
     fontFamily: "SofiaSans-Regular",
   },
 });

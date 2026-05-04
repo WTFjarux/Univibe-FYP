@@ -45,6 +45,10 @@ export const useChatRoomsQuery = ({ token }: UseChatRoomsQueryProps) => {
       type: room.type || "direct",
       name: room.name,
       avatar: room.avatar || null,
+      groupIcon: room.groupIcon || null,
+      groupPhoto: room.groupPhoto || room.groupIcon || null, //  (fallback to groupIcon)
+      groupDescription: room.groupDescription || "", //
+      participantCount: room.participantCount || room.participants?.length || 0,
       otherUserId: room.otherUserId || null,
       otherUserAvatar: room.otherUserAvatar || null,
       participants: room.participants || [],
@@ -65,6 +69,9 @@ export const useChatRoomsQuery = ({ token }: UseChatRoomsQueryProps) => {
       muteUntil: room.muteUntil || null,
       isCleared: room.isCleared || false,
       clearedAt: room.clearedAt || null,
+      groupSettings: room.groupSettings || null,
+      createdBy: room.createdBy || null,
+      unreadCount: room.unreadCount || 0,
     }),
     [],
   );
@@ -149,11 +156,12 @@ export const useChatRoomsQuery = ({ token }: UseChatRoomsQueryProps) => {
       if (!token) return;
 
       try {
-        const response = await chatApi.getSingleRoom(token);
+        // ✅ FIX: Pass roomId, not token
+        const response = await chatApi.getSingleRoom(roomId);
 
-        if (response.success) {
+        if (response.success && response.data) {
+          const normalized = normalizeRoom(response.data);
           setRooms((prev) => {
-            const normalized = normalizeRoom(response.data);
             const updated = prev.map((room) =>
               room.roomId === roomId
                 ? {
@@ -169,7 +177,7 @@ export const useChatRoomsQuery = ({ token }: UseChatRoomsQueryProps) => {
           });
         }
       } catch {
-        // Silently fail — will be refreshed on next focus or socket event
+        // Silently fail
       }
     },
     [token, normalizeRoom, sortRooms],

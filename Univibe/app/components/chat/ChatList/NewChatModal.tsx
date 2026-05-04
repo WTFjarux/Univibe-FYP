@@ -44,6 +44,14 @@ export default function NewChatModal({
   const [loading, setLoading] = useState<boolean>(false);
 
   useEffect(() => {
+    if (!visible) {
+      setSearchQuery("");
+      setUsers([]);
+      setLoading(false);
+    }
+  }, [visible]);
+
+  useEffect(() => {
     if (visible && searchQuery.trim()) {
       fetchUsers(searchQuery);
     } else if (visible) {
@@ -56,27 +64,29 @@ export default function NewChatModal({
     setLoading(true);
     try {
       const res = await fetch(
-        `${API_BASE_URL}/api/profile/search?query=${encodeURIComponent(query)}&limit=20`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        },
+        `${API_BASE_URL}/api/profile/search-connections?query=${encodeURIComponent(query)}&limit=20`,
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       const data = await res.json();
 
-      // FIX: API returns data.data, not data.profiles
       if (data.success && data.data) {
         const profiles = Array.isArray(data.data) ? data.data : [];
-
-        // Map profiles to User type and filter out current user
         const filtered = profiles
-          .filter((profile: any) => profile.user?._id !== currentUserId)
+          .filter((profile: any) => {
+            const userId = profile.user?._id || profile._id;
+            return userId !== currentUserId;
+          })
           .map((profile: any) => ({
             _id: profile.user?._id || profile._id,
-            name: profile.user?.name || profile.fullName || "Unknown",
-            username: profile.username || "",
-            profilePicture: profile.profilePicture || "",
+            name:
+              profile.user?.name ||
+              profile.fullName ||
+              profile.name ||
+              "Unknown",
+            username: profile.user?.username || profile.username || "",
+            profilePicture:
+              profile.profilePicture || profile.user?.profilePicture || "",
           }));
-
         setUsers(filtered);
       } else {
         setUsers([]);
@@ -96,7 +106,6 @@ export default function NewChatModal({
 
   const handleStartChat = (user: User) => {
     onStartChat(user._id, user.name, user.profilePicture);
-    // Reset state after starting chat
     setSearchQuery("");
     setUsers([]);
   };
