@@ -5,22 +5,23 @@ import {
   Text,
   ScrollView,
   RefreshControl,
-  ActivityIndicator,
-  Alert,
   TouchableOpacity,
+  Alert,
   Animated,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useAuth } from "../../../lib/contexts/AuthContext";
 import Ionicons from "@expo/vector-icons/Ionicons";
-
-// Components
 import FeedHeader from "@/app/components/Feed/FeedHeader";
 import CreatePostButton from "@/app/components/Feed/Post/CreatePostButton";
 import FilterTabs from "@/app/components/Feed/FilterTabs";
 import PostCard from "@/app/components/Feed/Post/PostCard";
 import SharePostModal from "@/app/components/Feed/Post/SharePostModal";
+import FeedSkeleton, {
+  LoadMorePostsSkeleton,
+  InitialPostsLoadingSkeleton,
+} from "@/app/components/Feed/FeedSkeleton";
 
 // Services
 import {
@@ -61,7 +62,6 @@ export default function FeedScreen() {
     removePost,
     updatePost,
     refreshOnFocus,
-    forceRefresh,
     markNeedsRefresh,
   } = useFeed();
 
@@ -74,6 +74,9 @@ export default function FeedScreen() {
   const [hiddenPosts, setHiddenPosts] = useState<Set<string>>(new Set());
   const [mutedUsers, setMutedUsers] = useState<Set<string>>(new Set());
   const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
+
+  // Loading states for skeletons
+  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
 
   // Info bar
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
@@ -110,6 +113,7 @@ export default function FeedScreen() {
   );
 
   // ============ INFO BAR ============
+  // ... (keep all info bar functions the same)
 
   const showInfoBar = (
     message: string,
@@ -249,11 +253,24 @@ export default function FeedScreen() {
       const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
       const isCloseToBottom =
         layoutMeasurement.height + contentOffset.y >= contentSize.height - 100;
-      if (isCloseToBottom && currentFeed.hasMore && !currentFeed.loadingMore) {
-        loadMoreFeed();
+      if (
+        isCloseToBottom &&
+        currentFeed.hasMore &&
+        !currentFeed.loadingMore &&
+        !loadingMorePosts
+      ) {
+        setLoadingMorePosts(true);
+        loadMoreFeed().finally(() => {
+          setLoadingMorePosts(false);
+        });
       }
     },
-    [currentFeed.hasMore, currentFeed.loadingMore, loadMoreFeed],
+    [
+      currentFeed.hasMore,
+      currentFeed.loadingMore,
+      loadMoreFeed,
+      loadingMorePosts,
+    ],
   );
 
   // ============ POST INTERACTIONS ============
@@ -299,8 +316,6 @@ export default function FeedScreen() {
     });
   };
 
-
-
   const handleShare = (postId: string) => {
     if (!token) {
       showInfoBar("Please login to share posts", "info");
@@ -318,10 +333,7 @@ export default function FeedScreen() {
     router.push(userId === user?.id ? "/(tabs)/profile" : `/profile/${userId}`);
   };
 
-  // ============ POST OPTIONS ============
-
   const handleEditPost = (postId: string) => {
-    // Mark that feed needs refresh when returning from edit
     markNeedsRefresh();
     router.push({
       pathname: "/components/Feed/Post/EditPost",
@@ -406,14 +418,11 @@ export default function FeedScreen() {
     );
   };
 
-  // ============ UI ACTIONS ============
-
   const handleCreatePost = () => {
     if (!token) {
       showInfoBar("Please login to create posts", "info");
       return;
     }
-    // Mark that feed needs refresh when returning
     markNeedsRefresh();
     router.push("/components/Feed/Post/create");
   };
@@ -442,7 +451,7 @@ export default function FeedScreen() {
           { backgroundColor: bg, transform: [{ translateY: slideAnim }] },
         ]}
       >
-        <Ionicons name={icon as any} size={20} color="#fff" />
+        <Ionicons name={icon} size={20} color="#fff" />
         <Text style={styles.infoBarText}>{infoMessage}</Text>
         {undoAction && (
           <TouchableOpacity onPress={handleUndo} style={styles.undoButton}>
@@ -451,22 +460,6 @@ export default function FeedScreen() {
         )}
       </Animated.View>
     );
-  };
-
-  const renderFooter = () => {
-    if (currentFeed.loadingMore)
-      return (
-        <View style={{ padding: 20 }}>
-          <ActivityIndicator size="small" color="#8b5cf6" />
-        </View>
-      );
-    if (!currentFeed.hasMore && visiblePosts.length > 0)
-      return (
-        <View style={styles.endMessage}>
-          <Text style={styles.endMessageText}>No more posts to load</Text>
-        </View>
-      );
-    return null;
   };
 
   const sharePostData = sharePost
@@ -503,12 +496,11 @@ export default function FeedScreen() {
     );
   }
 
+  // Show skeleton during initial loading
   if (currentFeed.loading && visiblePosts.length === 0) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#8b5cf6" />
-        </View>
+      <SafeAreaView style={styles.container} edges={["top"]}>
+        <FeedSkeleton />
       </SafeAreaView>
     );
   }
@@ -574,7 +566,6 @@ export default function FeedScreen() {
                 post={post}
                 onLikePress={handleLike}
                 onCommentPress={handleComment}
-
                 onSharePress={handleShare}
                 onEdit={handleEditPost}
                 onDelete={handleDeletePost}
@@ -597,7 +588,9 @@ export default function FeedScreen() {
           )}
         </View>
 
-        {renderFooter()}
+        {/* Loading more skeleton */}
+        {loadingMorePosts && <LoadMorePostsSkeleton />}
+
         <View style={styles.bottomPadding} />
       </ScrollView>
 

@@ -30,6 +30,10 @@ const setupUserHandlers = (io, socket) => {
    * Mark user as online when they connect
    */
   const markUserOnline = () => {
+    if (!userId) {
+      console.error("❌ No userId for socket:", socket.id);
+      return;
+    }
     // Register in room manager immediately (sync)
     registerUser(userId, socket.id);
 
@@ -81,6 +85,8 @@ const setupUserHandlers = (io, socket) => {
    * Mark user as offline when they disconnect
    */
   const markUserOffline = async () => {
+    if (!userId) return;
+
     if (isCleanedUp) return; // Prevent double execution
     isCleanedUp = true;
 

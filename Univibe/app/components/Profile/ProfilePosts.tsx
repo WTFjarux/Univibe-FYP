@@ -24,7 +24,6 @@ interface ProfilePostsProps {
   hasMore: boolean;
   onLikePress: (postId: string) => void;
   onCommentPress: (postId: string) => void;
-
   onSharePress: (postId: string) => void;
   onEdit?: (postId: string) => void;
   onDelete?: (postId: string) => void;
@@ -35,6 +34,7 @@ interface ProfilePostsProps {
   onMuteUser?: (userId: string) => void;
   onBlockUser?: (userId: string) => void;
   listHeaderComponent?: React.ReactElement;
+  listFooterComponent?: React.ReactElement | null;
 }
 
 export default function ProfilePosts({
@@ -46,7 +46,6 @@ export default function ProfilePosts({
   hasMore,
   onLikePress,
   onCommentPress,
-
   onSharePress,
   onEdit,
   onDelete,
@@ -57,6 +56,7 @@ export default function ProfilePosts({
   onMuteUser,
   onBlockUser,
   listHeaderComponent,
+  listFooterComponent,
 }: ProfilePostsProps) {
   const router = useRouter();
 
@@ -85,11 +85,27 @@ export default function ProfilePosts({
     );
   };
 
+  // Show skeleton loading state when loading and no posts
   if (loading && posts.length === 0) {
     return (
-      <View style={styles.loaderContainer}>
-        <ActivityIndicator size="large" color="#8b5cf6" />
-      </View>
+      <FlatList
+        data={[]}
+        keyExtractor={() => "empty"}
+        renderItem={() => null}
+        ListHeaderComponent={listHeaderComponent}
+        ListEmptyComponent={null}
+        ListFooterComponent={listFooterComponent || renderFooter()}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#8b5cf6"
+            colors={["#8b5cf6"]}
+          />
+        }
+        showsVerticalScrollIndicator={true}
+        contentContainerStyle={styles.contentContainer}
+      />
     );
   }
 
@@ -103,7 +119,6 @@ export default function ProfilePosts({
             post={item}
             onLikePress={onLikePress}
             onCommentPress={onCommentPress}
-
             onSharePress={onSharePress}
             onEdit={onEdit}
             onDelete={onDelete}
@@ -117,8 +132,10 @@ export default function ProfilePosts({
         </View>
       )}
       ListHeaderComponent={listHeaderComponent}
-      ListEmptyComponent={renderEmptyState()}
-      ListFooterComponent={renderFooter()}
+      ListEmptyComponent={!loading ? renderEmptyState() : null}
+      ListFooterComponent={
+        listFooterComponent !== undefined ? listFooterComponent : renderFooter()
+      }
       refreshControl={
         <RefreshControl
           refreshing={refreshing}

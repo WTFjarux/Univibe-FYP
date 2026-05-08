@@ -1,5 +1,5 @@
 // app/(tabs)/events/index.tsx
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -17,6 +17,10 @@ import { eventService, Event } from "@/lib/services/eventService";
 import EventCard from "@/app/components/Events/EventCard";
 import EventCategory from "@/app/components/Events/EventCategory";
 import { useAuth } from "@/lib/contexts/AuthContext";
+import socketService from "@/lib/services/socketService";
+
+// Use a Set to track processed socket updates and prevent duplicate processing
+const processedUpdates = new Set<string>();
 
 const categories = [
   { id: "all", name: "All", icon: "grid", count: 0 },
@@ -42,26 +46,35 @@ export default function EventsScreen() {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
 
-  // Helper function to deduplicate events by _id
+  // Track pending optimistic updates
+  const pendingUpdates = useRef<
+    Map<string, { type: string; timestamp: number }>
+  >(new Map());
+
   const deduplicateEvents = (eventsArray: Event[]): Event[] => {
-    const seen = new Map();
-    return eventsArray.filter((event) => {
-      if (seen.has(event._id)) {
-        return false;
+    const seen = new Map<string, Event>();
+    eventsArray.forEach((event) => {
+      if (!seen.has(event._id)) {
+        seen.set(event._id, event);
       }
-      seen.set(event._id, true);
-      return true;
     });
+    return Array.from(seen.values());
   };
 
   const fetchEvents = async (refresh = false) => {
     if (refresh) {
       setPage(1);
       setHasMore(true);
+      // Clear cache on refresh to always get fresh data
+      eventService.clearCache();
     }
 
     try {
-      const params: any = { page: refresh ? 1 : page, limit: 10 };
+      const params: any = {
+        page: refresh ? 1 : page,
+        limit: 10,
+        skipCache: refresh, // Skip cache when refreshing
+      };
       if (selectedCategory !== "all") params.category = selectedCategory;
       if (searchQuery) params.search = searchQuery;
 
@@ -71,13 +84,16 @@ export default function EventsScreen() {
         const newEvents = response.data;
 
         if (refresh) {
-          // On refresh, just set the new events (already unique from API)
           setEvents(newEvents);
+          // Join event rooms for all new events
+          newEvents.forEach((event) => {
+            socketService.joinRoom(`event_${event._id}`, null, "event");
+          });
         } else {
-          // On load more, combine and deduplicate
-          setEvents((prev) => {
-            const combined = [...prev, ...newEvents];
-            return deduplicateEvents(combined);
+          setEvents((prev) => deduplicateEvents([...prev, ...newEvents]));
+          // Join event rooms for newly loaded events
+          newEvents.forEach((event) => {
+            socketService.joinRoom(`event_${event._id}`, null, "event");
           });
         }
 
@@ -92,6 +108,31 @@ export default function EventsScreen() {
     }
   };
 
+  // ===== REAL-TIME EVENT UPDATES VIA SOCKET =====
+  useEffect(() => {
+    const handleEventUpdate = (data: any) => {
+      setEvents((prev) => {
+        const newEvents = prev.map((event) => {
+          if (event._id !== data.eventId) return event;
+
+          return {
+            ...event,
+            interestedCount: data.interestedCount ?? event.interestedCount ?? 0,
+            rsvpCount: data.rsvpCount ?? event.rsvpCount ?? 0,
+            isFull: data.isFull ?? event.isFull,
+          };
+        });
+        return newEvents;
+      });
+    };
+
+    socketService.on("event:updated", handleEventUpdate);
+
+    return () => {
+      socketService.off("event:updated", handleEventUpdate);
+    };
+  }, []);
+
   const onRefresh = () => {
     setRefreshing(true);
     fetchEvents(true);
@@ -103,55 +144,172 @@ export default function EventsScreen() {
     }
   };
 
+  // Optimistic update for interest
   const handleInterest = async (eventId: string) => {
+    const event = events.find((e) => e._id === eventId);
+    if (!event) return;
+
+    // Track this optimistic update
+    pendingUpdates.current.set(eventId, {
+      type: "interest",
+      timestamp: Date.now(),
+    });
+
+    // Optimistic UI update
+    setEvents((prev) =>
+      prev.map((e) => {
+        if (e._id !== eventId) return e;
+        const currentCount = e.interestedCount ?? 0;
+        return {
+          ...e,
+          isInterested: !e.isInterested,
+          interestedCount: e.isInterested
+            ? Math.max(0, currentCount - 1)
+            : currentCount + 1,
+        };
+      }),
+    );
+
     try {
       const response = await eventService.toggleInterest(eventId);
+      // Clean up pending update
+      pendingUpdates.current.delete(eventId);
+
       if (response.success) {
+        // Server-confirmed update
         setEvents((prev) =>
-          prev.map((event) =>
-            event._id === eventId
-              ? {
-                  ...event,
-                  isInterested: response.isInterested,
-                  interestedCount: response.interestedCount || 0,
-                }
-              : event,
-          ),
+          prev.map((e) => {
+            if (e._id !== eventId) return e;
+            return {
+              ...e,
+              isInterested: response.isInterested ?? !e.isInterested,
+              interestedCount:
+                response.interestedCount ?? e.interestedCount ?? 0,
+            };
+          }),
         );
+      } else {
+        // Revert on failure
+        revertOptimisticUpdate(eventId, "interest");
       }
     } catch (error) {
-      console.error("Error toggling interest:", error);
+      // Clean up and revert on error
+      pendingUpdates.current.delete(eventId);
+      revertOptimisticUpdate(eventId, "interest");
     }
   };
 
+  // Optimistic update for RSVP
   const handleRsvp = async (eventId: string) => {
+    const event = events.find((e) => e._id === eventId);
+    if (!event) return;
+
+    const wasRsvpd = event.isRsvpd ?? false;
+    const currentCount = event.rsvpCount ?? 0;
+
+    // Calculate new count safely
+    const newRsvpCount = wasRsvpd
+      ? Math.max(0, currentCount - 1) // Removing RSVP
+      : currentCount + 1; // Adding RSVP
+
+    // Optimistic UI update
+    setEvents((prev) =>
+      prev.map((e) => {
+        if (e._id !== eventId) return e;
+        return {
+          ...e,
+          isRsvpd: !wasRsvpd,
+          rsvpCount: newRsvpCount,
+        };
+      }),
+    );
+
     try {
       const response = await eventService.toggleRsvp(eventId);
+
       if (response.success) {
+        // Use server values, but fall back to optimistic if undefined
+        const serverRsvpCount =
+          response.rsvpCount !== undefined ? response.rsvpCount : newRsvpCount;
+
+        const serverIsRsvpd =
+          response.isRsvpd !== undefined ? response.isRsvpd : !wasRsvpd;
+
         setEvents((prev) =>
-          prev.map((event) =>
-            event._id === eventId
-              ? {
-                  ...event,
-                  isRsvpd: response.isRsvpd,
-                  rsvpCount: response.rsvpCount || 0,
-                  isFull: response.isFull,
-                }
-              : event,
-          ),
+          prev.map((e) => {
+            if (e._id !== eventId) return e;
+            return {
+              ...e,
+              isRsvpd: serverIsRsvpd,
+              rsvpCount: serverRsvpCount,
+              isFull: response.isFull ?? e.isFull,
+            };
+          }),
+        );
+      } else {
+        // Revert on failure
+        setEvents((prev) =>
+          prev.map((e) => {
+            if (e._id !== eventId) return e;
+            return {
+              ...e,
+              isRsvpd: wasRsvpd,
+              rsvpCount: currentCount,
+            };
+          }),
         );
       }
     } catch (error) {
-      console.error("Error toggling RSVP:", error);
+      console.error("💥 Error, reverting:", error);
+      // Revert on error
+      setEvents((prev) =>
+        prev.map((e) => {
+          if (e._id !== eventId) return e;
+          return {
+            ...e,
+            isRsvpd: wasRsvpd,
+            rsvpCount: currentCount,
+          };
+        }),
+      );
     }
+  };
+
+  // Helper to revert optimistic updates
+  const revertOptimisticUpdate = (
+    eventId: string,
+    type: "interest" | "rsvp",
+  ) => {
+    setEvents((prev) =>
+      prev.map((e) => {
+        if (e._id !== eventId) return e;
+        return {
+          ...e,
+          isInterested: type === "interest" ? !e.isInterested : e.isInterested,
+          interestedCount:
+            type === "interest"
+              ? e.isInterested
+                ? (e.interestedCount ?? 0) + 1
+                : Math.max(0, (e.interestedCount ?? 0) - 1)
+              : e.interestedCount,
+          isRsvpd: type === "rsvp" ? !e.isRsvpd : e.isRsvpd,
+          rsvpCount:
+            type === "rsvp"
+              ? e.isRsvpd
+                ? (e.rsvpCount ?? 0) + 1
+                : Math.max(0, (e.rsvpCount ?? 0) - 1)
+              : e.rsvpCount,
+        };
+      }),
+    );
   };
 
   useFocusEffect(
     useCallback(() => {
+      eventService.clearCache(); // Always clear cache on focus
       fetchEvents(true);
-    }, [selectedCategory, searchQuery]),
+    }, []), // Empty array = always run on focus, but only create callback once
   );
-
   if (loading && events.length === 0) {
     return (
       <SafeAreaView style={styles.container}>
@@ -181,7 +339,7 @@ export default function EventsScreen() {
         scrollEventThrottle={400}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Header with Search Icon */}
+        {/* Header */}
         <View style={styles.header}>
           <View>
             <Text style={styles.title}>Events</Text>
@@ -195,7 +353,7 @@ export default function EventsScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Search Bar - Toggle */}
+        {/* Search Bar */}
         {showSearch && (
           <View style={styles.searchContainer}>
             <Ionicons name="search-outline" size={20} color="#9ca3af" />
@@ -249,7 +407,7 @@ export default function EventsScreen() {
           ) : (
             events.map((event) => (
               <EventCard
-                key={event._id} // This ensures unique keys
+                key={event._id}
                 event={event}
                 currentUserId={currentUserId}
                 onInterestPress={handleInterest}
@@ -263,18 +421,15 @@ export default function EventsScreen() {
           <ActivityIndicator style={styles.loader} color="#8b5cf6" />
         )}
 
-        {/* End of Events Message */}
         {!hasMore && events.length > 0 && (
           <View style={styles.endMessage}>
             <Text style={styles.endMessageText}>No more events to load</Text>
           </View>
         )}
 
-        {/* Add extra padding at bottom */}
         <View style={styles.bottomPadding} />
       </ScrollView>
 
-      {/* Floating Action Button for Create */}
       <TouchableOpacity
         style={styles.fab}
         onPress={() => router.push("/events/create")}

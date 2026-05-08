@@ -765,6 +765,124 @@ const uploadVideo = (req, res, next) => {
 };
 
 // ============================================
+// Story Media Upload
+// ============================================
+
+const storyMediaStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, "../uploads/stories");
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const userId = req.user?.id || req.user?._id || "unknown";
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
+    const filename = `story-${userId}-${uniqueSuffix}${ext}`;
+    cb(null, filename);
+  },
+});
+
+const storyMediaFileFilter = (req, file, cb) => {
+  const allowedImageTypes = [
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+  ];
+
+  const allowedVideoTypes = [
+    "video/mp4",
+    "video/quicktime",
+    "video/x-msvideo",
+    "video/webm",
+    "video/3gpp",
+    "video/x-matroska",
+  ];
+
+  const allowed = [...allowedImageTypes, ...allowedVideoTypes];
+  const ext = path.extname(file.originalname).toLowerCase();
+  const allowedExts = [
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".webp",
+    ".heic",
+    ".heif",
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".webm",
+    ".3gp",
+    ".mkv",
+  ];
+
+  if (allowed.includes(file.mimetype) || allowedExts.includes(ext)) {
+    cb(null, true);
+  } else {
+    cb(
+      new Error(`Story media type not supported: ${file.originalname}`),
+      false,
+    );
+  }
+};
+
+const storyMediaUpload = multer({
+  storage: storyMediaStorage,
+  fileFilter: storyMediaFileFilter,
+  limits: {
+    fileSize: 200 * 1024 * 1024, // 200MB
+  },
+});
+
+const uploadStoryMedia = (req, res, next) => {
+  console.log("[uploadStoryMedia] Processing story media upload...");
+
+  storyMediaUpload.single("media")(req, res, async (err) => {
+    if (err) {
+      console.error("Story media upload error:", err);
+      return handleUploadError(err, req, res, next);
+    }
+
+    if (req.file) {
+      const filePath = req.file.path;
+      if (fs.existsSync(filePath)) {
+        const stats = fs.statSync(filePath);
+        console.log("Story media saved successfully:");
+        console.log(`   Path: ${filePath}`);
+        console.log(`   Filename: ${req.file.filename}`);
+        console.log(`   Size: ${formatBytes(stats.size)}`);
+        console.log(`   Type: ${req.file.mimetype}`);
+
+        let mediaType = "image";
+        if (req.file.mimetype?.startsWith("video/")) {
+          mediaType = "video";
+        }
+
+        req.storyMediaInfo = {
+          filename: req.file.filename,
+          url: `/uploads/stories/${req.file.filename}`,
+          size: req.file.size,
+          mimetype: req.file.mimetype,
+          type: mediaType,
+        };
+      } else {
+        console.error("Story media file not found at path:", filePath);
+      }
+    } else {
+      console.error("No media file in request");
+    }
+
+    next();
+  });
+};
+
+// ============================================
 // EXPORTS
 // ============================================
 
@@ -781,6 +899,8 @@ module.exports = {
   uploadAttachments,
   uploadSingleAttachment,
   uploadVideo,
+  uploadStoryMedia,
+  uploadStoryMedia,
   getVideoMetadata,
   deleteOldImage,
   formatBytes,

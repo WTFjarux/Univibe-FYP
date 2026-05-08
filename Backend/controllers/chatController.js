@@ -38,6 +38,8 @@ const formatMessage = (msg, currentUserId) => ({
   originalSenderName: msg.originalSenderName || null,
   forwardedAt: msg.forwardedAt || null,
   sharedPost: msg.sharedPost || null,
+  // ✅ ADD THIS
+  story: msg.story || null,
   replyTo: msg.replyTo?.messageId
     ? {
         messageId: msg.replyTo.messageId,
@@ -282,7 +284,11 @@ exports.getUserChatRooms = async (req, res) => {
           lastMessage: lastMsg
             ? {
                 message:
-                  lastMsg.type === "audio" ? "Voice message" : lastMsg.message,
+                  lastMsg.type === "audio"
+                    ? "Voice message"
+                    : lastMsg.type === "story_reply"
+                      ? "📸 Story reply"
+                      : lastMsg.message,
                 sentAt: lastMsg.createdAt,
                 senderId: lastMsg.sender?.toString(),
                 senderName: lastMsg.senderName,

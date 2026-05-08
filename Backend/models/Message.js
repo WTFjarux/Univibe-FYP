@@ -23,6 +23,7 @@ const messageTypes = [
   "file",
   "location",
   "post",
+  "story_reply",
 ];
 
 const messageSchema = new mongoose.Schema(
@@ -105,6 +106,13 @@ const messageSchema = new mongoose.Schema(
       postAuthorAvatar: { type: String, default: "" },
       isAnonymous: { type: Boolean, default: false },
       postCreatedAt: { type: Date },
+    },
+
+    // Story reply
+    story: {
+      storyId: { type: mongoose.Schema.Types.ObjectId, ref: "Story" },
+      mediaUrl: { type: String, default: "" },
+      thumbnailUrl: { type: String, default: "" },
     },
 
     // Read receipts

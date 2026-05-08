@@ -373,7 +373,9 @@ export const useChatMessages = ({
   // ---------------------------------------------------------------------------
 
   const addMessage = useCallback(
+    
     (message: Message) => {
+      
       if (!message._id) return;
 
       // Block duplicates synchronously

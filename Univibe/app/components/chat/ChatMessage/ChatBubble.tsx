@@ -37,7 +37,15 @@ interface Message {
   roomId: string;
   createdAt: string;
   status?: "sent" | "delivered" | "read" | "sending";
-  type?: "text" | "image" | "audio" | "video" | "file" | "location" | "post";
+  type?:
+    | "text"
+    | "image"
+    | "audio"
+    | "video"
+    | "file"
+    | "location"
+    | "post"
+    | "story_reply";
   mediaUrl?: string;
   thumbnailUrl?: string;
   mediaSize?: number;
@@ -74,6 +82,12 @@ interface Message {
     isAnonymous?: boolean;
     postCreatedAt?: string;
   };
+  story?: {
+    storyId: string;
+    mediaUrl?: string;
+    thumbnailUrl?: string;
+    storyOwnerId?: string;
+  };
 }
 
 interface ChatBubbleProps {
@@ -98,6 +112,84 @@ interface ChatBubbleProps {
   onScrollToMessage?: (messageId: string) => void;
 }
 
+// -----------------------------------------------------------------------------
+// Story Reply Card Component (outside bubble)
+// -----------------------------------------------------------------------------
+
+export const StoryReplyCard = React.memo(
+  ({
+    message,
+    isOwnMessage,
+    getFullImageUrl,
+    onPress,
+  }: {
+    message: Message;
+    isOwnMessage: boolean;
+    getFullImageUrl: (url: string) => string;
+    onPress: () => void;
+  }) => {
+    const storyImageUrl =
+      message.story?.thumbnailUrl || message.story?.mediaUrl;
+    const fullStoryImageUrl = storyImageUrl
+      ? getFullImageUrl(storyImageUrl)
+      : null;
+
+    const labelText = isOwnMessage
+      ? "You replied to their campus moment"
+      : `${message.senderName} replied to your campus moment`;
+
+    return (
+      <View style={styles.storyReplyOuter}>
+        {/* Label */}
+        <View
+          style={[
+            styles.storyReplyLabel,
+            isOwnMessage
+              ? styles.storyReplyLabelOwn
+              : styles.storyReplyLabelOther,
+          ]}
+        >
+          <Ionicons name="arrow-undo-outline" size={11} color="#8E8E93" />
+          <Text style={styles.storyReplyLabelText} numberOfLines={1}>
+            {labelText}
+          </Text>
+        </View>
+
+        {/* Story Preview Thumbnail */}
+        <Pressable
+          onPress={onPress}
+          style={[
+            styles.storyPreviewCard,
+            isOwnMessage
+              ? styles.storyPreviewCardOwn
+              : styles.storyPreviewCardOther,
+          ]}
+        >
+          <View style={styles.storyPreviewThumb}>
+            {fullStoryImageUrl ? (
+              <Image
+                source={{ uri: fullStoryImageUrl }}
+                style={styles.storyPreviewThumbImage}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={styles.storyPreviewThumbPlaceholder}>
+                <Ionicons name="camera" size={28} color="#8E8E93" />
+              </View>
+            )}
+            {/* Gradient overlay at bottom */}
+            <View style={styles.storyThumbGradient} />
+            {/* Story type label */}
+            <View style={styles.storyTypeLabel}>
+              <Ionicons name="camera-outline" size={11} color="white" />
+              <Text style={styles.storyTypeText}>Campus Moment</Text>
+            </View>
+          </View>
+        </Pressable>
+      </View>
+    );
+  },
+);
 // -----------------------------------------------------------------------------
 // Main Component
 // -----------------------------------------------------------------------------
@@ -168,6 +260,7 @@ export default function ChatBubble({
     message.type || "",
   );
   const isPostType = message.type === "post" && message.sharedPost;
+  const isStoryReply = message.type === "story_reply" && message.story;
   const isForwarded = message.isForwarded === true;
 
   const getAvatarSource = () => {
@@ -312,6 +405,38 @@ export default function ChatBubble({
     }
   }, [message.sharedPost?.postId, router]);
 
+  const handleStoryReplyPress = useCallback(() => {
+    if (message.story?.storyId) {
+      let storyOwnerId: string;
+
+      if (isOwnMessage) {
+        const parts = message.roomId.split("_");
+        if (parts.length >= 3) {
+          storyOwnerId = parts[1] === currentUserId ? parts[2] : parts[1];
+        } else {
+          storyOwnerId = getSenderId();
+        }
+      } else {
+        storyOwnerId = currentUserId || "";
+      }
+
+      router.push({
+        pathname: "/screens/StoryViewerScreen",
+        params: {
+          userId: storyOwnerId,
+          storyId: message.story.storyId, // ✅ Already passing this
+          initialStoryId: message.story.storyId, // ✅ Add explicit initial story
+        },
+      });
+    }
+  }, [
+    message.story?.storyId,
+    message.roomId,
+    isOwnMessage,
+    currentUserId,
+    router,
+  ]);
+
   const getForwardedLabel = (): string => {
     if (!isForwarded) return "";
     if (getSenderId() === currentUserId) return "You forwarded";
@@ -376,21 +501,19 @@ export default function ChatBubble({
   };
 
   const renderMessageContent = () => {
+    // Post share
     if (isPostType) {
       const postData = buildPostFromSharedData();
       if (!postData) return null;
       const hasMessage = message.message && message.message.trim().length > 0;
-
       return (
         <View style={styles.postMessageContainer}>
-          {/* ✅ Long press on the entire shared post area */}
           <Pressable
             onPress={handleSharedPostPress}
             onLongPress={handleLongPress}
             delayLongPress={300}
             style={{ width: "100%" }}
           >
-            {/* ✅ pointerEvents="none" prevents PostCard from stealing touches */}
             <View pointerEvents="none">
               <PostCard
                 post={postData}
@@ -400,7 +523,6 @@ export default function ChatBubble({
                 hideTime={true}
                 onLikePress={() => {}}
                 onCommentPress={() => {}}
-
                 onSharePress={() => {}}
               />
             </View>
@@ -436,6 +558,21 @@ export default function ChatBubble({
       );
     }
 
+    // Story reply - only the text inside bubble
+    if (isStoryReply) {
+      return (
+        <Text
+          style={[
+            styles.messageText,
+            isOwnMessage ? styles.ownMessageText : styles.otherMessageText,
+          ]}
+        >
+          {message.message || "📸 Replied to story"}
+        </Text>
+      );
+    }
+
+    // Media
     if (isMediaType) {
       return (
         <AttachmentMessage
@@ -471,6 +608,7 @@ export default function ChatBubble({
       );
     }
 
+    // Audio sending
     if (
       message.type === "audio" &&
       (message.status === "sending" || !message.mediaUrl)
@@ -509,6 +647,7 @@ export default function ChatBubble({
       );
     }
 
+    // Audio
     if (message.type === "audio") {
       return (
         <View style={styles.audioMessageContainer}>
@@ -523,6 +662,7 @@ export default function ChatBubble({
       );
     }
 
+    // Text
     return (
       <Text
         style={[
@@ -581,6 +721,7 @@ export default function ChatBubble({
           {!isOwnMessage && !showAvatar && <View style={styles.avatarSpacer} />}
           {isOwnMessage && <View style={styles.avatarSpacer} />}
           <View style={styles.messageContent}>
+            {/* Reply preview */}
             {message.replyTo && (
               <ReplyPreview
                 replyTo={{
@@ -598,23 +739,41 @@ export default function ChatBubble({
                 onScrollToMessage={onScrollToMessage}
               />
             )}
+            {/* Forwarded label */}
             {renderForwardedLabel()}
+            {/* Story Reply Card - OUTSIDE bubble */}
+            {isStoryReply && (
+              <StoryReplyCard
+                message={message}
+                isOwnMessage={isOwnMessage}
+                getFullImageUrl={getFullImageUrl}
+                onPress={handleStoryReplyPress}
+              />
+            )}
+            {/* Message bubble */}
             <Pressable
               onLongPress={handleLongPress}
               delayLongPress={300}
               style={({ pressed }) => [
                 styles.bubble,
-                !isMediaType && !isPostType && styles.bubbleAutoWidth,
                 !isMediaType &&
                   !isPostType &&
+                  !isStoryReply &&
+                  styles.bubbleAutoWidth,
+                !isMediaType &&
+                  !isPostType &&
+                  !isStoryReply &&
                   (isOwnMessage ? styles.ownBubble : styles.otherBubble),
                 (isMediaType || isPostType) && styles.mediaBubble,
+                isStoryReply &&
+                  (isOwnMessage ? styles.ownBubble : styles.otherBubble),
                 isOwnMessage ? styles.bubbleAlignRight : styles.bubbleAlignLeft,
                 pressed && styles.bubblePressed,
               ]}
             >
               {renderMessageContent()}
             </Pressable>
+            {/* Reactions */}
             {reactionGroups && Object.keys(reactionGroups).length > 0 && (
               <View
                 style={[
@@ -632,6 +791,7 @@ export default function ChatBubble({
                 ))}
               </View>
             )}
+            {/* Time */}
             {showTime && (
               <View
                 style={[
@@ -690,6 +850,10 @@ export default function ChatBubble({
     </>
   );
 }
+
+// -----------------------------------------------------------------------------
+// Styles
+// -----------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
   messageWrapper: {
@@ -842,5 +1006,87 @@ const styles = StyleSheet.create({
     marginLeft: 2,
     justifyContent: "center",
     alignItems: "center",
+  },
+
+  // Story Reply Styles
+  storyReplyOuter: {
+    marginTop: 0,
+    marginBottom: 6,
+  },
+  storyReplyLabel: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 4,
+    paddingHorizontal: 2,
+    gap: 4,
+  },
+  storyReplyLabelOwn: {
+    alignSelf: "flex-end",
+    justifyContent: "flex-end",
+  },
+  storyReplyLabelOther: {
+    alignSelf: "flex-start",
+    justifyContent: "flex-start",
+  },
+  storyReplyLabelText: {
+    fontSize: 10.5,
+    fontFamily: "SofiaSans-Regular",
+    fontStyle: "italic",
+    color: "#8E8E93",
+  },
+  storyPreviewCard: {
+    borderRadius: 12,
+    overflow: "hidden",
+    borderWidth: 1,
+    marginBottom: 6,
+  },
+  storyPreviewCardOwn: {
+    backgroundColor: "rgba(139, 92, 246, 0.06)",
+    borderColor: "rgba(139, 92, 246, 0.12)",
+    alignSelf: "flex-end",
+  },
+  storyPreviewCardOther: {
+    backgroundColor: "#FFFFFF",
+    borderColor: "rgba(0,0,0,0.08)",
+    alignSelf: "flex-start",
+  },
+  storyPreviewThumb: {
+    width: 125,
+    height: 160,
+    position: "relative",
+  },
+  storyPreviewThumbImage: {
+    width: 125,
+    height: 160,
+    backgroundColor: "#E5E5EA",
+  },
+  storyPreviewThumbPlaceholder: {
+    width: 125,
+    height: 160,
+    backgroundColor: "#F2F2F7",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  storyThumbGradient: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 28,
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  storyTypeLabel: {
+    position: "absolute",
+    bottom: 6,
+    left: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  storyTypeText: {
+    fontSize: 10,
+    color: "white",
+    fontWeight: "600",
+    fontFamily: "SofiaSans-SemiBold",
   },
 });

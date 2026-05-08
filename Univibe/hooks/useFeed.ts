@@ -95,39 +95,84 @@ export function useFeed(): UseFeedReturn {
     };
   }
 
+  // ===========================================================================
+  // Silent fetch - no loading/refreshing indicators
+  // ===========================================================================
+  const fetchFeedSilent = useCallback(async (feedType: FeedType) => {
+    if (isFetching.current) return;
+    isFetching.current = true;
+
+    try {
+      let response: FeedResponse;
+      switch (feedType) {
+        case "campus":
+          response = await feedService.getCampusFeed();
+          break;
+        case "connections":
+          response = await feedService.getConnectionsFeed();
+          break;
+        case "anonymous":
+          response = await feedService.getAnonymousFeed();
+          break;
+        default:
+          isFetching.current = false;
+          return;
+      }
+
+      if (!isMounted.current) {
+        isFetching.current = false;
+        return;
+      }
+
+      cursors.current[feedType] = response.pagination.nextCursor;
+      pagination.current[feedType] = response.pagination;
+      lastRefreshTime.current[feedType] = Date.now();
+
+      // ✅ Update posts WITHOUT changing loading/refreshing states
+      setFeeds((prev) => ({
+        ...prev,
+        [feedType]: {
+          ...prev[feedType],
+          posts: response.posts,
+          hasMore: response.pagination.hasMore,
+          error: null,
+          lastFetchedAt: Date.now(),
+          loading: false,
+          refreshing: false,
+          loadingMore: false,
+        },
+      }));
+    } catch (error: any) {
+      console.error(`❌ Error silent fetching ${feedType} feed:`, error);
+    } finally {
+      isFetching.current = false;
+    }
+  }, []);
+
+  // ===========================================================================
+  // Normal fetch - with loading/refreshing indicators
+  // ===========================================================================
   const fetchFeed = useCallback(
     async (
       feedType: FeedType,
       mode: "initial" | "refresh" | "loadMore" = "initial",
     ) => {
-      // Prevent concurrent fetches
-      if (isFetching.current) {
-        return;
-      }
+      if (isFetching.current) return;
 
       const currentState = feeds[feedType];
 
-      // Guard: Don't load more if already loading or no more
       if (
         mode === "loadMore" &&
         (currentState.loadingMore || !currentState.hasMore)
-      ) {
+      )
         return;
-      }
-
-      // Guard: Don't refresh if already refreshing
-      if (mode === "refresh" && currentState.refreshing) {
-        return;
-      }
-
-      // Guard: Don't initial fetch if already have data
+      if (mode === "refresh" && currentState.refreshing) return;
       if (
         mode === "initial" &&
         currentState.posts.length > 0 &&
         !needsRefresh.current
-      ) {
+      )
         return;
-      }
 
       needsRefresh.current = false;
       isFetching.current = true;
@@ -147,7 +192,6 @@ export function useFeed(): UseFeedReturn {
         let response: FeedResponse;
 
         if (mode === "refresh" || mode === "initial") {
-          // Fetch first page (no cursor)
           switch (feedType) {
             case "campus":
               response = await feedService.getCampusFeed();
@@ -268,10 +312,13 @@ export function useFeed(): UseFeedReturn {
     [feeds],
   );
 
+  // ===========================================================================
+  // Public API
+  // ===========================================================================
+
   const switchFeed = useCallback(
     (feedType: FeedType) => {
       setActiveFeed(feedType);
-
       const feedState = feeds[feedType];
       if (
         feedState.posts.length === 0 &&
@@ -284,32 +331,12 @@ export function useFeed(): UseFeedReturn {
     [feeds, fetchFeed],
   );
 
-  // Pull-to-refresh (respects cooldown)
+  // Pull-to-refresh (visible indicator)
   const refresh = useCallback(async () => {
     const now = Date.now();
     const lastTime = lastRefreshTime.current[activeFeed];
 
     if (now - lastTime < REFRESH_COOLDOWN) {
-      // Briefly show refreshing state for UX
-      setFeeds((prev) => ({
-        ...prev,
-        [activeFeed]: {
-          ...prev[activeFeed],
-          refreshing: true,
-        },
-      }));
-
-      setTimeout(() => {
-        if (isMounted.current) {
-          setFeeds((prev) => ({
-            ...prev,
-            [activeFeed]: {
-              ...prev[activeFeed],
-              refreshing: false,
-            },
-          }));
-        }
-      }, 500);
       return;
     }
 
@@ -329,50 +356,39 @@ export function useFeed(): UseFeedReturn {
       currentState.loadingMore ||
       currentState.refreshing ||
       !currentState.hasMore
-    ) {
+    )
       return;
-    }
     await fetchFeed(activeFeed, "loadMore");
   }, [activeFeed, feeds, fetchFeed]);
 
-  // Optimistic add new post to relevant feeds
   const addNewPost = useCallback((post: Post) => {
     feedService.invalidateCache();
-
     setFeeds((prev) => {
       const updated = { ...prev };
-
-      // Campus feed: campus posts + anonymous posts
       if (post.visibility === "campus" || post.isAnonymous) {
         updated.campus = {
           ...updated.campus,
           posts: [post, ...updated.campus.posts],
         };
       }
-
-      // Connections feed: connections visibility posts
       if (post.visibility === "connections") {
         updated.connections = {
           ...updated.connections,
           posts: [post, ...updated.connections.posts],
         };
       }
-
-      // Anonymous feed: anonymous posts only
       if (post.isAnonymous) {
         updated.anonymous = {
           ...updated.anonymous,
           posts: [post, ...updated.anonymous.posts],
         };
       }
-
       return updated;
     });
   }, []);
 
   const removePost = useCallback((postId: string) => {
     feedService.invalidateCache();
-
     setFeeds((prev) => {
       const updated = { ...prev };
       (Object.keys(updated) as FeedType[]).forEach((feedType) => {
@@ -400,12 +416,11 @@ export function useFeed(): UseFeedReturn {
     });
   }, []);
 
-  // Light refresh when screen gains focus (respects interval)
+  // ✅ Silent refresh on focus - no visible indicator
   const refreshOnFocus = useCallback(async () => {
     const now = Date.now();
     const lastTime = lastRefreshTime.current[activeFeed];
 
-    // Only refresh if it's been more than FOCUS_REFRESH_INTERVAL
     if (now - lastTime > FOCUS_REFRESH_INTERVAL) {
       cursors.current[activeFeed] = null;
       pagination.current[activeFeed] = {
@@ -414,12 +429,11 @@ export function useFeed(): UseFeedReturn {
         limit: 10,
       };
       await feedService.invalidateFeedCache(activeFeed);
-      await fetchFeed(activeFeed, "refresh");
-    } else {
+      await fetchFeedSilent(activeFeed); // ✅ Silent - no pull-down
     }
-  }, [activeFeed, fetchFeed]);
+  }, [activeFeed, fetchFeedSilent]);
 
-  // Force refresh (bypasses cooldown completely)
+  // Force refresh (visible indicator)
   const forceRefresh = useCallback(async () => {
     cursors.current[activeFeed] = null;
     pagination.current[activeFeed] = {
@@ -427,12 +441,11 @@ export function useFeed(): UseFeedReturn {
       nextCursor: null,
       limit: 10,
     };
-    lastRefreshTime.current[activeFeed] = 0; // Reset cooldown
+    lastRefreshTime.current[activeFeed] = 0;
     await feedService.invalidateCache();
     await fetchFeed(activeFeed, "refresh");
   }, [activeFeed, fetchFeed]);
 
-  // Mark that feed needs refresh (for use after creating posts)
   const markNeedsRefresh = useCallback(() => {
     needsRefresh.current = true;
   }, []);

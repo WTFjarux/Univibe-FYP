@@ -1,4 +1,4 @@
-// app/profile/[id].tsx - With chat integration and connection management
+// app/profile/[id].tsx - With chat integration, connection management, and skeleton loading
 
 import React, { useState, useCallback, useEffect } from "react";
 import {
@@ -32,6 +32,10 @@ import ProfileHeader from "../components/Profile/ProfileHeader";
 import ProfileInfo from "../components/Profile/ProfileInfo";
 import ProfileStats from "../components/Profile/ProfileStats";
 import PostCard from "../components/Feed/Post/PostCard";
+import ProfileSkeleton, {
+  LoadingMorePostsSkeleton,
+  InitialPostsSkeleton,
+} from "../components/Profile/ProfileSkeleton";
 import { styles } from "../components/Profile/profileStyles";
 
 type ConnectionStatus =
@@ -79,6 +83,7 @@ export default function PublicProfileScreen() {
   // Profile state
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>("not_connected");
@@ -94,8 +99,10 @@ export default function PublicProfileScreen() {
   // Posts state
   const [posts, setPosts] = useState<Post[]>([]);
   const [postsLoading, setPostsLoading] = useState(false);
+  const [initialPostsLoading, setInitialPostsLoading] = useState(true);
   const [postsPage, setPostsPage] = useState(1);
   const [hasMorePosts, setHasMorePosts] = useState(true);
+  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
   const [viewerStatus, setViewerStatus] = useState({
     isOwnProfile: false,
     isConnected: false,
@@ -186,7 +193,13 @@ export default function PublicProfileScreen() {
   const loadProfilePosts = async (page = 1, shouldAppend = false) => {
     if (!id || postsLoading) return;
 
+    if (shouldAppend) {
+      setLoadingMorePosts(true);
+    } else {
+      setInitialPostsLoading(true);
+    }
     setPostsLoading(true);
+
     try {
       const response = await getProfilePosts(id as string, page, 10);
 
@@ -210,6 +223,8 @@ export default function PublicProfileScreen() {
       showInfoBar("Failed to load posts", "error");
     } finally {
       setPostsLoading(false);
+      setInitialPostsLoading(false);
+      setLoadingMorePosts(false);
     }
   };
 
@@ -298,6 +313,7 @@ export default function PublicProfileScreen() {
       goBack();
     } finally {
       setLoading(false);
+      setInitialLoading(false);
     }
   };
 
@@ -317,7 +333,7 @@ export default function PublicProfileScreen() {
     }
   };
 
-  // ✅ FIXED: Handle like action - uses likeCount instead of likes array
+  // Handle like action
   const handleLike = async (postId: string) => {
     if (!token) {
       showInfoBar("Please login to like posts", "info");
@@ -706,22 +722,27 @@ export default function PublicProfileScreen() {
     </View>
   );
 
-  if (loading && !profile) {
+  // Show full profile skeleton during initial load
+  if (initialLoading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#8b5cf6" />
-        <Text style={styles.loadingText}>Loading profile...</Text>
-      </View>
+      <SafeAreaView style={styles.container} edges={["top"]}>
+        <ProfileSkeleton isOwnProfile={isOwnProfile} />
+      </SafeAreaView>
     );
   }
 
+  // Profile not found state
   if (!profile) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.noProfileContainer}>
           <Ionicons name="person-circle-outline" size={100} color="#d1d5db" />
           <Text style={styles.noProfileTitle}>Profile Not Found</Text>
+          <Text style={styles.noProfileDescription}>
+            The profile you're looking for doesn't exist or has been removed.
+          </Text>
           <TouchableOpacity style={styles.setupButton} onPress={goBack}>
+            <Ionicons name="arrow-back" size={20} color="white" />
             <Text style={styles.setupButtonText}>Go Back</Text>
           </TouchableOpacity>
         </View>
@@ -731,6 +752,7 @@ export default function PublicProfileScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
+      {/* Header */}
       <View style={publicStyles.header}>
         <TouchableOpacity onPress={goBack} style={publicStyles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#111827" />
@@ -767,6 +789,7 @@ export default function PublicProfileScreen() {
               isPublicView={true}
             />
             <View style={styles.content}>
+              {/* Connection Buttons (only for non-own profiles) */}
               {!isOwnProfile && (
                 <View style={publicStyles.connectionButtonContainer}>
                   {connectionStatus === "pending_received" ? (
@@ -863,30 +886,37 @@ export default function PublicProfileScreen() {
                   )}
                 </View>
               )}
-              <ProfileInfo profile={profile} user={profile.user} />
-              <ProfileStats
-                stats={{
-                  posts: profile.stats?.posts || 0,
-                  connections: profile.stats?.connections || 0,
-                  groups: profile.stats?.groups || 0,
-                }}
-              />
-              <View style={publicStyles.postsHeader}>
-                <Text style={publicStyles.postsTitle}>Posts</Text>
-              </View>
+
+              {/* Show skeleton while posts are loading, otherwise show content */}
+              {initialPostsLoading ? (
+                <InitialPostsSkeleton />
+              ) : (
+                <>
+                  <ProfileInfo profile={profile} user={profile.user} />
+                  <ProfileStats
+                    stats={{
+                      posts: profile.stats?.posts || 0,
+                      connections: profile.stats?.connections || 0,
+                      groups: profile.stats?.groups || 0,
+                    }}
+                  />
+                  <View style={publicStyles.postsHeader}>
+                    <Text style={publicStyles.postsTitle}>Posts</Text>
+                  </View>
+                </>
+              )}
             </View>
           </>
         }
         ListFooterComponent={
-          postsLoading ? (
-            <ActivityIndicator
-              style={publicStyles.footerLoader}
-              color="#8b5cf6"
-            />
+          loadingMorePosts ? (
+            <View style={publicStyles.loadingMoreContainer}>
+              <LoadingMorePostsSkeleton />
+            </View>
           ) : null
         }
         ListEmptyComponent={
-          posts.length === 0 && !postsLoading ? (
+          !initialPostsLoading && posts.length === 0 ? (
             <View style={publicStyles.emptyPostsContainer}>
               <Ionicons
                 name="document-text-outline"
@@ -956,9 +986,17 @@ const publicStyles = StyleSheet.create({
     textAlign: "left",
     lineHeight: 20,
   },
-  connectionButtonContainer: { paddingHorizontal: 20, marginBottom: 16 },
-  buttonsRow: { flexDirection: "row", gap: 12 },
-  flexButton: { flex: 1 },
+  connectionButtonContainer: {
+    paddingHorizontal: 20,
+    marginBottom: 16,
+  },
+  buttonsRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  flexButton: {
+    flex: 1,
+  },
   connectionButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -967,9 +1005,15 @@ const publicStyles = StyleSheet.create({
     borderRadius: 25,
     gap: 8,
   },
-  connectionButton_connect: { backgroundColor: "#8b5cf6" },
-  connectionButton_pending: { backgroundColor: "#f59e0b" },
-  connectionButton_accept: { backgroundColor: "#10b981" },
+  connectionButton_connect: {
+    backgroundColor: "#8b5cf6",
+  },
+  connectionButton_pending: {
+    backgroundColor: "#f59e0b",
+  },
+  connectionButton_accept: {
+    backgroundColor: "#10b981",
+  },
   connectionButton_connected: {
     backgroundColor: "#f3f4f6",
     borderWidth: 1,
@@ -981,8 +1025,12 @@ const publicStyles = StyleSheet.create({
     fontFamily: "SofiaSans-Bold",
     fontWeight: "600",
   },
-  connectedButtonText: { color: "#10b981" },
-  messageButton: { backgroundColor: "#3b82f6" },
+  connectedButtonText: {
+    color: "#10b981",
+  },
+  messageButton: {
+    backgroundColor: "#3b82f6",
+  },
   acceptCancelContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -998,8 +1046,14 @@ const publicStyles = StyleSheet.create({
     borderRadius: 25,
     gap: 8,
   },
-  cancelButton: { padding: 4, borderRadius: 20 },
-  postsHeader: { marginTop: 16, paddingHorizontal: 20 },
+  cancelButton: {
+    padding: 4,
+    borderRadius: 20,
+  },
+  postsHeader: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+  },
   postsTitle: {
     fontSize: 24,
     fontWeight: "bold",
@@ -1023,7 +1077,18 @@ const publicStyles = StyleSheet.create({
     textAlign: "center",
     marginTop: 4,
   },
-  footerLoader: { paddingVertical: 20 },
-  flatListContent: { paddingBottom: 20 },
-  postCardContainer: { padding: 16, marginBottom: 8 },
+  footerLoader: {
+    paddingVertical: 20,
+  },
+  flatListContent: {
+    paddingBottom: 20,
+  },
+  postCardContainer: {
+    padding: 16,
+    marginBottom: 8,
+  },
+  loadingMoreContainer: {
+    paddingHorizontal: 0,
+    paddingTop: 0,
+  },
 });

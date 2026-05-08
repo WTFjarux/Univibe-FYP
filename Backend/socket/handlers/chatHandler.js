@@ -80,130 +80,143 @@ const setupChatHandlers = (io, socket) => {
   // ===========================================================================
   // JOIN ROOM
   // ===========================================================================
-  socket.on(EVENTS.JOIN_ROOM, async ({ roomId, otherUserId = null }) => {
-    try {
-      let finalRoomId = roomId;
+  socket.on(
+    EVENTS.JOIN_ROOM,
+    async ({ roomId, otherUserId = null, type = "direct" }) => {
+      try {
+        // ✅ Skip chat validation for non-chat rooms (events, notifications, etc.)
+        if (
+          type === "event" ||
+          type === "notification" ||
+          (roomId &&
+            (roomId.startsWith("event_") || roomId.startsWith("story_")))
+        ) {
+          socket.join(roomId);
+          console.log(`User ${userId} joined ${type} room: ${roomId}`);
+          return;
+        }
 
-      // For new direct chats, check connection first
-      if (!finalRoomId && otherUserId) {
-        // ✅ Check if users are connected
-        const isConnected = await areUsersConnected(userId, otherUserId);
-        if (!isConnected) {
-          socket.emit(EVENTS.ERROR, {
-            message:
-              "You can only chat with your connections. Please connect first.",
+        let finalRoomId = roomId;
+
+        // For new direct chats, check connection first
+        if (!finalRoomId && otherUserId) {
+          // ✅ Check if users are connected
+          const isConnected = await areUsersConnected(userId, otherUserId);
+          if (!isConnected) {
+            socket.emit(EVENTS.ERROR, {
+              message:
+                "You can only chat with your connections. Please connect first.",
+            });
+            return;
+          }
+          finalRoomId = getDirectRoomId(userId, otherUserId);
+        }
+
+        if (!finalRoomId) {
+          socket.emit(EVENTS.ERROR, { message: "Room ID is required" });
+          return;
+        }
+
+        // For existing rooms, find or create
+        let chatRoom = await ChatRoom.findOne({ roomId: finalRoomId });
+
+        // For group chats, verify user is a participant
+        if (chatRoom && chatRoom.type === "group") {
+          const isParticipant = chatRoom.participants.some(
+            (p) => p.userId.toString() === userId.toString(),
+          );
+          if (!isParticipant) {
+            socket.emit(EVENTS.ERROR, {
+              message: "You are not a member of this group",
+            });
+            return;
+          }
+        }
+
+        // For direct chats without existing room, create one (with connection check)
+        if (!chatRoom) {
+          const otherId =
+            otherUserId ||
+            finalRoomId.split("_").find((id) => id !== userId.toString());
+
+          // ✅ Verify the other user is a valid ObjectId
+          if (!otherId || !otherId.match(/^[0-9a-fA-F]{24}$/)) {
+            socket.emit(EVENTS.ERROR, { message: "Invalid user ID" });
+            return;
+          }
+
+          // ✅ Check connection before creating room
+          const isConnected = await areUsersConnected(userId, otherId);
+          if (!isConnected) {
+            socket.emit(EVENTS.ERROR, {
+              message:
+                "You can only chat with your connections. Please connect first.",
+            });
+            return;
+          }
+
+          chatRoom = new ChatRoom({
+            roomId: finalRoomId,
+            type: "direct",
+            participants: [
+              {
+                userId,
+                joinedAt: new Date(),
+                role: "member",
+                lastReadAt: new Date(),
+              },
+              {
+                userId: otherId,
+                joinedAt: new Date(),
+                role: "member",
+                lastReadAt: new Date(),
+              },
+            ],
+            createdBy: userId,
+            messageCount: 0,
           });
-          return;
+          await chatRoom.save();
         }
-        finalRoomId = getDirectRoomId(userId, otherUserId);
-      }
 
-      if (!finalRoomId) {
-        socket.emit(EVENTS.ERROR, { message: "Room ID is required" });
-        return;
-      }
+        // Join the socket room
+        socket.join(finalRoomId);
+        addUserToRoom(userId, finalRoomId);
 
-      // For existing rooms, find or create
-      let chatRoom = await ChatRoom.findOne({ roomId: finalRoomId });
+        // Send cleared status for this user
+        const clearedAt = chatRoom.getClearTimestamp
+          ? chatRoom.getClearTimestamp(userId)
+          : null;
 
-      // For group chats, verify user is a participant
-      if (chatRoom && chatRoom.type === "group") {
-        const isParticipant = chatRoom.participants.some(
-          (p) => p.userId.toString() === userId.toString(),
-        );
-        if (!isParticipant) {
-          socket.emit(EVENTS.ERROR, {
-            message: "You are not a member of this group",
+        socket.emit("room_joined", {
+          roomId: finalRoomId,
+          success: true,
+          roomType: chatRoom.type,
+          roomName: chatRoom.name || null,
+          isGroup: chatRoom.type === "group",
+          clearedAt,
+          isCleared: !!clearedAt,
+        });
+
+        // Notify others in the room
+        if (chatRoom.type === "group") {
+          socket.to(finalRoomId).emit("user_joined_group", {
+            userId,
+            userName: user?.name || "Unknown",
+            roomId: finalRoomId,
+            roomName: chatRoom.name,
           });
-          return;
-        }
-      }
-
-      // For direct chats without existing room, create one (with connection check)
-      if (!chatRoom) {
-        const otherId =
-          otherUserId ||
-          finalRoomId.split("_").find((id) => id !== userId.toString());
-
-        // ✅ Verify the other user is a valid ObjectId
-        if (!otherId || !otherId.match(/^[0-9a-fA-F]{24}$/)) {
-          socket.emit(EVENTS.ERROR, { message: "Invalid user ID" });
-          return;
-        }
-
-        // ✅ Check connection before creating room
-        const isConnected = await areUsersConnected(userId, otherId);
-        if (!isConnected) {
-          socket.emit(EVENTS.ERROR, {
-            message:
-              "You can only chat with your connections. Please connect first.",
+        } else {
+          socket.to(finalRoomId).emit("user_joined_room", {
+            userId,
+            roomId: finalRoomId,
           });
-          return;
         }
-
-        chatRoom = new ChatRoom({
-          roomId: finalRoomId,
-          type: "direct",
-          participants: [
-            {
-              userId,
-              joinedAt: new Date(),
-              role: "member",
-              lastReadAt: new Date(),
-            },
-            {
-              userId: otherId,
-              joinedAt: new Date(),
-              role: "member",
-              lastReadAt: new Date(),
-            },
-          ],
-          createdBy: userId,
-          messageCount: 0,
-        });
-        await chatRoom.save();
+      } catch (error) {
+        console.error("Error joining room:", error);
+        socket.emit(EVENTS.ERROR, { message: "Failed to join room" });
       }
-
-      // Join the socket room
-      socket.join(finalRoomId);
-      addUserToRoom(userId, finalRoomId);
-
-      // Send cleared status for this user
-      const clearedAt = chatRoom.getClearTimestamp
-        ? chatRoom.getClearTimestamp(userId)
-        : null;
-
-      socket.emit("room_joined", {
-        roomId: finalRoomId,
-        success: true,
-        roomType: chatRoom.type,
-        roomName: chatRoom.name || null,
-        isGroup: chatRoom.type === "group",
-        clearedAt,
-        isCleared: !!clearedAt,
-      });
-
-      // Notify others in the room
-      if (chatRoom.type === "group") {
-        socket.to(finalRoomId).emit("user_joined_group", {
-          userId,
-          userName: user?.name || "Unknown",
-          roomId: finalRoomId,
-          roomName: chatRoom.name,
-        });
-      } else {
-        socket.to(finalRoomId).emit("user_joined_room", {
-          userId,
-          roomId: finalRoomId,
-        });
-      }
-
-      
-    } catch (error) {
-      console.error("Error joining room:", error);
-      socket.emit(EVENTS.ERROR, { message: "Failed to join room" });
-    }
-  });
+    },
+  );
 
   // ===========================================================================
   // LEAVE ROOM
@@ -271,6 +284,7 @@ const setupChatHandlers = (io, socket) => {
       mediaUrl = null,
       duration = null,
       tempId = null,
+      story = null,
     }) => {
       try {
         // Validation
@@ -403,6 +417,14 @@ const setupChatHandlers = (io, socket) => {
           deliveredTo: [{ user: userId, deliveredAt: new Date() }],
           status: "sent",
         };
+
+        if (story && type === "story_reply") {
+          messageData.story = {
+            storyId: story.storyId,
+            mediaUrl: story.mediaUrl || "",
+            thumbnailUrl: story.thumbnailUrl || story.mediaUrl || "",
+          };
+        }
 
         if (type === "audio") {
           if (!mediaUrl) {

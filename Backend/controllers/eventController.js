@@ -6,6 +6,36 @@ const fs = require("fs").promises;
 const path = require("path");
 
 // ============================================
+// RATE LIMITER FOR EVENT INTERACTIONS
+// ============================================
+
+const interactionRateLimit = new Map();
+const RATE_LIMIT_WINDOW = 2000; // 2 seconds
+
+const isRateLimited = (userId, eventId, action) => {
+  const key = `${userId}:${eventId}:${action}`;
+  const now = Date.now();
+  const lastAction = interactionRateLimit.get(key);
+
+  if (lastAction && now - lastAction < RATE_LIMIT_WINDOW) {
+    return true;
+  }
+
+  interactionRateLimit.set(key, now);
+  return false;
+};
+
+// Clean up old rate limit entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, timestamp] of interactionRateLimit.entries()) {
+    if (now - timestamp > RATE_LIMIT_WINDOW * 2) {
+      interactionRateLimit.delete(key);
+    }
+  }
+}, 300000);
+
+// ============================================
 // HELPER FUNCTIONS
 // ============================================
 
@@ -19,7 +49,6 @@ const createEventNotification = async (
   targetModel = "Event",
 ) => {
   try {
-    // Validate required fields
     if (!recipientId || !senderId || !type || !title || !message) {
       console.error("Missing required notification fields");
       return null;
@@ -40,6 +69,63 @@ const createEventNotification = async (
   } catch (error) {
     console.error("Create notification error:", error);
     return null;
+  }
+};
+
+// ============================================
+// SOCKET HELPER
+// ============================================
+
+const emitEventNotification = async (io, recipientId, notification) => {
+  if (!io || !notification) return;
+
+  try {
+    const roomId = `user_${recipientId}`;
+
+    const populatedNotification = await Notification.findById(notification._id)
+      .populate("sender", "name username email")
+      .lean();
+
+    if (populatedNotification) {
+      const senderProfile = await Profile.findOne({
+        user: populatedNotification.sender._id || populatedNotification.sender,
+      })
+        .select("profilePicture fullName")
+        .lean();
+
+      if (senderProfile) {
+        populatedNotification.sender = {
+          ...populatedNotification.sender,
+          profilePicture: senderProfile.profilePicture || null,
+          fullName: senderProfile.fullName || populatedNotification.sender.name,
+        };
+      }
+
+      io.to(roomId).emit("notification:new", {
+        notification: populatedNotification,
+      });
+    }
+
+    const unreadCount = await Notification.countDocuments({
+      recipient: recipientId,
+      read: false,
+    });
+    io.to(roomId).emit("notification:unreadCount", { count: unreadCount });
+
+    console.log(`📢 Event notification sent to ${roomId}`);
+  } catch (error) {
+    console.error("Emit event notification error:", error);
+  }
+};
+
+// ============================================
+// EMIT EVENT UPDATE TO ALL VIEWERS
+// ============================================
+
+const emitEventUpdate = (io, eventId, data) => {
+  if (io) {
+    io.to(`event_${eventId}`).emit("event:updated", data);
+    console.log(`📢 Event update sent to event_${eventId}`);
   }
 };
 
@@ -167,7 +253,6 @@ exports.createEvent = async (req, res) => {
 
     const userId = req.user._id;
 
-    // Validate required fields
     if (
       !title ||
       !description ||
@@ -184,7 +269,6 @@ exports.createEvent = async (req, res) => {
       });
     }
 
-    // Get user profile
     const profile = await Profile.findOne({ user: userId });
     if (!profile) {
       await cleanupUploadedFiles(uploadedFiles);
@@ -194,7 +278,6 @@ exports.createEvent = async (req, res) => {
       });
     }
 
-    // Validate dates
     const start = new Date(startDate);
     const end = new Date(endDate);
 
@@ -214,7 +297,6 @@ exports.createEvent = async (req, res) => {
       });
     }
 
-    // Validate image count
     if (uploadedFiles.length > 5) {
       await cleanupUploadedFiles(uploadedFiles);
       return res.status(400).json({
@@ -223,7 +305,6 @@ exports.createEvent = async (req, res) => {
       });
     }
 
-    // Get user for organizer name
     const user = await User.findById(userId);
     if (!user) {
       await cleanupUploadedFiles(uploadedFiles);
@@ -236,7 +317,6 @@ exports.createEvent = async (req, res) => {
     const organizerName = profile.fullName || user.name;
     const formattedImages = formatImageObjects(uploadedFiles);
 
-    // Create event
     const event = new Event({
       title: title.trim(),
       description: description.trim(),
@@ -255,14 +335,12 @@ exports.createEvent = async (req, res) => {
       images: formattedImages,
     });
 
-    // Set cover image if there are images
     if (formattedImages.length > 0) {
       event.coverImage = formattedImages[0].url;
     }
 
     await event.save();
 
-    // Fetch created event with populated data
     const populatedEvent = await Event.findById(event._id)
       .populate("organizer", "name username email")
       .lean();
@@ -274,7 +352,6 @@ exports.createEvent = async (req, res) => {
     populatedEvent.organizerName =
       organizerWithProfile?.fullName || organizerWithProfile?.name;
 
-    // Process images for response
     const finalEvent = processEventImagesForResponse(req, populatedEvent);
 
     res.status(201).json({
@@ -309,7 +386,6 @@ exports.getEvents = async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const userId = req.user._id;
 
-    // Get user profile and connections
     const [userProfile, currentUser] = await Promise.all([
       Profile.findOne({ user: userId }),
       User.findById(userId),
@@ -320,26 +396,22 @@ exports.getEvents = async (req, res) => {
 
     let query = {};
 
-    // Campus filter
     if (campus) {
       query.campus = campus;
     } else if (userCampus) {
       query.campus = userCampus;
     }
 
-    // Category filter
     if (category && category !== "All" && category !== "all") {
       query.category = category;
     }
 
-    // Status filter
     if (status && status !== "all") {
       query.status = status;
     } else {
       query.status = { $in: ["upcoming", "ongoing"] };
     }
 
-    // Search filter
     if (search && search.trim()) {
       const searchRegex = new RegExp(search.trim(), "i");
       query.$or = [
@@ -350,7 +422,6 @@ exports.getEvents = async (req, res) => {
       ];
     }
 
-    // Visibility filter
     query.$or = [
       { visibility: "campus" },
       { visibility: "public" },
@@ -358,7 +429,6 @@ exports.getEvents = async (req, res) => {
       { visibility: "connections", organizer: { $in: connectionIds } },
     ];
 
-    // Execute query
     const [events, total] = await Promise.all([
       Event.find(query)
         .populate("organizer", "name username email")
@@ -369,7 +439,6 @@ exports.getEvents = async (req, res) => {
       Event.countDocuments(query),
     ]);
 
-    // Process events with profile pictures and image URLs
     const eventsWithProfiles = await Promise.all(
       events.map(async (event) => {
         const organizerWithProfile = await getUserWithProfile(event.organizer);
@@ -419,7 +488,6 @@ exports.getEventById = async (req, res) => {
     const { eventId } = req.params;
     const userId = req.user._id;
 
-    // Validate eventId
     if (!eventId || eventId === "undefined" || eventId === "null") {
       return res.status(400).json({
         success: false,
@@ -440,7 +508,6 @@ exports.getEventById = async (req, res) => {
       });
     }
 
-    // Get profiles for all users
     const [organizerWithProfile, interestedWithProfiles, rsvpWithProfiles] =
       await Promise.all([
         getUserWithProfile(event.organizer),
@@ -454,10 +521,8 @@ exports.getEventById = async (req, res) => {
     event.interested = interestedWithProfiles;
     event.rsvp = rsvpWithProfiles;
 
-    // Process images for response
     const processedEvent = processEventImagesForResponse(req, event);
 
-    // Add user interaction status
     processedEvent.isInterested = event.interested?.some(
       (user) => user._id?.toString() === userId.toString(),
     );
@@ -489,7 +554,6 @@ exports.updateEvent = async (req, res) => {
     const userId = req.user._id;
     const updates = req.body;
 
-    // Validate eventId
     if (!eventId || eventId === "undefined" || eventId === "null") {
       await cleanupUploadedFiles(newUploadedFiles);
       return res.status(400).json({
@@ -507,7 +571,6 @@ exports.updateEvent = async (req, res) => {
       });
     }
 
-    // Check authorization
     if (event.organizer.toString() !== userId.toString()) {
       await cleanupUploadedFiles(newUploadedFiles);
       return res.status(403).json({
@@ -516,7 +579,6 @@ exports.updateEvent = async (req, res) => {
       });
     }
 
-    // Handle image deletion by indices
     if (updates.imagesToDelete) {
       const deleteIndices = updates.imagesToDelete
         .split(",")
@@ -535,7 +597,6 @@ exports.updateEvent = async (req, res) => {
       }
     }
 
-    // Handle new image uploads
     if (newUploadedFiles.length > 0) {
       if (event.images.length + newUploadedFiles.length > 5) {
         await cleanupUploadedFiles(newUploadedFiles);
@@ -549,7 +610,6 @@ exports.updateEvent = async (req, res) => {
       event.images.push(...newImages);
     }
 
-    // Handle cover image setting
     if (updates.setCoverImageIndex !== undefined) {
       const index = parseInt(updates.setCoverImageIndex);
       if (event.images[index]) {
@@ -559,7 +619,6 @@ exports.updateEvent = async (req, res) => {
       }
     }
 
-    // Update text fields
     const allowedUpdates = [
       "title",
       "description",
@@ -590,7 +649,6 @@ exports.updateEvent = async (req, res) => {
       }
     }
 
-    // Update coverImage field
     if (event.images.length > 0) {
       const coverImg =
         event.images.find((img) => img.isCover) || event.images[0];
@@ -601,7 +659,6 @@ exports.updateEvent = async (req, res) => {
 
     await event.save();
 
-    // Fetch updated event
     const updatedEvent = await Event.findById(eventId)
       .populate("organizer", "name username email")
       .lean();
@@ -613,7 +670,6 @@ exports.updateEvent = async (req, res) => {
     updatedEvent.organizerName =
       organizerWithProfile?.fullName || organizerWithProfile?.name;
 
-    // Process images for response
     const finalEvent = processEventImagesForResponse(req, updatedEvent);
 
     res.status(200).json({
@@ -639,7 +695,6 @@ exports.deleteEvent = async (req, res) => {
     const { eventId } = req.params;
     const userId = req.user._id;
 
-    // Validate eventId
     if (!eventId || eventId === "undefined" || eventId === "null") {
       return res.status(400).json({
         success: false,
@@ -655,7 +710,6 @@ exports.deleteEvent = async (req, res) => {
       });
     }
 
-    // Check authorization
     if (
       event.organizer.toString() !== userId.toString() &&
       req.user.role !== "admin"
@@ -666,7 +720,6 @@ exports.deleteEvent = async (req, res) => {
       });
     }
 
-    // Delete all associated images
     for (const image of event.images) {
       try {
         await fs.unlink(image.path);
@@ -675,6 +728,9 @@ exports.deleteEvent = async (req, res) => {
         console.error("Error deleting image file:", image.path, err);
       }
     }
+
+    // Delete all associated notifications
+    await Notification.deleteMany({ targetId: eventId, targetModel: "Event" });
 
     await Event.findByIdAndDelete(eventId);
 
@@ -701,7 +757,6 @@ exports.addEventImages = async (req, res) => {
     const { eventId } = req.params;
     const userId = req.user._id;
 
-    // Validate eventId
     if (!eventId || eventId === "undefined" || eventId === "null") {
       await cleanupUploadedFiles(uploadedFiles);
       return res.status(400).json({
@@ -719,7 +774,6 @@ exports.addEventImages = async (req, res) => {
       });
     }
 
-    // Check authorization
     if (event.organizer.toString() !== userId.toString()) {
       await cleanupUploadedFiles(uploadedFiles);
       return res.status(403).json({
@@ -728,7 +782,6 @@ exports.addEventImages = async (req, res) => {
       });
     }
 
-    // Check image limit
     if (event.images.length + uploadedFiles.length > 5) {
       await cleanupUploadedFiles(uploadedFiles);
       return res.status(400).json({
@@ -737,11 +790,9 @@ exports.addEventImages = async (req, res) => {
       });
     }
 
-    // Add new images
     const newImages = formatImageObjects(uploadedFiles);
     event.images.push(...newImages);
 
-    // Set cover image if this was the first image
     if (event.images.length === newImages.length && newImages.length > 0) {
       event.images[0].isCover = true;
       event.coverImage = newImages[0].url;
@@ -749,7 +800,6 @@ exports.addEventImages = async (req, res) => {
 
     await event.save();
 
-    // Process images for response
     const processedImages = event.images.map((img) => ({
       ...img,
       url: getFullImageUrl(req, img.url),
@@ -779,7 +829,6 @@ exports.removeEventImage = async (req, res) => {
     const { eventId, imageIndex } = req.params;
     const userId = req.user._id;
 
-    // Validate parameters
     if (!eventId || eventId === "undefined" || eventId === "null") {
       return res.status(400).json({
         success: false,
@@ -795,7 +844,6 @@ exports.removeEventImage = async (req, res) => {
       });
     }
 
-    // Check authorization
     if (event.organizer.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
@@ -811,7 +859,6 @@ exports.removeEventImage = async (req, res) => {
       });
     }
 
-    // Delete the image file
     try {
       await fs.unlink(event.images[index].path);
       console.log(`🗑️ Deleted image: ${event.images[index].path}`);
@@ -822,12 +869,10 @@ exports.removeEventImage = async (req, res) => {
     const wasCover = event.images[index].isCover;
     event.images.splice(index, 1);
 
-    // If we removed the cover image and there are other images, set the first as cover
     if (wasCover && event.images.length > 0) {
       event.images[0].isCover = true;
     }
 
-    // Update coverImage field
     if (event.images.length > 0) {
       const coverImg =
         event.images.find((img) => img.isCover) || event.images[0];
@@ -838,7 +883,6 @@ exports.removeEventImage = async (req, res) => {
 
     await event.save();
 
-    // Process images for response
     const processedImages = event.images.map((img) => ({
       ...img,
       url: getFullImageUrl(req, img.url),
@@ -866,6 +910,22 @@ exports.markInterested = async (req, res) => {
   try {
     const { eventId } = req.params;
     const userId = req.user._id;
+    const io = req.app.get("io");
+
+    if (!eventId || eventId === "undefined" || eventId === "null") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid event ID",
+      });
+    }
+
+    // Rate limiting
+    if (isRateLimited(userId, eventId, "interest")) {
+      return res.status(429).json({
+        success: false,
+        message: "Please wait before performing this action again",
+      });
+    }
 
     const event = await Event.findById(eventId);
     if (!event) {
@@ -878,20 +938,35 @@ exports.markInterested = async (req, res) => {
     const isInterested = event.isUserInterested(userId);
 
     if (isInterested) {
+      // REMOVING INTEREST - Delete the previous notification
       await event.removeInterested(userId);
-      console.log(`User ${userId} removed interest from event ${eventId}`);
-    } else {
-      await event.addInterested(userId);
-      console.log(`User ${userId} added interest to event ${eventId}`);
 
-      // Send notification to event organizer
+      await Notification.deleteOne({
+        recipient: event.organizer,
+        sender: userId,
+        type: "event_interest",
+        targetId: event._id,
+        targetModel: "Event",
+      });
+    } else {
+      // ADDING INTEREST - Delete any existing notification first, then create new
+      await event.addInterested(userId);
+
       if (event.organizer.toString() !== userId.toString()) {
+        await Notification.deleteOne({
+          recipient: event.organizer,
+          sender: userId,
+          type: "event_interest",
+          targetId: event._id,
+          targetModel: "Event",
+        });
+
         const [user, profile] = await Promise.all([
           User.findById(userId),
           Profile.findOne({ user: userId }),
         ]);
 
-        await createEventNotification(
+        const notification = await createEventNotification(
           event.organizer,
           userId,
           "event_interest",
@@ -900,12 +975,19 @@ exports.markInterested = async (req, res) => {
           event._id,
           "Event",
         );
+
+        await emitEventNotification(io, event.organizer, notification);
       }
     }
 
-    // Get updated counts
     const updatedEvent = await Event.findById(eventId);
-
+    // Emit real-time update to all viewers of this event
+    emitEventUpdate(io, eventId, {
+      eventId,
+      interestedCount: updatedEvent.interestedCount,
+      rsvpCount: updatedEvent.rsvpCount,
+      isFull: updatedEvent.isFull,
+    });
     res.status(200).json({
       success: true,
       message: isInterested ? "Interest removed" : "Interest added",
@@ -928,6 +1010,22 @@ exports.rsvpEvent = async (req, res) => {
   try {
     const { eventId } = req.params;
     const userId = req.user._id;
+    const io = req.app.get("io");
+
+    if (!eventId || eventId === "undefined" || eventId === "null") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid event ID",
+      });
+    }
+
+    // Rate limiting
+    if (isRateLimited(userId, eventId, "rsvp")) {
+      return res.status(429).json({
+        success: false,
+        message: "Please wait before performing this action again",
+      });
+    }
 
     const event = await Event.findById(eventId);
     if (!event) {
@@ -937,7 +1035,6 @@ exports.rsvpEvent = async (req, res) => {
       });
     }
 
-    // Check if event is full
     if (event.isFull && !event.isUserRsvpd(userId)) {
       return res.status(400).json({
         success: false,
@@ -948,20 +1045,35 @@ exports.rsvpEvent = async (req, res) => {
     const isRsvpd = event.isUserRsvpd(userId);
 
     if (isRsvpd) {
+      // CANCELLING RSVP - Delete the previous notification
       await event.removeRsvp(userId);
-      console.log(`User ${userId} cancelled RSVP for event ${eventId}`);
-    } else {
-      await event.addRsvp(userId);
-      console.log(`User ${userId} RSVP'd for event ${eventId}`);
 
-      // Send notification to event organizer
+      await Notification.deleteOne({
+        recipient: event.organizer,
+        sender: userId,
+        type: "event_rsvp",
+        targetId: event._id,
+        targetModel: "Event",
+      });
+    } else {
+      // ADDING RSVP - Delete any existing notification first, then create new
+      await event.addRsvp(userId);
+
       if (event.organizer.toString() !== userId.toString()) {
+        await Notification.deleteOne({
+          recipient: event.organizer,
+          sender: userId,
+          type: "event_rsvp",
+          targetId: event._id,
+          targetModel: "Event",
+        });
+
         const [user, profile] = await Promise.all([
           User.findById(userId),
           Profile.findOne({ user: userId }),
         ]);
 
-        await createEventNotification(
+        const notification = await createEventNotification(
           event.organizer,
           userId,
           "event_rsvp",
@@ -970,12 +1082,20 @@ exports.rsvpEvent = async (req, res) => {
           event._id,
           "Event",
         );
+
+        await emitEventNotification(io, event.organizer, notification);
       }
     }
 
-    // Get updated counts
     const updatedEvent = await Event.findById(eventId);
 
+    // Emit real-time update to all viewers of this event
+    emitEventUpdate(io, eventId, {
+      eventId,
+      interestedCount: updatedEvent.interestedCount,
+      rsvpCount: updatedEvent.rsvpCount,
+      isFull: updatedEvent.isFull,
+    });
     res.status(200).json({
       success: true,
       message: isRsvpd ? "RSVP cancelled" : "RSVP confirmed",

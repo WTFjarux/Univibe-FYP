@@ -1,5 +1,5 @@
-// app/events/[id].tsx - Fixed version without duplicate counts
-import React, { useState, useEffect } from "react";
+// app/events/[id].tsx - With real-time socket updates
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
   Share,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { eventService, Event } from "@/lib/services/eventService";
 import { useAuth } from "@/lib/contexts/AuthContext";
@@ -23,15 +23,17 @@ import { EventDetailsTab } from "@/app/components/Events/EventDetailsTab";
 import { EventActionBar } from "@/app/components/Events/EventActionBar";
 import EventOptionsModal from "@/app/components/Events/EventOptionsModal";
 import { EventTabs, TabType } from "@/app/components/Events/EventTabs";
+import socketService from "@/lib/services/socketService";
 
 interface User {
   _id: string;
   name: string;
   username: string;
   email?: string;
+  profilePicture?: string;
+  fullName?: string;
 }
 
-// Extended Event type to include optional UI-only properties
 interface ExtendedEvent extends Event {
   isSaved?: boolean;
   isReported?: boolean;
@@ -50,17 +52,71 @@ export default function EventDetailScreen() {
   const [interestedUsers, setInterestedUsers] = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
 
-  // Calculate isOrganizer early based on current event and user
+  // Track pending optimistic updates
+  const pendingUpdate = useRef<{ type: string; timestamp: number } | null>(
+    null,
+  );
+  // Track if socket listener is set up
+  const socketSetup = useRef(false);
+
   const isOrganizer = event?.organizer._id === user?.id;
 
+  // Clear cache when leaving this screen
+  useEffect(() => {
+    return () => {
+      eventService.clearCache();
+      socketSetup.current = false;
+    };
+  }, []);
+
+  // ===== REAL-TIME EVENT UPDATES VIA SOCKET =====
+  useEffect(() => {
+    if (!id || socketSetup.current) return;
+
+    socketSetup.current = true;
+
+    socketService.joinRoom(`event_${id}`, null, "event");
+
+    const handleEventUpdate = (data: any) => {
+      if (data.eventId !== id) return;
+
+      // Check if we have a pending optimistic update
+      if (pendingUpdate.current) {
+        const age = Date.now() - pendingUpdate.current.timestamp;
+        if (age < 2000) {
+          return;
+        }
+      }
+
+      setEvent((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          interestedCount: data.interestedCount ?? prev.interestedCount ?? 0,
+          rsvpCount: data.rsvpCount ?? prev.rsvpCount ?? 0,
+          isFull: data.isFull ?? prev.isFull,
+        };
+      });
+    };
+
+    socketService.on("event:updated", handleEventUpdate);
+
+    return () => {
+      socketService.off("event:updated", handleEventUpdate);
+      socketService.leaveRoom(`event_${id}`);
+      socketSetup.current = false;
+    };
+  }, [id]); // ONLY depend on id - not isOrganizer or activeTab
+
+  // Fetch event on mount - SKIP CACHE
   useEffect(() => {
     if (id) {
       fetchEvent();
     }
   }, [id]);
 
+  // Fetch attendees/interested users when tab changes (for organizer)
   useEffect(() => {
-    // Only fetch attendees/interested if user is organizer
     if (event && isOrganizer) {
       if (activeTab === "attendees") {
         fetchAttendees();
@@ -68,11 +124,12 @@ export default function EventDetailScreen() {
         fetchInterestedUsers();
       }
     }
-  }, [event, activeTab, isOrganizer]);
+  }, [activeTab]);
 
   const fetchEvent = async () => {
     try {
-      const response = await eventService.getEventById(id);
+      // SKIP CACHE to always get fresh data
+      const response = await eventService.getEventById(id, true);
       if (response.success && response.event) {
         setEvent(response.event);
       } else {
@@ -92,7 +149,8 @@ export default function EventDetailScreen() {
     if (!event) return;
     setLoadingUsers(true);
     try {
-      const response = await eventService.getEventById(id);
+      // SKIP CACHE to get fresh attendee list
+      const response = await eventService.getEventById(id, true);
       if (response.success && response.event) {
         setAttendees(response.event.rsvp || []);
       }
@@ -107,7 +165,8 @@ export default function EventDetailScreen() {
     if (!event) return;
     setLoadingUsers(true);
     try {
-      const response = await eventService.getEventById(id);
+      // SKIP CACHE to get fresh interested users list
+      const response = await eventService.getEventById(id, true);
       if (response.success && response.event) {
         setInterestedUsers(response.event.interested || []);
       }
@@ -121,19 +180,45 @@ export default function EventDetailScreen() {
   const handleInterest = async () => {
     if (!event) return;
     setProcessing(true);
+
+    // Track optimistic update
+    pendingUpdate.current = { type: "interest", timestamp: Date.now() };
+
+    // Optimistic UI update
+    setEvent((prev) => {
+      if (!prev) return prev;
+      const currentCount = prev.interestedCount ?? 0;
+      return {
+        ...prev,
+        isInterested: !prev.isInterested,
+        interestedCount: prev.isInterested
+          ? Math.max(0, currentCount - 1)
+          : currentCount + 1,
+      };
+    });
+
     try {
       const response = await eventService.toggleInterest(event._id);
+      pendingUpdate.current = null;
+
       if (response.success) {
-        setEvent({
-          ...event,
-          isInterested: response.isInterested,
-          interestedCount: response.interestedCount || 0,
+        // Server-confirmed update
+        setEvent((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            isInterested: response.isInterested ?? !prev.isInterested,
+            interestedCount:
+              response.interestedCount ?? prev.interestedCount ?? 0,
+          };
         });
-        if (activeTab === "interested") {
-          fetchInterestedUsers();
-        }
+      } else {
+        // Revert on failure
+        revertOptimisticUpdate("interest");
       }
     } catch (error) {
+      pendingUpdate.current = null;
+      revertOptimisticUpdate("interest");
       Alert.alert("Error", "Failed to update interest");
     } finally {
       setProcessing(false);
@@ -152,24 +237,80 @@ export default function EventDetailScreen() {
     }
 
     setProcessing(true);
+
+    // Track optimistic update
+    pendingUpdate.current = { type: "rsvp", timestamp: Date.now() };
+
+    // Optimistic UI update
+    setEvent((prev) => {
+      if (!prev) return prev;
+      const currentCount = prev.rsvpCount ?? 0;
+      return {
+        ...prev,
+        isRsvpd: !prev.isRsvpd,
+        rsvpCount: prev.isRsvpd
+          ? Math.max(0, currentCount - 1)
+          : currentCount + 1,
+      };
+    });
+
     try {
       const response = await eventService.toggleRsvp(event._id);
+      pendingUpdate.current = null;
+
       if (response.success) {
-        setEvent({
-          ...event,
-          isRsvpd: response.isRsvpd,
-          rsvpCount: response.rsvpCount || 0,
-          isFull: response.isFull,
+        // Server-confirmed update
+        setEvent((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            isRsvpd: response.isRsvpd ?? !prev.isRsvpd,
+            rsvpCount: response.rsvpCount ?? prev.rsvpCount ?? 0,
+            isFull: response.isFull ?? prev.isFull,
+          };
         });
-        if (activeTab === "attendees") {
-          fetchAttendees();
+
+        // Refresh attendee/interested lists if organizer is viewing
+        if (isOrganizer) {
+          if (activeTab === "attendees") fetchAttendees();
+          else if (activeTab === "interested") fetchInterestedUsers();
         }
+      } else {
+        // Revert on failure
+        revertOptimisticUpdate("rsvp");
       }
     } catch (error) {
+      pendingUpdate.current = null;
+      revertOptimisticUpdate("rsvp");
       Alert.alert("Error", "Failed to update RSVP");
     } finally {
       setProcessing(false);
     }
+  };
+
+  // Helper to revert optimistic updates
+  const revertOptimisticUpdate = (type: "interest" | "rsvp") => {
+    setEvent((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        isInterested:
+          type === "interest" ? !prev.isInterested : prev.isInterested,
+        interestedCount:
+          type === "interest"
+            ? prev.isInterested
+              ? (prev.interestedCount ?? 0) + 1
+              : Math.max(0, (prev.interestedCount ?? 0) - 1)
+            : prev.interestedCount,
+        isRsvpd: type === "rsvp" ? !prev.isRsvpd : prev.isRsvpd,
+        rsvpCount:
+          type === "rsvp"
+            ? prev.isRsvpd
+              ? (prev.rsvpCount ?? 0) + 1
+              : Math.max(0, (prev.rsvpCount ?? 0) - 1)
+            : prev.rsvpCount,
+      };
+    });
   };
 
   const handleShare = async () => {
@@ -225,12 +366,9 @@ export default function EventDetailScreen() {
     );
   };
 
-  // Handlers for EventOptionsModal with proper error handling
   const handleSaveEvent = async (eventId: string) => {
     try {
-      // TODO: Implement when backend is ready
       Alert.alert("Coming Soon", "Save feature will be available soon!");
-      // Update local state optimistically
       setEvent((prev) => (prev ? { ...prev, isSaved: !prev.isSaved } : null));
     } catch (error) {
       console.error("Error saving event:", error);
@@ -240,9 +378,7 @@ export default function EventDetailScreen() {
 
   const handleReportEvent = async (eventId: string) => {
     try {
-      // TODO: Implement when backend is ready
       Alert.alert("Thank You", "Event has been reported. We'll review it.");
-      // Update local state optimistically
       setEvent((prev) => (prev ? { ...prev, isReported: true } : null));
     } catch (error) {
       console.error("Error reporting event:", error);
@@ -260,7 +396,6 @@ export default function EventDetailScreen() {
 
   const handleMuteOrganizer = async (organizerId: string) => {
     try {
-      // TODO: Implement when backend is ready
       Alert.alert("Success", "Organizer muted. You won't see their events.");
     } catch (error) {
       console.error("Error muting organizer:", error);
@@ -279,7 +414,6 @@ export default function EventDetailScreen() {
           style: "destructive",
           onPress: async () => {
             try {
-              // TODO: Implement when backend is ready
               Alert.alert("Success", "Organizer blocked.");
             } catch (error) {
               console.error("Error blocking organizer:", error);
@@ -292,12 +426,8 @@ export default function EventDetailScreen() {
   };
 
   const getImages = () => {
-    if (event?.imageUrls && event.imageUrls.length > 0) {
-      return event.imageUrls;
-    }
-    if (event?.coverImage) {
-      return [event.coverImage];
-    }
+    if (event?.imageUrls && event.imageUrls.length > 0) return event.imageUrls;
+    if (event?.coverImage) return [event.coverImage];
     return [];
   };
 
@@ -319,10 +449,21 @@ export default function EventDetailScreen() {
     />
   );
 
+  const handleOrganizerProfilePress = (organizerId: string) => {
+    if (organizerId === user?.id) {
+      router.push("/(tabs)/profile");
+    } else {
+      router.push(`/profile/${organizerId}`);
+    }
+  };
+
+  const handleTabChange = (tab: TabType) => {
+    setActiveTab(tab);
+  };
+
   const renderTabContent = () => {
     if (!event) return null;
 
-    // For non-organizers, only show details tab content
     if (!isOrganizer) {
       return (
         <EventDetailsTab
@@ -332,7 +473,6 @@ export default function EventDetailScreen() {
       );
     }
 
-    // For organizers, show content based on active tab
     switch (activeTab) {
       case "details":
         return (
@@ -350,9 +490,7 @@ export default function EventDetailScreen() {
             </View>
           );
         }
-        if (attendees.length === 0) {
-          return <EmptyState type="attendees" />;
-        }
+        if (attendees.length === 0) return <EmptyState type="attendees" />;
         return renderUserList(attendees, true);
       case "interested":
         if (loadingUsers) {
@@ -365,21 +503,11 @@ export default function EventDetailScreen() {
             </View>
           );
         }
-        if (interestedUsers.length === 0) {
+        if (interestedUsers.length === 0)
           return <EmptyState type="interested" />;
-        }
         return renderUserList(interestedUsers, false);
       default:
         return null;
-    }
-  };
-
-  // Add the handler function
-  const handleOrganizerProfilePress = (organizerId: string) => {
-    if (organizerId === user?.id) {
-      router.push("/(tabs)/profile");
-    } else {
-      router.push(`/profile/${organizerId}`);
     }
   };
 
@@ -410,7 +538,6 @@ export default function EventDetailScreen() {
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
 
-        {/* Menu button for all users */}
         <TouchableOpacity
           style={styles.menuButton}
           onPress={() => setShowEventOptions(true)}
@@ -430,13 +557,12 @@ export default function EventDetailScreen() {
 
           <Text style={styles.title}>{event.title}</Text>
 
-          {/* Only show tabs for organizers */}
           {isOrganizer && (
             <EventTabs
               activeTab={activeTab}
-              onTabChange={setActiveTab}
-              rsvpCount={event.rsvpCount}
-              interestedCount={event.interestedCount}
+              onTabChange={handleTabChange}
+              rsvpCount={event.rsvpCount ?? 0}
+              interestedCount={event.interestedCount ?? 0}
             />
           )}
 
@@ -444,7 +570,6 @@ export default function EventDetailScreen() {
         </View>
       </ScrollView>
 
-      {/* Only show action buttons for non-organizers */}
       {!isOrganizer && (
         <EventActionBar
           isInterested={event.isInterested || false}
@@ -483,19 +608,14 @@ export default function EventDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#fff",
-  },
+  container: { flex: 1, backgroundColor: "#fff" },
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#fff",
   },
-  scrollContent: {
-    paddingBottom: 20,
-  },
+  scrollContent: { paddingBottom: 20 },
   backButton: {
     position: "absolute",
     top: 30,
@@ -520,11 +640,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 10,
   },
-  content: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 16,
-  },
+  content: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16 },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -543,9 +659,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontFamily: "SofiaSans-Bold",
   },
-  shareButton: {
-    padding: 8,
-  },
+  shareButton: { padding: 8 },
   title: {
     fontSize: 26,
     fontWeight: "bold",
@@ -554,9 +668,7 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Bold",
     lineHeight: 34,
   },
-  tabContent: {
-    minHeight: 300,
-  },
+  tabContent: { minHeight: 300 },
   tabLoadingContainer: {
     flex: 1,
     justifyContent: "center",
@@ -569,7 +681,5 @@ const styles = StyleSheet.create({
     color: "#6b7280",
     fontFamily: "SofiaSans-Regular",
   },
-  usersList: {
-    paddingVertical: 8,
-  },
+  usersList: { paddingVertical: 8 },
 });

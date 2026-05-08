@@ -43,14 +43,13 @@ export default function RootLayout() {
         <AuthProvider>
           <ProfileProvider>
             <ChatProvider>
-              {/* 🔴 Wrap Stack with ActiveRoomProvider */}
               <ActiveRoomProvider>
                 <Stack screenOptions={{ headerShown: false }}>
-                  {/* Public routes - don't require auth */}
+                  {/* Public routes */}
                   <Stack.Screen name="index" />
                   <Stack.Screen name="(auth)" />
 
-                  {/* Verification route - modal presentation */}
+                  {/* Verification route */}
                   <Stack.Screen
                     name="verify"
                     options={{
@@ -59,11 +58,29 @@ export default function RootLayout() {
                     }}
                   />
 
-                  {/* Profile routes - includes both index and dynamic [id] */}
+                  {/* Main tabs */}
                   <Stack.Screen name="(tabs)" />
                   <Stack.Screen name="profile" />
 
-                  {/* Chat screens */}
+                  {/* Story Screens - FULL SCREEN MODAL */}
+                  <Stack.Screen
+                    name="screens/CreateStoryScreen"
+                    options={{
+                      headerShown: false,
+                      presentation: "fullScreenModal",
+                      animation: "fade",
+                    }}
+                  />
+                  <Stack.Screen
+                    name="screens/StoryViewerScreen"
+                    options={{
+                      headerShown: false,
+                      presentation: "fullScreenModal",
+                      animation: "fade",
+                    }}
+                  />
+
+                  {/* Chat Screens */}
                   <Stack.Screen
                     name="screens/ChatScreen"
                     options={{
@@ -75,6 +92,7 @@ export default function RootLayout() {
                     name="screens/ChatListScreen"
                     options={{
                       headerShown: false,
+                      presentation: "card",
                     }}
                   />
                   <Stack.Screen
@@ -83,6 +101,16 @@ export default function RootLayout() {
                       headerShown: false,
                       presentation: "modal",
                       animation: "slide_from_bottom",
+                    }}
+                  />
+
+                  {/* Notifications Screen */}
+                  <Stack.Screen
+                    name="screens/notifications"
+                    options={{
+                      headerShown: false,
+                      presentation: "card",
+                      animation: "slide_from_right",
                     }}
                   />
                 </Stack>

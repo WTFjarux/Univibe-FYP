@@ -400,14 +400,33 @@ class SocketService {
 
     // ===== NOTIFICATION EVENTS =====
     this.socket.on("notification:new", (data: any) => {
-      console.log(
-        data?.notification?.message,
-      );
+      console.log(data?.notification?.message);
       this.emitEvent("notification:new", data);
     });
 
     this.socket.on("notification:unreadCount", (data: any) => {
       this.emitEvent("notification:unreadCount", data);
+    });
+
+    // ===== STORY EVENTS =====
+    this.socket.on("story_created", (data: any) => {
+      console.log("📱 Story created:", data);
+      this.emitEvent("story_created", data);
+    });
+
+    this.socket.on("story_viewed", (data: any) => {
+      console.log("👁️ Story viewed:", data);
+      this.emitEvent("story_viewed", data);
+    });
+
+    this.socket.on("story_deleted", (data: any) => {
+      console.log("🗑️ Story deleted:", data);
+      this.emitEvent("story_deleted", data);
+    });
+
+    // ===== EVENT UPDATES =====
+    this.socket.on("event:updated", (data: any) => {
+      this.emitEvent("event:updated", data);
     });
 
     // ===== ERROR EVENTS =====

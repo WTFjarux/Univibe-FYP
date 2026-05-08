@@ -198,7 +198,6 @@ export default function CreateEventScreen() {
   };
 
   return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <SafeAreaView style={styles.container}>
         <KeyboardAvoidingView
           style={{ flex: 1 }}
@@ -476,7 +475,6 @@ export default function CreateEventScreen() {
           setMinute={setTempEndMinute}
         />
       </SafeAreaView>
-    </TouchableWithoutFeedback>
   );
 }
 

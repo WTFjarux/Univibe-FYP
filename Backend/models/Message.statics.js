@@ -133,7 +133,7 @@ module.exports = function (messageSchema) {
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .select(
-        "_id sender senderName senderAvatar roomId message type createdAt status mediaUrl mediaName mediaSize mediaMimeType duration thumbnailUrl locationData replyTo reactions readBy deliveredTo tempId isForwarded originalMessageId originalSenderId originalSenderName forwardedAt sharedPost",
+        "_id sender senderName senderAvatar roomId message type createdAt status mediaUrl mediaName mediaSize mediaMimeType duration thumbnailUrl locationData replyTo reactions readBy deliveredTo tempId isForwarded originalMessageId originalSenderId originalSenderName forwardedAt sharedPost story",
       )
       .populate("sender", "name avatar")
       .populate("reactions.user", "name")

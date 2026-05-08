@@ -25,6 +25,7 @@ const eventRoutes = require("./routes/eventRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const groupRoutes = require("./routes/groupRoutes");
 const feedRoutes = require("./routes/feedRoutes");
+const storyRoutes = require("./routes/storyRoutes");
 
 // Connect to database
 connectDB();
@@ -84,6 +85,7 @@ app.use("/api/connections", connectionRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/stories", storyRoutes);
 app.use("/api/groups", groupRoutes);
 app.use(
   "/uploads/group-photos",

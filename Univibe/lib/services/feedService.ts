@@ -44,14 +44,12 @@ class FeedService {
     // Try memory cache first
     const memoryCached = feedCache.getFromMemory(feedType, cursorKey);
     if (memoryCached) {
-
       return memoryCached;
     }
 
     // Try persistent cache
     const storageCached = await feedCache.getFromStorage(feedType, cursorKey);
     if (storageCached) {
-
       return storageCached;
     }
 
@@ -63,7 +61,6 @@ class FeedService {
     }
 
     const url = `${this.baseUrl}/${feedType}?${params.toString()}`;
-    console.log(`📡 Fetching ${feedType} feed from API`);
 
     const response = await fetch(url, {
       method: "GET",

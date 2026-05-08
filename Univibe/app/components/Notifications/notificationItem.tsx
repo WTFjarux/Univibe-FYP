@@ -32,6 +32,7 @@ interface NotificationItemProps {
       profilePicture?: string;
     };
     targetId?: string;
+    targetModel?: string; // ADD THIS
     metadata?: {
       isGrouped?: boolean;
       count?: number;
@@ -72,6 +73,23 @@ export default function NotificationItem({
           showLikes: "true",
         },
       });
+      return;
+    }
+
+    // ADD THIS: Handle event notifications
+    if (
+      notification.type === "event_interest" ||
+      notification.type === "event_rsvp"
+    ) {
+      if (notification.targetId) {
+        router.push(`/events/${notification.targetId}`);
+        return;
+      }
+    }
+
+    // ADD THIS: Handle event notifications with targetModel
+    if (notification.targetModel === "Event" && notification.targetId) {
+      router.push(`/events/${notification.targetId}`);
       return;
     }
 
@@ -151,6 +169,11 @@ export default function NotificationItem({
         return { name: "chatbubble", color: "#fff", bg: "#8b5cf6" };
       case "like":
         return { name: "heart", color: "#fff", bg: "#ef4444" };
+      // ADD THESE EVENT TYPES
+      case "event_interest":
+        return { name: "heart", color: "#fff", bg: "#ef4444" };
+      case "event_rsvp":
+        return { name: "calendar", color: "#fff", bg: "#8b5cf6" };
       default:
         return { name: "notifications", color: "#fff", bg: "#6b7280" };
     }
@@ -174,7 +197,6 @@ export default function NotificationItem({
         if (notification.metadata?.isGrouped) {
           const likers = notification.metadata?.likers || [];
 
-          // Parse message to bold the names
           const renderLikeMessage = () => {
             const message = notification.message;
 
@@ -328,7 +350,6 @@ export default function NotificationItem({
           </Text>
         );
       case "connection_accepted":
-        // Check if this is a notification for the accepter
         if (notification.message.includes("You are now connected with")) {
           return (
             <Text style={styles.messageText}>
@@ -339,13 +360,37 @@ export default function NotificationItem({
             </Text>
           );
         }
-        // Original message for the requester
         return (
           <Text style={styles.messageText}>
             <Text style={styles.boldName}>{senderName}</Text>
             <Text style={!notification.read && styles.unreadText}>
               {" "}
               accepted your connection request
+            </Text>
+          </Text>
+        );
+      // ADD THESE EVENT TYPES
+      case "event_interest":
+        return (
+          <Text style={styles.messageText}>
+            <Text style={styles.boldName}>{senderName}</Text>
+            <Text style={!notification.read && styles.unreadText}>
+              {" "}
+              {notification.message.includes("interested")
+                ? "is interested in your event"
+                : notification.message}
+            </Text>
+          </Text>
+        );
+      case "event_rsvp":
+        return (
+          <Text style={styles.messageText}>
+            <Text style={styles.boldName}>{senderName}</Text>
+            <Text style={!notification.read && styles.unreadText}>
+              {" "}
+              {notification.message.includes("RSVP")
+                ? "has RSVP'd for your event"
+                : notification.message}
             </Text>
           </Text>
         );
@@ -419,7 +464,6 @@ export default function NotificationItem({
           ]}
         >
           {isGroupedLike ? (
-            // For grouped likes, the avatars are already in the formatted message
             <View style={styles.contentContainer}>{formattedMessage}</View>
           ) : (
             <>
@@ -489,6 +533,7 @@ export default function NotificationItem({
   );
 }
 
+// ... styles remain the same ...
 const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
@@ -602,7 +647,6 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
     color: "#ef4444",
   },
-  // Grouped like styles
   groupedLikeContent: {
     flexDirection: "row",
     alignItems: "center",

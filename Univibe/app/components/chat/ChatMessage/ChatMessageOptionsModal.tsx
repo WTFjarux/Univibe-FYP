@@ -16,6 +16,7 @@ import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import AudioPlayer from "./AudioPlayer";
 import ReplyPreview from "./ReplyPreview";
+import { StoryReplyCard } from "./ChatBubble";
 import AudioManager from "../../../../lib/utils/AudioManager";
 import PostCard from "../../Feed/Post/PostCard";
 import { Post } from "../../../../lib/services/postService";
@@ -26,68 +27,68 @@ import { Post } from "../../../../lib/services/postService";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
-// Available reactions
 const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "😡"];
 
-// Layout dimensions
 const REACTION_WIDTH = 340;
 const REACTION_BAR_HEIGHT = 56;
 const ACTION_HEIGHT = 48;
 const ACTION_SEPARATOR_HEIGHT = 0.5;
 const ACTIONS_WIDTH = 220;
 
-// Positioning
 const SIDE_MARGIN = 12;
 const VERTICAL_OFFSET = 12;
 const SAFE_TOP = 60;
 const SAFE_BOTTOM = 30;
 
-// Spacing
-const GAP_BETWEEN_PREVIEW_AND_ACTIONS = 25; // Gap between message preview and action buttons
-const TOTAL_HEIGHT_PADDING = 60; // Extra padding for total modal height
-const POST_MESSAGE_EXTRA_OFFSET = 30; // Extra offset for shared post messages
-const REPLY_PREVIEW_HEIGHT = 50; // Extra height when reply preview is shown
+const GAP_BETWEEN_PREVIEW_AND_ACTIONS = 25;
+const TOTAL_HEIGHT_PADDING = 60;
+const POST_MESSAGE_EXTRA_OFFSET = 30;
+const REPLY_PREVIEW_HEIGHT = 50;
 
-// Message bubble
 const MAX_BUBBLE_WIDTH = SCREEN_WIDTH * 0.75;
 
-// Media preview
 const IMAGE_PREVIEW_WIDTH = SCREEN_WIDTH * 0.55;
 const IMAGE_PREVIEW_HEIGHT = IMAGE_PREVIEW_WIDTH * 1.25;
-const SHARED_POST_PREVIEW_HEIGHT = 300;
 
-// Placeholder
 const PHOTO_BLURHASH = "L6PZfSi_.AyE_3t7t7R**0o#DgR4";
 
-// Audio waveform
 const WAVEFORM_BARS = [10, 18, 14, 22, 10, 16, 12];
 
 // =============================================================================
 // Types
 // =============================================================================
 
-interface ReplyTo {
-  messageId: string;
-  message: string;
-  senderName: string;
-  senderId?: string;
-  type?: string;
-  mediaUrl?: string;
-  thumbnailUrl?: string;
-  duration?: number;
-}
-
 interface Message {
   _id: string;
+  sender: string | { _id: string; name: string; email?: string };
+  senderName: string; // ✅ Required, not optional
+  senderAvatar?: string;
   message: string;
+  roomId: string;
+  createdAt?: string;
+  status?: string;
   type?: string;
   mediaUrl?: string;
   thumbnailUrl?: string;
-  senderName?: string;
-  senderAvatar?: string;
+  mediaSize?: number;
+  mediaName?: string;
+  mediaMimeType?: string;
   duration?: number;
-  createdAt?: string;
-  replyTo?: ReplyTo;
+  locationData?: { latitude: number; longitude: number; locationName?: string };
+  reactions?: Array<{ userId: string; reaction: string; createdAt: string }>;
+  readBy?: Array<{ user: string; readAt: string }>;
+  deliveredTo?: Array<{ user: string; deliveredAt: string }>;
+  replyTo?: {
+    messageId: string;
+    message: string;
+    senderName: string;
+    senderId?: string;
+    type?: string;
+    mediaUrl?: string;
+    thumbnailUrl?: string;
+    duration?: number;
+  };
+  isForwarded?: boolean;
   sharedPost?: {
     postId: string;
     postContent?: string;
@@ -98,6 +99,11 @@ interface Message {
     postAuthorAvatar?: string;
     isAnonymous?: boolean;
     postCreatedAt?: string;
+  };
+  story?: {
+    storyId: string;
+    mediaUrl?: string;
+    thumbnailUrl?: string;
   };
 }
 
@@ -123,8 +129,16 @@ interface ChatMessageOptionsModalProps {
 // Message Type Helpers
 // =============================================================================
 
-/** Check if message has a valid reply */
-const isValidReply = (reply?: ReplyTo): boolean =>
+const isValidReply = (reply?: {
+  messageId: string;
+  message: string;
+  senderName: string;
+  senderId?: string;
+  type?: string;
+  mediaUrl?: string;
+  thumbnailUrl?: string;
+  duration?: number;
+}): boolean =>
   !!(
     reply &&
     reply.messageId &&
@@ -132,35 +146,29 @@ const isValidReply = (reply?: ReplyTo): boolean =>
     reply.senderName.trim() !== ""
   );
 
-/** Check if message is an image type */
 const isImageMessage = (message: Message): boolean =>
   message.type === "image" && !!message.mediaUrl;
 
-/** Check if message is a video type */
 const isVideoMessage = (message: Message): boolean =>
   message.type === "video" && !!message.mediaUrl;
 
-/** Check if message is an audio type */
 const isAudioMessage = (message: Message): boolean => message.type === "audio";
 
-/** Check if message is a file type */
 const isFileMessage = (message: Message): boolean => message.type === "file";
 
-/** Check if message is a location type */
 const isLocationMessage = (message: Message): boolean =>
   message.type === "location";
 
-/** Check if message is a shared post type */
 const isPostMessage = (message: Message): boolean =>
   message.type === "post" && !!message.sharedPost;
+
+const isStoryReplyMessage = (message: Message): boolean =>
+  message.type === "story_reply" && !!message.story;
 
 // =============================================================================
 // Sub-Components
 // =============================================================================
 
-/**
- * MediaPreview - Displays image/video preview in the options modal
- */
 const MediaPreview = ({
   uri,
   showPlayButton,
@@ -172,14 +180,11 @@ const MediaPreview = ({
 
   return (
     <View style={styles.mediaPreviewBox}>
-      {/* Loading indicator */}
       {loading && (
         <View style={styles.mediaLoadingOverlay}>
           <ActivityIndicator size="small" color="#007AFF" />
         </View>
       )}
-
-      {/* Image preview */}
       {uri ? (
         <Image
           source={{ uri }}
@@ -197,8 +202,6 @@ const MediaPreview = ({
           <Ionicons name="videocam" size={32} color="rgba(255,255,255,0.4)" />
         </View>
       )}
-
-      {/* Play button overlay for videos */}
       {showPlayButton && uri && (
         <View style={styles.playOverlay}>
           <View style={styles.playCircle}>
@@ -215,9 +218,6 @@ const MediaPreview = ({
   );
 };
 
-/**
- * AudioPreview - Displays audio player or loading state in the options modal
- */
 const AudioPreview = ({
   message,
   isOwnMessage,
@@ -225,7 +225,6 @@ const AudioPreview = ({
   message: Message;
   isOwnMessage: boolean;
 }) => {
-  // Show loading state if audio hasn't been sent yet
   if (!message.mediaUrl) {
     return (
       <View style={styles.audioLoadingContainer}>
@@ -259,7 +258,6 @@ const AudioPreview = ({
     );
   }
 
-  // Show audio player for sent audio
   return (
     <View style={styles.audioMessageContainer}>
       <AudioPlayer
@@ -273,9 +271,6 @@ const AudioPreview = ({
   );
 };
 
-/**
- * FilePreview - Displays file attachment preview in the options modal
- */
 const FilePreview = ({
   message,
   isOwnMessage,
@@ -284,7 +279,6 @@ const FilePreview = ({
   isOwnMessage: boolean;
 }) => {
   const fileColor = "#8B5CF6";
-
   return (
     <View
       style={[
@@ -309,9 +303,6 @@ const FilePreview = ({
   );
 };
 
-/**
- * LocationPreview - Displays location preview in the options modal
- */
 const LocationPreview = ({ isOwnMessage }: { isOwnMessage: boolean }) => (
   <View
     style={[
@@ -332,9 +323,6 @@ const LocationPreview = ({ isOwnMessage }: { isOwnMessage: boolean }) => (
   </View>
 );
 
-/**
- * SharedPostPreview - Displays shared post with optional caption in the options modal
- */
 const SharedPostPreview = ({
   message,
   isOwnMessage,
@@ -345,7 +333,6 @@ const SharedPostPreview = ({
   const sharedPost = message.sharedPost;
   if (!sharedPost?.postId) return null;
 
-  // Build Post object from shared post data
   const postData: Post = {
     _id: sharedPost.postId,
     user: {
@@ -387,7 +374,6 @@ const SharedPostPreview = ({
 
   return (
     <View style={{ width: 260, alignSelf: "center" }}>
-      {/* Shared post card */}
       <PostCard
         post={postData}
         compact={true}
@@ -398,8 +384,6 @@ const SharedPostPreview = ({
         onCommentPress={() => {}}
         onSharePress={() => {}}
       />
-
-      {/* Caption message bubble below the post */}
       {hasCaption && (
         <View
           style={{
@@ -431,7 +415,7 @@ const SharedPostPreview = ({
 };
 
 // =============================================================================
-// Main Component - ChatMessageOptionsModal
+// Main Component
 // =============================================================================
 
 export default function ChatMessageOptionsModal({
@@ -451,7 +435,6 @@ export default function ChatMessageOptionsModal({
   currentUserId,
   DEFAULT_AVATAR,
 }: ChatMessageOptionsModalProps) {
-  // Stop audio when modal closes
   useEffect(() => {
     if (!visible) AudioManager.stopCurrentSound();
     return () => {
@@ -459,14 +442,13 @@ export default function ChatMessageOptionsModal({
     };
   }, [visible]);
 
-  // Close modal and stop audio
   const handleClose = useCallback(() => {
     AudioManager.stopCurrentSound();
     onClose();
   }, [onClose]);
 
   // ===========================================================================
-  // Action Buttons Configuration
+  // Action Buttons
   // ===========================================================================
 
   const actions = useMemo(() => {
@@ -480,8 +462,6 @@ export default function ChatMessageOptionsModal({
       { icon: "copy-outline", label: "Copy", handler: onCopy },
       { icon: "arrow-redo-outline", label: "Forward", handler: onForward },
     ];
-
-    // Only show delete for own messages
     if (isOwnMessage && onDelete) {
       items.push({
         icon: "trash-outline",
@@ -490,7 +470,6 @@ export default function ChatMessageOptionsModal({
         destructive: true,
       });
     }
-
     return items;
   }, [isOwnMessage, onReply, onCopy, onForward, onDelete]);
 
@@ -501,10 +480,8 @@ export default function ChatMessageOptionsModal({
   const actionsCount = actions.length;
   const actionsHeight =
     actionsCount * ACTION_HEIGHT + (actionsCount - 1) * ACTION_SEPARATOR_HEIGHT;
-
   const hasValidReply = isValidReply(message.replyTo);
 
-  // Check if reply is a voice message
   const isReplyVoiceMessage = useMemo(() => {
     if (!message.replyTo) return false;
     const replyType = message.replyTo.type;
@@ -516,103 +493,73 @@ export default function ChatMessageOptionsModal({
     );
   }, [message.replyTo]);
 
-  /**
-   * Calculate the preview height based on message type
-   */
   const getPreviewHeight = (): number => {
-    // Shared post: dynamic height based on content
+    if (isStoryReplyMessage(message)) return 210;
     if (isPostMessage(message)) {
       const sharedPost = message.sharedPost;
-      let height = 15; // Base: header with avatar + name
-
-      if (sharedPost?.postContent) height += 50; // Text content
-      if (sharedPost?.postImage)
-        height += 150; // Image
-      else height += 15; // Small padding if no image
-      if (message.message && message.message.trim().length > 0) height += 50; // Caption
-
+      let height = 15;
+      if (sharedPost?.postContent) height += 50;
+      if (sharedPost?.postImage) height += 150;
+      else height += 15;
+      if (message.message && message.message.trim().length > 0) height += 50;
       return height;
     }
-
-    // Image/Video: fixed preview size
     if (isImageMessage(message) || isVideoMessage(message))
       return IMAGE_PREVIEW_HEIGHT + 25;
-
-    // Audio: player height
     if (isAudioMessage(message)) return 70;
-
-    // File: attachment preview height
     if (isFileMessage(message)) return 95;
-
-    // Location: compact preview
     if (isLocationMessage(message)) return 56;
-
-    // Text with reply preview
     if (hasValidReply) return isReplyVoiceMessage ? 130 : 60;
-
-    // Plain text message
     return 66;
   };
 
   const previewHeight = getPreviewHeight();
 
-  // Check if message is any type of media (for layout purposes)
   const isMediaMessage =
     isImageMessage(message) ||
     isVideoMessage(message) ||
     isFileMessage(message) ||
     isLocationMessage(message) ||
-    isPostMessage(message);
+    isPostMessage(message) ||
+    isStoryReplyMessage(message);
 
-  // Total modal height
   const totalHeight =
     REACTION_BAR_HEIGHT +
     previewHeight +
     actionsHeight +
     TOTAL_HEIGHT_PADDING +
-    (hasValidReply ? REPLY_PREVIEW_HEIGHT : 0);
+    (hasValidReply && !isStoryReplyMessage(message) ? REPLY_PREVIEW_HEIGHT : 0);
 
-  // Horizontal positioning
   const actionsLeft = isOwnMessage
     ? SCREEN_WIDTH - ACTIONS_WIDTH - SIDE_MARGIN
     : SIDE_MARGIN;
-
   const reactionLeft = isOwnMessage
     ? SCREEN_WIDTH - REACTION_WIDTH - SIDE_MARGIN
     : SIDE_MARGIN;
 
-  /**
-   * Calculate the top position for the modal
-   * Prefers to show above the message, falls back to below
-   */
   const getModalTop = (): number => {
     const spaceAbove = position.y - SAFE_TOP;
     const spaceBelow = SCREEN_HEIGHT - position.y - SAFE_BOTTOM;
-
-    if (spaceAbove >= totalHeight + VERTICAL_OFFSET) {
-      return position.y - totalHeight - VERTICAL_OFFSET; // Show above
-    }
-    if (spaceBelow >= totalHeight + VERTICAL_OFFSET) {
-      return position.y + VERTICAL_OFFSET; // Show below
-    }
-    return (SCREEN_HEIGHT - totalHeight) / 2; // Center on screen
+    if (spaceAbove >= totalHeight + VERTICAL_OFFSET)
+      return position.y - totalHeight - VERTICAL_OFFSET;
+    if (spaceBelow >= totalHeight + VERTICAL_OFFSET)
+      return position.y + VERTICAL_OFFSET;
+    return (SCREEN_HEIGHT - totalHeight) / 2;
   };
 
   const modalTop = Math.max(
     SAFE_TOP,
     Math.min(getModalTop(), SCREEN_HEIGHT - totalHeight - SAFE_BOTTOM),
   );
-
-  // Vertical positions for each section
   const reactionBarTop = modalTop;
   const messagePreviewTop = modalTop + REACTION_BAR_HEIGHT;
-
-  // Actions position: below the message preview with consistent gap
   const postOffset = isPostMessage(message) ? POST_MESSAGE_EXTRA_OFFSET : 0;
   const actionsTop =
     messagePreviewTop +
     previewHeight +
-    (hasValidReply ? REPLY_PREVIEW_HEIGHT : 0) +
+    (hasValidReply && !isStoryReplyMessage(message)
+      ? REPLY_PREVIEW_HEIGHT
+      : 0) +
     GAP_BETWEEN_PREVIEW_AND_ACTIONS +
     postOffset;
 
@@ -620,29 +567,23 @@ export default function ChatMessageOptionsModal({
   // Event Handlers
   // ===========================================================================
 
-  /** Handle reaction press with haptic feedback */
   const handleReactionPress = useCallback(
     (reaction: string) => {
       const shouldRemove = selectedReaction === reaction;
-      if (shouldRemove) {
+      if (shouldRemove)
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } else {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      }
+      else Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       onReaction(reaction, shouldRemove);
       handleClose();
     },
     [selectedReaction, onReaction, handleClose],
   );
 
-  /** Handle action button press with haptic feedback */
   const handleActionPress = useCallback(
     (handler: () => void, destructive?: boolean) => {
-      if (destructive) {
+      if (destructive)
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      } else {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      }
+      else Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       handler();
       handleClose();
     },
@@ -653,8 +594,16 @@ export default function ChatMessageOptionsModal({
   // Data Helpers
   // ===========================================================================
 
-  /** Get reply data for the reply preview */
-  const getReplyData = (): ReplyTo | null => {
+  const getReplyData = (): {
+    messageId: string;
+    message: string;
+    senderName: string;
+    senderId?: string;
+    type?: string;
+    mediaUrl?: string;
+    thumbnailUrl?: string;
+    duration?: number;
+  } | null => {
     if (!hasValidReply) return null;
     return {
       messageId: message.replyTo!.messageId,
@@ -668,7 +617,6 @@ export default function ChatMessageOptionsModal({
     };
   };
 
-  /** Format the message timestamp */
   const getFormattedTime = (): string => {
     if (message.createdAt && formatTime) return formatTime(message.createdAt);
     if (message.createdAt) {
@@ -681,21 +629,18 @@ export default function ChatMessageOptionsModal({
     return "";
   };
 
-  /** Resolve a relative URL to a full URL */
   const resolveUrl = (url?: string): string => {
     if (!url) return "";
     return getFullImageUrl ? getFullImageUrl(url) : url;
   };
 
-  /** Get the preview URL for image/video messages */
   const getPreviewUrl = (): string => {
     if (isVideoMessage(message)) {
       if (message.thumbnailUrl) return resolveUrl(message.thumbnailUrl);
       if (message.mediaUrl) return resolveUrl(message.mediaUrl);
     }
-    if (isImageMessage(message) && message.mediaUrl) {
+    if (isImageMessage(message) && message.mediaUrl)
       return resolveUrl(message.mediaUrl);
-    }
     return "";
   };
 
@@ -703,8 +648,19 @@ export default function ChatMessageOptionsModal({
   // Render: Message Content
   // ===========================================================================
 
-  /** Render the appropriate preview based on message type */
   const renderMessageContent = () => {
+    // Story reply
+    if (isStoryReplyMessage(message)) {
+      return (
+        <StoryReplyCard
+          message={message as any}
+          isOwnMessage={isOwnMessage}
+          getFullImageUrl={getFullImageUrl || ((url: string) => url)}
+          onPress={() => {}}
+        />
+      );
+    }
+
     // Shared post
     if (isPostMessage(message)) {
       return (
@@ -750,7 +706,7 @@ export default function ChatMessageOptionsModal({
   const replyData = getReplyData();
 
   // ===========================================================================
-  // Render: Main Modal
+  // Render
   // ===========================================================================
 
   return (
@@ -760,7 +716,6 @@ export default function ChatMessageOptionsModal({
       animationType="fade"
       onRequestClose={handleClose}
     >
-      {/* Backdrop - tap to close */}
       <TouchableOpacity
         style={StyleSheet.absoluteFill}
         activeOpacity={1}
@@ -770,7 +725,7 @@ export default function ChatMessageOptionsModal({
         <View style={[StyleSheet.absoluteFill, styles.dimLayer]} />
       </TouchableOpacity>
 
-      {/* ===== Reaction Bar ===== */}
+      {/* Reaction Bar */}
       <View
         style={[
           styles.reactionContainer,
@@ -792,15 +747,21 @@ export default function ChatMessageOptionsModal({
         ))}
       </View>
 
-      {/* ===== Message Preview ===== */}
+      {/* Message Preview */}
       <View
         style={[
           styles.messageWrapper,
           { top: messagePreviewTop, left: 0, right: 0, alignItems: "center" },
         ]}
       >
-        {/* Shared post layout */}
-        {isPostMessage(message) ? (
+        {isStoryReplyMessage(message) ? (
+          <View style={{ alignItems: "center" }}>
+            {renderMessageContent()}
+            <Text style={[styles.timeText, { marginTop: 8 }]}>
+              {getFormattedTime()}
+            </Text>
+          </View>
+        ) : isPostMessage(message) ? (
           <View style={styles.mediaPreviewContainer}>
             {replyData && (
               <View style={styles.replyPreviewWrapperCenter}>
@@ -819,8 +780,7 @@ export default function ChatMessageOptionsModal({
               <Text style={styles.timeText}>{getFormattedTime()}</Text>
             </View>
           </View>
-        ) : /* Media message layout (image, video, file, location) */
-        isMediaMessage ? (
+        ) : isMediaMessage ? (
           <View style={styles.mediaPreviewContainer}>
             {replyData && (
               <View style={styles.replyPreviewWrapperCenter}>
@@ -840,7 +800,6 @@ export default function ChatMessageOptionsModal({
             </View>
           </View>
         ) : (
-          /* Text message layout */
           <View
             style={[
               styles.messageRow,
@@ -849,9 +808,7 @@ export default function ChatMessageOptionsModal({
           >
             {!isOwnMessage && <View style={styles.avatarSpacer} />}
             {isOwnMessage && <View style={styles.avatarSpacerRight} />}
-
             <View style={styles.messageContent}>
-              {/* Reply preview */}
               {replyData && (
                 <View
                   style={[
@@ -868,8 +825,6 @@ export default function ChatMessageOptionsModal({
                   />
                 </View>
               )}
-
-              {/* Message bubble */}
               <View
                 style={[
                   styles.bubble,
@@ -882,8 +837,6 @@ export default function ChatMessageOptionsModal({
               >
                 {renderMessageContent()}
               </View>
-
-              {/* Timestamp */}
               <View
                 style={[
                   styles.messageFooter,
@@ -893,13 +846,12 @@ export default function ChatMessageOptionsModal({
                 <Text style={styles.timeText}>{getFormattedTime()}</Text>
               </View>
             </View>
-
             {isOwnMessage && <View style={styles.avatarSpacer} />}
           </View>
         )}
       </View>
 
-      {/* ===== Action Buttons ===== */}
+      {/* Action Buttons */}
       <View
         style={[
           styles.actionsContainer,
@@ -944,13 +896,7 @@ export default function ChatMessageOptionsModal({
 // =============================================================================
 
 const styles = StyleSheet.create({
-  // Backdrop
-  dimLayer: {
-    flex: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.58)",
-  },
-
-  // Reaction bar
+  dimLayer: { flex: 1, backgroundColor: "rgba(255, 255, 255, 0.58)" },
   reactionContainer: {
     position: "absolute",
     width: REACTION_WIDTH,
@@ -974,9 +920,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     position: "relative",
   },
-  reactionEmoji: {
-    fontSize: 26,
-  },
+  reactionEmoji: { fontSize: 26 },
   selectedIndicator: {
     position: "absolute",
     bottom: 0,
@@ -987,91 +931,31 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: "#8B5CF6",
   },
-
-  // Message wrapper
-  messageWrapper: {
-    position: "absolute",
-    marginVertical: 4,
-  },
-  messageRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-  },
-  ownMessageRow: {
-    justifyContent: "flex-end",
-  },
-  otherMessageRow: {
-    justifyContent: "flex-start",
-  },
-  avatarSpacer: {
-    width: 40,
-  },
-  avatarSpacerRight: {
-    width: 40,
-  },
-  messageContent: {
-    maxWidth: MAX_BUBBLE_WIDTH,
-  },
-
-  // Media preview
-  mediaPreviewContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  replyPreviewWrapperCenter: {
-    alignSelf: "center",
-    marginBottom: 8,
-  },
-  mediaContentWrapper: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  mediaTimeFooter: {
-    alignItems: "center",
-    marginTop: 8,
-  },
-  replyPreviewWrapperOwn: {
-    alignSelf: "flex-end",
-    marginBottom: 8,
-  },
-  replyPreviewWrapperOther: {
-    alignSelf: "flex-start",
-    marginBottom: 8,
-  },
-
-  // Message bubble
-  bubble: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 18,
-  },
-  bubbleAutoWidth: {
-    alignSelf: "flex-start",
-  },
-  ownBubbleAlignment: {
-    alignSelf: "flex-end",
-  },
-  ownBubble: {
-    backgroundColor: "#8b5cf6",
-    borderBottomRightRadius: 4,
-  },
-  otherBubble: {
-    backgroundColor: "#E5E5EA",
-    borderBottomLeftRadius: 4,
-  },
+  messageWrapper: { position: "absolute", marginVertical: 4 },
+  messageRow: { flexDirection: "row", alignItems: "flex-end" },
+  ownMessageRow: { justifyContent: "flex-end" },
+  otherMessageRow: { justifyContent: "flex-start" },
+  avatarSpacer: { width: 40 },
+  avatarSpacerRight: { width: 40 },
+  messageContent: { maxWidth: MAX_BUBBLE_WIDTH },
+  mediaPreviewContainer: { alignItems: "center", justifyContent: "center" },
+  replyPreviewWrapperCenter: { alignSelf: "center", marginBottom: 8 },
+  mediaContentWrapper: { alignItems: "center", justifyContent: "center" },
+  mediaTimeFooter: { alignItems: "center", marginTop: 8 },
+  replyPreviewWrapperOwn: { alignSelf: "flex-end", marginBottom: 8 },
+  replyPreviewWrapperOther: { alignSelf: "flex-start", marginBottom: 8 },
+  bubble: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18 },
+  bubbleAutoWidth: { alignSelf: "flex-start" },
+  ownBubbleAlignment: { alignSelf: "flex-end" },
+  ownBubble: { backgroundColor: "#8b5cf6", borderBottomRightRadius: 4 },
+  otherBubble: { backgroundColor: "#E5E5EA", borderBottomLeftRadius: 4 },
   messageText: {
     fontSize: 15,
     lineHeight: 20,
     fontFamily: "SofiaSans-Regular",
   },
-  ownMessageText: {
-    color: "#fff",
-  },
-  otherMessageText: {
-    color: "#000",
-  },
-
-  // Media preview box
+  ownMessageText: { color: "#fff" },
+  otherMessageText: { color: "#000" },
   mediaPreviewBox: {
     width: IMAGE_PREVIEW_WIDTH,
     height: IMAGE_PREVIEW_HEIGHT,
@@ -1079,11 +963,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#E5E5EA",
   },
-  mediaPreviewImage: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 12,
-  },
+  mediaPreviewImage: { width: "100%", height: "100%", borderRadius: 12 },
   mediaLoadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: "center",
@@ -1114,12 +994,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
-  // Audio
-  audioMessageContainer: {
-    minWidth: 200,
-    maxWidth: 250,
-  },
+  audioMessageContainer: { minWidth: 200, maxWidth: 250 },
   audioLoadingContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -1134,23 +1009,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  waveformContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-  },
-  waveBar: {
-    width: 3,
-    borderRadius: 2,
-  },
+  waveformContainer: { flexDirection: "row", alignItems: "center", gap: 3 },
+  waveBar: { width: 3, borderRadius: 2 },
   audioLabel: {
     fontSize: 12,
     color: "#000",
     opacity: 0.7,
     fontFamily: "SofiaSans-Regular",
   },
-
-  // File
   filePreviewContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -1166,9 +1032,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  fileInfo: {
-    flex: 1,
-  },
+  fileInfo: { flex: 1 },
   fileName: {
     fontSize: 14,
     fontWeight: "500",
@@ -1176,8 +1040,6 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Medium",
     marginBottom: 3,
   },
-
-  // Location
   locationPreviewContainer: {
     borderRadius: 16,
     padding: 16,
@@ -1192,8 +1054,6 @@ const styles = StyleSheet.create({
     color: "#000",
     fontFamily: "SofiaSans-Bold",
   },
-
-  // Message footer
   messageFooter: {
     flexDirection: "row",
     alignItems: "center",
@@ -1202,16 +1062,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
     gap: 4,
   },
-  ownMessageFooter: {
-    justifyContent: "flex-end",
-  },
-  timeText: {
-    fontSize: 10,
-    color: "#4b4b4b",
-    fontFamily: "SofiaSans-Regular",
-  },
-
-  // Action buttons
+  ownMessageFooter: { justifyContent: "flex-end" },
+  timeText: { fontSize: 10, color: "#4b4b4b", fontFamily: "SofiaSans-Regular" },
   actionsContainer: {
     position: "absolute",
     width: ACTIONS_WIDTH,
@@ -1231,18 +1083,12 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     gap: 16,
   },
-  actionSeparator: {
-    height: 0.5,
-    backgroundColor: "#E5E5EA",
-    marginLeft: 16,
-  },
+  actionSeparator: { height: 0.5, backgroundColor: "#E5E5EA", marginLeft: 16 },
   actionLabel: {
     fontSize: 15,
     color: "#1C1C1E",
     fontWeight: "500",
     fontFamily: "SofiaSans-Regular",
   },
-  actionLabelDestructive: {
-    color: "#FF3B30",
-  },
+  actionLabelDestructive: { color: "#FF3B30" },
 });

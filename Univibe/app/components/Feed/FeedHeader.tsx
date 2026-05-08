@@ -55,7 +55,6 @@ const FeedHeader: React.FC<FeedHeaderProps> = ({
         <TouchableOpacity style={styles.iconButton} onPress={handleSearchPress}>
           <Ionicons name="search-outline" size={30} color="#111827" />
         </TouchableOpacity>
-
       </View>
     </View>
   );
@@ -73,15 +72,14 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 28,
-    fontWeight: "bold",
     color: "#111827",
-    fontFamily:"SofiaSans-Bold",
+    fontFamily: "SofiaSans-Bold",
   },
   subtitle: {
     fontSize: 14,
     color: "#6b7280",
     marginTop: 4,
-    fontFamily:"SofiaSans-Regular",
+    fontFamily: "SofiaSans-Regular",
   },
   actions: {
     flexDirection: "row",
@@ -91,8 +89,7 @@ const styles = StyleSheet.create({
   iconButton: {
     padding: 8,
     borderRadius: 12,
-    backgroundColor: "white",
-    shadowColor: "#000",
+    shadowColor: "#050505",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 2,

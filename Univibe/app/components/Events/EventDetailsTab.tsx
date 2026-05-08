@@ -1,5 +1,5 @@
 // app/components/Events/EventDetailsTab.tsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -14,8 +14,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { Event } from "@/lib/services/eventService";
 import { useRouter } from "expo-router";
 import { API_BASE_URL } from "../../../constants/ipConstants";
+import socketService from "@/lib/services/socketService";
 
-// Import default avatar from assets
 const DEFAULT_AVATAR: ImageSourcePropType = require("../../../assets/images/default-avatar.png");
 
 interface EventDetailsTabProps {
@@ -31,11 +31,39 @@ export const EventDetailsTab = ({
   const [imageError, setImageError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Reset loading state when event changes
+  // LOCAL STATE for real-time counts
+  const [localRsvpCount, setLocalRsvpCount] = useState(event.rsvpCount ?? 0);
+  const [localInterestedCount, setLocalInterestedCount] = useState(
+    event.interestedCount ?? 0,
+  );
+
+  // Sync with event prop changes
   useEffect(() => {
-    setIsLoading(true);
-    setImageError(false);
-  }, [event.organizer._id]);
+    setLocalRsvpCount(event.rsvpCount ?? 0);
+    setLocalInterestedCount(event.interestedCount ?? 0);
+  }, [event.rsvpCount, event.interestedCount]);
+
+  // Listen for socket updates
+  useEffect(() => {
+    if (!event._id) return;
+
+    const handleEventUpdate = (data: any) => {
+      if (data.eventId === event._id) {
+        if (data.rsvpCount !== undefined) {
+          setLocalRsvpCount(data.rsvpCount ?? 0);
+        }
+        if (data.interestedCount !== undefined) {
+          setLocalInterestedCount(data.interestedCount ?? 0);
+        }
+      }
+    };
+
+    socketService.on("event:updated", handleEventUpdate);
+
+    return () => {
+      socketService.off("event:updated", handleEventUpdate);
+    };
+  }, [event._id]);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -55,13 +83,13 @@ export const EventDetailsTab = ({
   const startDate = formatDate(event.startDate);
   const endDate = formatDate(event.endDate);
 
-  const handleOrganizerPress = () => {
+  const handleOrganizerPress = useCallback(() => {
     if (onOrganizerPress) {
       onOrganizerPress(event.organizer._id);
     } else {
       router.push(`/profile/${event.organizer._id}`);
     }
-  };
+  }, [event.organizer._id, onOrganizerPress]);
 
   const getFullImageUrl = (url: string | undefined): string | undefined => {
     if (!url) return undefined;
@@ -71,7 +99,6 @@ export const EventDetailsTab = ({
 
   const getProfileImage = () => {
     const profilePic = event.organizer.profilePicture;
-
     if (profilePic && profilePic !== "" && !imageError) {
       const fullUrl = getFullImageUrl(profilePic);
       if (fullUrl) {
@@ -97,13 +124,11 @@ export const EventDetailsTab = ({
       <View style={styles.statsContainer}>
         <View style={styles.stat}>
           <Ionicons name="people-outline" size={18} color="#8b5cf6" />
-          <Text style={styles.statText}>{event.rsvpCount} attending</Text>
+          <Text style={styles.statText}>{localRsvpCount} attending</Text>
         </View>
         <View style={styles.stat}>
           <Ionicons name="heart-outline" size={18} color="#8b5cf6" />
-          <Text style={styles.statText}>
-            {event.interestedCount} interested
-          </Text>
+          <Text style={styles.statText}>{localInterestedCount} interested</Text>
         </View>
       </View>
 

@@ -1,4 +1,4 @@
-// app/(tabs)/profile/index.tsx - Fixed infinite loading, removed repost
+// app/(tabs)/profile/index.tsx - With skeleton loading
 
 import React, {
   useRef,
@@ -10,7 +10,6 @@ import React, {
 import {
   View,
   RefreshControl,
-  ActivityIndicator,
   Text,
   TouchableOpacity,
   ScrollView,
@@ -37,7 +36,6 @@ import {
   Post,
 } from "../../../lib/services/postService";
 import { API_BASE_URL } from "../../../constants/ipConstants";
-import { profileService } from "../../../lib/services/profileService";
 import { profileCache } from "../../../lib/cache/profileCache";
 
 import ProfileHeader from "@/app/components/Profile/ProfileHeader";
@@ -48,6 +46,10 @@ import ProfilePosts from "@/app/components/Profile/ProfilePosts";
 import UploadModal from "@/app/components/Profile/UploadModal";
 import ImageViewModal from "@/app/components/Profile/ImageViewModal";
 import { styles } from "@/app/components/Profile/profileStyles";
+import OwnProfilePageSkeleton, {
+  OwnPostsLoadingSkeleton,
+  OwnLoadingMorePostsSkeleton,
+} from "@/app/components/Profile/OwnProfileSkeleton";
 
 type TabType = "posts" | "about";
 
@@ -92,6 +94,10 @@ export default function ProfileScreen() {
   const [postsRefreshing, setPostsRefreshing] = useState(false);
   const [postsLoaded, setPostsLoaded] = useState(false);
 
+  // Loading states for skeletons
+  const [postsInitialLoading, setPostsInitialLoading] = useState(false);
+  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
+
   // Cache state
   const [isCached, setIsCached] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -100,7 +106,6 @@ export default function ProfileScreen() {
   const refreshInProgress = useRef(false);
   const initialLoadDone = useRef(false);
   const mainScrollViewRef = useRef<ScrollView>(null);
-  const flatListRef = useRef<any>(null);
 
   // Image upload hooks
   const {
@@ -220,6 +225,14 @@ export default function ProfileScreen() {
 
       const cacheKey = `user_posts_${user.id}_page_${page}`;
 
+      // Set appropriate loading states for skeletons
+      if (shouldAppend) {
+        setLoadingMorePosts(true);
+      } else if (!forceRefresh) {
+        setPostsInitialLoading(true);
+      }
+      setPostsLoading(true);
+
       // Try cache first (for first page only)
       if (
         !forceRefresh &&
@@ -240,11 +253,12 @@ export default function ProfileScreen() {
           setPostsPage(page);
           setPostsLoaded(true);
           setIsCached(true);
+          setPostsInitialLoading(false);
+          setPostsLoading(false);
           return;
         }
       }
 
-      setPostsLoading(true);
       try {
         const response = await getProfilePosts(user.id, page, 10);
 
@@ -275,6 +289,8 @@ export default function ProfileScreen() {
         if (isMounted.current) {
           setPostsLoading(false);
           setPostsRefreshing(false);
+          setPostsInitialLoading(false);
+          setLoadingMorePosts(false);
         }
       }
     },
@@ -766,11 +782,11 @@ export default function ProfileScreen() {
     [activeTab, postCount],
   );
 
-  // Memoize posts props (NO repost)
+  // Memoize posts props
   const postsProps = useMemo(
     () => ({
       posts,
-      loading: postsLoading && !postsLoaded,
+      loading: postsInitialLoading,
       refreshing: postsRefreshing,
       onRefresh: refreshPosts,
       onLoadMore: loadMorePosts,
@@ -787,7 +803,7 @@ export default function ProfileScreen() {
       onMuteUser: handleMuteUser,
       onBlockUser: handleBlockUser,
     }),
-    [posts, postsLoading, postsLoaded, postsRefreshing, hasMorePosts],
+    [posts, postsInitialLoading, postsRefreshing, hasMorePosts],
   );
 
   // Memoize about content
@@ -868,13 +884,14 @@ export default function ProfileScreen() {
     [profile, user, postCount, connectionCount, isCached],
   );
 
-  // Loading state
+  // ============ RENDER ============
+
+  // Full page skeleton during initial load
   if ((authLoading || initialLoading) && !profile) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#8b5cf6" />
-        <Text style={styles.loadingText}>Loading profile...</Text>
-      </View>
+      <SafeAreaView style={styles.container} edges={["top"]}>
+        <OwnProfilePageSkeleton />
+      </SafeAreaView>
     );
   }
 
@@ -980,7 +997,13 @@ export default function ProfileScreen() {
           <>
             {profileHeader}
             {profileTabs}
+            {/* Show posts loading skeleton when initially loading posts */}
+            {postsInitialLoading && <OwnPostsLoadingSkeleton />}
           </>
+        }
+        listFooterComponent={
+          // Show loading more skeleton when loading more posts
+          loadingMorePosts ? <OwnLoadingMorePostsSkeleton /> : null
         }
       />
       <UploadModal

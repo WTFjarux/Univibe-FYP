@@ -1,5 +1,5 @@
 // app/components/Events/EventCard.tsx
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -37,17 +37,12 @@ export default function EventCard({
   // Check if current user is the organizer
   const isOrganizer = (() => {
     if (!currentUserId) return false;
-
-    // Case 1: organizer is a string ID
     if (typeof event.organizer === "string") {
       return event.organizer === currentUserId;
     }
-
-    // Case 2: organizer is an object with _id property
     if (event.organizer && typeof event.organizer === "object") {
       return event.organizer._id === currentUserId;
     }
-
     return false;
   })();
 
@@ -131,6 +126,10 @@ export default function EventCard({
   const images = getEventImages();
   const hasMultipleImages = images.length > 1;
 
+  // SAFE: Ensure rsvpCount and interestedCount are always numbers
+  const safeRsvpCount = event.rsvpCount ?? 0;
+  const safeInterestedCount = event.interestedCount ?? 0;
+
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
       if (viewableItems.length > 0 && viewableItems[0].index !== null) {
@@ -143,16 +142,12 @@ export default function EventCard({
     itemVisiblePercentThreshold: 50,
   }).current;
 
-  const renderImageItem = ({
-    item: imageUrl,
-  }: {
-    item: string;
-    index: number;
-  }) => <Image source={{ uri: imageUrl }} style={styles.coverImage} />;
+  const renderImageItem = ({ item: imageUrl }: { item: string }) => (
+    <Image source={{ uri: imageUrl }} style={styles.coverImage} />
+  );
 
   const renderDot = () => {
     if (!hasMultipleImages) return null;
-
     return (
       <View style={styles.dotsContainer}>
         {images.map((_, index) => (
@@ -170,7 +165,6 @@ export default function EventCard({
 
   const renderNavigationButtons = () => {
     if (!hasMultipleImages) return null;
-
     return (
       <>
         {currentImageIndex > 0 && (
@@ -205,7 +199,6 @@ export default function EventCard({
 
   const renderImageCounter = () => {
     if (!hasMultipleImages) return null;
-
     return (
       <View style={styles.imageCounter}>
         <Ionicons name="images-outline" size={12} color="#fff" />
@@ -216,10 +209,8 @@ export default function EventCard({
     );
   };
 
-  // Render organizer badge for your own events
   const renderOrganizerBadge = () => {
     if (!isOrganizer) return null;
-
     return (
       <View style={styles.organizerBadge}>
         <Ionicons name="star" size={12} color="#f59e0b" />
@@ -228,16 +219,13 @@ export default function EventCard({
     );
   };
 
-  // Render organizer name for other events
   const renderOrganizerName = () => {
     if (isOrganizer) return null;
-
     const organizerDisplayName =
       event.organizerName ||
       (typeof event.organizer === "object"
         ? event.organizer?.name
         : "Organizer");
-
     return (
       <View style={styles.organizerInfo}>
         <Ionicons name="person-outline" size={14} color="#6b7280" />
@@ -248,10 +236,22 @@ export default function EventCard({
     );
   };
 
+  const handleCardPress = useCallback(() => {
+    router.push(`/events/${event._id}`);
+  }, [event._id]);
+
+  const handleInterestPress = useCallback(() => {
+    onInterestPress?.(event._id);
+  }, [event._id, onInterestPress]);
+
+  const handleRsvpPress = useCallback(() => {
+    onRsvpPress?.(event._id);
+  }, [event._id, onRsvpPress]);
+
   return (
     <TouchableOpacity
       style={styles.card}
-      onPress={() => router.push(`/events/${event._id}`)}
+      onPress={handleCardPress}
       activeOpacity={0.7}
     >
       {/* Image Carousel */}
@@ -311,7 +311,7 @@ export default function EventCard({
           </View>
           <View style={styles.stats}>
             <Ionicons name="people" size={14} color="#6b7280" />
-            <Text style={styles.statsText}>{event.rsvpCount} going</Text>
+            <Text style={styles.statsText}>{safeRsvpCount} going</Text>
           </View>
         </View>
 
@@ -332,11 +332,9 @@ export default function EventCard({
           </View>
         </View>
 
-        {/* Show organizer badge for own events OR organizer name for other events */}
         {renderOrganizerBadge()}
         {renderOrganizerName()}
 
-        {/* Image Count Indicator */}
         {hasMultipleImages && (
           <View style={styles.imageInfo}>
             <Ionicons name="images-outline" size={14} color="#9ca3af" />
@@ -344,16 +342,14 @@ export default function EventCard({
           </View>
         )}
 
-        {/* Actions - Only show if showActions is true AND user is NOT the organizer */}
         {showActions && !isOrganizer && (
           <View style={styles.actions}>
-            {/* Interested Button */}
             <TouchableOpacity
               style={[
                 styles.interestedButton,
                 event.isInterested && styles.interestedButtonActive,
               ]}
-              onPress={() => onInterestPress?.(event._id)}
+              onPress={handleInterestPress}
             >
               <Ionicons
                 name={event.isInterested ? "heart" : "heart-outline"}
@@ -370,13 +366,12 @@ export default function EventCard({
               </Text>
             </TouchableOpacity>
 
-            {/* RSVP Button */}
             <TouchableOpacity
               style={[
                 styles.rsvpButton,
                 event.isRsvpd && styles.rsvpButtonActive,
               ]}
-              onPress={() => onRsvpPress?.(event._id)}
+              onPress={handleRsvpPress}
             >
               <Text
                 style={[
