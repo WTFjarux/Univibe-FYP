@@ -332,12 +332,6 @@ export const eventService = {
         }
       }
 
-      console.log(
-        "🌐 Fetching events from API (skipCache:",
-        params?.skipCache,
-        ")",
-      );
-
       const response = await enhancedFetch(url, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -389,7 +383,7 @@ export const eventService = {
         }
       }
 
-      console.log("🌐 Fetching event from API (skipCache:", skipCache, ")");
+
 
       const response = await enhancedFetch(url, {
         headers: {
@@ -714,8 +708,6 @@ export const eventService = {
       );
 
       const data = await response.json();
-
-      console.log("🔍 Interest API Response:", JSON.stringify(data, null, 2));
 
       if (data.success) {
         invalidateEventCache();

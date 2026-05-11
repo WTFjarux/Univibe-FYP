@@ -28,15 +28,18 @@ export default function LoginScreen() {
   const [isCheckingVerification, setIsCheckingVerification] = useState(false);
   const [resendingEmail, setResendingEmail] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [errorMessage, setErrorMessage] = useState("");
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { login, isLoading } = useAuth();
 
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert("Error", "Please fill in all fields");
+      setErrorMessage("Please fill in all fields");
       return;
     }
+
+    setErrorMessage("");
 
     try {
       await login(email, password);
@@ -52,13 +55,14 @@ export default function LoginScreen() {
       ) {
         setIsEmailVerified(false);
         setShowVerificationModal(true);
+        setErrorMessage(""); // Clear error for verification flow
       } else if (
         errorMsg.toLowerCase().includes("invalid email") ||
         errorMsg.toLowerCase().includes("invalid password")
       ) {
-        Alert.alert("Login Failed", "Invalid email or password");
+        setErrorMessage("Invalid email or password");
       } else {
-        Alert.alert("Login Failed", errorMsg || "An error occurred");
+        setErrorMessage(errorMsg || "An error occurred");
       }
     }
   };
@@ -194,7 +198,10 @@ export default function LoginScreen() {
                   placeholder="Email"
                   placeholderTextColor="#9ca3af"
                   value={email}
-                  onChangeText={setEmail}
+                  onChangeText={(text) => {
+                    setEmail(text);
+                    setErrorMessage("");
+                  }}
                   autoCapitalize="none"
                   keyboardType="email-address"
                   editable={!isLoading}
@@ -214,7 +221,10 @@ export default function LoginScreen() {
                   placeholder="Password"
                   placeholderTextColor="#9ca3af"
                   value={password}
-                  onChangeText={setPassword}
+                  onChangeText={(text) => {
+                    setPassword(text);
+                    setErrorMessage("");
+                  }}
                   secureTextEntry={!showPassword}
                   editable={!isLoading}
                 />
@@ -230,10 +240,28 @@ export default function LoginScreen() {
                 </TouchableOpacity>
               </View>
 
-              {/* Forgot Password */}
-              <TouchableOpacity style={styles.forgotPassword}>
-                <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-              </TouchableOpacity>
+              {/* Error Message + Forgot Password Row */}
+              <View style={styles.passwordBottomRow}>
+                {/* Error Message - Left Side */}
+                {errorMessage ? (
+                  <View style={styles.errorContainer}>
+                    <Ionicons name="alert-circle" size={14} color="#ef4444" />
+                    <Text style={styles.errorText}>{errorMessage}</Text>
+                  </View>
+                ) : (
+                  <View style={{ flex: 1 }} />
+                )}
+
+                {/* Forgot Password - Right Side */}
+                <TouchableOpacity
+                  style={styles.forgotPassword}
+                  onPress={() => router.push("/(auth)/forgot-password")}
+                >
+                  <Text style={styles.forgotPasswordText}>
+                    Forgot Password?
+                  </Text>
+                </TouchableOpacity>
+              </View>
 
               {/* Login Button */}
               <TouchableOpacity
@@ -476,7 +504,28 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
   },
   eyeButton: { padding: 5 },
-  forgotPassword: { alignSelf: "flex-end", marginBottom: 25 },
+  //  Password bottom row with error + forgot password
+  passwordBottomRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    marginBottom: 25,
+    paddingHorizontal: 5,
+  },
+  errorContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    flex: 1,
+  },
+  errorText: {
+    color: "#ef4444",
+    fontSize: 12,
+    fontFamily: "SofiaSans-Medium",
+    flexShrink: 1,
+  },
+  forgotPassword: {},
   forgotPasswordText: {
     color: "#8b5cf6",
     fontSize: 14,
@@ -679,24 +728,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: "center",
     fontFamily: "SofiaSans-Medium",
-  },
-  successContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#ecfdf5",
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    borderRadius: 8,
-    marginBottom: 15,
-    width: "100%",
-    borderWidth: 1,
-    borderColor: "#d1fae5",
-  },
-  successText: {
-    color: "#10b981",
-    fontSize: 13,
-    marginLeft: 8,
-    flex: 1,
-    fontFamily: "SofiaSans-Regular",
   },
 });

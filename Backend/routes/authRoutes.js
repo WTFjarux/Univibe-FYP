@@ -12,6 +12,9 @@ const {
   refreshToken,
   verifyAndRefreshToken,
   changePassword,
+  forgotPassword,
+  verifyOTP,
+  resetPassword,
 } = require("../controllers/authController");
 const { protect } = require("../middleware/authmiddleware");
 
@@ -24,6 +27,11 @@ router.post("/register", register);
 router.post("/login", login);
 router.post("/resend-verification", resendVerification);
 router.post("/check-verification-by-email", checkVerificationByEmail);
+
+// Password Reset Routes (Public)
+router.post("/forgot-password", forgotPassword); //  Step 1: Send OTP
+router.post("/verify-otp", verifyOTP); // Step 2: Verify OTP
+router.post("/reset-password", resetPassword); // Step 3: Set new password
 
 // ============================================
 // Email Verification Routes
@@ -38,8 +46,6 @@ router.get("/me", protect, getMe);
 router.get("/check-verification", protect, checkVerificationStatus);
 router.get("/refresh-token", protect, refreshToken);
 router.get("/verify-and-refresh", protect, verifyAndRefreshToken);
-
-// Change Password Route
 router.post("/change-password", protect, changePassword);
 
 module.exports = router;

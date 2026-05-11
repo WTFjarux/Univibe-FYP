@@ -686,6 +686,24 @@ userSchema.methods.canResendVerification = function () {
 };
 
 // ============================================
+// PASSWORD RESET METHODS (via OTP)
+// ============================================
+
+/**
+ * Reset user's password and invalidate all existing tokens
+ * This is called after OTP verification
+ */
+userSchema.methods.resetPassword = async function (newPassword) {
+  this.password = newPassword;
+  this.tokenVersion = (this.tokenVersion || 0) + 1; // Invalidate all existing login tokens
+  await this.save();
+  console.log(
+    `🔐 Password reset for user: ${this.email} (tokenVersion: ${this.tokenVersion})`,
+  );
+  return true;
+};
+
+// ============================================
 // ONLINE STATUS METHODS
 // ============================================
 
@@ -709,8 +727,6 @@ userSchema.methods.updateOnlineStatus = async function (
  * Respects block - blocked users can't see online status
  */
 userSchema.methods.getOnlineStatus = function (requesterId) {
-  // If requester is blocked by this user, don't show online status
-  // This check is done at the route level using middleware
   return {
     isOnline: this.isOnline,
     lastSeen: this.lastSeen,
@@ -723,7 +739,6 @@ userSchema.methods.getOnlineStatus = function (requesterId) {
 
 /**
  * Get blocked user IDs for a user (from Block collection)
- * This replaces the old this.blockedUsers approach
  */
 userSchema.statics.getBlockedUserIds = async function (userId) {
   const Block = mongoose.model("Block");
@@ -735,19 +750,15 @@ userSchema.statics.getBlockedUserIds = async function (userId) {
 
   blocks.forEach((block) => {
     if (block.blockDirection === "mutual") {
-      // In mutual blocks, both users are blocked from each other
       blockedIds.add(block.blocker.toString());
       blockedIds.add(block.blocked.toString());
     } else if (block.blocker.toString() === userId.toString()) {
-      // Current user blocked someone - they're blocked
       blockedIds.add(block.blocked.toString());
     } else {
-      // Someone blocked current user - they're blocked from viewing
       blockedIds.add(block.blocker.toString());
     }
   });
 
-  // Remove self from set
   blockedIds.delete(userId.toString());
   return Array.from(blockedIds);
 };
@@ -769,7 +780,6 @@ userSchema.statics.areUsersBlocked = async function (userId1, userId2) {
 
 /**
  * Get connection suggestions based on mutual connections
- * Excludes blocked users
  */
 userSchema.statics.getConnectionSuggestions = async function (
   userId,
@@ -779,10 +789,8 @@ userSchema.statics.getConnectionSuggestions = async function (
   const user = await User.findById(userId);
   if (!user) return [];
 
-  // Get blocked user IDs
   const blockedUserIds = await User.getBlockedUserIds(userId);
 
-  // Get IDs to exclude
   const excludedIds = [
     userId,
     ...user.connections.map((id) => id.toString()),
@@ -792,7 +800,6 @@ userSchema.statics.getConnectionSuggestions = async function (
     ...user.mutedUsers.map((id) => id.toString()),
   ];
 
-  // Find users with mutual connections
   const suggestions = await User.aggregate([
     {
       $match: {
@@ -844,10 +851,8 @@ userSchema.statics.getOnlineFriends = async function (userId) {
   const user = await this.findById(userId);
   if (!user) return [];
 
-  // Get blocked users to exclude
   const blockedUserIds = await this.getBlockedUserIds(userId);
 
-  // Filter out blocked users from connections
   const visibleConnections = user.connections.filter(
     (connId) => !blockedUserIds.includes(connId.toString()),
   );
