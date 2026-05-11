@@ -1,6 +1,8 @@
-// Backend/controllers/profileController.js
+// backend/controllers/profileController.js
 const User = require("../models/User");
 const Profile = require("../models/Profile");
+const Block = require("../models/Block");
+const BlockService = require("../services/blockService");
 const fs = require("fs");
 const path = require("path");
 
@@ -8,9 +10,6 @@ const path = require("path");
 // HELPER FUNCTIONS
 // ============================================
 
-/**
- * Convert image path to full URL for frontend consumption
- */
 const getFullImageUrl = (imagePath, req) => {
   if (!imagePath) return null;
   if (imagePath.startsWith("http://") || imagePath.startsWith("https://")) {
@@ -32,9 +31,6 @@ const getFullImageUrl = (imagePath, req) => {
   return `${baseUrl}/uploads/${imagePath}`;
 };
 
-/**
- * Delete uploaded file from server on failure
- */
 const cleanupUploadedFile = (filename, fileType = "profile-picture") => {
   try {
     const directory =
@@ -50,9 +46,6 @@ const cleanupUploadedFile = (filename, fileType = "profile-picture") => {
 // PROFILE SETUP
 // ============================================
 
-/**
- * Check username availability
- */
 exports.checkUsernameAvailability = async (req, res) => {
   try {
     const { username } = req.params;
@@ -114,9 +107,6 @@ exports.checkUsernameAvailability = async (req, res) => {
   }
 };
 
-/**
- * Complete initial profile setup for new users
- */
 exports.setupProfile = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -155,7 +145,6 @@ exports.setupProfile = async (req, res) => {
       });
     }
 
-    // Update user with username and mark profile complete
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       {
@@ -254,9 +243,6 @@ exports.setupProfile = async (req, res) => {
   }
 };
 
-/**
- * Check if user has completed profile setup
- */
 exports.checkProfileStatus = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
@@ -271,7 +257,6 @@ exports.checkProfileStatus = async (req, res) => {
 
     let profile = await Profile.findOne({ user: req.user.id });
 
-    // Auto-create profile if user is marked complete but profile doesn't exist
     if (!profile && user.profileComplete) {
       profile = await Profile.create({
         user: req.user.id,
@@ -281,7 +266,7 @@ exports.checkProfileStatus = async (req, res) => {
         year: "UPC",
         graduationYear: String(new Date().getFullYear() + 1),
         universityEmail: user.email,
-        profilePicture: "", // Empty string - frontend will use default avatar
+        profilePicture: "",
         coverPhoto: "",
       });
     }
@@ -318,9 +303,6 @@ exports.checkProfileStatus = async (req, res) => {
 // IMAGE UPLOAD & MANAGEMENT
 // ============================================
 
-/**
- * Upload profile picture
- */
 exports.uploadProfilePicture = async (req, res) => {
   try {
     if (!req.file) {
@@ -378,9 +360,6 @@ exports.uploadProfilePicture = async (req, res) => {
   }
 };
 
-/**
- * Delete profile picture - sets to empty string (frontend will show default avatar)
- */
 exports.deleteProfilePicture = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -392,7 +371,6 @@ exports.deleteProfilePicture = async (req, res) => {
         .json({ success: false, message: "No profile picture found" });
     }
 
-    // Delete the uploaded file from server if it exists
     const isUploadedFile =
       profile.profilePicture &&
       !profile.profilePicture.startsWith("http") &&
@@ -414,7 +392,6 @@ exports.deleteProfilePicture = async (req, res) => {
       }
     }
 
-    // Set profile picture to empty string - frontend will use default avatar
     const updatedProfile = await Profile.findOneAndUpdate(
       { user: userId },
       { profilePicture: "" },
@@ -434,9 +411,6 @@ exports.deleteProfilePicture = async (req, res) => {
   }
 };
 
-/**
- * Upload cover photo
- */
 exports.uploadCoverPhoto = async (req, res) => {
   try {
     if (!req.file) {
@@ -479,9 +453,6 @@ exports.uploadCoverPhoto = async (req, res) => {
   }
 };
 
-/**
- * Delete cover photo
- */
 exports.deleteCoverPhoto = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -535,9 +506,6 @@ exports.deleteCoverPhoto = async (req, res) => {
 // PROFILE RETRIEVAL
 // ============================================
 
-/**
- * Get authenticated user's detailed profile
- */
 exports.getProfileDetails = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -587,9 +555,6 @@ exports.getProfileDetails = async (req, res) => {
   }
 };
 
-/**
- * Get authenticated user's full profile with real connection count
- */
 exports.getMyProfile = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -615,7 +580,6 @@ exports.getMyProfile = async (req, res) => {
       });
     }
 
-    // Get real connection count from User model
     const currentUser = await User.findById(userId).select("connectionCount");
     const Post = require("../models/Post");
     const postCount = await Post.countDocuments({
@@ -658,12 +622,10 @@ exports.getMyProfile = async (req, res) => {
   }
 };
 
-/**
- * Get public profile by username
- */
 exports.getProfileByUsername = async (req, res) => {
   try {
     const { username } = req.params;
+    const currentUserId = req.user.id;
 
     const profile = await Profile.findOne({ username })
       .populate("user", "name email profileComplete")
@@ -676,6 +638,21 @@ exports.getProfileByUsername = async (req, res) => {
       return res
         .status(404)
         .json({ success: false, message: "Profile not found" });
+    }
+
+    const profileOwnerId = profile.user._id.toString();
+    if (profileOwnerId !== currentUserId) {
+      const isBlocked = await Block.areUsersBlocked(
+        currentUserId,
+        profileOwnerId,
+      );
+      if (isBlocked) {
+        return res.status(403).json({
+          success: false,
+          message: "You cannot view this profile",
+          isBlocked: true,
+        });
+      }
     }
 
     profile.profilePicture = getFullImageUrl(profile.profilePicture, req);
@@ -702,21 +679,109 @@ exports.getProfileByUsername = async (req, res) => {
   }
 };
 
-/**
- * Get public profile by user ID with real connection count
- */
 exports.getPublicProfile = async (req, res) => {
   try {
     const { userId } = req.params;
+    const currentUserId = req.user.id;
+
+    if (userId === currentUserId) {
+      const user = await User.findById(userId).select(
+        "name username profileComplete",
+      );
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+
+      const profile = await Profile.findOne({ user: userId })
+        .select(
+          "fullName username profilePicture coverPhoto bio major year graduationYear pronouns interests stats socialLinks",
+        )
+        .lean();
+
+      if (!profile) {
+        return res.status(404).json({
+          success: false,
+          message: "Profile not found",
+        });
+      }
+
+      profile.socialLinks = profile.socialLinks || {
+        instagram: "",
+        linkedin: "",
+        github: "",
+      };
+      profile.stats = profile.stats || { posts: 0, connections: 0, groups: 0 };
+
+      profile.profilePicture = getFullImageUrl(profile.profilePicture, req);
+      profile.coverPhoto = getFullImageUrl(profile.coverPhoto, req);
+
+      const targetUser = await User.findById(userId).select("connectionCount");
+      const Post = require("../models/Post");
+      const postCount = await Post.countDocuments({
+        user: userId,
+        isAnonymous: false,
+        isDeleted: { $ne: true },
+      });
+
+      const profileResponse = {
+        ...profile,
+        stats: {
+          posts: postCount,
+          connections: targetUser?.connectionCount || 0,
+          groups: profile.stats?.groups || 0,
+        },
+      };
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          user: {
+            _id: user._id,
+            name: user.name,
+            username: user.username,
+            profileComplete: user.profileComplete,
+          },
+          profile: {
+            _id: profileResponse._id,
+            fullName: profileResponse.fullName,
+            username: profileResponse.username,
+            bio: profileResponse.bio || "",
+            major: profileResponse.major || "",
+            year: profileResponse.year || "",
+            graduationYear: profileResponse.graduationYear || "",
+            pronouns: profileResponse.pronouns || "",
+            profilePicture: profileResponse.profilePicture || "",
+            coverPhoto: profileResponse.coverPhoto || "",
+            socialLinks: profileResponse.socialLinks,
+            stats: profileResponse.stats,
+          },
+        },
+      });
+    }
+
+    const isBlocked = await Block.areUsersBlocked(currentUserId, userId);
+
+    if (isBlocked) {
+      return res.status(403).json({
+        success: false,
+        message: "You cannot view this profile",
+        isBlocked: true,
+      });
+    }
 
     const user = await User.findById(userId).select(
       "name username profileComplete",
     );
 
     if (!user) {
-      return res
-        .status(404)
-        .json({ success: false, message: "User not found" });
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
     }
 
     const profile = await Profile.findOne({ user: userId })
@@ -726,12 +791,12 @@ exports.getPublicProfile = async (req, res) => {
       .lean();
 
     if (!profile) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Profile not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Profile not found",
+      });
     }
 
-    // Set defaults for missing fields
     profile.socialLinks = profile.socialLinks || {
       instagram: "",
       linkedin: "",
@@ -742,7 +807,6 @@ exports.getPublicProfile = async (req, res) => {
     profile.profilePicture = getFullImageUrl(profile.profilePicture, req);
     profile.coverPhoto = getFullImageUrl(profile.coverPhoto, req);
 
-    // Get real connection count from User model
     const targetUser = await User.findById(userId).select("connectionCount");
     const Post = require("../models/Post");
     const postCount = await Post.countDocuments({
@@ -799,9 +863,6 @@ exports.getPublicProfile = async (req, res) => {
 // PROFILE UPDATE
 // ============================================
 
-/**
- * Update profile information
- */
 exports.updateProfile = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -816,7 +877,6 @@ exports.updateProfile = async (req, res) => {
 
     const profileUpdate = {};
 
-    // Sync fullName with User model's name field
     if (
       updateData.fullName !== undefined &&
       updateData.fullName !== currentUser.name
@@ -826,7 +886,6 @@ exports.updateProfile = async (req, res) => {
       profileUpdate.fullName = updateData.fullName;
     }
 
-    // Handle username change
     if (updateData.username && updateData.username !== currentUser.username) {
       const existingUser = await User.findOne({
         username: updateData.username,
@@ -847,7 +906,6 @@ exports.updateProfile = async (req, res) => {
       profileUpdate.username = updateData.username;
     }
 
-    // Update profile fields
     if (updateData.bio !== undefined) profileUpdate.bio = updateData.bio;
     if (updateData.major) profileUpdate.major = updateData.major;
     if (updateData.year) profileUpdate.year = updateData.year;
@@ -858,7 +916,6 @@ exports.updateProfile = async (req, res) => {
     if (updateData.universityEmail)
       profileUpdate.universityEmail = updateData.universityEmail;
 
-    // Handle profile picture (allow empty string for deletion)
     if (updateData.profilePicture !== undefined) {
       if (updateData.profilePicture === "") {
         profileUpdate.profilePicture = "";
@@ -869,7 +926,6 @@ exports.updateProfile = async (req, res) => {
       }
     }
 
-    // Handle cover photo
     if (updateData.coverPhoto !== undefined) {
       if (updateData.coverPhoto === "") {
         profileUpdate.coverPhoto = "";
@@ -882,7 +938,6 @@ exports.updateProfile = async (req, res) => {
 
     if (updateData.interests) profileUpdate.interests = updateData.interests;
 
-    // Update social links
     if (updateData.socialLinks) {
       profileUpdate.socialLinks = {
         instagram: updateData.socialLinks.instagram || "",
@@ -891,7 +946,6 @@ exports.updateProfile = async (req, res) => {
       };
     }
 
-    // Find or create profile
     let profile = await Profile.findOne({ user: userId });
 
     if (!profile) {
@@ -961,18 +1015,22 @@ exports.updateProfile = async (req, res) => {
 // PUBLIC & SEARCH FUNCTIONS
 // ============================================
 
-/**
- * Get all profiles with pagination
- */
 exports.getAllProfiles = async (req, res) => {
   try {
+    const userId = req.user.id;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const totalProfiles = await Profile.countDocuments();
+    const blockedUserIds = await BlockService.getBlockedUserIds(userId);
 
-    const profiles = await Profile.find()
+    const totalProfiles = await Profile.countDocuments({
+      user: { $nin: blockedUserIds },
+    });
+
+    const profiles = await Profile.find({
+      user: { $nin: blockedUserIds },
+    })
       .select(
         "user fullName username profilePicture coverPhoto bio major year interests",
       )
@@ -1006,12 +1064,10 @@ exports.getAllProfiles = async (req, res) => {
   }
 };
 
-/**
- * Search profiles by name, username, major, or bio
- */
 exports.searchProfiles = async (req, res) => {
   try {
     const { query } = req.query;
+    const userId = req.user.id;
 
     if (!query || query.length < 2) {
       return res.status(400).json({
@@ -1020,7 +1076,10 @@ exports.searchProfiles = async (req, res) => {
       });
     }
 
+    const blockedUserIds = await BlockService.getBlockedUserIds(userId);
+
     const profiles = await Profile.find({
+      user: { $nin: blockedUserIds },
       $or: [
         { fullName: { $regex: query, $options: "i" } },
         { username: { $regex: query, $options: "i" } },
@@ -1050,10 +1109,6 @@ exports.searchProfiles = async (req, res) => {
   }
 };
 
-/**
- * Search only within user's connections
- * GET /api/profile/search-connections?query=xxx
- */
 exports.searchConnections = async (req, res) => {
   try {
     const { query, limit = 20 } = req.query;
@@ -1063,20 +1118,20 @@ exports.searchConnections = async (req, res) => {
       return res.json({ success: true, data: [] });
     }
 
-    // Get current user's connections
+    const blockedUserIds = await BlockService.getBlockedUserIds(userId);
+
     const currentUser = await User.findById(userId)
       .select("connections")
       .lean();
 
-    const connectionIds = (currentUser?.connections || []).map((id) =>
-      id.toString(),
-    );
+    const connectionIds = (currentUser?.connections || [])
+      .map((id) => id.toString())
+      .filter((id) => !blockedUserIds.includes(id));
 
     if (connectionIds.length === 0) {
       return res.json({ success: true, data: [] });
     }
 
-    // Search only within connections
     const users = await User.find({
       _id: { $in: connectionIds },
       $or: [
@@ -1088,7 +1143,6 @@ exports.searchConnections = async (req, res) => {
       .limit(parseInt(limit))
       .lean();
 
-    // Format response same as searchProfiles for consistency
     const profiles = await Promise.all(
       users.map(async (user) => {
         const profile = await Profile.findOne({ user: user._id })

@@ -2,7 +2,6 @@
 import * as SecureStore from "expo-secure-store";
 import { API_BASE_URL } from "../../constants/ipConstants";
 
-// Default avatar constant
 export const DEFAULT_AVATAR = "default-avatar";
 
 // ============================================
@@ -41,15 +40,12 @@ export interface Post {
   createdAt: string;
   updatedAt: string;
   isLiked: boolean;
+  isSaved?: boolean;
   isOwner?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
-
-  // Counts (denormalized)
   likeCount: number;
   commentCount: number;
-
-  // Only populated in single post view
   likes?: Array<{
     _id: string;
     name: string;
@@ -59,8 +55,6 @@ export interface Post {
   reposts?: any[];
   mentions?: any[];
   recentComments?: Comment[];
-
-  // Legacy fields
   isPinned?: boolean;
   isReposted?: boolean;
   isDeleted?: boolean;
@@ -149,9 +143,17 @@ export interface ProfilePostsResponse {
     viewerStatus: {
       isOwnProfile: boolean;
       isConnected: boolean;
+      isBlocked?: boolean;
+      isBlockedByOwner?: boolean;
     };
   };
   message?: string;
+}
+
+export interface BlockError {
+  isBlocked: boolean;
+  status: number;
+  message: string;
 }
 
 // ============================================
@@ -208,6 +210,19 @@ export const getFullImageUrl = (url: string): string => {
     : API_BASE_URL;
   const cleanUrl = url.startsWith("/") ? url : `/${url}`;
   return `${baseUrl}${cleanUrl}`;
+};
+
+const handleBlockError = (response: Response, data: any): never => {
+  if (response.status === 403 && (data.isBlocked || data.isBlockedByOwner)) {
+    const error = new Error(
+      data.message || "Access denied due to block",
+    ) as any;
+    error.isBlocked = true;
+    error.isBlockedByOwner = data.isBlockedByOwner;
+    error.status = 403;
+    throw error;
+  }
+  throw new Error(data.error || data.message || "Request failed");
 };
 
 // ============================================
@@ -289,11 +304,14 @@ export const getPostById = async (
     });
 
     if (!response.ok) {
+      const data = await response.json();
+      handleBlockError(response, data);
       throw new Error(`Failed to fetch post: ${response.status}`);
     }
 
     return await response.json();
-  } catch (error) {
+  } catch (error: any) {
+    if (error.isBlocked) throw error;
     console.error("Error fetching post:", error);
     throw error;
   }
@@ -431,11 +449,14 @@ export const toggleLike = async (postId: string): Promise<LikeResponse> => {
     });
 
     if (!response.ok) {
+      const data = await response.json();
+      handleBlockError(response, data);
       throw new Error(`Failed to toggle like: ${response.status}`);
     }
 
     return await response.json();
-  } catch (error) {
+  } catch (error: any) {
+    if (error.isBlocked) throw error;
     console.error("Error toggling like:", error);
     throw error;
   }
@@ -472,6 +493,22 @@ export const getProfilePosts = async (
     });
 
     const result = await response.json();
+
+    if (response.status === 403 && result.viewerStatus?.isBlocked) {
+      return {
+        success: true,
+        data: {
+          posts: [],
+          pagination: { page, limit, total: 0, pages: 0 },
+          viewerStatus: {
+            isOwnProfile: false,
+            isConnected: false,
+            isBlocked: true,
+          },
+        },
+      };
+    }
+
     return result;
   } catch (error) {
     console.error("Error fetching profile posts:", error);
@@ -540,12 +577,14 @@ export const getPostComments = async (
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || "Failed to fetch comments");
+      const data = await response.json();
+      handleBlockError(response, data);
+      throw new Error(data.error || "Failed to fetch comments");
     }
 
     return await response.json();
-  } catch (error) {
+  } catch (error: any) {
+    if (error.isBlocked) throw error;
     console.error("Error fetching comments:", error);
     throw error;
   }
@@ -570,12 +609,14 @@ export const addComment = async (
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || "Failed to add comment");
+      const data = await response.json();
+      handleBlockError(response, data);
+      throw new Error(data.error || "Failed to add comment");
     }
 
     return await response.json();
-  } catch (error) {
+  } catch (error: any) {
+    if (error.isBlocked) throw error;
     console.error("Error adding comment:", error);
     throw error;
   }
@@ -601,12 +642,14 @@ export const addReply = async (
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || "Failed to add reply");
+      const data = await response.json();
+      handleBlockError(response, data);
+      throw new Error(data.error || "Failed to add reply");
     }
 
     return await response.json();
-  } catch (error) {
+  } catch (error: any) {
+    if (error.isBlocked) throw error;
     console.error("Error adding reply:", error);
     throw error;
   }
@@ -628,12 +671,14 @@ export const getCommentThread = async (
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || "Failed to fetch comment thread");
+      const data = await response.json();
+      handleBlockError(response, data);
+      throw new Error(data.error || "Failed to fetch comment thread");
     }
 
     return await response.json();
-  } catch (error) {
+  } catch (error: any) {
+    if (error.isBlocked) throw error;
     console.error("Error fetching comment thread:", error);
     throw error;
   }
@@ -656,12 +701,14 @@ export const toggleCommentLike = async (
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || "Failed to toggle comment like");
+      const data = await response.json();
+      handleBlockError(response, data);
+      throw new Error(data.error || "Failed to toggle comment like");
     }
 
     return await response.json();
-  } catch (error) {
+  } catch (error: any) {
+    if (error.isBlocked) throw error;
     console.error("Error toggling comment like:", error);
     throw error;
   }
@@ -726,20 +773,198 @@ export const deleteComment = async (
 };
 
 // ============================================
+// CONTENT MODERATION (NEW BLOCK SYSTEM)
+// ============================================
+
+export const toggleBlockUser = async (
+  userId: string,
+  reason?: string,
+): Promise<{
+  success: boolean;
+  blocked: boolean;
+  isMutual?: boolean;
+  message: string;
+}> => {
+  try {
+    const token = await getAuthToken();
+    const url = buildApiUrl(`content/block/${userId}`);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ reason: reason || null }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || "Failed to toggle block");
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("Error toggling block:", error);
+    throw error;
+  }
+};
+
+export const getBlockedUsers = async (
+  page: number = 1,
+  limit: number = 20,
+  type: "all" | "blocked_by_me" | "blocked_me" = "all",
+): Promise<any> => {
+  try {
+    const token = await getAuthToken();
+    const url = buildApiUrl(
+      `content/blocked?page=${page}&limit=${limit}&type=${type}`,
+    );
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || "Failed to fetch blocked users");
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("Error fetching blocked users:", error);
+    throw error;
+  }
+};
+
+export const toggleMuteUser = async (
+  userId: string,
+): Promise<{ success: boolean; muted: boolean; message: string }> => {
+  try {
+    const token = await getAuthToken();
+    const url = buildApiUrl(`content/mute/${userId}`);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      const data = await response.json();
+      handleBlockError(response, data);
+      throw new Error(data.message || "Failed to toggle mute");
+    }
+
+    return await response.json();
+  } catch (error: any) {
+    if (error.isBlocked) throw error;
+    console.error("Error toggling mute:", error);
+    throw error;
+  }
+};
+
+export const toggleSavePost = async (
+  postId: string,
+): Promise<{ success: boolean; saved: boolean; message: string }> => {
+  try {
+    const token = await getAuthToken();
+    const url = buildApiUrl(`content/save/${postId}`);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      const data = await response.json();
+      handleBlockError(response, data);
+      throw new Error(data.message || "Failed to toggle save");
+    }
+
+    return await response.json();
+  } catch (error: any) {
+    if (error.isBlocked) throw error;
+    console.error("Error toggling save:", error);
+    throw error;
+  }
+};
+
+export const hidePost = async (
+  postId: string,
+): Promise<{ success: boolean; hidden: boolean; message: string }> => {
+  try {
+    const token = await getAuthToken();
+    const url = buildApiUrl(`content/hide/${postId}`);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      const data = await response.json();
+      handleBlockError(response, data);
+      throw new Error(data.message || "Failed to hide post");
+    }
+
+    return await response.json();
+  } catch (error: any) {
+    if (error.isBlocked) throw error;
+    console.error("Error hiding post:", error);
+    throw error;
+  }
+};
+
+export const unhidePost = async (
+  postId: string,
+): Promise<{ success: boolean; unhidden: boolean; message: string }> => {
+  try {
+    const token = await getAuthToken();
+    const url = buildApiUrl(`content/unhide/${postId}`);
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      const data = await response.json();
+      handleBlockError(response, data);
+      throw new Error(data.message || "Failed to unhide post");
+    }
+
+    return await response.json();
+  } catch (error: any) {
+    if (error.isBlocked) throw error;
+    console.error("Error unhiding post:", error);
+    throw error;
+  }
+};
+
+// ============================================
 // TYPE GUARDS
 // ============================================
 
-/**
- * Check if replies are populated (objects) or just IDs (strings)
- */
 export function areRepliesPopulated(replies: string[] | Comment[]): boolean {
   if (!Array.isArray(replies) || replies.length === 0) return false;
   return typeof replies[0] !== "string";
 }
 
-/**
- * Get populated replies from a comment
- */
 export function getPopulatedReplies(comment: Comment): Comment[] {
   if (Array.isArray(comment.replies) && comment.replies.length > 0) {
     const firstReply = comment.replies[0];
@@ -750,16 +975,10 @@ export function getPopulatedReplies(comment: Comment): Comment[] {
   return [];
 }
 
-/**
- * Check if a comment has replies
- */
 export function hasReplies(comment: Comment): boolean {
   return Array.isArray(comment.replies) && comment.replies.length > 0;
 }
 
-/**
- * Get reply count for a comment
- */
 export function getReplyCount(comment: Comment): number {
   if (Array.isArray(comment.replies)) {
     return comment.replies.length;
@@ -849,3 +1068,9 @@ export const getVisibilityIcon = (visibility: string): string => {
       return "globe-outline";
   }
 };
+
+// ============================================
+// RE-EXPORT BLOCK SERVICE FUNCTIONS
+// ============================================
+
+export { toggleBlockUser as blockUser };

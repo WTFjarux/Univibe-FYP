@@ -4,6 +4,8 @@ const Message = require("../models/Message");
 const User = require("../models/User");
 const Profile = require("../models/Profile");
 const ChatRoom = require("../models/ChatRoom");
+const Block = require("../models/Block");
+const BlockService = require("../services/blockService");
 const fs = require("fs");
 const mongoose = require("mongoose");
 
@@ -38,7 +40,6 @@ const formatMessage = (msg, currentUserId) => ({
   originalSenderName: msg.originalSenderName || null,
   forwardedAt: msg.forwardedAt || null,
   sharedPost: msg.sharedPost || null,
-  // ✅ ADD THIS
   story: msg.story || null,
   replyTo: msg.replyTo?.messageId
     ? {
@@ -65,6 +66,15 @@ const formatMessage = (msg, currentUserId) => ({
   })),
 });
 
+const isUserBlocked = async (userId, targetUserId) => {
+  try {
+    return await Block.areUsersBlocked(userId, targetUserId);
+  } catch (error) {
+    console.error("isUserBlocked error:", error);
+    return true;
+  }
+};
+
 const areUsersConnected = async (userId1, userId2) => {
   try {
     const user = await User.findById(userId1).select("connections").lean();
@@ -89,6 +99,10 @@ const ensureRoomExists = async (roomId, userId) => {
       if (otherUserId.match(/^[0-9a-fA-F]{24}$/)) {
         const isConnected = await areUsersConnected(userId, otherUserId);
         if (!isConnected) return null;
+
+        const isBlocked = await isUserBlocked(userId, otherUserId);
+        if (isBlocked) return null;
+
         room = await ChatRoom.create({
           roomId,
           type: "direct",
@@ -123,23 +137,37 @@ exports.getOrCreateDirectRoom = async (req, res) => {
   try {
     const { otherUserId } = req.params;
     const userId = req.user.id;
+
     if (!otherUserId || !otherUserId.match(/^[0-9a-fA-F]{24}$/)) {
       return res
         .status(400)
         .json({ success: false, message: "Invalid user ID format" });
     }
+
     if (otherUserId === userId) {
       return res
         .status(400)
         .json({ success: false, message: "Cannot create chat with yourself" });
     }
+
+    const isBlocked = await isUserBlocked(userId, otherUserId);
+    if (isBlocked) {
+      return res.status(403).json({
+        success: false,
+        message: "Cannot start chat with this user due to blocking",
+        isBlocked: true,
+      });
+    }
+
     const otherUser = await User.findById(otherUserId)
       .select("_id name")
       .lean();
-    if (!otherUser)
+    if (!otherUser) {
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
+    }
+
     const isConnected = await areUsersConnected(userId, otherUserId);
     if (!isConnected) {
       return res.status(403).json({
@@ -148,8 +176,10 @@ exports.getOrCreateDirectRoom = async (req, res) => {
           "You can only chat with your connections. Please connect first.",
       });
     }
+
     const roomId = getDirectRoomId(userId, otherUserId);
     let room = await ChatRoom.findOne({ roomId });
+
     if (!room) {
       room = await ChatRoom.create({
         roomId,
@@ -172,12 +202,14 @@ exports.getOrCreateDirectRoom = async (req, res) => {
         messageCount: 0,
       });
     }
+
     const clearedAt = room.getClearTimestamp
       ? room.getClearTimestamp(userId)
       : null;
     const isCleared = room.isClearedByUser
       ? room.isClearedByUser(userId)
       : false;
+
     res.json({
       success: true,
       data: {
@@ -211,6 +243,8 @@ exports.getOrCreateDirectRoom = async (req, res) => {
 
 exports.getUserChatRooms = async (req, res) => {
   try {
+    const blockedUserIds = await BlockService.getBlockedUserIds(req.user.id);
+
     const rooms = await ChatRoom.find({
       "participants.userId": req.user.id,
       isActive: { $ne: false },
@@ -243,6 +277,10 @@ exports.getUserChatRooms = async (req, res) => {
             (p) => p.userId.toString() !== req.user.id,
           );
           if (otherParticipant) {
+            const otherId = otherParticipant.userId.toString();
+            if (blockedUserIds.includes(otherId)) {
+              return null;
+            }
             otherUser = await User.findById(otherParticipant.userId)
               .select("name username")
               .lean();
@@ -272,7 +310,7 @@ exports.getUserChatRooms = async (req, res) => {
               ? room.name
               : otherUser?.name || room.name || "Unknown",
           groupIcon: room.groupIcon || null,
-          groupPhoto: room.groupPhoto || room.groupIcon || null, // ✅ Added
+          groupPhoto: room.groupPhoto || room.groupIcon || null,
           groupDescription: room.groupDescription || "",
           participantCount: room.participants?.length || 0,
           otherUserId:
@@ -308,7 +346,9 @@ exports.getUserChatRooms = async (req, res) => {
       }),
     );
 
-    res.json({ success: true, data: formatted });
+    const filtered = formatted.filter(Boolean);
+
+    res.json({ success: true, data: filtered });
   } catch (e) {
     console.error("getUserChatRooms error:", e);
     res.status(500).json({ success: false, message: "Server error" });
@@ -336,7 +376,25 @@ exports.getRoomDetails = async (req, res) => {
         .json({ success: false, message: "Not a participant" });
     }
 
-    // ✅ Fetch profile pictures from Profile model
+    if (room.type === "direct") {
+      const otherParticipant = room.participants.find(
+        (p) => (p.userId?._id || p.userId).toString() !== req.user.id,
+      );
+      if (otherParticipant) {
+        const otherId = (
+          otherParticipant.userId?._id || otherParticipant.userId
+        ).toString();
+        const isBlocked = await isUserBlocked(req.user.id, otherId);
+        if (isBlocked) {
+          return res.status(403).json({
+            success: false,
+            message: "Cannot access this chat due to blocking",
+            isBlocked: true,
+          });
+        }
+      }
+    }
+
     const participantIds = room.participants.map(
       (p) => p.userId?._id || p.userId,
     );
@@ -344,7 +402,6 @@ exports.getRoomDetails = async (req, res) => {
       .select("user profilePicture")
       .lean();
 
-    // Create a map of userId -> profilePicture
     const profilePictureMap = {};
     profiles.forEach((p) => {
       profilePictureMap[p.user.toString()] = p.profilePicture || "";
@@ -354,14 +411,13 @@ exports.getRoomDetails = async (req, res) => {
       (c) => c.user.toString() === req.user.id,
     );
 
-    // ✅ Format participants with actual profile pictures
     const formattedParticipants = room.participants.map((p) => {
       const uid = (p.userId?._id || p.userId).toString();
       return {
         userId: uid,
         name: p.userId?.name || "Unknown",
         username: p.userId?.username || "",
-        avatar: profilePictureMap[uid] || p.userId?.avatar || "", // ✅ Profile picture
+        avatar: profilePictureMap[uid] || p.userId?.avatar || "",
         role: p.role || "member",
         joinedAt: p.joinedAt,
         lastReadAt: p.lastReadAt,
@@ -398,7 +454,7 @@ exports.getRoomDetails = async (req, res) => {
         groupPhoto: room.groupPhoto || room.groupIcon,
         groupDescription: room.groupDescription,
         participantCount: room.participants?.length || 0,
-        participants: formattedParticipants, // ✅ Now includes profile pictures
+        participants: formattedParticipants,
         groupSettings: room.groupSettings,
         createdBy: room.createdBy,
         lastMessage: room.lastMessage,
@@ -458,27 +514,56 @@ exports.getMessageHistory = async (req, res) => {
   try {
     const { roomId } = req.params;
     const { limit = 50, before } = req.query;
+
     const room = await ChatRoom.findOne({ roomId })
       .select("clearedBy type participants")
       .lean();
-    if (!room)
+
+    if (!room) {
       return res
         .status(404)
         .json({ success: false, message: "Room not found" });
-    if (!room.participants.some((p) => p.userId.toString() === req.user.id))
+    }
+
+    let otherUserId = null;
+    if (room.type === "direct") {
+      const otherParticipant = room.participants.find(
+        (p) => p.userId.toString() !== req.user.id,
+      );
+      if (otherParticipant) {
+        otherUserId = otherParticipant.userId.toString();
+      }
+    }
+
+    if (otherUserId) {
+      const isBlocked = await isUserBlocked(req.user.id, otherUserId);
+      if (isBlocked) {
+        return res.status(403).json({
+          success: false,
+          message: "Cannot access messages due to blocking",
+          isBlocked: true,
+        });
+      }
+    }
+
+    if (!room.participants.some((p) => p.userId.toString() === req.user.id)) {
       return res
         .status(403)
         .json({ success: false, message: "Not a participant" });
+    }
+
     const clearedEntry = (room.clearedBy || []).find(
       (c) => c.user.toString() === req.user.id,
     );
     const clearedAt = clearedEntry ? clearedEntry.clearedAt : null;
+
     const messages = await Message.getMessages(
       roomId,
       parseInt(limit),
       before,
       req.user.id,
     );
+
     res.json({
       success: true,
       data: {
@@ -511,6 +596,26 @@ exports.getMessagesLight = async (req, res) => {
       return res
         .status(403)
         .json({ success: false, message: "Not a participant" });
+
+    if (room.type === "direct") {
+      const otherParticipant = room.participants.find(
+        (p) => p.userId.toString() !== req.user.id,
+      );
+      if (otherParticipant) {
+        const isBlocked = await isUserBlocked(
+          req.user.id,
+          otherParticipant.userId.toString(),
+        );
+        if (isBlocked) {
+          return res.status(403).json({
+            success: false,
+            message: "Cannot access messages due to blocking",
+            isBlocked: true,
+          });
+        }
+      }
+    }
+
     const clearedEntry = (room.clearedBy || []).find(
       (c) => c.user.toString() === req.user.id,
     );
@@ -605,6 +710,29 @@ exports.forwardMessage = async (req, res) => {
       return res
         .status(400)
         .json({ success: false, message: "Maximum 10 chats" });
+
+    for (const targetRoomId of targetChatIds) {
+      const room = await ChatRoom.findOne({ roomId: targetRoomId }).lean();
+      if (room && room.type === "direct") {
+        const otherParticipant = room.participants.find(
+          (p) => p.userId.toString() !== userId,
+        );
+        if (otherParticipant) {
+          const isBlocked = await isUserBlocked(
+            userId,
+            otherParticipant.userId.toString(),
+          );
+          if (isBlocked) {
+            return res.status(403).json({
+              success: false,
+              message: "Cannot forward to this chat due to blocking",
+              isBlocked: true,
+            });
+          }
+        }
+      }
+    }
+
     const originalMessage = await Message.findById(messageId)
       .populate("sender", "name")
       .lean();
@@ -803,51 +931,89 @@ exports.sharePost = async (req, res) => {
   try {
     const { postId, targetChatIds, comment } = req.body;
     const userId = req.user.id;
+
     if (
       !postId ||
       !targetChatIds ||
       !Array.isArray(targetChatIds) ||
       targetChatIds.length === 0
-    )
+    ) {
       return res
         .status(400)
         .json({ success: false, message: "postId and targetChatIds required" });
-    if (targetChatIds.length > 10)
+    }
+
+    if (targetChatIds.length > 10) {
       return res
         .status(400)
         .json({ success: false, message: "Maximum 10 chats" });
+    }
+
+    for (const targetRoomId of targetChatIds) {
+      const room = await ChatRoom.findOne({ roomId: targetRoomId }).lean();
+      if (room && room.type === "direct") {
+        const otherParticipant = room.participants.find(
+          (p) => p.userId.toString() !== userId,
+        );
+        if (otherParticipant) {
+          const isBlocked = await isUserBlocked(
+            userId,
+            otherParticipant.userId.toString(),
+          );
+          if (isBlocked) {
+            return res.status(403).json({
+              success: false,
+              message:
+                "Cannot share post with a user who has blocked you or you have blocked",
+              isBlocked: true,
+            });
+          }
+        }
+      }
+    }
+
     const Post = require("../models/Post");
     const post = await Post.findById(postId)
       .populate("user", "name username")
       .lean();
-    if (!post)
+
+    if (!post) {
       return res
         .status(404)
         .json({ success: false, message: "Post not found" });
+    }
+
     const postAuthorId = post.user?._id || post.user;
     const authorProfile = await Profile.findOne({ user: postAuthorId })
       .select("profilePicture")
       .lean();
+
     const targetRooms = await ChatRoom.find({
       roomId: { $in: targetChatIds },
       "participants.userId": userId,
     }).lean();
+
     const validRoomIds = targetRooms.map((r) => r.roomId);
-    if (!validRoomIds.length)
+    if (!validRoomIds.length) {
       return res
         .status(400)
         .json({ success: false, message: "No valid target chats" });
+    }
+
     const user = await User.findById(userId).select("name").lean();
     const profile = await Profile.findOne({ user: userId })
       .select("profilePicture")
       .lean();
+
     const sharedMessages = [];
     const io = req.app.get("io");
+
     await Promise.all(
       validRoomIds.map(async (targetRoomId) => {
         const messageText = comment || "";
         const postImage =
           post.images && post.images.length > 0 ? post.images[0].url : "";
+
         const sharedPostData = {
           sender: userId,
           senderName: user?.name || "Unknown",
@@ -875,8 +1041,10 @@ exports.sharePost = async (req, res) => {
           readBy: [{ user: userId, readAt: new Date() }],
           deliveredTo: [{ user: userId, deliveredAt: new Date() }],
         };
+
         const sharedMessage = await Message.create(sharedPostData);
         sharedMessages.push(sharedMessage);
+
         await ChatRoom.findOneAndUpdate(
           { roomId: targetRoomId },
           {
@@ -893,6 +1061,7 @@ exports.sharePost = async (req, res) => {
             $pull: { clearedBy: { user: userId } },
           },
         );
+
         if (io) {
           const populated = await Message.findById(sharedMessage._id)
             .populate("sender", "name avatar")
@@ -904,6 +1073,7 @@ exports.sharePost = async (req, res) => {
         }
       }),
     );
+
     res.json({
       success: true,
       message: `Post shared to ${sharedMessages.length} chat(s)`,
@@ -933,6 +1103,30 @@ exports.uploadAudio = async (req, res) => {
     } = req.body;
     if (!req.file)
       return res.status(400).json({ success: false, message: "No file" });
+
+    const room = await ChatRoom.findOne({ roomId }).lean();
+    if (room && room.type === "direct") {
+      const otherParticipant = room.participants.find(
+        (p) => p.userId.toString() !== req.user.id,
+      );
+      if (otherParticipant) {
+        const isBlocked = await isUserBlocked(
+          req.user.id,
+          otherParticipant.userId.toString(),
+        );
+        if (isBlocked) {
+          if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+          }
+          return res.status(403).json({
+            success: false,
+            message: "Cannot send message due to blocking",
+            isBlocked: true,
+          });
+        }
+      }
+    }
+
     await ensureRoomExists(roomId, req.user.id);
     const user = await User.findById(req.user.id);
     const profile = await Profile.findOne({ user: req.user.id });
@@ -997,6 +1191,34 @@ exports.uploadAudio = async (req, res) => {
 exports.uploadAttachments = async (req, res) => {
   try {
     const { roomId } = req.body;
+
+    const room = await ChatRoom.findOne({ roomId }).lean();
+    if (room && room.type === "direct") {
+      const otherParticipant = room.participants.find(
+        (p) => p.userId.toString() !== req.user.id,
+      );
+      if (otherParticipant) {
+        const isBlocked = await isUserBlocked(
+          req.user.id,
+          otherParticipant.userId.toString(),
+        );
+        if (isBlocked) {
+          if (req.files?.length) {
+            req.files.forEach((file) => {
+              if (file.path && fs.existsSync(file.path)) {
+                fs.unlinkSync(file.path);
+              }
+            });
+          }
+          return res.status(403).json({
+            success: false,
+            message: "Cannot send message due to blocking",
+            isBlocked: true,
+          });
+        }
+      }
+    }
+
     const user = await User.findById(req.user.id);
     const profile = await Profile.findOne({ user: req.user.id });
     await ensureRoomExists(roomId, req.user.id);
@@ -1168,6 +1390,15 @@ exports.removeReaction = async (req, res) => {
 
 exports.getOtherUserProfile = async (req, res) => {
   try {
+    const isBlocked = await isUserBlocked(req.user.id, req.params.otherUserId);
+    if (isBlocked) {
+      return res.status(403).json({
+        success: false,
+        message: "Cannot view this profile due to blocking",
+        isBlocked: true,
+      });
+    }
+
     const user = await User.findById(req.params.otherUserId)
       .select("name username")
       .lean();
@@ -1190,23 +1421,32 @@ exports.getOtherUserProfile = async (req, res) => {
   }
 };
 
-/**
- * Get total unread message count across all chats for current user
- */
 exports.getUnreadChatCount = async (req, res) => {
   try {
     const userId = req.user._id || req.user.id;
 
-    // Find all chat rooms the user is part of
+    const blockedUserIds = await BlockService.getBlockedUserIds(userId);
+
     const rooms = await ChatRoom.find({
       "participants.userId": userId,
       isActive: { $ne: false },
-    }).select("roomId clearedBy participants");
+    }).select("roomId clearedBy participants type");
 
     let totalUnread = 0;
 
     for (const room of rooms) {
-      // Check if user has cleared this chat
+      if (room.type === "direct") {
+        const otherParticipant = room.participants.find(
+          (p) => p.userId.toString() !== userId.toString(),
+        );
+        if (
+          otherParticipant &&
+          blockedUserIds.includes(otherParticipant.userId.toString())
+        ) {
+          continue;
+        }
+      }
+
       const clearedEntry = (room.clearedBy || []).find(
         (c) => c.user.toString() === userId.toString(),
       );

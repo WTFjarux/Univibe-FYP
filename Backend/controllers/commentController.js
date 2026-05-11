@@ -1,36 +1,33 @@
+// backend/controllers/commentController.js
+
 const Post = require("../models/Post");
 const Comment = require("../models/Comment");
 const User = require("../models/User");
 const Profile = require("../models/Profile");
 const Notification = require("../models/Notification");
+const Block = require("../models/Block");
 
 // ===================== HELPER FUNCTIONS =====================
 
-/**
- * Check if user can view a post based on visibility settings
- */
 async function canUserViewPost(userId, post) {
-  // Post author can always view their own posts
   if (post.user.toString() === userId.toString()) {
     return true;
   }
 
-  // Get user's connections and campus
+  const isBlocked = await Block.areUsersBlocked(userId, post.user);
+  if (isBlocked) return false;
+
   const user = await User.findById(userId).select("connections");
   const userProfile = await Profile.findOne({ user: userId }).select("campus");
   const userCampus = userProfile?.campus || "Unknown Campus";
 
-  // Get connection IDs as strings for comparison
   const connectionIds = (user.connections || []).map((id) => id.toString());
 
   switch (post.visibility) {
     case "campus":
-      // Check if user is in same campus as post
       return post.campus === userCampus;
 
     case "connections":
-      // Check if post author is in user's connections
-      // OR if user is in post author's connections (mutual)
       return connectionIds.includes(post.user.toString());
 
     default:
@@ -38,17 +35,10 @@ async function canUserViewPost(userId, post) {
   }
 }
 
-/**
- * Check if user can comment on a post
- */
 async function canUserCommentOnPost(userId, post) {
-  // Same permission check as viewing - if they can see it, they can comment
   return await canUserViewPost(userId, post);
 }
 
-/**
- * Create a notification for comment events
- */
 const createCommentNotification = async (
   recipientId,
   senderId,
@@ -58,10 +48,12 @@ const createCommentNotification = async (
   targetId,
   targetModel,
 ) => {
-  // Don't create notification for self-actions
   if (recipientId.toString() === senderId.toString()) {
     return null;
   }
+
+  const isBlocked = await Block.areUsersBlocked(recipientId, senderId);
+  if (isBlocked) return null;
 
   try {
     const notification = new Notification({
@@ -81,18 +73,12 @@ const createCommentNotification = async (
   }
 };
 
-/**
- * Extract mentions from comment content
- */
 function extractMentions(content) {
   const mentionRegex = /@(\w+)/g;
   const matches = content.match(mentionRegex);
   return matches ? matches.map((mention) => mention.substring(1)) : [];
 }
 
-/**
- * Process comment for anonymous handling
- */
 function processCommentForAnonymous(comment, post, currentUserId) {
   const commentObj = comment.toObject ? comment.toObject() : comment;
 
@@ -118,9 +104,6 @@ function processCommentForAnonymous(comment, post, currentUserId) {
   return commentObj;
 }
 
-/**
- * Recursively fetch all replies for a comment
- */
 async function fetchReplies(commentId, userId, post, profilePictureMap) {
   const replies = await Comment.find({
     parentComment: commentId,
@@ -141,7 +124,6 @@ async function fetchReplies(commentId, userId, post, profilePictureMap) {
         profilePictureMap[reply.user._id.toString()] || null;
     }
 
-    // Fix: Compare with the likes array properly - they should be ObjectIds in lean()
     reply.isLiked =
       reply.likes?.some((likeId) => {
         if (!likeId) return false;
@@ -158,9 +140,7 @@ async function fetchReplies(commentId, userId, post, profilePictureMap) {
 
   return replies;
 }
-/**
- * Get all child comments recursively (for deletion)
- */
+
 async function getAllChildCommentIds(commentId) {
   const children = await Comment.find({
     parentComment: commentId,
@@ -177,9 +157,6 @@ async function getAllChildCommentIds(commentId) {
   return ids;
 }
 
-/**
- * Update post comment count accurately
- */
 async function updatePostCommentCount(postId) {
   const actualCount = await Comment.countDocuments({
     post: postId,
@@ -192,9 +169,6 @@ async function updatePostCommentCount(postId) {
 
 // ===================== COMMENT CONTROLLERS =====================
 
-/**
- * Add a comment to a post
- */
 exports.addComment = async (req, res) => {
   try {
     const { content, isAnonymous = false } = req.body;
@@ -223,6 +197,16 @@ exports.addComment = async (req, res) => {
       });
     }
 
+    if (post.user.toString() !== userId.toString()) {
+      const isBlocked = await Block.areUsersBlocked(userId, post.user);
+      if (isBlocked) {
+        return res.status(403).json({
+          success: false,
+          error: "You cannot comment on this post",
+        });
+      }
+    }
+
     const canComment = await canUserCommentOnPost(userId, post);
     if (!canComment) {
       return res.status(403).json({
@@ -249,7 +233,6 @@ exports.addComment = async (req, res) => {
     await newComment.save();
     await updatePostCommentCount(postId);
 
-    // Update recent comments
     const recentComments = await Comment.find({
       post: postId,
       isDeleted: false,
@@ -265,12 +248,7 @@ exports.addComment = async (req, res) => {
       select: "name username email verified",
     });
 
-    // Create notification for post owner (if not commenting on own post and post is not anonymous)
     if (post.user.toString() !== userId.toString() && !post.isAnonymous) {
-      const commenter = await User.findById(userId);
-      const truncatedContent =
-        content.length > 50 ? content.substring(0, 50) + "..." : content;
-
       const notification = await createCommentNotification(
         post.user,
         userId,
@@ -281,7 +259,6 @@ exports.addComment = async (req, res) => {
         "Post",
       );
 
-      // Emit socket event
       const io = req.app.get("io");
       if (io && notification) {
         const populatedNotif = await Notification.findById(notification._id)
@@ -351,9 +328,6 @@ exports.addComment = async (req, res) => {
   }
 };
 
-/**
- * Add a reply to a comment
- */
 exports.addReply = async (req, res) => {
   try {
     const { content, isAnonymous = false } = req.body;
@@ -383,6 +357,16 @@ exports.addReply = async (req, res) => {
       });
     }
 
+    if (post.user.toString() !== userId.toString()) {
+      const isBlocked = await Block.areUsersBlocked(userId, post.user);
+      if (isBlocked) {
+        return res.status(403).json({
+          success: false,
+          error: "You cannot reply on this post",
+        });
+      }
+    }
+
     const canComment = await canUserCommentOnPost(userId, post);
     if (!canComment) {
       return res.status(403).json({
@@ -402,6 +386,16 @@ exports.addReply = async (req, res) => {
         success: false,
         error: "Parent comment not found",
       });
+    }
+
+    if (parentComment.user.toString() !== userId.toString()) {
+      const isBlocked = await Block.areUsersBlocked(userId, parentComment.user);
+      if (isBlocked) {
+        return res.status(403).json({
+          success: false,
+          error: "You cannot reply to this comment",
+        });
+      }
     }
 
     if (parentComment.depth >= 5) {
@@ -430,26 +424,20 @@ exports.addReply = async (req, res) => {
     await reply.save();
     await updatePostCommentCount(postId);
 
-    // Create notification for parent comment owner (if not replying to own comment)
     if (
       parentComment.user.toString() !== userId.toString() &&
       !post.isAnonymous
     ) {
-      const replier = await User.findById(userId);
-      const truncatedContent =
-        content.length > 50 ? content.substring(0, 50) + "..." : content;
-
       const notification = await createCommentNotification(
         parentComment.user,
         userId,
         "comment",
         "New Reply",
-        `${replier.name} replied to your comment: "${truncatedContent}"`,
+        content,
         postId,
         "Post",
       );
 
-      // Emit socket event
       const io = req.app.get("io");
       if (io && notification) {
         const populatedNotif = await Notification.findById(notification._id)
@@ -524,9 +512,6 @@ exports.addReply = async (req, res) => {
   }
 };
 
-/**
- * Get all comments for a post (with nested replies)
- */
 exports.getPostComments = async (req, res) => {
   try {
     const postId = req.params.id;
@@ -543,10 +528,23 @@ exports.getPostComments = async (req, res) => {
       });
     }
 
-    // Get total count of ALL non-deleted comments (including nested)
+    if (post.user.toString() !== userId.toString()) {
+      const isBlocked = await Block.areUsersBlocked(userId, post.user);
+      if (isBlocked) {
+        return res.status(403).json({
+          success: false,
+          error: "You cannot view comments on this post",
+        });
+      }
+    }
+
+    const blockedUserIds =
+      await require("../services/blockService").getBlockedUserIds(userId);
+
     const totalComments = await Comment.countDocuments({
       post: postId,
       isDeleted: false,
+      user: { $nin: blockedUserIds },
     });
 
     const profiles = await Profile.find().select("user profilePicture").lean();
@@ -559,6 +557,7 @@ exports.getPostComments = async (req, res) => {
       post: postId,
       parentComment: null,
       isDeleted: false,
+      user: { $nin: blockedUserIds },
     })
       .populate("user", "name username email verified")
       .sort({ createdAt: -1 })
@@ -570,6 +569,7 @@ exports.getPostComments = async (req, res) => {
       post: postId,
       parentComment: null,
       isDeleted: false,
+      user: { $nin: blockedUserIds },
     });
 
     const commentsWithReplies = [];
@@ -601,7 +601,6 @@ exports.getPostComments = async (req, res) => {
       );
     }
 
-    // Update post's commentCount to ensure it's accurate
     await Post.findByIdAndUpdate(postId, { commentCount: totalComments });
 
     res.json({
@@ -613,7 +612,7 @@ exports.getPostComments = async (req, res) => {
         total: totalTopLevel,
         pages: Math.ceil(totalTopLevel / limit),
       },
-      totalComments: totalComments, // This is the accurate total
+      totalComments: totalComments,
     });
   } catch (error) {
     console.error("Error fetching comments:", error);
@@ -624,9 +623,6 @@ exports.getPostComments = async (req, res) => {
   }
 };
 
-/**
- * Get a specific comment thread
- */
 exports.getCommentThread = async (req, res) => {
   try {
     const postId = req.params.id;
@@ -701,9 +697,6 @@ exports.getCommentThread = async (req, res) => {
   }
 };
 
-/**
- * Like/unlike a comment
- */
 exports.toggleCommentLike = async (req, res) => {
   try {
     const postId = req.params.id;
@@ -716,6 +709,16 @@ exports.toggleCommentLike = async (req, res) => {
         success: false,
         error: "Post not found",
       });
+    }
+
+    if (post.user.toString() !== userId.toString()) {
+      const isBlocked = await Block.areUsersBlocked(userId, post.user);
+      if (isBlocked) {
+        return res.status(403).json({
+          success: false,
+          error: "You cannot interact with comments on this post",
+        });
+      }
     }
 
     const canView = await canUserViewPost(userId, post);
@@ -740,14 +743,23 @@ exports.toggleCommentLike = async (req, res) => {
       });
     }
 
+    if (comment.user.toString() !== userId.toString()) {
+      const isBlocked = await Block.areUsersBlocked(userId, comment.user);
+      if (isBlocked) {
+        return res.status(403).json({
+          success: false,
+          error: "You cannot interact with this comment",
+        });
+      }
+    }
+
     const liked = comment.toggleLike(userId);
     await comment.save();
 
-    // Return just the IDs, not populated
     res.json({
       success: true,
       likes: comment.likes.length,
-      likesArray: comment.likes, // Send the raw likes array (just ObjectIds)
+      likesArray: comment.likes,
       isLiked: liked,
     });
   } catch (error) {
@@ -759,9 +771,6 @@ exports.toggleCommentLike = async (req, res) => {
   }
 };
 
-/**
- * Delete a comment and all its replies with proper count update
- */
 exports.deleteComment = async (req, res) => {
   try {
     const postId = req.params.id;
@@ -788,7 +797,6 @@ exports.deleteComment = async (req, res) => {
       });
     }
 
-    // Check authorization
     if (
       comment.user.toString() !== userId.toString() &&
       post.user.toString() !== userId.toString()
@@ -828,9 +836,6 @@ exports.deleteComment = async (req, res) => {
   }
 };
 
-/**
- * Update a comment
- */
 exports.updateComment = async (req, res) => {
   try {
     const { content } = req.body;
@@ -911,11 +916,6 @@ exports.updateComment = async (req, res) => {
   }
 };
 
-// ===================== DEBUG ENDPOINT =====================
-
-/**
- * Debug endpoint to check comment counts
- */
 exports.debugCommentCounts = async (req, res) => {
   try {
     const postId = req.params.id;

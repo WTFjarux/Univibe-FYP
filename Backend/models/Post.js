@@ -11,10 +11,10 @@ const postSchema = new mongoose.Schema(
 
     content: {
       type: String,
-      required: false, // Changed from true to false
+      required: false,
       trim: true,
       maxlength: 500,
-      default: "", // Add default empty string
+      default: "",
     },
 
     // === ANONYMOUS POSTING FIELDS ===
@@ -77,10 +77,10 @@ const postSchema = new mongoose.Schema(
       required: true,
     },
 
-    // SIMPLIFIED VISIBILITY -  campus and connections
+    // SIMPLIFIED VISIBILITY - campus and connections
     visibility: {
       type: String,
-      enum: ["campus", "connections"], 
+      enum: ["campus", "connections"],
       default: "campus",
     },
 
@@ -101,7 +101,7 @@ const postSchema = new mongoose.Schema(
     isDeleted: {
       type: Boolean,
       default: false,
-      index: true, // Add index for faster queries
+      index: true,
     },
     deletedAt: {
       type: Date,
@@ -137,27 +137,67 @@ postSchema.pre("validate", function (next) {
   }
 });
 
-// === MIDDLEWARE: Automatically exclude soft-deleted posts from queries ===
-postSchema.pre(/^find/, function () {
-  // Only apply to find queries, not to countDocuments or other operations
-  if (this.getQuery().includeDeleted !== true) {
-    this.where({ isDeleted: false });
-  }
-  // Remove the flag so it doesn't affect other queries
-  delete this.getQuery().includeDeleted;
-});
+// ============================================
+// MIDDLEWARE: Soft Delete Filter System
+// ============================================
 
-// === DATABASE INDEXES FOR PERFORMANCE ===
+/**
+ * Pre-middleware function to exclude soft-deleted posts
+ * Only applies if includeDeleted() was NOT called on the query
+ */
+const applySoftDeleteFilter = function () {
+  // Only apply if includeDeleted was NOT explicitly called
+  if (!this._includeDeleted) {
+    const query = this.getQuery();
+    // Don't apply if query already has an isDeleted condition
+    if (!("isDeleted" in query)) {
+      this.where({ isDeleted: false });
+    }
+  }
+  // IMPORTANT: Don't reset _includeDeleted here - let it persist
+};
+
+/**
+ * Post-middleware function to reset the includeDeleted flag
+ * Runs after the query completes to clean up
+ */
+const resetIncludeDeletedFlag = function () {
+  this._includeDeleted = false;
+};
+
+// Apply pre-middleware to all find operations
+postSchema.pre(/^find/, applySoftDeleteFilter);
+postSchema.pre("countDocuments", applySoftDeleteFilter);
+postSchema.pre("findOne", applySoftDeleteFilter);
+postSchema.pre("findOneAndUpdate", applySoftDeleteFilter);
+postSchema.pre("findOneAndDelete", applySoftDeleteFilter);
+postSchema.pre("findOneAndRemove", applySoftDeleteFilter);
+
+// Apply post-middleware to reset the flag after query completes
+postSchema.post(/^find/, resetIncludeDeletedFlag);
+postSchema.post("countDocuments", resetIncludeDeletedFlag);
+postSchema.post("findOne", resetIncludeDeletedFlag);
+postSchema.post("findOneAndUpdate", resetIncludeDeletedFlag);
+postSchema.post("findOneAndDelete", resetIncludeDeletedFlag);
+postSchema.post("findOneAndRemove", resetIncludeDeletedFlag);
+
+// ============================================
+// DATABASE INDEXES FOR PERFORMANCE
+// ============================================
 postSchema.index({ user: 1, createdAt: -1 });
 postSchema.index({ campus: 1, createdAt: -1 });
 postSchema.index({ tags: 1 });
 postSchema.index({ visibility: 1 });
 postSchema.index({ isAnonymous: 1 });
 postSchema.index({ commentCount: -1 });
-postSchema.index({ user: 1, visibility: 1 }); // Added for connection queries
-postSchema.index({ campus: 1, visibility: 1 }); // Added for campus queries
-postSchema.index({ isDeleted: 1, createdAt: -1 }); // Index for soft-deleted posts
-postSchema.index({ isDeleted: 1, deletedAt: 1 }); // Index for cleanup queries
+postSchema.index({ user: 1, visibility: 1 });
+postSchema.index({ campus: 1, visibility: 1 });
+postSchema.index({ isDeleted: 1, createdAt: -1 });
+postSchema.index({ isDeleted: 1, deletedAt: 1 });
+
+// ============================================
+// VIRTUALS
+// ============================================
 
 // === VIRTUAL FOR COMMENTS (lazy loading) ===
 postSchema.virtual("comments", {
@@ -175,6 +215,10 @@ postSchema.virtual("topLevelComments", {
   match: { parentComment: null, isDeleted: false },
   options: { sort: { createdAt: -1 } },
 });
+
+// ============================================
+// INSTANCE METHODS
+// ============================================
 
 // === METHOD TO SOFT DELETE A POST ===
 postSchema.methods.softDelete = async function () {
@@ -196,47 +240,13 @@ postSchema.methods.restore = async function () {
 postSchema.methods.permanentDelete = async function () {
   // Remove associated images
   if (this.images && this.images.length > 0) {
-    // You'll need to import your deletePostImages function or handle here
     const filenames = this.images.map((img) => img.filename);
-    // Note: This requires access to the deletePostImages function
-    // You might want to handle image deletion in the controller instead
+    // Image deletion should be handled in the controller
+    // using the deletePostImages function since it needs req object
   }
 
   await this.deleteOne();
   return true;
-};
-
-// === STATIC METHOD TO GET SOFT-DELETED POSTS ===
-postSchema.statics.getDeletedPosts = function (options = {}) {
-  return this.find({ isDeleted: true, ...options }).sort({ deletedAt: -1 });
-};
-
-// === STATIC METHOD TO PERMANENTLY DELETE OLD SOFT-DELETED POSTS ===
-postSchema.statics.cleanupOldDeletedPosts = async function (daysToKeep = 30) {
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
-
-  const oldDeletedPosts = await this.find({
-    isDeleted: true,
-    deletedAt: { $lt: cutoffDate },
-  });
-
-  let deletedCount = 0;
-  for (const post of oldDeletedPosts) {
-    // Delete associated comments
-    const Comment = mongoose.model("Comment");
-    await Comment.deleteMany({ post: post._id });
-
-    // Delete associated notifications
-    const Notification = mongoose.model("Notification");
-    await Notification.deleteMany({ targetId: post._id, targetModel: "Post" });
-
-    // Delete the post
-    await post.deleteOne();
-    deletedCount++;
-  }
-
-  return deletedCount;
 };
 
 // === METHOD TO UPDATE COMMENT COUNT ===
@@ -306,9 +316,61 @@ postSchema.methods.canUserModify = function (userId) {
   return this.user.toString() === userId.toString();
 };
 
+// ============================================
+// STATIC METHODS
+// ============================================
+
+// === STATIC METHOD TO GET SOFT-DELETED POSTS ===
+postSchema.statics.getDeletedPosts = function (options = {}) {
+  return this.find({ isDeleted: true, ...options })
+    .includeDeleted()
+    .sort({ deletedAt: -1 });
+};
+
+// === STATIC METHOD TO PERMANENTLY DELETE OLD SOFT-DELETED POSTS ===
+postSchema.statics.cleanupOldDeletedPosts = async function (daysToKeep = 30) {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+
+  const oldDeletedPosts = await this.find({
+    isDeleted: true,
+    deletedAt: { $lt: cutoffDate },
+  }).includeDeleted();
+
+  let deletedCount = 0;
+  for (const post of oldDeletedPosts) {
+    // Delete associated comments
+    const Comment = mongoose.model("Comment");
+    await Comment.deleteMany({ post: post._id });
+
+    // Delete associated notifications
+    const Notification = mongoose.model("Notification");
+    await Notification.deleteMany({ targetId: post._id, targetModel: "Post" });
+
+    // Delete the post
+    await post.deleteOne();
+    deletedCount++;
+  }
+
+  return deletedCount;
+};
+
+// ============================================
+// QUERY HELPERS
+// ============================================
+
 // === QUERY HELPER TO INCLUDE SOFT-DELETED POSTS ===
 postSchema.query.includeDeleted = function () {
-  return this.where({ includeDeleted: true });
+
+  this._includeDeleted = true;
+  return this;
+};
+
+// === QUERY HELPER TO EXPLICITLY EXCLUDE SOFT-DELETED POSTS ===
+postSchema.query.excludeDeleted = function () {
+
+  this._includeDeleted = false;
+  return this;
 };
 
 const Post = mongoose.model("Post", postSchema);

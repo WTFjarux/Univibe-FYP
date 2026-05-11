@@ -1,5 +1,5 @@
 // app/(tabs)/feed/index.tsx
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -20,22 +20,26 @@ import PostCard from "@/app/components/Feed/Post/PostCard";
 import SharePostModal from "@/app/components/Feed/Post/SharePostModal";
 import FeedSkeleton, {
   LoadMorePostsSkeleton,
-  InitialPostsLoadingSkeleton,
 } from "@/app/components/Feed/FeedSkeleton";
 
-// Services
 import {
   toggleLike,
   deletePost,
   restorePost,
   Post,
   getFullImageUrl,
+  toggleBlockUser,
 } from "../../../lib/services/postService";
 
-// Feed hook
+import {
+  toggleSavePost,
+  hidePost,
+  unhidePost,
+  toggleMuteUser,
+} from "../../../lib/services/contentService";
+
 import { useFeed } from "../../../hooks/useFeed";
 
-// Styles
 import styles from "@/app/components/Feed/styles";
 
 interface UndoAction {
@@ -51,7 +55,6 @@ export default function FeedScreen() {
   const router = useRouter();
   const { token, user } = useAuth();
 
-  // Feed hook
   const {
     activeFeed,
     currentFeed,
@@ -63,22 +66,14 @@ export default function FeedScreen() {
     updatePost,
     refreshOnFocus,
     markNeedsRefresh,
+    invalidateAllFeeds,
   } = useFeed();
 
-  // Share modal
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [sharePost, setSharePost] = useState<Post | null>(null);
 
-  // User interactions
-  const [savedPosts, setSavedPosts] = useState<Set<string>>(new Set());
-  const [hiddenPosts, setHiddenPosts] = useState<Set<string>>(new Set());
-  const [mutedUsers, setMutedUsers] = useState<Set<string>>(new Set());
-  const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
-
-  // Loading states for skeletons
   const [loadingMorePosts, setLoadingMorePosts] = useState(false);
 
-  // Info bar
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [infoType, setInfoType] = useState<"success" | "error" | "info">(
     "info",
@@ -95,15 +90,8 @@ export default function FeedScreen() {
     { id: "anonymous", label: "Anonymous" },
   ];
 
-  // Filtered posts
-  const visiblePosts = currentFeed.posts.filter(
-    (post) =>
-      !hiddenPosts.has(post._id) &&
-      !mutedUsers.has(post.user?._id || "") &&
-      !blockedUsers.has(post.user?._id || ""),
-  );
+  const visiblePosts = currentFeed.posts;
 
-  // ============ SCREEN FOCUS - Refresh when returning ============
   useFocusEffect(
     useCallback(() => {
       if (token) {
@@ -111,9 +99,6 @@ export default function FeedScreen() {
       }
     }, [token, refreshOnFocus]),
   );
-
-  // ============ INFO BAR ============
-  // ... (keep all info bar functions the same)
 
   const showInfoBar = (
     message: string,
@@ -179,11 +164,8 @@ export default function FeedScreen() {
     switch (undoAction.type) {
       case "mute":
         if (undoAction.userId) {
-          setMutedUsers((prev) => {
-            const n = new Set(prev);
-            n.delete(undoAction.userId!);
-            return n;
-          });
+          await toggleMuteUser(undoAction.userId);
+          await invalidateAllFeeds();
           showInfoBar(
             `User ${undoAction.userName || "muted"} unmuted`,
             "success",
@@ -192,11 +174,8 @@ export default function FeedScreen() {
         break;
       case "block":
         if (undoAction.userId) {
-          setBlockedUsers((prev) => {
-            const n = new Set(prev);
-            n.delete(undoAction.userId!);
-            return n;
-          });
+          await toggleBlockUser(undoAction.userId);
+          await invalidateAllFeeds();
           showInfoBar(
             `User ${undoAction.userName || "blocked"} unblocked`,
             "success",
@@ -205,21 +184,15 @@ export default function FeedScreen() {
         break;
       case "hide":
         if (undoAction.postId) {
-          setHiddenPosts((prev) => {
-            const n = new Set(prev);
-            n.delete(undoAction.postId!);
-            return n;
-          });
+          await unhidePost(undoAction.postId);
+          await invalidateAllFeeds();
           showInfoBar("Post restored to feed", "success");
         }
         break;
       case "save":
         if (undoAction.postId) {
-          setSavedPosts((prev) => {
-            const n = new Set(prev);
-            n.delete(undoAction.postId!);
-            return n;
-          });
+          await toggleSavePost(undoAction.postId);
+          updatePost(undoAction.postId, { isSaved: false });
           showInfoBar("Post removed from saved items", "info");
         }
         break;
@@ -228,6 +201,7 @@ export default function FeedScreen() {
           try {
             await restorePost(undoAction.postId);
             addNewPost(undoAction.deletedPost);
+            await invalidateAllFeeds();
             showInfoBar("Post restored successfully", "success");
           } catch (error: any) {
             showInfoBar(error.message || "Failed to restore post", "error");
@@ -237,8 +211,6 @@ export default function FeedScreen() {
     }
     hideInfoBar();
   };
-
-  // ============ FEED ACTIONS ============
 
   const handleFilterChange = (filterId: string) => {
     if (token) switchFeed(filterId as "campus" | "connections" | "anonymous");
@@ -273,8 +245,6 @@ export default function FeedScreen() {
     ],
   );
 
-  // ============ POST INTERACTIONS ============
-
   const handleLike = async (postId: string) => {
     if (!token) {
       showInfoBar("Please login to like posts", "info");
@@ -296,6 +266,11 @@ export default function FeedScreen() {
         likeCount: response.likes,
       });
     } catch (error: any) {
+      if (error.isBlocked) {
+        removePost(postId);
+        showInfoBar("You cannot interact with this post", "info");
+        return;
+      }
       if (post)
         updatePost(postId, {
           isLiked: post.isLiked,
@@ -355,24 +330,42 @@ export default function FeedScreen() {
 
     try {
       await deletePost(postId);
+      await invalidateAllFeeds();
     } catch (error: any) {
       addNewPost(postToDelete);
       showInfoBar(error.message || "Failed to delete post", "error");
     }
   };
 
-  const handleSavePost = (postId: string) => {
-    setSavedPosts((prev) => {
-      const n = new Set(prev);
-      if (n.has(postId)) {
-        n.delete(postId);
-        showInfoBar("Post removed from saved", "info");
-      } else {
-        n.add(postId);
+  const handleSavePost = async (postId: string) => {
+    if (!token) {
+      showInfoBar("Please login to save posts", "info");
+      return;
+    }
+
+    const post = visiblePosts.find((p) => p._id === postId);
+    const wasSaved = post?.isSaved;
+
+    updatePost(postId, { isSaved: !wasSaved });
+
+    try {
+      const response = await toggleSavePost(postId);
+      updatePost(postId, { isSaved: response.saved });
+
+      if (response.saved) {
         showInfoBar("Post saved", "success", { type: "save", postId }, true);
+      } else {
+        showInfoBar("Post removed from saved", "info");
       }
-      return n;
-    });
+    } catch (error: any) {
+      if (error.isBlocked) {
+        updatePost(postId, { isSaved: wasSaved });
+        showInfoBar("You cannot interact with this post", "info");
+        return;
+      }
+      updatePost(postId, { isSaved: wasSaved });
+      showInfoBar(error.message || "Failed to save post", "error");
+    }
   };
 
   const handleReportPost = () => {
@@ -390,32 +383,76 @@ export default function FeedScreen() {
     );
   };
 
-  const handleHidePost = (postId: string) => {
-    setHiddenPosts((prev) => new Set(prev).add(postId));
+  const handleHidePost = async (postId: string) => {
+    if (!token) {
+      showInfoBar("Please login to hide posts", "info");
+      return;
+    }
+
+    removePost(postId);
     showInfoBar("Post hidden", "info", { type: "hide", postId }, true);
+
+    try {
+      await hidePost(postId);
+      await invalidateAllFeeds();
+    } catch (error: any) {
+      if (error.isBlocked) {
+        showInfoBar("You cannot interact with this post", "info");
+        return;
+      }
+      await invalidateAllFeeds();
+      showInfoBar(error.message || "Failed to hide post", "error");
+    }
   };
 
-  const handleCopyLink = () =>
+  const handleCopyLink = () => {
     showInfoBar("Link copied to clipboard", "success");
-  const handleMuteUser = (userId: string, userName?: string) => {
-    if (!userId) return;
-    setMutedUsers((prev) => new Set(prev).add(userId));
+  };
+
+  const handleMuteUser = async (userId: string, userName?: string) => {
+    if (!token || !userId) return;
+
+    const postsToRemove = visiblePosts.filter((p) => p.user?._id === userId);
+    postsToRemove.forEach((post) => removePost(post._id));
     showInfoBar(
       `User ${userName || "muted"} muted`,
       "info",
       { type: "mute", userId, userName },
       true,
     );
+
+    try {
+      await toggleMuteUser(userId);
+      await invalidateAllFeeds();
+    } catch (error: any) {
+      if (error.isBlocked) {
+        showInfoBar("Cannot mute this user due to block restrictions", "info");
+        return;
+      }
+      await invalidateAllFeeds();
+      showInfoBar(error.message || "Failed to mute user", "error");
+    }
   };
-  const handleBlockUser = (userId: string, userName?: string) => {
-    if (!userId) return;
-    setBlockedUsers((prev) => new Set(prev).add(userId));
+
+  const handleBlockUser = async (userId: string, userName?: string) => {
+    if (!token || !userId) return;
+
+    const postsToRemove = visiblePosts.filter((p) => p.user?._id === userId);
+    postsToRemove.forEach((post) => removePost(post._id));
     showInfoBar(
       `User ${userName || "blocked"} blocked`,
       "info",
       { type: "block", userId, userName },
       true,
     );
+
+    try {
+      await toggleBlockUser(userId);
+      await invalidateAllFeeds();
+    } catch (error: any) {
+      await invalidateAllFeeds();
+      showInfoBar(error.message || "Failed to block user", "error");
+    }
   };
 
   const handleCreatePost = () => {
@@ -426,8 +463,6 @@ export default function FeedScreen() {
     markNeedsRefresh();
     router.push("/components/Feed/Post/create");
   };
-
-  // ============ RENDER HELPERS ============
 
   const renderInfoBar = () => {
     if (!infoMessage) return null;
@@ -477,8 +512,6 @@ export default function FeedScreen() {
       }
     : null;
 
-  // ============ AUTH CHECKS ============
-
   if (!token) {
     return (
       <SafeAreaView style={styles.container}>
@@ -496,7 +529,6 @@ export default function FeedScreen() {
     );
   }
 
-  // Show skeleton during initial loading
   if (currentFeed.loading && visiblePosts.length === 0) {
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
@@ -504,8 +536,6 @@ export default function FeedScreen() {
       </SafeAreaView>
     );
   }
-
-  // ============ MAIN RENDER ============
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -588,7 +618,6 @@ export default function FeedScreen() {
           )}
         </View>
 
-        {/* Loading more skeleton */}
         {loadingMorePosts && <LoadMorePostsSkeleton />}
 
         <View style={styles.bottomPadding} />

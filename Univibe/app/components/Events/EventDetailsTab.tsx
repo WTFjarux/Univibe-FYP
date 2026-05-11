@@ -194,7 +194,6 @@ export const EventDetailsTab = ({
                 event.organizerName.toLowerCase().replace(/\s/g, "")}
             </Text>
           </View>
-          <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
         </TouchableOpacity>
       </View>
 
@@ -288,11 +287,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 12,
-    backgroundColor: "#f9fafb",
     padding: 16,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#f3f4f6",
   },
   locationIconWrapper: {
     width: 36,
@@ -328,11 +324,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    backgroundColor: "#f9fafb",
     padding: 12,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#f3f4f6",
   },
   organizerAvatar: {
     position: "relative",

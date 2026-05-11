@@ -1,3 +1,5 @@
+// app/components/Feed/Post/PostOptionsModal.tsx
+
 import React from "react";
 import {
   View,
@@ -17,14 +19,18 @@ interface PostOptionsModalProps {
   isSaved?: boolean;
   isReported?: boolean;
   isHidden?: boolean;
+  isMuted?: boolean;
+  isBlocked?: boolean;
+  userName?: string;
   onEdit?: (postId: string) => void;
   onDelete?: (postId: string) => void;
   onSave?: (postId: string) => void;
   onReport?: (postId: string) => void;
   onHide?: (postId: string) => void;
   onShare?: (postId: string) => void;
-  onMuteUser?: (userId: string) => void;
-  onBlockUser?: (userId: string) => void;
+  onCopyLink?: (postId: string) => void;
+  onMuteUser?: (userId: string, userName?: string) => void;
+  onBlockUser?: (userId: string, userName?: string) => void;
   userId?: string;
 }
 
@@ -36,27 +42,25 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
   isSaved = false,
   isReported = false,
   isHidden = false,
+  isMuted = false,
+  isBlocked = false,
+  userName,
   onEdit,
   onDelete,
   onSave,
   onReport,
   onHide,
   onShare,
+  onCopyLink,
   onMuteUser,
   onBlockUser,
   userId,
 }) => {
-  /**
-   * Handle edit post action
-   */
   const handleEdit = () => {
     onClose();
     if (onEdit) onEdit(postId);
   };
 
-  /**
-   * Handle delete post with confirmation
-   */
   const handleDelete = () => {
     Alert.alert(
       "Delete Post",
@@ -75,17 +79,16 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
     );
   };
 
-  /**
-   * Handle save/unsave post
-   */
   const handleSave = () => {
     onClose();
     if (onSave) onSave(postId);
   };
 
-  /**
-   * Handle report post with reason selection
-   */
+  const handleCopyLink = () => {
+    onClose();
+    if (onCopyLink) onCopyLink(postId);
+  };
+
   const handleReport = () => {
     Alert.alert("Report Post", "Why are you reporting this post?", [
       { text: "Cancel", style: "cancel" },
@@ -113,67 +116,70 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
     ]);
   };
 
-  /**
-   * Handle hide post
-   */
   const handleHide = () => {
-    onClose();
-    if (onHide) onHide(postId);
+    const actionText = isHidden ? "unhide" : "hide";
+    const actionMessage = isHidden
+      ? "Do you want to unhide this post? It will reappear in your feed."
+      : "Are you sure you want to hide this post? You won't see it in your feed.";
+
+    Alert.alert(isHidden ? "Unhide Post" : "Hide Post", actionMessage, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: isHidden ? "Unhide" : "Hide",
+        style: isHidden ? "default" : "destructive",
+        onPress: () => {
+          onClose();
+          if (onHide) onHide(postId);
+        },
+      },
+    ]);
   };
 
-  /**
-   * Handle share post
-   */
   const handleShare = () => {
     onClose();
     if (onShare) onShare(postId);
   };
 
-  /**
-   * Handle mute user
-   */
   const handleMuteUser = () => {
-    Alert.alert(
-      "Mute User",
-      "Are you sure you want to mute this user? You won't see their posts anymore.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Mute",
-          style: "destructive",
-          onPress: () => {
-            onClose();
-            if (onMuteUser && userId) onMuteUser(userId);
-          },
+    const displayName = userName || "this user";
+    const actionText = isMuted ? "unmute" : "mute";
+    const actionMessage = isMuted
+      ? `Do you want to unmute ${displayName}? You will see their posts again.`
+      : `Are you sure you want to mute ${displayName}? You won't see their posts anymore.`;
+
+    Alert.alert(isMuted ? "Unmute User" : "Mute User", actionMessage, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: isMuted ? "Unmute" : "Mute",
+        style: isMuted ? "default" : "destructive",
+        onPress: () => {
+          onClose();
+          if (onMuteUser && userId) onMuteUser(userId, displayName);
         },
-      ],
-    );
+      },
+    ]);
   };
 
-  /**
-   * Handle block user
-   */
   const handleBlockUser = () => {
-    Alert.alert(
-      "Block User",
-      "Are you sure you want to block this user? You won't see their posts and they won't see yours.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Block",
-          style: "destructive",
-          onPress: () => {
-            onClose();
-            if (onBlockUser && userId) onBlockUser(userId);
-          },
+    const displayName = userName || "this user";
+    const actionText = isBlocked ? "unblock" : "block";
+    const actionMessage = isBlocked
+      ? `Do you want to unblock ${displayName}? They will be able to interact with you again.`
+      : `Are you sure you want to block ${displayName}? You won't see their posts and they won't see yours.`;
+
+    Alert.alert(isBlocked ? "Unblock User" : "Block User", actionMessage, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: isBlocked ? "Unblock" : "Block",
+        style: isBlocked ? "default" : "destructive",
+        onPress: () => {
+          onClose();
+          if (onBlockUser && userId) onBlockUser(userId, displayName);
         },
-      ],
-    );
+      },
+    ]);
   };
 
-  /**
-   * Render owner options (Edit/Delete)
-   */
   const renderOwnerOptions = () => (
     <>
       <TouchableOpacity style={styles.optionItem} onPress={handleEdit}>
@@ -190,28 +196,40 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
     </>
   );
 
-  /**
-   * Render user actions (Mute/Block)
-   */
   const renderUserActions = () => (
     <>
       <TouchableOpacity style={styles.optionItem} onPress={handleMuteUser}>
-        <Ionicons name="volume-mute-outline" size={22} color="#6b7280" />
-        <Text style={styles.optionText}>Mute User</Text>
+        <Ionicons
+          name={isMuted ? "volume-high-outline" : "volume-mute-outline"}
+          size={22}
+          color={isMuted ? "#8b5cf6" : "#6b7280"}
+        />
+        <Text style={[styles.optionText, isMuted && styles.savedText]}>
+          {isMuted ? "Unmute User" : "Mute User"}
+        </Text>
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.optionItem} onPress={handleBlockUser}>
-        <Ionicons name="ban-outline" size={22} color="#ef4444" />
-        <Text style={[styles.optionText, styles.deleteText]}>Block User</Text>
+        <Ionicons
+          name={isBlocked ? "person-add-outline" : "ban-outline"}
+          size={22}
+          color={isBlocked ? "#8b5cf6" : "#ef4444"}
+        />
+        <Text
+          style={[
+            styles.optionText,
+            isBlocked && styles.savedText,
+            isBlocked ? {} : styles.deleteText,
+          ]}
+        >
+          {isBlocked ? "Unblock User" : "Block User"}
+        </Text>
       </TouchableOpacity>
 
       <View style={styles.divider} />
     </>
   );
 
-  /**
-   * Render common options for all users
-   */
   const renderCommonOptions = () => (
     <>
       <TouchableOpacity style={styles.optionItem} onPress={handleSave}>
@@ -221,18 +239,18 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
           color={isSaved ? "#8b5cf6" : "#6b7280"}
         />
         <Text style={[styles.optionText, isSaved && styles.savedText]}>
-          {isSaved ? "Saved" : "Save Post"}
+          {isSaved ? "Unsave Post" : "Save Post"}
         </Text>
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.optionItem} onPress={handleHide}>
         <Ionicons
-          name={isHidden ? "eye-off" : "eye-off-outline"}
+          name={isHidden ? "eye-outline" : "eye-off-outline"}
           size={22}
           color={isHidden ? "#8b5cf6" : "#6b7280"}
         />
         <Text style={[styles.optionText, isHidden && styles.savedText]}>
-          {isHidden ? "Hidden" : "Hide Post"}
+          {isHidden ? "Unhide Post" : "Hide Post"}
         </Text>
       </TouchableOpacity>
 
@@ -240,12 +258,14 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
         <Ionicons name="share-outline" size={22} color="#6b7280" />
         <Text style={styles.optionText}>Share Post</Text>
       </TouchableOpacity>
+
+      <TouchableOpacity style={styles.optionItem} onPress={handleCopyLink}>
+        <Ionicons name="link-outline" size={22} color="#6b7280" />
+        <Text style={styles.optionText}>Copy Link</Text>
+      </TouchableOpacity>
     </>
   );
 
-  /**
-   * Render report option (only for non-owners)
-   */
   const renderReportOption = () => (
     <>
       <View style={styles.divider} />
@@ -275,7 +295,6 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
         onPress={onClose}
       >
         <View style={styles.modalContent}>
-          {/* Header */}
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Post Options</Text>
             <TouchableOpacity onPress={onClose}>
@@ -283,13 +302,8 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
             </TouchableOpacity>
           </View>
 
-          {/* Dynamic Options based on ownership */}
           {isOwnPost ? renderOwnerOptions() : renderUserActions()}
-
-          {/* Common Options for all users */}
           {renderCommonOptions()}
-
-          {/* Report option for non-owners */}
           {!isOwnPost && renderReportOption()}
         </View>
       </TouchableOpacity>
@@ -300,7 +314,7 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    backgroundColor: "transparent", 
+    backgroundColor: "transparent",
     justifyContent: "flex-end",
   },
   modalContent: {

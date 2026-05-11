@@ -1,4 +1,4 @@
-// Backend/routes/profileRoutes.js
+// backend/routes/profileRoutes.js
 const express = require("express");
 const router = express.Router();
 
@@ -8,31 +8,21 @@ const {
   uploadProfilePicture,
   uploadCoverPhoto,
 } = require("../middleware/uploadMiddleware");
+const { checkBlockStatus } = require("../middleware/blockMiddleware");
 
 const profileController = require("../controllers/profileController");
 const connectionRoutes = require("./connectionRoutes");
 
-// Apply authentication to all routes
 router.use(protect);
 
-// ============================================
-// Mount Connection Routes
-// ============================================
 router.use("/connections", connectionRoutes);
 
-// ============================================
-// Routes Without Email Verification
-// (Required for profile setup flow)
-// ============================================
 router.get(
   "/check-username/:username",
   profileController.checkUsernameAvailability,
 );
 router.get("/status", profileController.checkProfileStatus);
 
-// ============================================
-// Protected Routes (Require Email Verification)
-// ============================================
 router.post("/setup", checkEmailVerified, profileController.setupProfile);
 router.post(
   "/upload-picture",
@@ -61,10 +51,11 @@ router.get("/details", checkEmailVerified, profileController.getProfileDetails);
 router.put("/update", checkEmailVerified, profileController.updateProfile);
 router.get("/my-profile", checkEmailVerified, profileController.getMyProfile);
 
-// ============================================
-// Public Routes (No Email Verification Required)
-// ============================================
-router.get("/public/:userId", profileController.getPublicProfile);
+router.get(
+  "/public/:userId",
+  checkBlockStatus,
+  profileController.getPublicProfile,
+);
 router.get("/all", profileController.getAllProfiles);
 router.get("/search", profileController.searchProfiles);
 router.get("/username/:username", profileController.getProfileByUsername);

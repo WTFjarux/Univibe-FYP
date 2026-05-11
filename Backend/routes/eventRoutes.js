@@ -10,7 +10,7 @@ const {
 router.use(protect);
 
 // ============================================
-// EVENT QUERIES 
+// EVENT QUERIES
 // ============================================
 
 // Get user's events - SPECIFIC routes first
@@ -41,6 +41,13 @@ router.put(
 router.delete("/:eventId", eventController.deleteEvent);
 
 // ============================================
+// EVENT STATUS
+// ============================================
+
+// Refresh event status manually
+router.put("/:eventId/refresh-status", eventController.refreshEventStatus);
+
+// ============================================
 // IMAGE MANAGEMENT
 // ============================================
 
@@ -63,12 +70,5 @@ router.post("/:eventId/interested", eventController.markInterested);
 
 // Toggle RSVP
 router.post("/:eventId/rsvp", eventController.rsvpEvent);
-
-// ============================================
-// OPTIONAL: Batch operations (if needed)
-// ============================================
-
-// Bulk delete events (admin only)
-// router.delete("/bulk/delete", protect, adminOnly, eventController.bulkDeleteEvents);
 
 module.exports = router;

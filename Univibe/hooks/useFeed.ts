@@ -32,6 +32,7 @@ interface UseFeedReturn {
   refreshOnFocus: () => Promise<void>;
   forceRefresh: () => Promise<void>;
   markNeedsRefresh: () => void;
+  invalidateAllFeeds: () => Promise<void>; // ✅ ADD THIS to return type
 }
 
 const REFRESH_COOLDOWN = 15 * 1000; // 15 seconds between refreshes
@@ -128,7 +129,6 @@ export function useFeed(): UseFeedReturn {
       pagination.current[feedType] = response.pagination;
       lastRefreshTime.current[feedType] = Date.now();
 
-      // ✅ Update posts WITHOUT changing loading/refreshing states
       setFeeds((prev) => ({
         ...prev,
         [feedType]: {
@@ -148,6 +148,43 @@ export function useFeed(): UseFeedReturn {
       isFetching.current = false;
     }
   }, []);
+
+  // ===========================================================================
+  // Invalidate all feeds - called after content management actions
+  // ===========================================================================
+  const invalidateAllFeeds = useCallback(async () => {
+    console.log("🔄 Invalidating all feeds...");
+    await feedService.invalidateCache();
+
+    // Reset cursors for all feed types
+    cursors.current = {
+      campus: null,
+      connections: null,
+      anonymous: null,
+    };
+
+    // Reset pagination for all feed types
+    pagination.current = {
+      campus: { hasMore: true, nextCursor: null, limit: 10 },
+      connections: { hasMore: true, nextCursor: null, limit: 10 },
+      anonymous: { hasMore: true, nextCursor: null, limit: 10 },
+    };
+
+    // Mark needs refresh for all feeds
+    needsRefresh.current = true;
+
+    // Also reset last refresh times to allow immediate refresh
+    lastRefreshTime.current = {
+      campus: 0,
+      connections: 0,
+      anonymous: 0,
+    };
+
+    // Force refresh the active feed silently
+    if (activeFeed) {
+      await fetchFeedSilent(activeFeed);
+    }
+  }, [activeFeed, fetchFeedSilent]);
 
   // ===========================================================================
   // Normal fetch - with loading/refreshing indicators
@@ -416,7 +453,7 @@ export function useFeed(): UseFeedReturn {
     });
   }, []);
 
-  // ✅ Silent refresh on focus - no visible indicator
+  // Silent refresh on focus - no visible indicator
   const refreshOnFocus = useCallback(async () => {
     const now = Date.now();
     const lastTime = lastRefreshTime.current[activeFeed];
@@ -429,7 +466,7 @@ export function useFeed(): UseFeedReturn {
         limit: 10,
       };
       await feedService.invalidateFeedCache(activeFeed);
-      await fetchFeedSilent(activeFeed); // ✅ Silent - no pull-down
+      await fetchFeedSilent(activeFeed);
     }
   }, [activeFeed, fetchFeedSilent]);
 
@@ -463,5 +500,6 @@ export function useFeed(): UseFeedReturn {
     refreshOnFocus,
     forceRefresh,
     markNeedsRefresh,
+    invalidateAllFeeds, // ✅ ADD THIS to return object
   };
 }

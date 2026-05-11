@@ -1,5 +1,12 @@
-// app/lib/ProfileContext.tsx
-import React, { createContext, useState, useContext, useEffect } from "react";
+// lib/contexts/ProfileContext.tsx
+
+import React, {
+  createContext,
+  useState,
+  useContext,
+  useEffect,
+  useRef,
+} from "react";
 import { useAuth } from "./AuthContext";
 import { profileService } from "../services/profileService";
 
@@ -22,16 +29,21 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ✅ Track if initial load is done to prevent infinite loops
+  const initialLoadDone = useRef(false);
+
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && token && !initialLoadDone.current) {
+      initialLoadDone.current = true;
       loadProfile();
-    } else {
+    } else if (!token) {
       setProfile(null);
+      initialLoadDone.current = false;
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, token]); // ✅ `token` is more stable than `isAuthenticated`
 
   const loadProfile = async () => {
-    if (!isAuthenticated) {
+    if (!token) {
       setProfile(null);
       return;
     }

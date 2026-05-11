@@ -297,23 +297,6 @@ export default function CampusMoments({
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         </View>
-      ) : stories.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <View style={styles.emptyIconContainer}>
-            <Ionicons name="camera-outline" size={40} color="#8b5cf6" />
-          </View>
-          <Text style={styles.emptyTitle}>No Stories Yet</Text>
-          <Text style={styles.emptyText}>
-            Be the first to share a moment with your campus community!
-          </Text>
-          <TouchableOpacity
-            style={styles.createStoryButton}
-            onPress={handleCreateStoryPress}
-          >
-            <Ionicons name="add-circle-outline" size={20} color="white" />
-            <Text style={styles.createStoryText}>Create Story</Text>
-          </TouchableOpacity>
-        </View>
       ) : (
         <ScrollView
           horizontal
@@ -321,7 +304,7 @@ export default function CampusMoments({
           style={styles.storiesContainer}
           contentContainerStyle={styles.storiesContentContainer}
         >
-          {/* User's Own Story */}
+          {/* User's Own Story - Always visible like Instagram */}
           <TouchableOpacity
             style={styles.storyCard}
             onPress={() => {
@@ -337,7 +320,9 @@ export default function CampusMoments({
               <View
                 style={[
                   styles.storyRing,
-                  hasActiveStories() ? styles.unviewedRing : styles.viewedRing,
+                  hasActiveStories()
+                    ? styles.unviewedRing
+                    : styles.addStoryRing,
                 ]}
               >
                 {getUserProfilePictureUrl() ? (
@@ -463,6 +448,11 @@ const styles = StyleSheet.create({
     borderColor: "#e5e7eb",
     padding: 3,
   },
+  addStoryRing: {
+    borderWidth: 3,
+    borderColor: "#e5e7eb",
+    padding: 3,
+  },
   storyAvatar: {
     width: 80,
     height: 80,
@@ -512,54 +502,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 2,
     elevation: 3,
-  },
-  // Empty state styles
-  emptyContainer: {
-    justifyContent: "center",
-    alignItems: "center",
-    paddingVertical: 32,
-    paddingHorizontal: 20,
-    backgroundColor: "#f9fafb",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderStyle: "dashed",
-  },
-  emptyIconContainer: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: "#f3e8ff",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#374151",
-    marginBottom: 8,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: "#6b7280",
-    textAlign: "center",
-    marginBottom: 20,
-    lineHeight: 20,
-  },
-  createStoryButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#8b5cf6",
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 20,
-    gap: 8,
-  },
-  createStoryText: {
-    color: "white",
-    fontSize: 14,
-    fontWeight: "600",
   },
   // Error state styles
   errorContainer: {

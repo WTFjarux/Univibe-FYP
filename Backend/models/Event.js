@@ -106,8 +106,11 @@ const eventSchema = new mongoose.Schema(
   },
 );
 
-// Indexes for performance
+// ============================================
+// INDEXES
+// ============================================
 eventSchema.index({ startDate: -1 });
+eventSchema.index({ endDate: 1 });
 eventSchema.index({ campus: 1, startDate: -1 });
 eventSchema.index({ organizer: 1 });
 eventSchema.index({ category: 1 });
@@ -115,8 +118,12 @@ eventSchema.index({ status: 1 });
 eventSchema.index({ visibility: 1 });
 eventSchema.index({ interested: 1 });
 eventSchema.index({ rsvp: 1 });
+// Compound index for status updates
+eventSchema.index({ status: 1, startDate: 1, endDate: 1 });
 
-// Virtuals
+// ============================================
+// VIRTUALS
+// ============================================
 eventSchema.virtual("coverImageUrl").get(function () {
   if (!this.images || this.images.length === 0) return "";
   const coverImg = this.images.find((img) => img.isCover === true);
@@ -138,7 +145,9 @@ eventSchema.virtual("isFull").get(function () {
   return this.rsvpCount >= this.maxAttendees;
 });
 
-// Instance methods
+// ============================================
+// INSTANCE METHODS
+// ============================================
 eventSchema.methods.isUserInterested = function (userId) {
   return this.interested.some((id) => id.toString() === userId.toString());
 };
@@ -203,16 +212,101 @@ eventSchema.methods.removeRsvp = async function (userId) {
   return this;
 };
 
+/**
+ * Calculate the correct status based on current time
+ */
+eventSchema.methods.calculateStatus = function () {
+  if (this.status === "cancelled") return "cancelled";
+
+  const now = new Date();
+
+  if (this.endDate < now) {
+    return "completed";
+  } else if (this.startDate <= now && this.endDate >= now) {
+    return "ongoing";
+  } else if (this.startDate > now) {
+    return "upcoming";
+  }
+
+  return this.status;
+};
+
+/**
+ * Update status if it has changed based on current time
+ */
+eventSchema.methods.updateStatusIfNeeded = async function () {
+  const correctStatus = this.calculateStatus();
+
+  if (correctStatus !== this.status) {
+    console.log(
+      `📅 Event "${this.title}" status changing: ${this.status} → ${correctStatus}`,
+    );
+    this.status = correctStatus;
+    await this.save();
+  }
+
+  return this;
+};
+
+// ============================================
+// STATIC METHODS
+// ============================================
+
+/**
+ * Update statuses for all events that need updating
+ */
+eventSchema.statics.updateAllEventStatuses = async function () {
+  const now = new Date();
+
+  // Update upcoming → ongoing
+  const toOngoing = await this.updateMany(
+    {
+      status: "upcoming",
+      startDate: { $lte: now },
+      endDate: { $gte: now },
+    },
+    { $set: { status: "ongoing" } },
+  );
+
+  // Update upcoming/ongoing → completed
+  const toCompleted = await this.updateMany(
+    {
+      status: { $in: ["upcoming", "ongoing"] },
+      endDate: { $lt: now },
+    },
+    { $set: { status: "completed" } },
+  );
+
+  const totalUpdated =
+    (toOngoing.modifiedCount || 0) + (toCompleted.modifiedCount || 0);
+
+  if (totalUpdated > 0) {
+    console.log(
+      `📅 Event status cron: ${toOngoing.modifiedCount || 0} → ongoing, ${toCompleted.modifiedCount || 0} → completed`,
+    );
+  }
+
+  return {
+    toOngoing: toOngoing.modifiedCount || 0,
+    toCompleted: toCompleted.modifiedCount || 0,
+    totalUpdated,
+  };
+};
+
+// ============================================
+// MIDDLEWARE
+// ============================================
+
 // Pre-save middleware to update status
 eventSchema.pre("save", function (next) {
-  const now = new Date();
+  // Only auto-update if status isn't manually set to 'cancelled'
   if (this.status !== "cancelled") {
-    if (now < this.startDate) {
-      this.status = "upcoming";
-    } else if (now >= this.startDate && now <= this.endDate) {
-      this.status = "ongoing";
-    } else if (now > this.endDate) {
-      this.status = "completed";
+    const correctStatus = this.calculateStatus();
+    if (correctStatus !== this.status) {
+      console.log(
+        `📅 Pre-save: Event "${this.title}" status auto-corrected: ${this.status} → ${correctStatus}`,
+      );
+      this.status = correctStatus;
     }
   }
   next();

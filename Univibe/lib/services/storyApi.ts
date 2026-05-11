@@ -98,6 +98,7 @@ export class StoryApiError extends Error {
     public message: string,
     public statusCode?: number,
     public originalError?: unknown,
+    public isBlocked?: boolean,
   ) {
     super(message);
     this.name = "StoryApiError";
@@ -129,31 +130,26 @@ interface PendingSync {
 class StoryApiService {
   private abortController: AbortController | null = null;
 
-  // ✅ MULTI-LEVEL CACHING STRATEGY (Instagram-style)
   private storiesListCache: CacheEntry<GetStoriesResponse> | undefined =
     undefined;
   private storyViewersCache = new Map<
     string,
     CacheEntry<GetStoryViewersResponse>
-  >(); // Per story
-  private individualStoryCache = new Map<string, CacheEntry<Story>>(); // Per story
+  >();
+  private individualStoryCache = new Map<string, CacheEntry<Story>>();
 
-  // ✅ VIEWED STORIES TRACKING (optimistic updates)
-  private viewedStoriesLocal = new Map<string, ViewedStoryTracker>(); // Optimistic state
-
-  // ✅ SYNC QUEUE FOR BACKGROUND SYNCING
+  private viewedStoriesLocal = new Map<string, ViewedStoryTracker>();
   private syncQueue: PendingSync[] = [];
   private isSyncing = false;
 
-  // ✅ CACHE CONFIG (Instagram-level durations)
-  private readonly STORIES_LIST_CACHE_DURATION = 60000; // 60s - Main list
-  private readonly STORY_VIEWERS_CACHE_DURATION = 120000; // 2min - Viewers (less frequent)
-  private readonly INDIVIDUAL_STORY_CACHE_DURATION = 300000; // 5min - Individual story
-  private readonly MAX_CACHE_SIZE = 100; // Max stories to keep in memory
+  private readonly STORIES_LIST_CACHE_DURATION = 60000;
+  private readonly STORY_VIEWERS_CACHE_DURATION = 120000;
+  private readonly INDIVIDUAL_STORY_CACHE_DURATION = 300000;
+  private readonly MAX_CACHE_SIZE = 100;
 
   private readonly MAX_RETRIES = 3;
   private readonly RETRY_DELAY = 1000;
-  private readonly SYNC_INTERVAL = 5000; // Background sync every 5s
+  private readonly SYNC_INTERVAL = 5000;
 
   private syncIntervalRef: ReturnType<typeof setInterval> | null = null;
 
@@ -161,10 +157,6 @@ class StoryApiService {
     this.startBackgroundSync();
   }
 
-  /**
-   * ✅ BACKGROUND SYNC - Like Instagram's offline queue
-   * Syncs viewed stories in background without blocking UI
-   */
   private startBackgroundSync(): void {
     if (this.syncIntervalRef) clearInterval(this.syncIntervalRef);
 
@@ -184,15 +176,21 @@ class StoryApiService {
       try {
         await this.viewStoryInternal(pending.storyId);
 
-        // Mark as synced
         const tracked = this.viewedStoriesLocal.get(pending.storyId);
         if (tracked) {
           tracked.synced = true;
         }
 
-        this.syncQueue.shift(); // Remove from queue
+        this.syncQueue.shift();
         console.log(`✅ Synced view for story: ${pending.storyId}`);
       } catch (err) {
+        const error = err as any;
+        if (error?.isBlocked) {
+          console.log(`🚫 Story view blocked, removing from sync queue`);
+          this.syncQueue.shift();
+          continue;
+        }
+
         pending.retries++;
 
         if (pending.retries > this.MAX_RETRIES) {
@@ -201,10 +199,9 @@ class StoryApiService {
           );
           this.syncQueue.shift();
         } else {
-          // Retry later
           pending.timestamp = Date.now();
           console.log(`🔄 Will retry story sync (attempt ${pending.retries})`);
-          break; // Stop processing, retry later
+          break;
         }
       }
     }
@@ -212,9 +209,6 @@ class StoryApiService {
     this.isSyncing = false;
   }
 
-  /**
-   * Generic request handler with error handling and retry logic
-   */
   private async handleRequest<T>(
     request: () => Promise<T>,
     context: string,
@@ -225,7 +219,6 @@ class StoryApiService {
     } catch (error) {
       const axiosError = error as AxiosError;
 
-      // ✅ Check if request was cancelled (don't treat as error)
       const isCancelled =
         axiosError.code === "ERR_CANCELED" ||
         axiosError.message === "canceled" ||
@@ -236,12 +229,13 @@ class StoryApiService {
         throw new StoryApiError("Request cancelled", 499, error);
       }
 
-      // Handle specific HTTP status codes
       if (axiosError.response) {
+        const responseData = axiosError.response.data as any;
+
         switch (axiosError.response.status) {
           case 400:
             throw new StoryApiError(
-              (axiosError.response.data as any)?.message || "Invalid request",
+              responseData?.message || "Invalid request",
               400,
               error,
             );
@@ -252,22 +246,25 @@ class StoryApiService {
               401,
               error,
             );
-          case 403:
+          case 403: {
+            const isBlocked = responseData?.isBlocked || false;
             throw new StoryApiError(
-              (axiosError.response.data as any)?.message ||
+              responseData?.message ||
                 "You don't have permission to perform this action",
               403,
               error,
+              isBlocked,
             );
+          }
           case 404:
             throw new StoryApiError(
-              (axiosError.response.data as any)?.message || "Moment not found",
+              responseData?.message || "Moment not found",
               404,
               error,
             );
           case 410:
             throw new StoryApiError(
-              (axiosError.response.data as any)?.message || "Moment has expired",
+              responseData?.message || "Moment has expired",
               410,
               error,
             );
@@ -294,7 +291,7 @@ class StoryApiService {
             );
           default:
             throw new StoryApiError(
-              (axiosError.response.data as any)?.message ||
+              responseData?.message ||
                 `Request failed with status ${axiosError.response.status}`,
               axiosError.response.status,
               error,
@@ -316,16 +313,10 @@ class StoryApiService {
     }
   }
 
-  /**
-   * Utility method for delay
-   */
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  /**
-   * Cancel ongoing requests
-   */
   cancelRequests(): void {
     if (this.abortController) {
       this.abortController.abort();
@@ -333,10 +324,6 @@ class StoryApiService {
     }
   }
 
-  /**
-   * ✅ SMART CACHE INVALIDATION
-   * Only invalidates what changed, not everything
-   */
   private invalidateStoriesListCache(): void {
     this.storiesListCache = undefined;
     console.log("📦 Invalidated stories list cache");
@@ -352,9 +339,6 @@ class StoryApiService {
     console.log(`📦 Invalidated individual story cache: ${storyId}`);
   }
 
-  /**
-   * Clear ALL caches (only on logout/auth failure)
-   */
   private clearAllCaches(): void {
     this.storiesListCache = undefined;
     this.storyViewersCache.clear();
@@ -363,13 +347,9 @@ class StoryApiService {
     console.log("🧹 Cleared all caches");
   }
 
-  /**
-   * ✅ MEMORY MANAGEMENT - Keep cache from growing unbounded
-   */
   private enforceMaxCacheSize(): void {
     if (this.individualStoryCache.size > this.MAX_CACHE_SIZE) {
       const entries = Array.from(this.individualStoryCache.entries());
-      // Remove oldest entries
       entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
       const toRemove = entries.slice(0, Math.floor(this.MAX_CACHE_SIZE * 0.2));
       toRemove.forEach(([key]) => this.individualStoryCache.delete(key));
@@ -377,9 +357,6 @@ class StoryApiService {
     }
   }
 
-  /**
-   * ✅ SMART CACHE CHECK - Returns cached if valid
-   */
   private isCacheValid<T>(
     cache: CacheEntry<T> | undefined,
     duration: number,
@@ -388,18 +365,11 @@ class StoryApiService {
     return Date.now() - cache.timestamp < duration;
   }
 
-  /**
-   * ✅ GET STORIES WITH SMART CACHING
-   * - Returns cached immediately on first page
-   * - Doesn't clear cache on every view
-   * - Optimistic viewer counts
-   */
   async getStories(
     page: number = 1,
     limit: number = 20,
     forceRefresh: boolean = false,
   ): Promise<GetStoriesResponse> {
-    // Check cache first (only for page 1)
     if (
       !forceRefresh &&
       page === 1 &&
@@ -408,7 +378,6 @@ class StoryApiService {
       return this.updateCacheWithViewedStories(this.storiesListCache!.data);
     }
 
-    // Cancel previous request
     this.cancelRequests();
     this.abortController = new AbortController();
 
@@ -418,7 +387,6 @@ class StoryApiService {
         signal: this.abortController!.signal,
       });
 
-      // Cache only first page
       if (page === 1) {
         this.storiesListCache = {
           data: response.data,
@@ -433,7 +401,6 @@ class StoryApiService {
       const result = await this.handleRequest(request, "getStories");
       return this.updateCacheWithViewedStories(result);
     } catch (error) {
-      // Return cache if failed and available
       if (this.storiesListCache) {
         console.log("📦 Request failed, returning cached stories");
         return this.updateCacheWithViewedStories(this.storiesListCache.data);
@@ -442,20 +409,15 @@ class StoryApiService {
     }
   }
 
-  /**
-   * ✅ UPDATE CACHE WITH LOCAL VIEWED STATE
-   * Shows optimistic viewer counts before sync completes
-   */
   private updateCacheWithViewedStories(
     response: GetStoriesResponse,
   ): GetStoriesResponse {
-    const updated = JSON.parse(JSON.stringify(response)); // Deep clone
+    const updated = JSON.parse(JSON.stringify(response));
 
     updated.data.forEach((group: StoryGroup) => {
       group.stories.forEach((story: Story) => {
         const viewed = this.viewedStoriesLocal.get(story._id);
         if (viewed) {
-          // Add to viewers optimistically
           story.hasCurrentUserViewed = true;
           story.uniqueViewersCount = (story.uniqueViewersCount || 0) + 1;
         }
@@ -465,11 +427,6 @@ class StoryApiService {
     return updated;
   }
 
-  /**
-   * Create a new story with image/video
-   * @param formData - FormData containing 'media' file and optional 'caption'
-   * @param onUploadProgress - Callback for upload progress
-   */
   async createStory(
     formData: FormData,
     onUploadProgress?: (progress: AxiosProgressEvent) => void,
@@ -486,7 +443,6 @@ class StoryApiService {
         onUploadProgress,
       });
 
-      // Invalidate list cache (new story added)
       this.invalidateStoriesListCache();
 
       return response.data;
@@ -496,18 +452,11 @@ class StoryApiService {
     return result;
   }
 
-  /**
-   * ✅ VIEW STORY - OPTIMISTIC UPDATE
-   * - Updates UI immediately
-   * - Queues sync in background
-   * - No blocking
-   */
   async viewStory(storyId: string): Promise<ViewStoryResponse> {
     if (!storyId) {
       throw new StoryApiError("Story ID is required", 400);
     }
 
-    // ✅ OPTIMISTIC UPDATE - Update immediately
     const tracked = this.viewedStoriesLocal.get(storyId);
     if (!tracked) {
       this.viewedStoriesLocal.set(storyId, {
@@ -517,7 +466,6 @@ class StoryApiService {
       });
     }
 
-    // ✅ QUEUE FOR BACKGROUND SYNC - Don't wait
     if (!tracked?.synced) {
       this.syncQueue.push({
         storyId,
@@ -526,7 +474,6 @@ class StoryApiService {
       });
     }
 
-    // Trigger sync but don't wait for it
     this.processSyncQueue().catch(console.error);
 
     return {
@@ -536,9 +483,6 @@ class StoryApiService {
     };
   }
 
-  /**
-   * Internal method for actual server sync
-   */
   private async viewStoryInternal(storyId: string): Promise<ViewStoryResponse> {
     const request = async () => {
       const response = await api.post(`/stories/${storyId}/view`);
@@ -549,18 +493,15 @@ class StoryApiService {
   }
 
   async viewStoryWithSync(storyId: string): Promise<ViewStoryResponse> {
-    // Do optimistic update
     await this.viewStory(storyId);
 
-    // Wait for this specific story to sync
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const checkSync = setInterval(() => {
         const tracked = this.viewedStoriesLocal.get(storyId);
         if (tracked?.synced) {
           clearInterval(checkSync);
           resolve({ success: true, message: "Story view synced" });
         }
-        // Timeout after 30 seconds
         if (Date.now() - (tracked?.viewedAt || Date.now()) > 30000) {
           clearInterval(checkSync);
           resolve({ success: true, message: "Sync timeout, saved locally" });
@@ -568,12 +509,7 @@ class StoryApiService {
       }, 500);
     });
   }
-  /**
-   * Get list of unique viewers for a story (with caching)
-   * @param storyId - Story ID
-   * @param page - Page number
-   * @param limit - Items per page
-   */
+
   async getStoryViewers(
     storyId: string,
     page: number = 1,
@@ -583,7 +519,6 @@ class StoryApiService {
       throw new StoryApiError("Story ID is required", 400);
     }
 
-    // Check cache
     const cacheKey = `${storyId}_${page}_${limit}`;
     const cached = this.storyViewersCache.get(cacheKey);
 
@@ -597,7 +532,6 @@ class StoryApiService {
         params: { page, limit },
       });
 
-      // Cache it
       this.storyViewersCache.set(cacheKey, {
         data: response.data,
         timestamp: Date.now(),
@@ -612,9 +546,6 @@ class StoryApiService {
     return result;
   }
 
-  /**
-   * Send a reply to a story
-   */
   async replyToStory(
     storyId: string,
     message: string,
@@ -644,7 +575,7 @@ class StoryApiService {
     const request = async () => {
       const response = await api.post(`/stories/${storyId}/reply`, {
         message: message.trim(),
-        storyData: storyData, // Include story data for the chat message
+        storyData: storyData,
       });
       return response.data;
     };
@@ -653,9 +584,6 @@ class StoryApiService {
     return result;
   }
 
-  /**
-   * Delete a story (only owner)
-   */
   async deleteStory(storyId: string): Promise<DeleteStoryResponse> {
     if (!storyId) {
       throw new StoryApiError("Story ID is required", 400);
@@ -664,7 +592,6 @@ class StoryApiService {
     const request = async () => {
       const response = await api.delete(`/stories/${storyId}`);
 
-      // Smart invalidation - only clear what's affected
       this.invalidateStoriesListCache();
       this.invalidateIndividualStoryCache(storyId);
 
@@ -675,9 +602,6 @@ class StoryApiService {
     return result;
   }
 
-  /**
-   * Manually trigger cleanup of expired stories (Admin only)
-   */
   async cleanupExpiredStories(): Promise<CleanupStoriesResponse> {
     const request = async () => {
       const response = await api.get("/stories/expired/cleanup");
@@ -689,20 +613,12 @@ class StoryApiService {
     return result;
   }
 
-  /**
-   * ✅ REFRESH STORIES - Force refetch from server
-   */
   async refreshStories(): Promise<GetStoriesResponse> {
     this.invalidateStoriesListCache();
     return this.getStories(1, 20, true);
   }
 
-  /**
-   * ✅ PREFETCH - Download next N stories in background
-   * No blocking, just fills cache
-   */
   async prefetchStories(count: number = 2): Promise<void> {
-    // Prefetch only if cache is stale
     if (
       !this.isCacheValid(
         this.storiesListCache,
@@ -717,17 +633,11 @@ class StoryApiService {
     }
   }
 
-  /**
-   * Check if a story has been viewed by current user
-   */
   hasUserViewedStory(story: Story, userId: string): boolean {
     if (!story.viewers || !userId) return false;
     return story.viewers.some((viewer) => viewer.userId === userId);
   }
 
-  /**
-   * Get unique viewer count with optimistic updates
-   */
   getUniqueViewerCount(story: Story | undefined): number {
     if (!story || !story.viewers || !Array.isArray(story.viewers)) {
       return 0;
@@ -736,9 +646,6 @@ class StoryApiService {
     return uniqueUserIds.size;
   }
 
-  /**
-   * Format story timestamp for display
-   */
   formatStoryTime(createdAt: string): string {
     if (!createdAt) return "Just now";
 
@@ -756,9 +663,6 @@ class StoryApiService {
     }
   }
 
-  /**
-   * Get cache stats (for debugging)
-   */
   getCacheStats() {
     return {
       hasStoriesListCache: !!this.storiesListCache,
@@ -770,9 +674,6 @@ class StoryApiService {
     };
   }
 
-  /**
-   * Cleanup on unmount
-   */
   destroy(): void {
     if (this.syncIntervalRef) {
       clearInterval(this.syncIntervalRef);

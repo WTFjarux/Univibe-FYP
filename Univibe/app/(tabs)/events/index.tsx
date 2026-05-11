@@ -22,14 +22,15 @@ import socketService from "@/lib/services/socketService";
 // Use a Set to track processed socket updates and prevent duplicate processing
 const processedUpdates = new Set<string>();
 
-const categories = [
-  { id: "all", name: "All", icon: "grid", count: 0 },
-  { id: "Academic", name: "Academic", icon: "school", count: 0 },
-  { id: "Social", name: "Social", icon: "people", count: 0 },
-  { id: "Sports", name: "Sports", icon: "basketball", count: 0 },
-  { id: "Career", name: "Career", icon: "briefcase", count: 0 },
-  { id: "Cultural", name: "Cultural", icon: "color-palette", count: 0 },
-  { id: "Workshop", name: "Workshop", icon: "construct", count: 0 },
+// Base categories without counts (counts will be set dynamically)
+const baseCategories = [
+  { id: "all", name: "All", icon: "grid" },
+  { id: "Academic", name: "Academic", icon: "school" },
+  { id: "Social", name: "Social", icon: "people" },
+  { id: "Sports", name: "Sports", icon: "basketball" },
+  { id: "Career", name: "Career", icon: "briefcase" },
+  { id: "Cultural", name: "Cultural", icon: "color-palette" },
+  { id: "Workshop", name: "Workshop", icon: "construct" },
 ];
 
 export default function EventsScreen() {
@@ -45,11 +46,26 @@ export default function EventsScreen() {
   const [showSearch, setShowSearch] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  const [categories, setCategories] = useState(
+    baseCategories.map((cat) => ({ ...cat, count: 0 })),
+  );
 
   // Track pending optimistic updates
   const pendingUpdates = useRef<
     Map<string, { type: string; timestamp: number }>
   >(new Map());
+
+  // Update category counts whenever events change
+  useEffect(() => {
+    const newCategories = baseCategories.map((cat) => {
+      if (cat.id === "all") {
+        return { ...cat, count: events.length };
+      }
+      const count = events.filter((event) => event.category === cat.id).length;
+      return { ...cat, count };
+    });
+    setCategories(newCategories);
+  }, [events]);
 
   const deduplicateEvents = (eventsArray: Event[]): Event[] => {
     const seen = new Map<string, Event>();
@@ -117,6 +133,7 @@ export default function EventsScreen() {
 
           return {
             ...event,
+            status: (data.status as Event["status"]) ?? event.status,
             interestedCount: data.interestedCount ?? event.interestedCount ?? 0,
             rsvpCount: data.rsvpCount ?? event.rsvpCount ?? 0,
             isFull: data.isFull ?? event.isFull,
@@ -235,6 +252,10 @@ export default function EventsScreen() {
         const serverIsRsvpd =
           response.isRsvpd !== undefined ? response.isRsvpd : !wasRsvpd;
 
+        // Cast the status to the correct type
+        const serverStatus: Event["status"] =
+          (response.status as Event["status"]) ?? event.status;
+
         setEvents((prev) =>
           prev.map((e) => {
             if (e._id !== eventId) return e;
@@ -243,6 +264,7 @@ export default function EventsScreen() {
               isRsvpd: serverIsRsvpd,
               rsvpCount: serverRsvpCount,
               isFull: response.isFull ?? e.isFull,
+              status: serverStatus,
             };
           }),
         );
@@ -310,6 +332,7 @@ export default function EventsScreen() {
       fetchEvents(true);
     }, []), // Empty array = always run on focus, but only create callback once
   );
+
   if (loading && events.length === 0) {
     return (
       <SafeAreaView style={styles.container}>

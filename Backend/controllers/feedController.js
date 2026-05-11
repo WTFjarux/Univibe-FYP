@@ -3,25 +3,22 @@ const Post = require("../models/Post");
 const User = require("../models/User");
 const Profile = require("../models/Profile");
 const Comment = require("../models/Comment");
+const BlockService = require("../services/blockService");
 
 /**
  * Get Campus Feed (Default/ALL Feed)
- *
- * Shows:
- * - All campus visibility posts from same campus
- * - All anonymous posts
- * - Connections posts ONLY from connected users
- * - Owner's own posts (regardless of visibility)
  */
 exports.getCampusFeed = async (req, res) => {
   try {
     const { cursor, limit = 10 } = req.query;
     const currentUserId = req.user._id;
 
-    // Fetch user data
-    const [currentUser, userProfile] = await Promise.all([
-      User.findById(currentUserId).select("connections").lean(),
+    const [currentUser, userProfile, blockedUserIds] = await Promise.all([
+      User.findById(currentUserId)
+        .select("connections mutedUsers hiddenPosts savedPosts")
+        .lean(),
       Profile.findOne({ user: currentUserId }).select("campus").lean(),
+      BlockService.getBlockedUserIds(currentUserId),
     ]);
 
     if (!userProfile) {
@@ -32,27 +29,31 @@ exports.getCampusFeed = async (req, res) => {
     }
 
     const connectionIds = currentUser?.connections || [];
+    const mutedUserIds =
+      currentUser?.mutedUsers?.map((id) => id.toString()) || [];
+    const hiddenPostIds =
+      currentUser?.hiddenPosts?.map((id) => id.toString()) || [];
+    const savedPostIds =
+      currentUser?.savedPosts?.map((id) => id.toString()) || [];
     const userCampus = userProfile.campus;
 
-    // Build query for campus feed
+    const excludedUserIds = [...new Set([...mutedUserIds, ...blockedUserIds])];
+
     const query = {
       isDeleted: false,
+      user: { $nin: excludedUserIds },
+      _id: { $nin: hiddenPostIds },
       $or: [
-        // 1. Campus visibility posts from same campus (includes connected users' campus posts)
         { visibility: "campus", campus: userCampus },
-        // 2. Anonymous posts (visible to all)
         { isAnonymous: true },
-        // 3. Connections posts from connected users (regardless of campus)
         {
           visibility: "connections",
           user: { $in: connectionIds },
         },
-        // 4. User's own posts (always visible to themselves)
         { user: currentUserId },
       ],
     };
 
-    // Apply cursor for pagination
     if (cursor) {
       const cursorPost = await Post.findById(cursor).select("createdAt").lean();
 
@@ -93,6 +94,8 @@ exports.getCampusFeed = async (req, res) => {
       commentCounts,
       currentUserId,
       userConnections: connectionIds,
+      savedPostIds,
+      forceAnonymous: false,
     });
 
     res.json({
@@ -117,25 +120,34 @@ exports.getCampusFeed = async (req, res) => {
 
 /**
  * Get Connections Feed
- *
- * Shows ONLY:
- * - Posts from connected users (both campus and connections visibility)
- * - EXCLUDES anonymous posts
  */
 exports.getConnectionsFeed = async (req, res) => {
   try {
     const { cursor, limit = 10 } = req.query;
     const currentUserId = req.user._id;
 
-    // Get user's connections
-    const currentUser = await User.findById(currentUserId)
-      .select("connections")
-      .lean();
+    const [currentUser, blockedUserIds] = await Promise.all([
+      User.findById(currentUserId)
+        .select("connections mutedUsers hiddenPosts savedPosts")
+        .lean(),
+      BlockService.getBlockedUserIds(currentUserId),
+    ]);
 
     const connectionIds = currentUser?.connections || [];
+    const mutedUserIds =
+      currentUser?.mutedUsers?.map((id) => id.toString()) || [];
+    const hiddenPostIds =
+      currentUser?.hiddenPosts?.map((id) => id.toString()) || [];
+    const savedPostIds =
+      currentUser?.savedPosts?.map((id) => id.toString()) || [];
 
-    // Return empty if no connections
-    if (connectionIds.length === 0) {
+    const excludedUserIds = [...new Set([...mutedUserIds, ...blockedUserIds])];
+
+    const validConnectionIds = connectionIds.filter(
+      (id) => !excludedUserIds.includes(id.toString()),
+    );
+
+    if (validConnectionIds.length === 0) {
       return res.json({
         success: true,
         posts: [],
@@ -147,16 +159,14 @@ exports.getConnectionsFeed = async (req, res) => {
       });
     }
 
-    // Build query - connections feed shows all non-anonymous posts from connected users
     const query = {
       isDeleted: false,
-      isAnonymous: false, // Exclude anonymous posts
-      user: { $in: connectionIds }, // Only from connected users
-      // Include both campus and connections visibility posts
+      isAnonymous: false,
+      user: { $in: validConnectionIds },
+      _id: { $nin: hiddenPostIds },
       $or: [{ visibility: "campus" }, { visibility: "connections" }],
     };
 
-    // Apply cursor for pagination
     if (cursor) {
       const cursorPost = await Post.findById(cursor).select("createdAt").lean();
 
@@ -197,6 +207,8 @@ exports.getConnectionsFeed = async (req, res) => {
       commentCounts,
       currentUserId,
       userConnections: connectionIds,
+      savedPostIds,
+      forceAnonymous: false,
     });
 
     res.json({
@@ -221,16 +233,27 @@ exports.getConnectionsFeed = async (req, res) => {
 
 /**
  * Get Anonymous Feed
- * Only posts marked as anonymous
  */
 exports.getAnonymousFeed = async (req, res) => {
   try {
     const { cursor, limit = 10 } = req.query;
     const currentUserId = req.user._id;
 
+    const [currentUser, blockedUserIds] = await Promise.all([
+      User.findById(currentUserId).select("hiddenPosts savedPosts").lean(),
+      BlockService.getBlockedUserIds(currentUserId),
+    ]);
+
+    const hiddenPostIds =
+      currentUser?.hiddenPosts?.map((id) => id.toString()) || [];
+    const savedPostIds =
+      currentUser?.savedPosts?.map((id) => id.toString()) || [];
+
     const query = {
       isAnonymous: true,
       isDeleted: false,
+      _id: { $nin: hiddenPostIds },
+      user: { $nin: blockedUserIds },
     };
 
     if (cursor) {
@@ -264,12 +287,12 @@ exports.getAnonymousFeed = async (req, res) => {
       batchGetCommentCounts(paginatedPosts),
     ]);
 
-    // Force anonymous for all posts in this feed
     const processedPosts = processPosts(paginatedPosts, {
       profilePictures,
       commentCounts,
       currentUserId,
       userConnections: [],
+      savedPostIds,
       forceAnonymous: true,
     });
 
@@ -343,6 +366,7 @@ function processPosts(
     commentCounts,
     currentUserId,
     userConnections,
+    savedPostIds = [],
     forceAnonymous = false,
   },
 ) {
@@ -358,7 +382,6 @@ function processPosts(
 
       let canView = true;
 
-      // Connection posts only visible to connected users or the owner
       if (post.visibility === "connections" && !isConnected && !isOwner) {
         canView = false;
       }
@@ -370,6 +393,8 @@ function processPosts(
       const isLiked =
         post.likes?.some((like) => like._id?.toString() === currentUserIdStr) ||
         false;
+
+      const isSaved = savedPostIds.includes(post._id.toString());
 
       return {
         _id: post._id,
@@ -386,6 +411,7 @@ function processPosts(
         createdAt: post.createdAt,
         updatedAt: post.updatedAt,
         isLiked,
+        isSaved,
         canView,
         isOwner,
         user: shouldAnonymize

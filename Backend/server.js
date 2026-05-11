@@ -13,6 +13,8 @@ require("dotenv").config();
 const { connectDB } = require("./config/database");
 const { setupSocketIO } = require("./config/socket");
 const { initializeSocketIO } = require("./socket");
+const { startCleanupJob } = require("./jobs/cleanupPosts");
+const { startEventStatusCron } = require("./jobs/eventStatusCron");
 
 // Routes
 const authRoutes = require("./routes/authRoutes");
@@ -26,6 +28,7 @@ const chatRoutes = require("./routes/chatRoutes");
 const groupRoutes = require("./routes/groupRoutes");
 const feedRoutes = require("./routes/feedRoutes");
 const storyRoutes = require("./routes/storyRoutes");
+const contentRoutes = require("./routes/contentRoutes");
 
 // Connect to database
 connectDB();
@@ -81,6 +84,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/feed", feedRoutes);
+app.use("/api/content", contentRoutes);
 app.use("/api/connections", connectionRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/events", eventRoutes);
@@ -109,6 +113,7 @@ app.get("/", (req, res) => {
       profile: "/api/profile",
       posts: "/api/posts",
       feed: "/api/feed",
+      content: "/api/content",
       connections: "/api/connections",
       notifications: "/api/notifications",
       events: "/api/events",
@@ -118,6 +123,17 @@ app.get("/", (req, res) => {
     websocket: {
       status: "active",
       port: process.env.PORT || 5001,
+    },
+    cleanup: {
+      status: "active",
+      schedule: "Daily at 2:00 AM",
+      deleteAfterDays: 30,
+    },
+    eventStatusCron: {
+      status: "active",
+      schedule: "Every 60 seconds",
+      description:
+        "Automatically updates event statuses (upcoming → ongoing → completed)",
     },
   });
 });
@@ -166,6 +182,13 @@ const PORT = process.env.PORT || 5001;
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`\n🚀 Server running on port ${PORT}`);
   console.log(`📡 Socket.IO running on same port`);
+
+  // Start the cleanup job (deletes old posts after 30 days)
+  startCleanupJob();
+
+  // Start the event status cron job (updates event statuses every 60 seconds)
+  startEventStatusCron(60000); // 60,000 ms = 1 minute
+
   console.log(`\n📁 Upload Directories:`);
   console.log(`   Profile Pictures:  /uploads/profile-pictures`);
   console.log(`   Cover Photos:      /uploads/cover-photos`);
@@ -174,17 +197,20 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`   Chat Audio:        /uploads/chat/audio`);
   console.log(`   Chat Attachments:  /uploads/chat/attachments`);
   console.log(`   Group Photos:      /uploads/group-photos`);
+
   console.log(`\n📱 API Endpoints:`);
   console.log(`   Auth:           /api/auth`);
   console.log(`   Users:          /api/users`);
   console.log(`   Profile:        /api/profile`);
   console.log(`   Posts:          /api/posts`);
   console.log(`   Feed:           /api/feed`);
+  console.log(`   Content:        /api/content`);
   console.log(`   Connections:    /api/connections`);
   console.log(`   Notifications:  /api/notifications`);
   console.log(`   Events:         /api/events`);
   console.log(`   Chat:           /api/chat`);
   console.log(`   Groups:         /api/groups`);
+
   console.log(`\n💬 Socket.IO Events:`);
   console.log(
     `   Chat:     join_room, leave_room, send_message, receive_message`,
@@ -195,6 +221,33 @@ server.listen(PORT, "0.0.0.0", () => {
     `   Groups:   create_group, add_group_members, remove_group_member`,
   );
   console.log(`   Calls:    call_user, offer, answer, ice_candidate, end_call`);
+  console.log(
+    `   Events:   event:updated (real-time event status/RSVP updates)`,
+  );
+
+  console.log(`\n✅ Content Management Features:`);
+  console.log(`   📌 Saved Posts:    POST /api/content/save/:postId`);
+  console.log(`   📌 Saved List:     GET  /api/content/saved`);
+  console.log(`   🙈 Hide Post:      POST /api/content/hide/:postId`);
+  console.log(`   👁️ Unhide Post:    POST /api/content/unhide/:postId`);
+  console.log(`   🙈 Hidden List:    GET  /api/content/hidden`);
+  console.log(`   🔇 Mute User:      POST /api/content/mute/:userId`);
+  console.log(`   🔇 Muted List:     GET  /api/content/muted`);
+  console.log(`   🚫 Block User:     POST /api/content/block/:userId`);
+  console.log(`   🚫 Blocked List:   GET  /api/content/blocked`);
+
+  console.log(`\n🧹 Cleanup Job:`);
+  console.log(`   Status:         Active`);
+  console.log(`   Schedule:       Daily at 2:00 AM`);
+  console.log(`   Delete After:   30 days`);
+
+  console.log(`\n📅 Event Status Cron Job:`);
+  console.log(`   Status:         Active`);
+  console.log(`   Schedule:       Every 60 seconds`);
+  console.log(`   Description:    Auto-updates event statuses`);
+  console.log(`   Transitions:    upcoming → ongoing → completed`);
+  console.log(`   Events API:     PUT /api/events/:eventId/refresh-status`);
+
   console.log(`\n`);
 });
 

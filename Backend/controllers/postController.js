@@ -1,9 +1,11 @@
-// Backend/controllers/postController.js
+// backend/controllers/postController.js
 const Post = require("../models/Post");
 const Comment = require("../models/Comment");
 const User = require("../models/User");
 const Profile = require("../models/Profile");
 const Notification = require("../models/Notification");
+const Block = require("../models/Block");
+const BlockService = require("../services/blockService");
 const {
   getPostImageRelativePath,
   deletePostImages,
@@ -11,27 +13,27 @@ const {
 
 // ===================== HELPER FUNCTIONS =====================
 
-/**
- * Extract hashtags from post content
- */
 function extractHashtags(content) {
   const hashtagRegex = /#(\w+)/g;
   const matches = content.match(hashtagRegex);
   return matches ? matches.map((tag) => tag.substring(1)) : [];
 }
 
-/**
- * Extract mentions from post content
- */
 function extractMentions(content) {
   const mentionRegex = /@(\w+)/g;
   const matches = content.match(mentionRegex);
   return matches ? matches.map((mention) => mention.substring(1)) : [];
 }
 
-/**
- * Create a notification for post interactions
- */
+const isBlockedInteraction = async (userId1, userId2) => {
+  try {
+    return await Block.areUsersBlocked(userId1, userId2);
+  } catch (error) {
+    console.error("isBlockedInteraction error:", error);
+    return true;
+  }
+};
+
 const createPostNotification = async (
   recipientId,
   senderId,
@@ -42,6 +44,9 @@ const createPostNotification = async (
   targetModel,
 ) => {
   try {
+    const isBlocked = await Block.areUsersBlocked(recipientId, senderId);
+    if (isBlocked) return null;
+
     const notification = new Notification({
       recipient: recipientId,
       sender: senderId,
@@ -59,11 +64,16 @@ const createPostNotification = async (
   }
 };
 
+const getBlockFilter = async (userId) => {
+  const blockedUserIds = await BlockService.getBlockedUserIds(userId);
+  return {
+    user: { $nin: blockedUserIds },
+    isDeleted: false,
+  };
+};
+
 // ===================== POST CRUD OPERATIONS =====================
 
-/**
- * Create a new post
- */
 exports.createPost = async (req, res) => {
   try {
     const { content, tags, visibility, isAnonymous } = req.body;
@@ -137,45 +147,21 @@ exports.createPost = async (req, res) => {
   }
 };
 
-/**
- * Soft delete a post (mark as deleted instead of removing from DB)
- */
 exports.deletePost = async (req, res) => {
   try {
-    // Use includeDeleted to find the post even if it's already deleted
     const post = await Post.findOne({
       _id: req.params.id,
-    }).includeDeleted();
-
-    console.log("Delete post - Found post:", post?._id);
-    console.log("Delete post - Current isDeleted:", post?.isDeleted);
+      user: req.user._id,
+    });
 
     if (!post) {
       return res.status(404).json({
         success: false,
-        error: "Post not found",
+        error: "Post not found or you don't have permission to delete it",
       });
     }
 
-    if (post.user.toString() !== req.user._id.toString()) {
-      return res.status(403).json({
-        success: false,
-        error: "Not authorized to delete this post",
-      });
-    }
-
-    // Check if already soft deleted
-    if (post.isDeleted) {
-      return res.status(400).json({
-        success: false,
-        error: "Post already deleted",
-      });
-    }
-
-    // Use the softDelete method from schema
     await post.softDelete();
-
-    console.log("Post soft deleted successfully:", post._id);
 
     res.json({
       success: true,
@@ -195,31 +181,17 @@ exports.deletePost = async (req, res) => {
   }
 };
 
-/**
- * Restore a soft-deleted post
- */
 exports.restorePost = async (req, res) => {
   try {
-    // Use findOne with $or to bypass the pre-find middleware
-    // Or use the includeDeleted query helper
     const post = await Post.findOne({
       _id: req.params.id,
-    }).includeDeleted(); // This bypasses the isDeleted filter
-
-    console.log("Restore attempt - Post found:", post);
-    console.log("Restore attempt - isDeleted:", post?.isDeleted);
+      user: req.user._id,
+    }).includeDeleted();
 
     if (!post) {
       return res.status(404).json({
         success: false,
-        error: "Post not found",
-      });
-    }
-
-    if (post.user.toString() !== req.user._id.toString()) {
-      return res.status(403).json({
-        success: false,
-        error: "Not authorized to restore this post",
+        error: "Post not found or you don't have permission to restore it",
       });
     }
 
@@ -230,13 +202,19 @@ exports.restorePost = async (req, res) => {
       });
     }
 
-    // Use the restore method from the schema
     await post.restore();
 
-    // Get the restored post with populated fields
     const restoredPost = await Post.findById(post._id)
       .populate("user", "name username email verified")
       .lean();
+
+    const userProfile = await Profile.findOne({ user: post.user })
+      .select("profilePicture")
+      .lean();
+
+    if (restoredPost && restoredPost.user) {
+      restoredPost.user.profilePicture = userProfile?.profilePicture || null;
+    }
 
     res.json({
       success: true,
@@ -252,12 +230,11 @@ exports.restorePost = async (req, res) => {
   }
 };
 
-/**
- * Permanently delete a post (hard delete) - for cleanup
- */
 exports.permanentlyDeletePost = async (req, res) => {
   try {
-    const post = await Post.findById(req.params.id);
+    const post = await Post.findOne({
+      _id: req.params.id,
+    }).includeDeleted();
 
     if (!post) {
       return res.status(404).json({
@@ -273,20 +250,18 @@ exports.permanentlyDeletePost = async (req, res) => {
       });
     }
 
-    // Delete associated comments
     await Comment.deleteMany({ post: post._id });
+    await Notification.deleteMany({
+      targetId: post._id,
+      targetModel: "Post",
+    });
 
-    // Delete associated notifications
-    await Notification.deleteMany({ targetId: post._id, targetModel: "Post" });
-
-    // Delete images if they exist
     if (post.images && post.images.length > 0) {
       const filenames = post.images.map((img) => img.filename);
       deletePostImages(req.user._id.toString(), filenames);
     }
 
-    // Hard delete the post
-    await post.deleteOne();
+    await Post.deleteOne({ _id: post._id });
 
     res.json({
       success: true,
@@ -301,23 +276,90 @@ exports.permanentlyDeletePost = async (req, res) => {
   }
 };
 
-/**
- * Update a post
- */
+exports.getDeletedPosts = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { page = 1, limit = 10 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const posts = await Post.find({
+      user: userId,
+      isDeleted: true,
+    })
+      .includeDeleted()
+      .sort({ deletedAt: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .populate("user", "name username email verified")
+      .lean();
+
+    const total = await Post.find({
+      user: userId,
+      isDeleted: true,
+    })
+      .includeDeleted()
+      .countDocuments();
+
+    const userIds = posts.map((post) => post.user?._id).filter(Boolean);
+    const profiles = await Profile.find({ user: { $in: userIds } })
+      .select("user profilePicture")
+      .lean();
+
+    const profilePictureMap = {};
+    profiles.forEach((profile) => {
+      if (profile.user) {
+        profilePictureMap[profile.user.toString()] = profile.profilePicture;
+      }
+    });
+
+    const postIds = posts.map((post) => post._id);
+    const commentCounts = await Comment.aggregate([
+      { $match: { post: { $in: postIds }, isDeleted: false } },
+      { $group: { _id: "$post", count: { $sum: 1 } } },
+    ]);
+
+    const commentCountMap = {};
+    commentCounts.forEach((item) => {
+      commentCountMap[item._id.toString()] = item.count;
+    });
+
+    const processedPosts = posts.map((post) => ({
+      ...post,
+      user: {
+        ...post.user,
+        profilePicture: profilePictureMap[post.user?._id?.toString()] || null,
+      },
+      commentCount: commentCountMap[post._id.toString()] || 0,
+      isLiked: false,
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: {
+        posts: processedPosts,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Get deleted posts error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch deleted posts",
+      error: error.message,
+    });
+  }
+};
+
 exports.updatePost = async (req, res) => {
   try {
     const { content, removeImages, visibility, isAnonymous } = req.body;
     const postId = req.params.id;
     const userId = req.user._id;
-
-    console.log("Update post request:", {
-      postId,
-      contentLength: content?.length,
-      removeImages,
-      visibility,
-      isAnonymous,
-      filesCount: req.files?.length || 0,
-    });
 
     const post = await Post.findById(postId);
 
@@ -328,7 +370,6 @@ exports.updatePost = async (req, res) => {
       });
     }
 
-    // Don't allow updating deleted posts
     if (post.isDeleted) {
       return res.status(400).json({
         success: false,
@@ -343,31 +384,24 @@ exports.updatePost = async (req, res) => {
       });
     }
 
-    // Parse removeImages - it could come as string, array, or undefined
     let imagesToRemove = [];
     if (removeImages) {
       if (Array.isArray(removeImages)) {
         imagesToRemove = removeImages;
       } else if (typeof removeImages === "string") {
         try {
-          // Try to parse as JSON first
           imagesToRemove = JSON.parse(removeImages);
         } catch {
-          // If not JSON, split by comma
           imagesToRemove = removeImages.split(",").filter((id) => id.trim());
         }
       }
     }
 
-    console.log("Images to remove:", imagesToRemove);
-
-    // Remove specified images
     if (imagesToRemove.length > 0) {
       const imagesToKeep = [];
       const imagesToDelete = [];
 
       for (const img of post.images) {
-        // Check if this image should be removed
         const shouldRemove = imagesToRemove.some(
           (removeId) =>
             removeId === img.filename ||
@@ -383,17 +417,14 @@ exports.updatePost = async (req, res) => {
         }
       }
 
-      // Delete the image files
       if (imagesToDelete.length > 0) {
         const filenames = imagesToDelete.map((img) => img.filename);
         deletePostImages(userId.toString(), filenames);
-        console.log("Deleted image files:", filenames);
       }
 
       post.images = imagesToKeep;
     }
 
-    // Add new images
     if (req.files && req.files.length > 0) {
       const newImages = req.files.map((file) => ({
         filename: file.filename,
@@ -404,7 +435,6 @@ exports.updatePost = async (req, res) => {
       }));
 
       if (post.images.length + newImages.length > 4) {
-        // Clean up newly uploaded files
         const filenames = req.files.map((file) => file.filename);
         deletePostImages(userId.toString(), filenames);
         return res.status(400).json({
@@ -414,10 +444,8 @@ exports.updatePost = async (req, res) => {
       }
 
       post.images.push(...newImages);
-      console.log(`Added ${newImages.length} new images`);
     }
 
-    // Update fields
     if (content !== undefined && content !== null) {
       post.content = content;
       post.tags = extractHashtags(content);
@@ -437,12 +465,9 @@ exports.updatePost = async (req, res) => {
       post.isAnonymous = isAnonymous === "true" || isAnonymous === true;
     }
 
-    // Set edited flag
     post.isEdited = true;
     post.editedAt = new Date();
     await post.save();
-
-    console.log("Post updated successfully:", postId);
 
     const updatedPost = await Post.findById(postId)
       .populate("user", "name username email verified")
@@ -471,11 +496,6 @@ exports.updatePost = async (req, res) => {
   }
 };
 
-/**
- * Get posts for a user's profile based on viewer's connection status
- * - Connected: Show all non-anonymous posts
- * - Not connected: Show only campus visibility posts
- */
 exports.getProfilePosts = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -493,17 +513,37 @@ exports.getProfilePosts = async (req, res) => {
       });
     }
 
+    if (!isOwnProfile) {
+      const isBlocked = await Block.areUsersBlocked(currentUserId, userId);
+      if (isBlocked) {
+        return res.status(200).json({
+          success: true,
+          data: {
+            posts: [],
+            pagination: {
+              page: parseInt(page),
+              limit: parseInt(limit),
+              total: 0,
+              pages: 0,
+            },
+            viewerStatus: {
+              isOwnProfile,
+              isConnected: false,
+              isBlocked: true,
+            },
+          },
+        });
+      }
+    }
+
+    const currentUser =
+      await User.findById(currentUserId).select("connections");
     const profileOwnerProfile = await Profile.findOne({ user: userId });
     const profileOwnerCampus = profileOwnerProfile?.campus || "Unknown Campus";
 
-    let isConnected = false;
-    if (!isOwnProfile) {
-      const currentUser = await User.findById(currentUserId);
-      isConnected = currentUser?.connections?.includes(userId) || false;
-    }
+    let isConnected =
+      currentUser?.connections?.some((id) => id.toString() === userId) || false;
 
-    // Build query based on connection status
-    // Exclude soft-deleted posts
     let query = {
       user: userId,
       isAnonymous: false,
@@ -525,7 +565,6 @@ exports.getProfilePosts = async (req, res) => {
 
     const total = await Post.countDocuments(query);
 
-    // Get profile pictures
     const userIds = posts.map((post) => post.user._id);
     const profiles = await Profile.find({ user: { $in: userIds } })
       .select("user profilePicture")
@@ -536,7 +575,6 @@ exports.getProfilePosts = async (req, res) => {
       profilePictureMap[profile.user.toString()] = profile.profilePicture;
     });
 
-    // Get comment counts
     const postIds = posts.map((post) => post._id);
     const commentCounts = await Comment.aggregate([
       { $match: { post: { $in: postIds }, isDeleted: false } },
@@ -571,7 +609,11 @@ exports.getProfilePosts = async (req, res) => {
           total,
           pages: Math.ceil(total / parseInt(limit)),
         },
-        viewerStatus: { isOwnProfile, isConnected },
+        viewerStatus: {
+          isOwnProfile,
+          isConnected,
+          isBlocked: false,
+        },
       },
     });
   } catch (error) {
@@ -583,40 +625,41 @@ exports.getProfilePosts = async (req, res) => {
   }
 };
 
-/**
- * Get single post by ID
- */
 exports.getPostById = async (req, res) => {
   try {
     const currentUserId = req.user._id;
     const postId = req.params.id;
-
-    const currentUser = await User.findById(currentUserId);
-    const currentUserProfile = await Profile.findOne({ user: currentUserId });
-    const currentUserCampus = currentUserProfile?.campus || "Unknown Campus";
-    const connectionIds = currentUser?.connections || [];
 
     const post = await Post.findById(postId)
       .populate("user", "name username email verified")
       .populate("likes", "name username")
       .lean();
 
-    if (!post) {
+    if (!post || post.isDeleted) {
       return res.status(404).json({
         success: false,
         error: "Post not found",
       });
     }
 
-    // Don't show soft-deleted posts
-    if (post.isDeleted) {
-      return res.status(404).json({
-        success: false,
-        error: "Post not found",
-      });
+    if (post.user._id.toString() !== currentUserId.toString()) {
+      const isBlocked = await Block.areUsersBlocked(
+        currentUserId,
+        post.user._id,
+      );
+      if (isBlocked) {
+        return res.status(403).json({
+          success: false,
+          error: "You cannot view this post due to a block",
+        });
+      }
     }
 
-    // Check permission to view
+    const currentUser = await User.findById(currentUserId);
+    const currentUserProfile = await Profile.findOne({ user: currentUserId });
+    const currentUserCampus = currentUserProfile?.campus || "Unknown Campus";
+    const connectionIds = currentUser?.connections || [];
+
     const canViewPost =
       post.user._id.toString() === currentUserId.toString() ||
       (post.visibility === "campus" && post.campus === currentUserCampus) ||
@@ -705,27 +748,29 @@ exports.getPostById = async (req, res) => {
   }
 };
 
-/**
- * Search posts by content or tags
- */
 exports.searchPosts = async (req, res) => {
   try {
     const { q, campus } = req.query;
     const currentUserId = req.user._id;
 
-    const currentUserProfile = await Profile.findOne({ user: currentUserId });
-    const currentUserCampus = currentUserProfile?.campus || "Unknown Campus";
+    const blockedUserIds = await BlockService.getBlockedUserIds(currentUserId);
 
     const currentUser = await User.findById(currentUserId);
+    const currentUserProfile = await Profile.findOne({ user: currentUserId });
+    const currentUserCampus = currentUserProfile?.campus || "Unknown Campus";
     const connectionIds = currentUser?.connections || [];
 
-    // Exclude soft-deleted posts
     const visibilityConditions = [
       { user: currentUserId, isDeleted: false },
-      { visibility: "campus", campus: currentUserCampus, isDeleted: false },
+      {
+        visibility: "campus",
+        campus: currentUserCampus,
+        isDeleted: false,
+        user: { $nin: blockedUserIds },
+      },
       {
         visibility: "connections",
-        user: { $in: connectionIds },
+        user: { $in: connectionIds, $nin: blockedUserIds },
         isDeleted: false,
       },
       { isAnonymous: true, isDeleted: false },
@@ -808,21 +853,14 @@ exports.searchPosts = async (req, res) => {
 
 // ===================== INTERACTIONS =====================
 
-/**
- * Handle like notification with grouping
- * Creates or updates a grouped like notification
- */
-/**
- * Handle like notification with grouping
- * Creates or updates a grouped like notification
- * Uses lastInteractionAt for proper sorting (new likes move notification to top)
- */
 const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
   try {
+    const isBlocked = await Block.areUsersBlocked(postOwnerId, likerId);
+    if (isBlocked) return;
+
     const liker = await User.findById(likerId).select("name");
     if (!liker) return;
 
-    // Get profile picture for the liker
     const profile = await Profile.findOne({ user: likerId })
       .select("profilePicture")
       .lean();
@@ -830,7 +868,6 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
 
     const likerIdStr = likerId.toString();
 
-    // Check if there's already a grouped like notification for this post
     let notification = await Notification.findOne({
       recipient: postOwnerId,
       type: "like",
@@ -840,28 +877,21 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
     });
 
     if (notification) {
-      // ============================================
-      // UPDATE EXISTING GROUPED NOTIFICATION
-      // ============================================
-
       let currentLikers = notification.metadata?.likers || [];
 
-      // Remove duplicate if user already exists (handles unlike-then-like-again)
       currentLikers = currentLikers.filter(
         (l) => l.userId.toString() !== likerIdStr,
       );
 
-      // Add newest liker to the BEGINNING (most recent first)
       currentLikers.unshift({
         userId: likerIdStr,
         name: liker.name,
         profilePicture: profilePicture,
       });
 
-      // Update notification fields
       notification.message = getLikeMessage(currentLikers);
       notification.read = false;
-      notification.lastInteractionAt = new Date(); // Key: triggers re-sorting to top
+      notification.lastInteractionAt = new Date();
       notification.sender = likerId;
       notification.metadata = {
         isGrouped: true,
@@ -869,19 +899,9 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
         likers: currentLikers,
       };
 
-      // Mark metadata as modified for Mongoose Mixed type
       notification.markModified("metadata");
-      await notification.save(); // Mongoose auto-handles updatedAt via timestamps
-
-      console.log(
-        `📢 Updated like notification: ${notification.message} | lastInteractionAt: ${notification.lastInteractionAt}`,
-      );
+      await notification.save();
     } else {
-      // ============================================
-      // CREATE NEW GROUPED NOTIFICATION
-      // ============================================
-
-      // Clean up old individual like notifications for this post
       await Notification.deleteMany({
         recipient: postOwnerId,
         type: "like",
@@ -889,7 +909,6 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
         targetModel: "Post",
       });
 
-      // Create fresh grouped notification
       notification = await Notification.create({
         recipient: postOwnerId,
         sender: likerId,
@@ -899,7 +918,7 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
         targetId: postId,
         targetModel: "Post",
         read: false,
-        lastInteractionAt: new Date(), // Set initial interaction time
+        lastInteractionAt: new Date(),
         metadata: {
           isGrouped: true,
           count: 1,
@@ -912,13 +931,8 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
           ],
         },
       });
-
-      console.log(`📢 Created new like notification: ${notification.message}`);
     }
 
-    // ============================================
-    // EMIT REAL-TIME SOCKET EVENT
-    // ============================================
     if (io && notification) {
       const populatedNotification = await Notification.findById(
         notification._id,
@@ -927,7 +941,6 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
         .lean();
 
       if (populatedNotification) {
-        // Enrich sender with profile picture
         const senderProfile = await Profile.findOne({
           user:
             populatedNotification.sender._id || populatedNotification.sender,
@@ -945,13 +958,10 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
         }
 
         const roomId = `user_${postOwnerId}`;
-
-        // Emit to post owner's personal room
         io.to(roomId).emit("notification:new", {
           notification: populatedNotification,
         });
 
-        // Emit updated unread count
         const unreadCount = await Notification.countDocuments({
           recipient: postOwnerId,
           read: false,
@@ -966,19 +976,9 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
   }
 };
 
-/**
- * Handle unlike notification
- * Removes user from grouped notification or deletes if last liker
- */
 const handleUnlikeNotification = async (postId, postOwnerId, unlikerId) => {
   try {
     const unlikerIdStr = unlikerId.toString();
-    console.log(
-      "Unlike - postId:",
-      postId.toString(),
-      "unlikerId:",
-      unlikerIdStr,
-    );
 
     const existingNotification = await Notification.findOne({
       recipient: postOwnerId,
@@ -989,61 +989,32 @@ const handleUnlikeNotification = async (postId, postOwnerId, unlikerId) => {
     });
 
     if (!existingNotification) {
-      console.log("No grouped notification found");
       return;
     }
 
     const currentLikers = existingNotification.metadata?.likers || [];
-    console.log(
-      "Current likers:",
-      currentLikers.map((l) => l.name),
-    );
 
-    // Remove the unliker
     const updatedLikers = currentLikers.filter(
       (l) => l.userId.toString() !== unlikerIdStr,
     );
 
-    console.log(
-      "Updated likers:",
-      updatedLikers.map((l) => l.name),
-    );
-
     if (updatedLikers.length === 0) {
-      // No more likes, delete the notification
-      console.log("No likers left, deleting notification");
       await Notification.findByIdAndDelete(existingNotification._id);
     } else {
-      // Update directly
       existingNotification.metadata.likers = updatedLikers;
       existingNotification.metadata.count = updatedLikers.length;
       existingNotification.message = getLikeMessage(updatedLikers);
       existingNotification.read = false;
       existingNotification.createdAt = new Date();
-
-      // Update sender to latest liker
       existingNotification.sender = updatedLikers[0].userId;
-
-      // Mark metadata as modified
       existingNotification.markModified("metadata");
-
       await existingNotification.save();
-
-      console.log(
-        "Notification updated with",
-        updatedLikers.length,
-        "likers:",
-        updatedLikers.map((l) => l.name),
-      );
     }
   } catch (error) {
     console.error("Handle unlike notification error:", error);
   }
 };
 
-/**
- * Helper to generate like message
- */
 const getLikeMessage = (likers) => {
   if (!likers || likers.length === 0) return "";
   if (likers.length === 1) {
@@ -1055,21 +1026,10 @@ const getLikeMessage = (likers) => {
   }
 };
 
-/**
- * Like or unlike a post
- */
 exports.toggleLike = async (req, res) => {
   try {
     const post = await Post.findById(req.params.id);
-    if (!post) {
-      return res.status(404).json({
-        success: false,
-        error: "Post not found",
-      });
-    }
-
-    // Don't allow liking deleted posts
-    if (post.isDeleted) {
+    if (!post || post.isDeleted) {
       return res.status(404).json({
         success: false,
         error: "Post not found",
@@ -1077,6 +1037,17 @@ exports.toggleLike = async (req, res) => {
     }
 
     const currentUserId = req.user._id;
+
+    if (post.user.toString() !== currentUserId.toString()) {
+      const isBlocked = await Block.areUsersBlocked(currentUserId, post.user);
+      if (isBlocked) {
+        return res.status(403).json({
+          success: false,
+          error: "You cannot interact with this post due to a block",
+        });
+      }
+    }
+
     const currentUserProfile = await Profile.findOne({ user: currentUserId });
     const currentUserCampus = currentUserProfile?.campus || "Unknown Campus";
 
@@ -1105,11 +1076,9 @@ exports.toggleLike = async (req, res) => {
     const io = req.app.get("io");
 
     if (wasLiked) {
-      // USER IS LIKING THE POST
       post.likes.push(req.user._id);
       await post.save();
 
-      // Handle like notification (grouped)
       if (
         post.user.toString() !== currentUserId.toString() &&
         !post.isAnonymous
@@ -1117,11 +1086,9 @@ exports.toggleLike = async (req, res) => {
         await handleLikeNotification(post._id, post.user, currentUserId, io);
       }
     } else {
-      // USER IS UNLIKING THE POST
       post.likes.splice(likeIndex, 1);
       await post.save();
 
-      // Handle unlike notification
       if (
         post.user.toString() !== currentUserId.toString() &&
         !post.isAnonymous
@@ -1146,12 +1113,8 @@ exports.toggleLike = async (req, res) => {
 
 // ===================== ADMIN FUNCTIONS =====================
 
-/**
- * Get anonymous posts for moderation (admin only)
- */
 exports.getAnonymousPostsForModeration = async (req, res) => {
   try {
-    // Exclude soft-deleted posts from admin view too
     const posts = await Post.find({ isAnonymous: true, isDeleted: false })
       .sort({ createdAt: -1 })
       .populate("user", "name username email")
@@ -1197,9 +1160,6 @@ exports.getAnonymousPostsForModeration = async (req, res) => {
   }
 };
 
-/**
- * Get post count for a user (excluding anonymous posts)
- */
 exports.getUserPostCount = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -1207,7 +1167,7 @@ exports.getUserPostCount = async (req, res) => {
     const postCount = await Post.countDocuments({
       user: userId,
       isAnonymous: false,
-      isDeleted: false, // Exclude soft-deleted posts
+      isDeleted: false,
     });
 
     res.json({ success: true, count: postCount });

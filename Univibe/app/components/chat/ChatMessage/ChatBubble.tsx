@@ -22,6 +22,7 @@ import ChatVideoPlayer from "./ChatVideoPlayer";
 import ChatMessageOptionsModal from "./ChatMessageOptionsModal";
 import ReplyPreview from "./ReplyPreview";
 import ChatFileViewer from "./ChatFileViewer";
+import StoryReplyCard from "./StoryReplyCard";
 import PostCard from "../../Feed/Post/PostCard";
 
 // -----------------------------------------------------------------------------
@@ -112,84 +113,6 @@ interface ChatBubbleProps {
   onScrollToMessage?: (messageId: string) => void;
 }
 
-// -----------------------------------------------------------------------------
-// Story Reply Card Component (outside bubble)
-// -----------------------------------------------------------------------------
-
-export const StoryReplyCard = React.memo(
-  ({
-    message,
-    isOwnMessage,
-    getFullImageUrl,
-    onPress,
-  }: {
-    message: Message;
-    isOwnMessage: boolean;
-    getFullImageUrl: (url: string) => string;
-    onPress: () => void;
-  }) => {
-    const storyImageUrl =
-      message.story?.thumbnailUrl || message.story?.mediaUrl;
-    const fullStoryImageUrl = storyImageUrl
-      ? getFullImageUrl(storyImageUrl)
-      : null;
-
-    const labelText = isOwnMessage
-      ? "You replied to their campus moment"
-      : `${message.senderName} replied to your campus moment`;
-
-    return (
-      <View style={styles.storyReplyOuter}>
-        {/* Label */}
-        <View
-          style={[
-            styles.storyReplyLabel,
-            isOwnMessage
-              ? styles.storyReplyLabelOwn
-              : styles.storyReplyLabelOther,
-          ]}
-        >
-          <Ionicons name="arrow-undo-outline" size={11} color="#8E8E93" />
-          <Text style={styles.storyReplyLabelText} numberOfLines={1}>
-            {labelText}
-          </Text>
-        </View>
-
-        {/* Story Preview Thumbnail */}
-        <Pressable
-          onPress={onPress}
-          style={[
-            styles.storyPreviewCard,
-            isOwnMessage
-              ? styles.storyPreviewCardOwn
-              : styles.storyPreviewCardOther,
-          ]}
-        >
-          <View style={styles.storyPreviewThumb}>
-            {fullStoryImageUrl ? (
-              <Image
-                source={{ uri: fullStoryImageUrl }}
-                style={styles.storyPreviewThumbImage}
-                resizeMode="cover"
-              />
-            ) : (
-              <View style={styles.storyPreviewThumbPlaceholder}>
-                <Ionicons name="camera" size={28} color="#8E8E93" />
-              </View>
-            )}
-            {/* Gradient overlay at bottom */}
-            <View style={styles.storyThumbGradient} />
-            {/* Story type label */}
-            <View style={styles.storyTypeLabel}>
-              <Ionicons name="camera-outline" size={11} color="white" />
-              <Text style={styles.storyTypeText}>Campus Moment</Text>
-            </View>
-          </View>
-        </Pressable>
-      </View>
-    );
-  },
-);
 // -----------------------------------------------------------------------------
 // Main Component
 // -----------------------------------------------------------------------------
@@ -748,6 +671,7 @@ export default function ChatBubble({
                 isOwnMessage={isOwnMessage}
                 getFullImageUrl={getFullImageUrl}
                 onPress={handleStoryReplyPress}
+                onLongPress={handleLongPress}
               />
             )}
             {/* Message bubble */}
@@ -1006,87 +930,5 @@ const styles = StyleSheet.create({
     marginLeft: 2,
     justifyContent: "center",
     alignItems: "center",
-  },
-
-  // Story Reply Styles
-  storyReplyOuter: {
-    marginTop: 0,
-    marginBottom: 6,
-  },
-  storyReplyLabel: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 4,
-    paddingHorizontal: 2,
-    gap: 4,
-  },
-  storyReplyLabelOwn: {
-    alignSelf: "flex-end",
-    justifyContent: "flex-end",
-  },
-  storyReplyLabelOther: {
-    alignSelf: "flex-start",
-    justifyContent: "flex-start",
-  },
-  storyReplyLabelText: {
-    fontSize: 10.5,
-    fontFamily: "SofiaSans-Regular",
-    fontStyle: "italic",
-    color: "#8E8E93",
-  },
-  storyPreviewCard: {
-    borderRadius: 12,
-    overflow: "hidden",
-    borderWidth: 1,
-    marginBottom: 6,
-  },
-  storyPreviewCardOwn: {
-    backgroundColor: "rgba(139, 92, 246, 0.06)",
-    borderColor: "rgba(139, 92, 246, 0.12)",
-    alignSelf: "flex-end",
-  },
-  storyPreviewCardOther: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "rgba(0,0,0,0.08)",
-    alignSelf: "flex-start",
-  },
-  storyPreviewThumb: {
-    width: 125,
-    height: 160,
-    position: "relative",
-  },
-  storyPreviewThumbImage: {
-    width: 125,
-    height: 160,
-    backgroundColor: "#E5E5EA",
-  },
-  storyPreviewThumbPlaceholder: {
-    width: 125,
-    height: 160,
-    backgroundColor: "#F2F2F7",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  storyThumbGradient: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 28,
-    backgroundColor: "rgba(0,0,0,0.4)",
-  },
-  storyTypeLabel: {
-    position: "absolute",
-    bottom: 6,
-    left: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  storyTypeText: {
-    fontSize: 10,
-    color: "white",
-    fontWeight: "600",
-    fontFamily: "SofiaSans-SemiBold",
   },
 });

@@ -28,7 +28,6 @@ class EventCache {
       const firstKey = this.cache.keys().next().value;
       if (firstKey) {
         this.cache.delete(firstKey);
-
       }
     }
 
@@ -37,7 +36,6 @@ class EventCache {
     setTimeout(() => {
       if (this.cache.has(key)) {
         this.cache.delete(key);
-
       }
     }, CONFIG.CACHE_DURATION);
   }
@@ -49,22 +47,18 @@ class EventCache {
     const isExpired = Date.now() - cached.timestamp > CONFIG.CACHE_DURATION;
     if (isExpired) {
       this.cache.delete(key);
-
       return null;
     }
-
 
     return cached.data;
   }
 
   clear() {
     this.cache.clear();
-
   }
 
   remove(key: string) {
     this.cache.delete(key);
-
   }
 
   getSize() {
@@ -308,7 +302,7 @@ export const eventService = {
     page?: number;
     limit?: number;
     search?: string;
-    skipCache?: boolean; // ADD THIS
+    skipCache?: boolean;
   }): Promise<EventsResponse> => {
     try {
       const token = await getAuthToken();
@@ -376,7 +370,7 @@ export const eventService = {
 
   getEventById: async (
     eventId: string,
-    skipCache?: boolean, // ADD THIS
+    skipCache?: boolean,
   ): Promise<{ success: boolean; event?: Event; message?: string }> => {
     try {
       const token = await getAuthToken();
@@ -526,6 +520,48 @@ export const eventService = {
         data: [],
         pagination: { page: 1, limit: 20, total: 0, pages: 0 },
       };
+    }
+  },
+
+  // ============================================
+  // NEW: REFRESH EVENT STATUS
+  // ============================================
+  refreshEventStatus: async (
+    eventId: string,
+  ): Promise<{
+    success: boolean;
+    message?: string;
+    oldStatus?: string;
+    newStatus?: string;
+    statusChanged?: boolean;
+  }> => {
+    try {
+      const token = await getAuthToken();
+      if (!token) {
+        return { success: false, message: "No authentication token" };
+      }
+
+      const response = await enhancedFetch(
+        `${BASE_URL}/api/events/${eventId}/refresh-status`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        },
+      );
+
+      const data = await response.json();
+
+      if (data.success) {
+        invalidateEventCache();
+      }
+
+      return data;
+    } catch (error) {
+      console.error("Error refreshing event status:", error);
+      return { success: false, message: "Failed to refresh event status" };
     }
   },
 
@@ -700,6 +736,7 @@ export const eventService = {
     isRsvpd?: boolean;
     rsvpCount?: number;
     isFull?: boolean;
+    status?: string;
   }> => {
     try {
       const token = await getAuthToken();

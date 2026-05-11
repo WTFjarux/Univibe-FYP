@@ -5,52 +5,25 @@ const postController = require("../controllers/postController");
 const commentRoutes = require("./commentRoutes");
 const { protect } = require("../middleware/authmiddleware");
 const { uploadPostImages } = require("../middleware/uploadPostMiddleware");
+const { preventBlockedInteractions } = require("../middleware/blockMiddleware");
 
-// Apply auth middleware to all routes
 router.use(protect);
 
-// ===================== POST CRUD =====================
-
-// Create post
 router.post("/", uploadPostImages, postController.createPost);
 
-// Get single post by ID
-router.get("/:id", postController.getPostById);
-
-// Update post
-router.put("/:id", uploadPostImages, postController.updatePost);
-
-// Delete post (soft delete)
-router.delete("/:id", postController.deletePost);
-
-// Restore soft-deleted post
-router.post("/:id/restore", postController.restorePost);
-
-// Permanent delete
-router.delete("/:id/permanent", postController.permanentlyDeletePost);
-
-// ===================== INTERACTIONS =====================
-
-// Like/Unlike post
-router.post("/:id/like", postController.toggleLike);
-
-// Nested comment routes
-router.use("/:id/comments", commentRoutes);
-
-// ===================== USER & SEARCH =====================
-
-// Get posts for a specific user's profile
+router.get("/deleted", postController.getDeletedPosts);
 router.get("/user/:userId", postController.getProfilePosts);
-
-// Get post count for a user
 router.get("/user/:userId/count", postController.getUserPostCount);
-
-// Search posts
 router.get("/search", postController.searchPosts);
-
-// ===================== ADMIN =====================
-
-// Get anonymous posts for moderation
 router.get("/admin/anonymous", postController.getAnonymousPostsForModeration);
+
+router.get("/:id", postController.getPostById);
+router.put("/:id", uploadPostImages, postController.updatePost);
+router.delete("/:id", postController.deletePost);
+router.post("/:id/restore", postController.restorePost);
+router.delete("/:id/permanent", postController.permanentlyDeletePost);
+router.post("/:id/like", preventBlockedInteractions, postController.toggleLike);
+
+router.use("/:id/comments", commentRoutes);
 
 module.exports = router;

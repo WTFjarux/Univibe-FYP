@@ -9,48 +9,32 @@ const {
   uploadVideo,
 } = require("../middleware/uploadMiddleware");
 const { generateThumbnails } = require("../middleware/thumbnailMiddleware");
+const { preventBlockedInteractions } = require("../middleware/blockMiddleware");
 
 const ctrl = require("../controllers/chatController");
 
-// -----------------------------------------------------------------------------
-// Authentication
-// -----------------------------------------------------------------------------
-
 router.use(protect);
-
-// -----------------------------------------------------------------------------
-// Rooms
-// -----------------------------------------------------------------------------
 
 router.get("/rooms", ctrl.getUserChatRooms);
 router.get("/direct/:otherUserId", ctrl.getOrCreateDirectRoom);
 router.get("/room/:roomId", ctrl.getRoomDetails);
 router.post("/room/:roomId/read", ctrl.markRoomAsRead);
 router.post("/room/:roomId/unread", ctrl.markRoomAsUnread);
-
-// Delete chat history for current user
 router.delete("/room/:roomId/history", ctrl.deleteChatHistory);
-
-// -----------------------------------------------------------------------------
-// Messages
-// -----------------------------------------------------------------------------
 
 router.get("/messages/:roomId", ctrl.getMessageHistory);
 router.get("/messages/:roomId/light", ctrl.getMessagesLight);
 
-// Forward message
-router.post("/messages/forward", ctrl.forwardMessage);
-
-// Share Post to chat
-router.post("/share-post", ctrl.sharePost);
+router.post(
+  "/messages/forward",
+  preventBlockedInteractions,
+  ctrl.forwardMessage,
+);
+router.post("/share-post", preventBlockedInteractions, ctrl.sharePost);
 
 router.delete("/message/:messageId", ctrl.deleteMessage);
 router.post("/message/:messageId/read", ctrl.markMessageAsRead);
 router.post("/message/:messageId/delivered", ctrl.markMessageAsDelivered);
-
-// -----------------------------------------------------------------------------
-// Uploads
-// -----------------------------------------------------------------------------
 
 router.post("/upload-audio", uploadAudioMessage, ctrl.uploadAudio);
 
@@ -68,30 +52,13 @@ router.post(
   ctrl.uploadAttachments,
 );
 
-// -----------------------------------------------------------------------------
-// Audio
-// -----------------------------------------------------------------------------
-
 router.put("/audio/:messageId/played", ctrl.markAudioAsPlayed);
-
-// -----------------------------------------------------------------------------
-// Reactions
-// -----------------------------------------------------------------------------
 
 router.post("/message/:messageId/react", ctrl.addReaction);
 router.delete("/message/:messageId/react", ctrl.removeReaction);
 
-// -----------------------------------------------------------------------------
-// User
-// -----------------------------------------------------------------------------
-
 router.get("/user-profile/:otherUserId", ctrl.getOtherUserProfile);
-
 router.get("/unread-count", protect, ctrl.getUnreadChatCount);
-
-// -----------------------------------------------------------------------------
-// Error handling
-// -----------------------------------------------------------------------------
 
 router.use((req, res) => {
   res.status(404).json({

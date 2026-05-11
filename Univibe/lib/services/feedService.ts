@@ -16,6 +16,16 @@ export interface FeedResponse {
   pagination: PaginationInfo;
 }
 
+export class FeedBlockedError extends Error {
+  constructor(
+    message: string,
+    public isBlocked: boolean = true,
+  ) {
+    super(message);
+    this.name = "FeedBlockedError";
+  }
+}
+
 class FeedService {
   private baseUrl: string;
 
@@ -41,19 +51,16 @@ class FeedService {
   ): Promise<FeedResponse> {
     const cursorKey = cursor || null;
 
-    // Try memory cache first
     const memoryCached = feedCache.getFromMemory(feedType, cursorKey);
     if (memoryCached) {
       return memoryCached;
     }
 
-    // Try persistent cache
     const storageCached = await feedCache.getFromStorage(feedType, cursorKey);
     if (storageCached) {
       return storageCached;
     }
 
-    // Fetch from API
     const params = new URLSearchParams();
     params.append("limit", limit.toString());
     if (cursor && cursor.trim().length > 0) {
@@ -74,7 +81,6 @@ class FeedService {
 
     const data: FeedResponse = await response.json();
 
-    // Cache the response
     await feedCache.saveToStorage(feedType, cursorKey, data);
 
     return data;
@@ -113,16 +119,10 @@ class FeedService {
     return this.fetchFeed("anonymous", cursor, limit);
   }
 
-  /**
-   * Invalidate cache when new post is created or post is deleted
-   */
   async invalidateCache(): Promise<void> {
     await feedCache.invalidateAll();
   }
 
-  /**
-   * Invalidate cache for a specific feed type
-   */
   async invalidateFeedCache(
     feedType: "campus" | "connections" | "anonymous",
   ): Promise<void> {

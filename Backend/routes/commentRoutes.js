@@ -1,36 +1,33 @@
 const express = require("express");
-const router = express.Router({ mergeParams: true }); // mergeParams to access postId from parent router
+const router = express.Router({ mergeParams: true });
 const commentController = require("../controllers/commentController");
 const { protect } = require("../middleware/authmiddleware");
+const { preventBlockedInteractions } = require("../middleware/blockMiddleware");
 
-// All comment routes require authentication
 router.use(protect);
 
-// Get all comments for a post
 router.get("/", commentController.getPostComments);
 
-// Add a comment to a post
-// Body: { content: "string", isAnonymous: boolean (optional) }
-router.post("/", commentController.addComment);
+router.post("/", preventBlockedInteractions, commentController.addComment);
 
-// Get a specific comment thread
 router.get("/:commentId", commentController.getCommentThread);
 
-// Add a reply to a comment
-// Body: { content: "string", isAnonymous: boolean (optional) }
-router.post("/:commentId/replies", commentController.addReply);
+router.post(
+  "/:commentId/replies",
+  preventBlockedInteractions,
+  commentController.addReply,
+);
 
-// Like/unlike a comment
-router.post("/:commentId/like", commentController.toggleCommentLike);
+router.post(
+  "/:commentId/like",
+  preventBlockedInteractions,
+  commentController.toggleCommentLike,
+);
 
-// Update a comment
-// Body: { content: "string" }
 router.put("/:commentId", commentController.updateComment);
 
-// Delete a comment
 router.delete("/:commentId", commentController.deleteComment);
 
-// Optional: Get reply count for a comment
 router.get("/:commentId/reply-count", async (req, res) => {
   try {
     const Comment = require("../models/Comment");
@@ -44,7 +41,6 @@ router.get("/:commentId/reply-count", async (req, res) => {
   }
 });
 
-// Optional: Get likes for a comment
 router.get("/:commentId/likes", async (req, res) => {
   try {
     const Comment = require("../models/Comment");

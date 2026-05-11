@@ -16,7 +16,7 @@ import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import AudioPlayer from "./AudioPlayer";
 import ReplyPreview from "./ReplyPreview";
-import { StoryReplyCard } from "./ChatBubble";
+import StoryReplyCard from "./StoryReplyCard";
 import AudioManager from "../../../../lib/utils/AudioManager";
 import PostCard from "../../Feed/Post/PostCard";
 import { Post } from "../../../../lib/services/postService";

@@ -1,4 +1,4 @@
-// app/(tabs)/profile/index.tsx - With skeleton loading
+// app/(tabs)/profile/index.tsx - With settings integration
 
 import React, {
   useRef,
@@ -18,6 +18,7 @@ import {
   LayoutAnimation,
   UIManager,
   Platform,
+  Modal,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -45,6 +46,7 @@ import ProfileTabs from "@/app/components/Profile/ProfileTabs";
 import ProfilePosts from "@/app/components/Profile/ProfilePosts";
 import UploadModal from "@/app/components/Profile/UploadModal";
 import ImageViewModal from "@/app/components/Profile/ImageViewModal";
+import SettingsScreen from "@/app/components/Profile/SettingsScreen";
 import { styles } from "@/app/components/Profile/profileStyles";
 import OwnProfilePageSkeleton, {
   OwnPostsLoadingSkeleton,
@@ -63,7 +65,6 @@ const getAuthToken = async (): Promise<string | null> => {
 
 const MemoizedProfilePosts = React.memo(ProfilePosts);
 
-// Enable LayoutAnimation for Android
 if (
   Platform.OS === "android" &&
   UIManager.setLayoutAnimationEnabledExperimental
@@ -85,8 +86,8 @@ export default function ProfileScreen() {
   const [connectionCount, setConnectionCount] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>("about");
+  const [showSettings, setShowSettings] = useState(false);
 
-  // Posts state
   const [posts, setPosts] = useState<Post[]>([]);
   const [postsLoading, setPostsLoading] = useState(false);
   const [postsPage, setPostsPage] = useState(1);
@@ -94,11 +95,9 @@ export default function ProfileScreen() {
   const [postsRefreshing, setPostsRefreshing] = useState(false);
   const [postsLoaded, setPostsLoaded] = useState(false);
 
-  // Loading states for skeletons
   const [postsInitialLoading, setPostsInitialLoading] = useState(false);
   const [loadingMorePosts, setLoadingMorePosts] = useState(false);
 
-  // Cache state
   const [isCached, setIsCached] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
 
@@ -107,7 +106,6 @@ export default function ProfileScreen() {
   const initialLoadDone = useRef(false);
   const mainScrollViewRef = useRef<ScrollView>(null);
 
-  // Image upload hooks
   const {
     uploadModal,
     viewPhotoModal,
@@ -135,24 +133,17 @@ export default function ProfileScreen() {
   const pickerActiveRef = useRef(false);
   const router = useRouter();
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       isMounted.current = false;
     };
   }, []);
 
-  /**
-   * Handle tab change with smooth transition
-   */
   const handleTabChange = useCallback(
     (tab: TabType) => {
       if (tab === activeTab) return;
-
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setActiveTab(tab);
-
-      // Load posts when switching to posts tab if not loaded
       if (tab === "posts" && !postsLoaded && user?.id && !postsLoading) {
         fetchUserPosts(1, false);
       }
@@ -160,80 +151,47 @@ export default function ProfileScreen() {
     [activeTab, postsLoaded, user?.id, postsLoading],
   );
 
-  /**
-   * Fetch user's post count (with caching)
-   */
   const fetchPostCount = useCallback(async () => {
     if (!user?.id) return;
-
     try {
       const cacheKey = `post_count_${user.id}`;
       const cached = profileCache.getFromMemory(cacheKey);
-
-      if (cached && isMounted.current) {
-        setPostCount(cached);
-      }
-
+      if (cached && isMounted.current) setPostCount(cached);
       const token = await getAuthToken();
       const response = await fetch(
         `${API_BASE_URL}/api/posts/user/${user.id}/count`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        },
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       const data = await response.json();
       if (data.success && isMounted.current) {
         setPostCount(data.count);
         profileCache.saveToMemory(cacheKey, data.count);
       }
-    } catch (error) {
-      // Silent fail - cached value remains
-    }
+    } catch (error) {}
   }, [user?.id]);
 
-  /**
-   * Fetch user's connection count (with caching)
-   */
   const fetchConnectionCount = useCallback(async () => {
     if (!user?.id) return;
-
     try {
       const cacheKey = `connection_count_${user.id}`;
       const cached = profileCache.getFromMemory(cacheKey);
-
-      if (cached && isMounted.current) {
-        setConnectionCount(cached);
-      }
-
+      if (cached && isMounted.current) setConnectionCount(cached);
       const response = await connectionService.getConnectionCount(user.id);
       if (response.success && response.data && isMounted.current) {
         setConnectionCount(response.data.connectionCount);
         profileCache.saveToMemory(cacheKey, response.data.connectionCount);
       }
-    } catch (error) {
-      // Silent fail
-    }
+    } catch (error) {}
   }, [user?.id]);
 
-  /**
-   * Fetch user's posts (with caching)
-   */
   const fetchUserPosts = useCallback(
     async (page = 1, shouldAppend = false, forceRefresh = false) => {
       if (!user?.id) return;
       if (postsLoading && !forceRefresh) return;
-
       const cacheKey = `user_posts_${user.id}_page_${page}`;
-
-      // Set appropriate loading states for skeletons
-      if (shouldAppend) {
-        setLoadingMorePosts(true);
-      } else if (!forceRefresh) {
-        setPostsInitialLoading(true);
-      }
+      if (shouldAppend) setLoadingMorePosts(true);
+      else if (!forceRefresh) setPostsInitialLoading(true);
       setPostsLoading(true);
-
-      // Try cache first (for first page only)
       if (
         !forceRefresh &&
         page === 1 &&
@@ -258,26 +216,19 @@ export default function ProfileScreen() {
           return;
         }
       }
-
       try {
         const response = await getProfilePosts(user.id, page, 10);
-
         if (response.success && response.data && isMounted.current) {
           const newPosts = response.data.posts;
-
-          if (shouldAppend) {
-            setPosts((prev) => [...prev, ...newPosts]);
-          } else {
+          if (shouldAppend) setPosts((prev) => [...prev, ...newPosts]);
+          else {
             setPosts(newPosts);
-            // Cache first page results
-            if (page === 1) {
+            if (page === 1)
               profileCache.saveToMemory(cacheKey, {
                 posts: newPosts,
                 hasMore: response.data.pagination.pages > page,
               });
-            }
           }
-
           setHasMorePosts(response.data.pagination.pages > page);
           setPostsPage(page);
           setPostsLoaded(true);
@@ -306,117 +257,74 @@ export default function ProfileScreen() {
   const refreshPosts = () => {
     if (postsRefreshing) return;
     setPostsRefreshing(true);
-    // Clear cache for first page
-    if (user?.id) {
-      profileCache.clear(`user_posts_${user.id}_page_1`);
-    }
+    if (user?.id) profileCache.clear(`user_posts_${user.id}_page_1`);
     fetchUserPosts(1, false, true);
   };
 
-  // Handle like action
   const handleLike = async (postId: string) => {
     if (!token) {
       Alert.alert("Login Required", "Please login to like posts");
       return;
     }
-
     try {
       const response = await toggleLike(postId);
-      setPosts((prevPosts) =>
-        prevPosts.map((post) =>
+      setPosts((prev) =>
+        prev.map((post) =>
           post._id === postId
-            ? {
-                ...post,
-                isLiked: response.isLiked,
-                likeCount: response.likes,
-              }
+            ? { ...post, isLiked: response.isLiked, likeCount: response.likes }
             : post,
         ),
       );
-      // Invalidate posts cache after like
-      if (user?.id) {
-        profileCache.clear(`user_posts_${user.id}_page_1`);
-      }
+      if (user?.id) profileCache.clear(`user_posts_${user.id}_page_1`);
     } catch (error: any) {
-      console.error("Error liking post:", error);
       Alert.alert("Error", error.message || "Failed to like post");
     }
   };
 
-  const handleComment = (postId: string) => {
+  const handleComment = (postId: string) =>
     router.push({
       pathname: "/components/Feed/Comment/CommentsScreen",
       params: { postId },
     });
-  };
-
-  const handleShare = (postId: string) => {
-    Alert.alert("Share", "Share feature coming soon!");
-  };
-
-  const handleEditPost = (postId: string) => {
+  const handleShare = () => Alert.alert("Share", "Share feature coming soon!");
+  const handleEditPost = (postId: string) =>
     router.push({
       pathname: "/components/Feed/Post/EditPost",
       params: { postId },
     });
-  };
-
   const handleDeletePost = async (postId: string) => {
     try {
       await deletePost(postId);
       setPosts((prev) => prev.filter((post) => post._id !== postId));
       setPostCount((prev) => Math.max(0, prev - 1));
-      // Invalidate cache
-      if (user?.id) {
-        profileCache.clear(`user_posts_${user.id}_page_1`);
-      }
+      if (user?.id) profileCache.clear(`user_posts_${user.id}_page_1`);
       Alert.alert("Success", "Post deleted successfully");
     } catch (error: any) {
-      console.error("Error deleting post:", error);
       Alert.alert("Error", error.message || "Failed to delete post");
     }
   };
-
-  const handleSavePost = (postId: string) => {
+  const handleSavePost = () =>
     Alert.alert("Saved", "Post saved to your bookmarks");
-  };
-
-  const handleReportPost = (postId: string) => {
+  const handleReportPost = () =>
     Alert.alert("Report Submitted", "Thank you for reporting this post.");
-  };
-
   const handleHidePost = (postId: string) => {
     setPosts((prev) => prev.filter((post) => post._id !== postId));
     Alert.alert("Post Hidden", "You won't see this post anymore");
   };
-
-  const handleCopyLink = (postId: string) => {
+  const handleCopyLink = () =>
     Alert.alert("Link Copied", "Post link copied to clipboard");
-  };
-
-  const handleMuteUser = (userId: string) => {
+  const handleMuteUser = () =>
     Alert.alert("User Muted", "You won't see posts from this user anymore");
-  };
-
-  const handleBlockUser = (userId: string) => {
+  const handleBlockUser = () =>
     Alert.alert("User Blocked", "You won't see posts from this user anymore");
-  };
 
-  /**
-   * Load initial data with caching
-   */
   const loadInitialData = useCallback(async () => {
     if (refreshInProgress.current || initialLoadDone.current) return;
     refreshInProgress.current = true;
     setInitialLoading(true);
-
     try {
-      // Load profile
       await loadProfile();
-
-      // Load counts in parallel
       await Promise.all([fetchPostCount(), fetchConnectionCount()]);
-
       initialLoadDone.current = true;
     } catch (error) {
       console.error("Error loading initial data:", error);
@@ -428,56 +336,37 @@ export default function ProfileScreen() {
     }
   }, [loadProfile, fetchPostCount, fetchConnectionCount]);
 
-  /**
-   * Refresh all data (for pull-to-refresh)
-   */
   const onRefresh = async () => {
     if (refreshing || refreshInProgress.current) return;
-
     setRefreshing(true);
     setIsCached(false);
-
     try {
-      // Clear caches
       await profileCache.clear("my_profile");
       if (user?.id) {
         await profileCache.clear(`post_count_${user.id}`);
         await profileCache.clear(`connection_count_${user.id}`);
         await profileCache.clear(`user_posts_${user.id}_page_1`);
       }
-
       await loadProfile();
       await refreshUserProfile();
       await Promise.all([fetchPostCount(), fetchConnectionCount()]);
-
-      if (activeTab === "posts") {
-        await fetchUserPosts(1, false, true);
-      }
+      if (activeTab === "posts") await fetchUserPosts(1, false, true);
     } catch (error) {
       console.error("Error refreshing:", error);
     } finally {
-      if (isMounted.current) {
-        setRefreshing(false);
-      }
+      if (isMounted.current) setRefreshing(false);
     }
   };
 
-  // Load profile on mount only once
   useEffect(() => {
-    if (user?.id && !initialLoadDone.current && !authLoading) {
-      loadInitialData();
-    }
+    if (user?.id && !initialLoadDone.current && !authLoading) loadInitialData();
   }, [user?.id, authLoading, loadInitialData]);
-
-  // Reload counts when profile changes
   useEffect(() => {
     if (profile && initialLoadDone.current) {
       fetchPostCount();
       fetchConnectionCount();
     }
   }, [profile, fetchPostCount, fetchConnectionCount]);
-
-  // Load posts only when switching to posts tab
   useEffect(() => {
     if (
       activeTab === "posts" &&
@@ -485,9 +374,8 @@ export default function ProfileScreen() {
       user?.id &&
       !postsLoading &&
       initialLoadDone.current
-    ) {
+    )
       fetchUserPosts(1, false);
-    }
   }, [
     activeTab,
     postsLoaded,
@@ -497,7 +385,6 @@ export default function ProfileScreen() {
     fetchUserPosts,
   ]);
 
-  // Refresh on screen focus
   useFocusEffect(
     useCallback(() => {
       if (user?.id && initialLoadDone.current && !refreshInProgress.current) {
@@ -519,6 +406,7 @@ export default function ProfileScreen() {
         text: "Logout",
         style: "destructive",
         onPress: async () => {
+          setShowSettings(false);
           await profileCache.clearAll();
           await logout();
           router.push("/(auth)/login");
@@ -527,12 +415,12 @@ export default function ProfileScreen() {
     ]);
   };
 
-  // ============ PROFILE PICTURE HANDLERS ============
+  const handleOpenSettings = () => setShowSettings(true);
+  const handleCloseSettings = () => setShowSettings(false);
 
   const handleGalleryPick = async () => {
     if (pickerActiveRef.current) return;
     pickerActiveRef.current = true;
-
     try {
       const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
       if (status !== "granted") {
@@ -546,16 +434,13 @@ export default function ProfileScreen() {
           return;
         }
       }
-
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: "images",
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
       });
-
       closeUploadModal();
-
       if (!result.canceled && result.assets?.[0]?.uri) {
         const success = await uploadProfileImage(result.assets[0].uri);
         if (success) {
@@ -567,7 +452,6 @@ export default function ProfileScreen() {
         }
       }
     } catch (error) {
-      console.error("Gallery pick error:", error);
       Alert.alert("Error", "Failed to select image");
     } finally {
       pickerActiveRef.current = false;
@@ -577,7 +461,6 @@ export default function ProfileScreen() {
   const handleCameraPick = async () => {
     if (pickerActiveRef.current) return;
     pickerActiveRef.current = true;
-
     try {
       const { status } = await ImagePicker.getCameraPermissionsAsync();
       if (status !== "granted") {
@@ -591,16 +474,13 @@ export default function ProfileScreen() {
           return;
         }
       }
-
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: "images",
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
       });
-
       closeUploadModal();
-
       if (!result.canceled && result.assets?.[0]?.uri) {
         const success = await uploadProfileImage(result.assets[0].uri);
         if (success) {
@@ -612,7 +492,6 @@ export default function ProfileScreen() {
         }
       }
     } catch (error) {
-      console.error("Camera error:", error);
       Alert.alert("Error", "Failed to take photo");
     } finally {
       pickerActiveRef.current = false;
@@ -633,12 +512,9 @@ export default function ProfileScreen() {
 
   const handleImagePress = () => openUploadModal();
 
-  // ============ COVER PHOTO HANDLERS ============
-
   const handleCoverGalleryPick = async () => {
     if (pickerActiveRef.current) return;
     pickerActiveRef.current = true;
-
     try {
       const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
       if (status !== "granted") {
@@ -652,16 +528,13 @@ export default function ProfileScreen() {
           return;
         }
       }
-
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: "images",
         allowsEditing: true,
         aspect: [16, 9],
         quality: 0.8,
       });
-
       closeCoverModal();
-
       if (!result.canceled && result.assets?.[0]?.uri) {
         const success = await uploadCoverPhoto(result.assets[0].uri);
         if (success) {
@@ -673,7 +546,6 @@ export default function ProfileScreen() {
         }
       }
     } catch (error) {
-      console.error("Cover gallery error:", error);
       Alert.alert("Error", "Failed to select image");
     } finally {
       pickerActiveRef.current = false;
@@ -683,7 +555,6 @@ export default function ProfileScreen() {
   const handleCoverCameraPick = async () => {
     if (pickerActiveRef.current) return;
     pickerActiveRef.current = true;
-
     try {
       const { status } = await ImagePicker.getCameraPermissionsAsync();
       if (status !== "granted") {
@@ -697,16 +568,13 @@ export default function ProfileScreen() {
           return;
         }
       }
-
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: "images",
         allowsEditing: true,
         aspect: [16, 9],
         quality: 0.8,
       });
-
       closeCoverModal();
-
       if (!result.canceled && result.assets?.[0]?.uri) {
         const success = await uploadCoverPhoto(result.assets[0].uri);
         if (success) {
@@ -718,7 +586,6 @@ export default function ProfileScreen() {
         }
       }
     } catch (error) {
-      console.error("Cover camera error:", error);
       Alert.alert("Error", "Failed to take photo");
     } finally {
       pickerActiveRef.current = false;
@@ -739,8 +606,6 @@ export default function ProfileScreen() {
 
   const handleCoverPhotoPress = () => openCoverModal();
 
-  // ============ RENDER HELPERS ============
-
   const formattedUser = {
     _id: user?.id,
     name: user?.name || profile?.fullName,
@@ -749,7 +614,6 @@ export default function ProfileScreen() {
     profileComplete: user?.profileComplete,
   };
 
-  // Memoize header
   const profileHeader = useMemo(
     () => (
       <ProfileHeader
@@ -770,7 +634,6 @@ export default function ProfileScreen() {
     ],
   );
 
-  // Memoize tabs
   const profileTabs = useMemo(
     () => (
       <ProfileTabs
@@ -782,7 +645,6 @@ export default function ProfileScreen() {
     [activeTab, postCount],
   );
 
-  // Memoize posts props
   const postsProps = useMemo(
     () => ({
       posts,
@@ -806,7 +668,6 @@ export default function ProfileScreen() {
     [posts, postsInitialLoading, postsRefreshing, hasMorePosts],
   );
 
-  // Memoize about content
   const aboutContentOnly = useMemo(
     () => (
       <View style={styles.aboutContent}>
@@ -823,6 +684,7 @@ export default function ProfileScreen() {
             connections: connectionCount,
             groups: profile?.stats?.groups || 0,
           }}
+          userId={user?.id || profile?.user?._id}
         />
         <View style={menuStyles.menuSection}>
           <TouchableOpacity
@@ -839,9 +701,7 @@ export default function ProfileScreen() {
           <View style={menuStyles.divider} />
           <TouchableOpacity
             style={menuStyles.menuItem}
-            onPress={() =>
-              Alert.alert("Coming Soon", "Settings feature coming soon!")
-            }
+            onPress={handleOpenSettings}
             activeOpacity={0.7}
           >
             <View style={menuStyles.menuItemContent}>
@@ -886,7 +746,6 @@ export default function ProfileScreen() {
 
   // ============ RENDER ============
 
-  // Full page skeleton during initial load
   if ((authLoading || initialLoading) && !profile) {
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
@@ -895,7 +754,6 @@ export default function ProfileScreen() {
     );
   }
 
-  // No profile state
   if (!profile && !authLoading && !initialLoading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -917,95 +775,56 @@ export default function ProfileScreen() {
     );
   }
 
-  // About tab
-  if (activeTab === "about") {
-    return (
-      <SafeAreaView style={styles.container} edges={["top"]}>
-        <ScrollView
-          ref={mainScrollViewRef}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={scrollStyles.scrollContent}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor="#8b5cf6"
-              colors={["#8b5cf6"]}
-            />
-          }
-        >
-          {profileHeader}
-          {profileTabs}
-          {aboutContentOnly}
-        </ScrollView>
-        <UploadModal
-          visible={uploadModal}
-          onClose={closeUploadModal}
-          onViewImage={openImageViewer}
-          onPickImage={handleGalleryPick}
-          onTakePhoto={handleCameraPick}
-          onDeletePhoto={handleDeleteProfileImage}
-          hasExistingImage={
-            !!profile?.profilePicture &&
-            !profile.profilePicture.includes("dicebear.com")
-          }
-          title="Profile Picture"
-          viewLabel="View Profile Picture"
-          deleteLabel="Remove Profile Picture"
-        />
-        <UploadModal
-          visible={coverModal}
-          onClose={closeCoverModal}
-          onViewImage={openCoverImageViewer}
-          onPickImage={handleCoverGalleryPick}
-          onTakePhoto={handleCoverCameraPick}
-          onDeletePhoto={handleDeleteCoverPhoto}
-          hasExistingImage={!!profile?.coverPhoto}
-          title="Cover Photo"
-          viewLabel="View Cover Photo"
-        />
-        <ImageViewModal
-          visible={viewPhotoModal}
-          imageUri={profile?.profilePicture}
-          onClose={closeImageViewer}
-          title="Profile Picture"
-          isCoverPhoto={false}
-        />
-        <ImageViewModal
-          visible={coverViewModal}
-          imageUri={profile?.coverPhoto}
-          onClose={closeCoverImageViewer}
-          title="Cover Photo"
-          isCoverPhoto={true}
-        />
-      </SafeAreaView>
-    );
-  }
-
-  // Posts tab
+  // ✅ SINGLE RETURN - modals rendered ONCE outside tab conditions
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      {isCached && (
-        <View style={cacheStyles.cacheHeader}>
-          <Ionicons name="cloud-outline" size={12} color="#9ca3af" />
-          <Text style={cacheStyles.cacheHeaderText}>Loaded from cache</Text>
-        </View>
-      )}
-      <MemoizedProfilePosts
-        {...postsProps}
-        listHeaderComponent={
-          <>
+    <>
+      <SafeAreaView style={styles.container} edges={["top"]}>
+        {activeTab === "about" ? (
+          <ScrollView
+            ref={mainScrollViewRef}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={scrollStyles.scrollContent}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor="#8b5cf6"
+                colors={["#8b5cf6"]}
+              />
+            }
+          >
             {profileHeader}
             {profileTabs}
-            {/* Show posts loading skeleton when initially loading posts */}
-            {postsInitialLoading && <OwnPostsLoadingSkeleton />}
+            {aboutContentOnly}
+          </ScrollView>
+        ) : (
+          <>
+            {isCached && (
+              <View style={cacheStyles.cacheHeader}>
+                <Ionicons name="cloud-outline" size={12} color="#9ca3af" />
+                <Text style={cacheStyles.cacheHeaderText}>
+                  Loaded from cache
+                </Text>
+              </View>
+            )}
+            <MemoizedProfilePosts
+              {...postsProps}
+              listHeaderComponent={
+                <>
+                  {profileHeader}
+                  {profileTabs}
+                  {postsInitialLoading && <OwnPostsLoadingSkeleton />}
+                </>
+              }
+              listFooterComponent={
+                loadingMorePosts ? <OwnLoadingMorePostsSkeleton /> : null
+              }
+            />
           </>
-        }
-        listFooterComponent={
-          // Show loading more skeleton when loading more posts
-          loadingMorePosts ? <OwnLoadingMorePostsSkeleton /> : null
-        }
-      />
+        )}
+      </SafeAreaView>
+
+      {/* Modals - rendered ONCE */}
       <UploadModal
         visible={uploadModal}
         onClose={closeUploadModal}
@@ -1046,7 +865,23 @@ export default function ProfileScreen() {
         title="Cover Photo"
         isCoverPhoto={true}
       />
-    </SafeAreaView>
+
+      <Modal
+        visible={showSettings}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={handleCloseSettings}
+      >
+        <SettingsScreen
+          onLogout={() => {
+            handleCloseSettings();
+            handleLogoutConfirm();
+          }}
+          userId={user?.id || ""}
+          onClose={handleCloseSettings}
+        />
+      </Modal>
+    </>
   );
 }
 

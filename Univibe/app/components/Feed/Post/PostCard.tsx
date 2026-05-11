@@ -34,16 +34,21 @@ interface PostCardProps {
   onImagePress?: (index: number) => void;
   onLikePress: (postId: string) => void;
   onCommentPress: (postId: string) => void;
-
   onSharePress: (postId: string) => void;
   onEdit?: (postId: string) => void;
   onDelete?: (postId: string) => void;
   onSave?: (postId: string) => void;
   onReport?: (postId: string) => void;
   onHide?: (postId: string) => void;
+  onUnhide?: (postId: string) => void;
+  isHidden?: boolean;
   onCopyLink?: (postId: string) => void;
-  onMuteUser?: (userId: string) => void;
-  onBlockUser?: (userId: string) => void;
+  onMuteUser?: (userId: string, userName?: string) => void;
+  onUnmuteUser?: (userId: string, userName?: string) => void;
+  isMuted?: boolean;
+  onBlockUser?: (userId: string, userName?: string) => void;
+  onUnblockUser?: (userId: string, userName?: string) => void;
+  isBlocked?: boolean;
   onProfilePress?: (userId: string) => void;
 }
 
@@ -56,16 +61,21 @@ const PostCard: React.FC<PostCardProps> = ({
   onImagePress,
   onLikePress,
   onCommentPress,
-
   onSharePress,
   onEdit,
   onDelete,
   onSave,
   onReport,
   onHide,
+  onUnhide,
+  isHidden = false,
   onCopyLink,
   onMuteUser,
+  onUnmuteUser,
+  isMuted = false,
   onBlockUser,
+  onUnblockUser,
+  isBlocked = false,
   onProfilePress,
 }) => {
   const router = useRouter();
@@ -74,15 +84,16 @@ const PostCard: React.FC<PostCardProps> = ({
 
   // ===== State Management =====
   const [optionsVisible, setOptionsVisible] = useState(false);
-  const [isSaved, setIsSaved] = useState(false);
+  const [isSaved, setIsSaved] = useState(post.isSaved || false);
   const [isReported, setIsReported] = useState(false);
-  const [isHidden, setIsHidden] = useState(false);
+  const [localIsHidden, setLocalIsHidden] = useState(isHidden);
+  const [localIsMuted, setLocalIsMuted] = useState(isMuted);
+  const [localIsBlocked, setLocalIsBlocked] = useState(isBlocked);
   const [avatarError, setAvatarError] = useState(false);
   const [postImageError, setPostImageError] = useState<boolean[]>([]);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
 
-  // ✅ FIXED: Use likeCount for feed posts, fallback to likes array for detail view
   const [displayCommentCount, setDisplayCommentCount] = useState(
     post.commentCount || 0,
   );
@@ -100,7 +111,7 @@ const PostCard: React.FC<PostCardProps> = ({
     return null;
   }
 
-  // ===== ✅ FIXED: Sync with Post Props =====
+  // ===== Sync with Post Props =====
   useEffect(() => {
     setDisplayCommentCount(post.commentCount || 0);
   }, [post.commentCount]);
@@ -108,7 +119,20 @@ const PostCard: React.FC<PostCardProps> = ({
   useEffect(() => {
     setIsLiked(post.isLiked || false);
     setLikesCount(post.likeCount ?? post.likes?.length ?? 0);
-  }, [post.isLiked, post.likeCount, post.likes?.length]);
+    setIsSaved(post.isSaved || false);
+  }, [post.isLiked, post.likeCount, post.likes?.length, post.isSaved]);
+
+  useEffect(() => {
+    setLocalIsHidden(isHidden);
+  }, [isHidden]);
+
+  useEffect(() => {
+    setLocalIsMuted(isMuted);
+  }, [isMuted]);
+
+  useEffect(() => {
+    setLocalIsBlocked(isBlocked);
+  }, [isBlocked]);
 
   // ===== Event Listeners =====
   useEffect(() => {
@@ -158,6 +182,11 @@ const PostCard: React.FC<PostCardProps> = ({
   }, [currentUserId, post.isAnonymous, post.originalUser, post.user]);
 
   const ownPost = isOwnPost();
+
+  const getUserNameForActions = useCallback((): string => {
+    if (post.isAnonymous) return "Anonymous";
+    return post.user?.name || "User";
+  }, [post.isAnonymous, post.user?.name]);
 
   const getUserIdForNavigation = useCallback((): string | null => {
     if (post.isAnonymous && post.originalUser) {
@@ -257,29 +286,63 @@ const PostCard: React.FC<PostCardProps> = ({
   // ===== Action Handlers =====
   const handleMorePress = useCallback(() => setOptionsVisible(true), []);
 
-  const handleSave = useCallback(
-    (postId: string) => {
-      setIsSaved((prev) => !prev);
-      if (onSave) onSave(postId);
-    },
-    [onSave],
-  );
+  const handleSave = useCallback(() => {
+    setIsSaved((prev) => !prev);
+    if (onSave) onSave(post._id);
+  }, [onSave, post._id]);
 
-  const handleReport = useCallback(
-    (postId: string) => {
-      setIsReported(true);
-      if (onReport) onReport(postId);
-    },
-    [onReport],
-  );
+  const handleReport = useCallback(() => {
+    setIsReported(true);
+    if (onReport) onReport(post._id);
+  }, [onReport, post._id]);
 
-  const handleHide = useCallback(
-    (postId: string) => {
-      setIsHidden(true);
-      if (onHide) onHide(postId);
-    },
-    [onHide],
-  );
+  const handleHide = useCallback(() => {
+    if (localIsHidden && onUnhide) {
+      setLocalIsHidden(false);
+      onUnhide(post._id);
+    } else if (onHide) {
+      setLocalIsHidden(true);
+      onHide(post._id);
+    }
+  }, [localIsHidden, onHide, onUnhide, post._id]);
+
+  const handleMuteUser = useCallback(() => {
+    const userName = getUserNameForActions();
+    if (localIsMuted && onUnmuteUser && post.user?._id) {
+      setLocalIsMuted(false);
+      onUnmuteUser(post.user._id, userName);
+    } else if (onMuteUser && post.user?._id) {
+      setLocalIsMuted(true);
+      onMuteUser(post.user._id, userName);
+    }
+  }, [
+    localIsMuted,
+    onMuteUser,
+    onUnmuteUser,
+    post.user?._id,
+    getUserNameForActions,
+  ]);
+
+  const handleBlockUser = useCallback(() => {
+    const userName = getUserNameForActions();
+    if (localIsBlocked && onUnblockUser && post.user?._id) {
+      setLocalIsBlocked(false);
+      onUnblockUser(post.user._id, userName);
+    } else if (onBlockUser && post.user?._id) {
+      setLocalIsBlocked(true);
+      onBlockUser(post.user._id, userName);
+    }
+  }, [
+    localIsBlocked,
+    onBlockUser,
+    onUnblockUser,
+    post.user?._id,
+    getUserNameForActions,
+  ]);
+
+  const handleCopyLink = useCallback(() => {
+    if (onCopyLink) onCopyLink(post._id);
+  }, [onCopyLink, post._id]);
 
   // ===== Display Helpers =====
   const getUserDisplayName = useCallback(() => {
@@ -433,6 +496,7 @@ const PostCard: React.FC<PostCardProps> = ({
   const renderAvatar = useCallback(() => {
     const avatarSize = compact ? 28 : 40;
 
+    // Handle anonymous posts
     if (post.isAnonymous) {
       return (
         <View
@@ -455,7 +519,35 @@ const PostCard: React.FC<PostCardProps> = ({
       );
     }
 
-    if (!avatarError && post.user?.profilePicture) {
+    // Handle posts with user data
+    if (post.user) {
+      // If user has profile picture and no error loading it
+      if (post.user.profilePicture && !avatarError) {
+        return (
+          <TouchableOpacity
+            onPress={(e) => {
+              e.stopPropagation();
+              handleUserPress();
+            }}
+            disabled={compact}
+          >
+            <Image
+              source={{ uri: getFullImageUrl(post.user.profilePicture) }}
+              style={[
+                styles.postAvatar,
+                {
+                  width: avatarSize,
+                  height: avatarSize,
+                  borderRadius: avatarSize / 2,
+                },
+              ]}
+              onError={() => setAvatarError(true)}
+            />
+          </TouchableOpacity>
+        );
+      }
+
+      // Fallback to colored circle with first letter
       return (
         <TouchableOpacity
           onPress={(e) => {
@@ -464,50 +556,46 @@ const PostCard: React.FC<PostCardProps> = ({
           }}
           disabled={compact}
         >
-          <Image
-            source={{ uri: getFullImageUrl(post.user.profilePicture) }}
+          <View
             style={[
               styles.postAvatar,
+              styles.defaultAvatar,
               {
                 width: avatarSize,
                 height: avatarSize,
                 borderRadius: avatarSize / 2,
               },
             ]}
-            onError={() => setAvatarError(true)}
-          />
+          >
+            <Text
+              style={[styles.defaultAvatarText, compact && { fontSize: 12 }]}
+            >
+              {post.user.name?.charAt(0)?.toUpperCase() || "U"}
+            </Text>
+          </View>
         </TouchableOpacity>
       );
     }
 
+    // Ultimate fallback when no user data exists
     return (
-      <TouchableOpacity
-        onPress={(e) => {
-          e.stopPropagation();
-          handleUserPress();
-        }}
-        disabled={compact}
+      <View
+        style={[
+          styles.postAvatar,
+          styles.defaultAvatar,
+          {
+            width: avatarSize,
+            height: avatarSize,
+            borderRadius: avatarSize / 2,
+          },
+        ]}
       >
-        <Image
-          source={DEFAULT_AVATAR}
-          style={[
-            styles.postAvatar,
-            {
-              width: avatarSize,
-              height: avatarSize,
-              borderRadius: avatarSize / 2,
-            },
-          ]}
-        />
-      </TouchableOpacity>
+        <Text style={[styles.defaultAvatarText, compact && { fontSize: 12 }]}>
+          U
+        </Text>
+      </View>
     );
-  }, [
-    post.isAnonymous,
-    avatarError,
-    post.user?.profilePicture,
-    compact,
-    handleUserPress,
-  ]);
+  }, [post.isAnonymous, post.user, avatarError, compact, handleUserPress]);
 
   const visibilityIconName = getVisibilityIconName();
   const visibilityBadgeColor = getVisibilityBadgeColor();
@@ -705,16 +793,20 @@ const PostCard: React.FC<PostCardProps> = ({
           isOwnPost={ownPost}
           isSaved={isSaved}
           isReported={isReported}
-          isHidden={isHidden}
+          isHidden={localIsHidden}
+          isMuted={localIsMuted}
+          isBlocked={localIsBlocked}
+          userId={post.user?._id ?? undefined}
+          userName={getUserNameForActions()}
           onEdit={onEdit}
           onDelete={onDelete}
           onSave={handleSave}
           onReport={handleReport}
           onHide={handleHide}
           onShare={onSharePress}
-          onMuteUser={onMuteUser}
-          onBlockUser={onBlockUser}
-          userId={post.user?._id ?? undefined}
+          onCopyLink={handleCopyLink}
+          onMuteUser={handleMuteUser}
+          onBlockUser={handleBlockUser}
         />
       )}
     </View>
@@ -879,6 +971,17 @@ const styles = StyleSheet.create({
   },
   compactActionText: { fontSize: 11 },
   likedText: { color: "#ef4444" },
+  defaultAvatar: {
+    backgroundColor: "#8b5cf6",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  defaultAvatarText: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
+  },
 });
 
 export default React.memo(PostCard);

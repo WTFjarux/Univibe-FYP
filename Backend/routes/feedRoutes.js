@@ -3,17 +3,13 @@ const express = require("express");
 const router = express.Router();
 const feedController = require("../controllers/feedController");
 const { protect } = require("../middleware/authmiddleware");
+const { filterBlockedUsers } = require("../middleware/blockMiddleware");
 
-// All feed routes require authentication
 router.use(protect);
+router.use(filterBlockedUsers);
 
-// GET /api/feed/campus - Campus/All feed (default tab)
 router.get("/campus", feedController.getCampusFeed);
-
-// GET /api/feed/connections - Connections feed
 router.get("/connections", feedController.getConnectionsFeed);
-
-// GET /api/feed/anonymous - Anonymous feed
 router.get("/anonymous", feedController.getAnonymousFeed);
 
 module.exports = router;

@@ -86,7 +86,6 @@ exports.sendConnectionRequest = async (req, res) => {
       });
     }
 
-    // Check if already connected
     if (sender.connections.includes(receiverId)) {
       return res.status(400).json({
         success: false,
@@ -94,7 +93,6 @@ exports.sendConnectionRequest = async (req, res) => {
       });
     }
 
-    // Check if request already sent
     if (sender.connectionRequestsSent.includes(receiverId)) {
       return res.status(400).json({
         success: false,
@@ -106,13 +104,22 @@ exports.sendConnectionRequest = async (req, res) => {
     if (sender.connectionRequestsReceived.includes(receiverId)) {
       await sender.acceptConnectionRequest(receiverId);
 
-      // Delete any pending notifications first
-      await notificationController.deletePendingConnectionNotifications(
-        receiverId,
-        senderId,
-      );
+      // ✅ Delete ALL existing notifications between these users first
+      await Notification.deleteMany({
+        $or: [
+          {
+            recipient: senderId,
+            sender: receiverId,
+            type: "connection_request",
+          },
+          {
+            recipient: receiverId,
+            sender: senderId,
+            type: "connection_request",
+          },
+        ],
+      });
 
-      // Create notification for the other user (they sent the original request)
       const notif1 = await notificationController.createNotification(
         receiverId,
         senderId,
@@ -121,18 +128,7 @@ exports.sendConnectionRequest = async (req, res) => {
         `${sender.name} accepted your connection request`,
       );
 
-      // Create notification for the sender (current user)
-      const notif2 = await notificationController.createNotification(
-        senderId,
-        receiverId,
-        "connection_accepted",
-        "Connection Accepted",
-        `You are now connected with ${receiver.name}`,
-      );
-
-      // Emit socket events for both users
       await emitConnectionNotification(io, receiverId, notif1);
-      await emitConnectionNotification(io, senderId, notif2);
 
       return res.status(200).json({
         success: true,
@@ -146,10 +142,15 @@ exports.sendConnectionRequest = async (req, res) => {
       });
     }
 
-    // Delete any existing pending notification before creating new one
-    await notificationController.deletePendingConnectionNotifications(
-      receiverId,
-      senderId,
+    // ✅ Delete ALL existing connection_request notifications from this sender to this receiver
+    // This handles the case where user cancels and resends
+    const deleteResult = await Notification.deleteMany({
+      recipient: receiverId,
+      sender: senderId,
+      type: "connection_request",
+    });
+    console.log(
+      `Deleted ${deleteResult.deletedCount} old connection request notifications`,
     );
 
     // Send new request
@@ -159,7 +160,7 @@ exports.sendConnectionRequest = async (req, res) => {
     receiver.connectionRequestsReceived.push(senderId);
     await receiver.save();
 
-    // Create notification for the receiver
+    // Create new notification
     const notif = await notificationController.createNotification(
       receiverId,
       senderId,
@@ -168,7 +169,6 @@ exports.sendConnectionRequest = async (req, res) => {
       `${sender.name} wants to connect with you`,
     );
 
-    // Emit socket event to receiver
     await emitConnectionNotification(io, receiverId, notif);
 
     res.status(200).json({
@@ -346,7 +346,6 @@ exports.cancelConnectionRequest = async (req, res) => {
       });
     }
 
-    // Check if request exists in sent list
     if (!user.connectionRequestsSent.includes(requestId)) {
       return res.status(400).json({
         success: false,
@@ -354,10 +353,14 @@ exports.cancelConnectionRequest = async (req, res) => {
       });
     }
 
-    // Delete pending notification before cancelling
-    await notificationController.deletePendingConnectionNotifications(
-      requestId,
-      userId,
+    // ✅ Delete ALL connection_request notifications from this sender to target
+    const deleteResult = await Notification.deleteMany({
+      recipient: requestId,
+      sender: userId,
+      type: "connection_request",
+    });
+    console.log(
+      `Deleted ${deleteResult.deletedCount} notifications for cancelled request`,
     );
 
     // Remove from sender's sent list

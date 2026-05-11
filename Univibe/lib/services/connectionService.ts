@@ -172,15 +172,14 @@ export const connectionService = {
 
   /**
    * Cancel a sent connection request - FIXED
+   * Removed the notification deletion call since the backend handles it
    */
   cancelConnectionRequest: async (
     userId: string,
   ): Promise<ConnectionResponse> => {
     try {
-      // First, delete any pending notifications
-      await notificationService.deletePendingConnectionNotifications(userId);
-
-      // Then cancel the request
+      // Don't call notification deletion separately - the backend will handle it
+      // Just make the DELETE request to cancel the connection
       const response = await api.delete(
         `${API_BASE_URL}/api/connections/cancel/${userId}`,
       );

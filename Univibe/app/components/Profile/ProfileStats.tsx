@@ -1,8 +1,9 @@
 // app/components/Profile/ProfileStats.tsx
 
 import React from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 
 interface ProfileStatsProps {
   stats: {
@@ -10,24 +11,39 @@ interface ProfileStatsProps {
     connections: number;
     groups: number;
   };
+  userId?: string;
 }
 
-// Define valid icon names as const
 const STAT_ICONS = {
   posts: "chatbubble-outline" as const,
   connections: "people-outline" as const,
   groups: "people-circle-outline" as const,
 };
 
-export default function ProfileStats({ stats }: ProfileStatsProps) {
+export default function ProfileStats({ stats, userId }: ProfileStatsProps) {
+  const router = useRouter();
+
   const statItems = [
-    { key: "posts" as const, label: "Posts", value: stats?.posts || 0 },
+    {
+      key: "posts" as const,
+      label: "Posts",
+      value: stats?.posts || 0,
+      onPress: undefined,
+    },
     {
       key: "connections" as const,
       label: "Connections",
       value: stats?.connections || 0,
+      onPress: userId
+        ? () => router.push(`/profile/connections?userId=${userId}`)
+        : undefined,
     },
-    { key: "groups" as const, label: "Groups", value: stats?.groups || 0 },
+    {
+      key: "groups" as const,
+      label: "Groups",
+      value: stats?.groups || 0,
+      onPress: undefined,
+    },
   ];
 
   return (
@@ -41,6 +57,7 @@ export default function ProfileStats({ stats }: ProfileStatsProps) {
             icon={STAT_ICONS[item.key]}
             label={item.label}
             value={item.value}
+            onPress={item.onPress}
           />
         ))}
       </View>
@@ -48,23 +65,37 @@ export default function ProfileStats({ stats }: ProfileStatsProps) {
   );
 }
 
-// StatItem Component with proper typing
 interface StatItemProps {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   value: number;
+  onPress?: () => void;
 }
 
-function StatItem({ icon, label, value }: StatItemProps) {
-  return (
-    <View style={styles.statItem}>
+function StatItem({ icon, label, value, onPress }: StatItemProps) {
+  const content = (
+    <>
       <View style={styles.statIcon}>
         <Ionicons name={icon} size={26} color="#8b5cf6" />
       </View>
       <Text style={styles.statNumber}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
+      <Text style={[styles.statLabel]}>{label}</Text>
+    </>
   );
+
+  if (onPress) {
+    return (
+      <TouchableOpacity
+        style={styles.statItem}
+        onPress={onPress}
+        activeOpacity={0.6}
+      >
+        {content}
+      </TouchableOpacity>
+    );
+  }
+
+  return <View style={styles.statItem}>{content}</View>;
 }
 
 const styles = StyleSheet.create({

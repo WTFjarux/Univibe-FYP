@@ -317,6 +317,15 @@ exports.createEvent = async (req, res) => {
     const organizerName = profile.fullName || user.name;
     const formattedImages = formatImageObjects(uploadedFiles);
 
+    // Calculate initial status based on dates
+    const now = new Date();
+    let initialStatus = "upcoming";
+    if (end < now) {
+      initialStatus = "completed";
+    } else if (start <= now && end >= now) {
+      initialStatus = "ongoing";
+    }
+
     const event = new Event({
       title: title.trim(),
       description: description.trim(),
@@ -333,6 +342,7 @@ exports.createEvent = async (req, res) => {
       meetingLink: meetingLink || "",
       tags: tags ? (Array.isArray(tags) ? tags : tags.split(",")) : [],
       images: formattedImages,
+      status: initialStatus, // Set correct initial status
     });
 
     if (formattedImages.length > 0) {
@@ -439,8 +449,19 @@ exports.getEvents = async (req, res) => {
       Event.countDocuments(query),
     ]);
 
-    const eventsWithProfiles = await Promise.all(
+    // Update status for each event if needed
+    const eventsWithUpdatedStatus = await Promise.all(
       events.map(async (event) => {
+        const eventDoc = await Event.findById(event._id);
+        if (eventDoc) {
+          await eventDoc.updateStatusIfNeeded();
+        }
+        return event;
+      }),
+    );
+
+    const eventsWithProfiles = await Promise.all(
+      eventsWithUpdatedStatus.map(async (event) => {
         const organizerWithProfile = await getUserWithProfile(event.organizer);
         const processedEvent = processEventImagesForResponse(req, event);
 
@@ -495,18 +516,24 @@ exports.getEventById = async (req, res) => {
       });
     }
 
-    const event = await Event.findById(eventId)
-      .populate("organizer", "name username email")
-      .populate("interested", "name username email")
-      .populate("rsvp", "name username email")
-      .lean();
-
+    // Fetch and update status if needed
+    let event = await Event.findById(eventId);
     if (!event) {
       return res.status(404).json({
         success: false,
         message: "Event not found",
       });
     }
+
+    // Update status if needed
+    await event.updateStatusIfNeeded();
+
+    // Now fetch the fully populated event
+    event = await Event.findById(eventId)
+      .populate("organizer", "name username email")
+      .populate("interested", "name username email")
+      .populate("rsvp", "name username email")
+      .lean();
 
     const [organizerWithProfile, interestedWithProfiles, rsvpWithProfiles] =
       await Promise.all([
@@ -631,6 +658,7 @@ exports.updateEvent = async (req, res) => {
       "isOnline",
       "meetingLink",
       "tags",
+      "status", // Allow manual status update
     ];
 
     for (const field of allowedUpdates) {
@@ -657,6 +685,7 @@ exports.updateEvent = async (req, res) => {
       event.coverImage = "";
     }
 
+    // The pre-save middleware will handle status recalculation
     await event.save();
 
     const updatedEvent = await Event.findById(eventId)
@@ -671,6 +700,16 @@ exports.updateEvent = async (req, res) => {
       organizerWithProfile?.fullName || organizerWithProfile?.name;
 
     const finalEvent = processEventImagesForResponse(req, updatedEvent);
+
+    // Emit update via socket
+    const io = req.app.get("io");
+    emitEventUpdate(io, eventId, {
+      eventId,
+      status: finalEvent.status,
+      interestedCount: finalEvent.interestedCount,
+      rsvpCount: finalEvent.rsvpCount,
+      isFull: finalEvent.isFull,
+    });
 
     res.status(200).json({
       success: true,
@@ -904,6 +943,59 @@ exports.removeEventImage = async (req, res) => {
 };
 
 // ============================================
+// REFRESH EVENT STATUS (NEW ENDPOINT)
+// ============================================
+exports.refreshEventStatus = async (req, res) => {
+  try {
+    const { eventId } = req.params;
+
+    if (!eventId || eventId === "undefined" || eventId === "null") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid event ID",
+      });
+    }
+
+    const event = await Event.findById(eventId);
+    if (!event) {
+      return res.status(404).json({
+        success: false,
+        message: "Event not found",
+      });
+    }
+
+    const oldStatus = event.status;
+    await event.updateStatusIfNeeded();
+
+    // Emit update via socket if status changed
+    if (oldStatus !== event.status) {
+      const io = req.app.get("io");
+      emitEventUpdate(io, eventId, {
+        eventId,
+        status: event.status,
+        interestedCount: event.interestedCount,
+        rsvpCount: event.rsvpCount,
+        isFull: event.isFull,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Event status refreshed",
+      oldStatus,
+      newStatus: event.status,
+      statusChanged: oldStatus !== event.status,
+    });
+  } catch (error) {
+    console.error("Refresh event status error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to refresh event status",
+    });
+  }
+};
+
+// ============================================
 // MARK INTERESTED
 // ============================================
 exports.markInterested = async (req, res) => {
@@ -934,6 +1026,9 @@ exports.markInterested = async (req, res) => {
         message: "Event not found",
       });
     }
+
+    // Update status if needed before proceeding
+    await event.updateStatusIfNeeded();
 
     const isInterested = event.isUserInterested(userId);
 
@@ -984,6 +1079,7 @@ exports.markInterested = async (req, res) => {
     // Emit real-time update to all viewers of this event
     emitEventUpdate(io, eventId, {
       eventId,
+      status: updatedEvent.status,
       interestedCount: updatedEvent.interestedCount,
       rsvpCount: updatedEvent.rsvpCount,
       isFull: updatedEvent.isFull,
@@ -1032,6 +1128,16 @@ exports.rsvpEvent = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Event not found",
+      });
+    }
+
+    // Update status if needed before proceeding
+    await event.updateStatusIfNeeded();
+
+    if (event.status === "completed") {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot RSVP to a completed event",
       });
     }
 
@@ -1092,6 +1198,7 @@ exports.rsvpEvent = async (req, res) => {
     // Emit real-time update to all viewers of this event
     emitEventUpdate(io, eventId, {
       eventId,
+      status: updatedEvent.status,
       interestedCount: updatedEvent.interestedCount,
       rsvpCount: updatedEvent.rsvpCount,
       isFull: updatedEvent.isFull,
@@ -1102,6 +1209,7 @@ exports.rsvpEvent = async (req, res) => {
       isRsvpd: !isRsvpd,
       rsvpCount: updatedEvent.rsvpCount,
       isFull: updatedEvent.isFull,
+      status: updatedEvent.status,
     });
   } catch (error) {
     console.error("RSVP error:", error);
@@ -1129,16 +1237,33 @@ exports.getMyEvents = async (req, res) => {
     const [events, total] = await Promise.all([
       Event.find(query)
         .populate("organizer", "name username email")
-        .sort({ startDate: 1 })
+        .sort({ startDate: -1 })
         .skip(skip)
         .limit(parseInt(limit))
         .lean(),
       Event.countDocuments(query),
     ]);
 
+    // Update status for each event if needed
+    await Promise.all(
+      events.map(async (event) => {
+        const eventDoc = await Event.findById(event._id);
+        if (eventDoc) {
+          await eventDoc.updateStatusIfNeeded();
+        }
+      }),
+    );
+
     const organizerWithProfile = await getUserWithProfile({ _id: userId });
 
-    const eventsWithProfiles = events.map((event) => {
+    const updatedEvents = await Event.find(query)
+      .populate("organizer", "name username email")
+      .sort({ startDate: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
+    const eventsWithProfiles = updatedEvents.map((event) => {
       const processedEvent = processEventImagesForResponse(req, event);
       return {
         ...processedEvent,
@@ -1181,15 +1306,32 @@ exports.getAttendingEvents = async (req, res) => {
     const [events, total] = await Promise.all([
       Event.find({ rsvp: userId })
         .populate("organizer", "name username email")
-        .sort({ startDate: 1 })
+        .sort({ startDate: -1 })
         .skip(skip)
         .limit(parseInt(limit))
         .lean(),
       Event.countDocuments({ rsvp: userId }),
     ]);
 
-    const eventsWithProfiles = await Promise.all(
+    // Update status for each event if needed
+    await Promise.all(
       events.map(async (event) => {
+        const eventDoc = await Event.findById(event._id);
+        if (eventDoc) {
+          await eventDoc.updateStatusIfNeeded();
+        }
+      }),
+    );
+
+    const updatedEvents = await Event.find({ rsvp: userId })
+      .populate("organizer", "name username email")
+      .sort({ startDate: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
+    const eventsWithProfiles = await Promise.all(
+      updatedEvents.map(async (event) => {
         const organizerWithProfile = await getUserWithProfile(event.organizer);
         const processedEvent = processEventImagesForResponse(req, event);
 

@@ -1,5 +1,5 @@
 // app/components/Events/EventCard.tsx
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { Event } from "@/lib/services/eventService";
+import { Event, eventService } from "@/lib/services/eventService";
 
 const { width } = Dimensions.get("window");
 
@@ -32,7 +32,55 @@ export default function EventCard({
   currentUserId,
 }: EventCardProps) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [currentStatus, setCurrentStatus] = useState<Event["status"]>(
+    event.status,
+  );
   const flatListRef = useRef<FlatList>(null);
+  // FIX: Use ReturnType<typeof setInterval> for cross-platform compatibility
+  const statusIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Update status based on current time
+  useEffect(() => {
+    const checkAndUpdateStatus = () => {
+      const now = new Date();
+      const startDate = new Date(event.startDate);
+      const endDate = new Date(event.endDate);
+
+      let newStatus = currentStatus;
+
+      if (currentStatus !== "cancelled") {
+        if (endDate < now && currentStatus !== "completed") {
+          newStatus = "completed";
+        } else if (
+          startDate <= now &&
+          endDate >= now &&
+          currentStatus === "upcoming"
+        ) {
+          newStatus = "ongoing";
+        }
+      }
+
+      if (newStatus !== currentStatus) {
+        setCurrentStatus(newStatus);
+        // Refresh server status
+        eventService.refreshEventStatus(event._id).catch(() => {
+          // Silent fail - client-side update is sufficient
+        });
+      }
+    };
+
+    // Check immediately
+    checkAndUpdateStatus();
+
+    // Check every 30 seconds
+    statusIntervalRef.current = setInterval(checkAndUpdateStatus, 30000);
+
+    return () => {
+      if (statusIntervalRef.current) {
+        clearInterval(statusIntervalRef.current);
+      }
+    };
+  }, [event._id, event.startDate, event.endDate]);
 
   // Check if current user is the organizer
   const isOrganizer = (() => {
@@ -248,9 +296,17 @@ export default function EventCard({
     onRsvpPress?.(event._id);
   }, [event._id, onRsvpPress]);
 
+  // Don't show interaction buttons for completed or cancelled events
+  const isEventInteractable =
+    currentStatus !== "completed" && currentStatus !== "cancelled";
+
   return (
     <TouchableOpacity
-      style={styles.card}
+      style={[
+        styles.card,
+        currentStatus === "completed" && styles.cardCompleted,
+        currentStatus === "cancelled" && styles.cardCancelled,
+      ]}
       onPress={handleCardPress}
       activeOpacity={0.7}
     >
@@ -273,6 +329,18 @@ export default function EventCard({
             {renderImageCounter()}
             {renderNavigationButtons()}
             {renderDot()}
+            {currentStatus === "completed" && (
+              <View style={styles.completedOverlay}>
+                <Ionicons name="checkmark-circle" size={48} color="#fff" />
+                <Text style={styles.completedOverlayText}>Completed</Text>
+              </View>
+            )}
+            {currentStatus === "cancelled" && (
+              <View style={styles.cancelledOverlay}>
+                <Ionicons name="close-circle" size={48} color="#fff" />
+                <Text style={styles.cancelledOverlayText}>Cancelled</Text>
+              </View>
+            )}
           </>
         ) : (
           <View style={[styles.coverImage, styles.coverPlaceholder]}>
@@ -285,10 +353,10 @@ export default function EventCard({
       <View
         style={[
           styles.statusBadge,
-          { backgroundColor: getStatusColor(event.status) },
+          { backgroundColor: getStatusColor(currentStatus) },
         ]}
       >
-        <Text style={styles.statusText}>{getStatusText(event.status)}</Text>
+        <Text style={styles.statusText}>{getStatusText(currentStatus)}</Text>
       </View>
 
       {/* Content */}
@@ -342,7 +410,7 @@ export default function EventCard({
           </View>
         )}
 
-        {showActions && !isOrganizer && (
+        {showActions && !isOrganizer && isEventInteractable && (
           <View style={styles.actions}>
             <TouchableOpacity
               style={[
@@ -384,6 +452,31 @@ export default function EventCard({
             </TouchableOpacity>
           </View>
         )}
+
+        {showActions && !isOrganizer && !isEventInteractable && (
+          <View style={styles.eventEndedMessage}>
+            <Ionicons
+              name={
+                currentStatus === "completed"
+                  ? "checkmark-circle"
+                  : "close-circle"
+              }
+              size={16}
+              color={currentStatus === "completed" ? "#10b981" : "#ef4444"}
+            />
+            <Text
+              style={[
+                styles.eventEndedText,
+                {
+                  color: currentStatus === "completed" ? "#10b981" : "#ef4444",
+                },
+              ]}
+            >
+              This event has{" "}
+              {currentStatus === "completed" ? "ended" : "been cancelled"}
+            </Text>
+          </View>
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -401,6 +494,12 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  cardCompleted: {
+    opacity: 0.8,
+  },
+  cardCancelled: {
+    opacity: 0.7,
+  },
   imageContainer: {
     position: "relative",
     width: width - 40,
@@ -417,6 +516,34 @@ const styles = StyleSheet.create({
   coverPlaceholder: {
     justifyContent: "center",
     alignItems: "center",
+  },
+  completedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 5,
+  },
+  completedOverlayText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+    marginTop: 8,
+    fontFamily: "SofiaSans-Regular",
+  },
+  cancelledOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(239, 68, 68, 0.4)",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 5,
+  },
+  cancelledOverlayText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+    marginTop: 8,
+    fontFamily: "SofiaSans-Regular",
   },
   statusBadge: {
     position: "absolute",
@@ -631,5 +758,19 @@ const styles = StyleSheet.create({
   },
   rsvpTextActive: {
     color: "white",
+  },
+  eventEndedMessage: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    backgroundColor: "#f9fafb",
+    borderRadius: 20,
+  },
+  eventEndedText: {
+    fontSize: 14,
+    fontWeight: "500",
+    fontFamily: "SofiaSans-Regular",
   },
 });

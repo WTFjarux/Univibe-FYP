@@ -1,23 +1,20 @@
 /**
  * socket/handlers/chatHandler.js — Real-time Chat Event Handlers
  *
- * CHAT CLEAR LOGIC:
- * - clearedAt timestamp stored per user in ChatRoom.clearedBy
- * - Messages with createdAt > clearedAt are visible
- * - Messages with createdAt < clearedAt are hidden
- * - clearedBy entries are NEVER auto-removed
- * - Each user has independent clearedAt timestamps
- *
- * MESSAGE DELIVERY:
- * - io.to(`user_X`) - Direct delivery to recipient's personal room
- * - socket.to(roomId) - Broadcast to other sockets in the room
- * - socket.emit - Instant feedback to sender
+ * BLOCK SYSTEM INTEGRATION:
+ * - Block checks before sending messages
+ * - Block checks before joining rooms
+ * - Block checks before forwarding
+ * - Typing indicators blocked between blocked users
+ * - Read receipts blocked between blocked users
  */
 
 const Message = require("../../models/Message");
 const ChatRoom = require("../../models/ChatRoom");
 const Profile = require("../../models/Profile");
 const User = require("../../models/User");
+const Block = require("../../models/Block");
+const BlockService = require("../../services/blockService");
 const {
   getDirectRoomId,
   addUserToRoom,
@@ -57,6 +54,8 @@ const EVENTS = {
   MESSAGE_FORWARDED_TO_ROOM: "message_forwarded_to_room",
   ERROR: "error",
   MESSAGE_ERROR: "message_error",
+  BLOCK_STATUS_CHANGED: "block_status_changed",
+  USER_BLOCKED: "user_blocked",
 };
 
 const setupChatHandlers = (io, socket) => {
@@ -77,6 +76,65 @@ const setupChatHandlers = (io, socket) => {
     }
   };
 
+  const isUserBlocked = async (userId1, userId2) => {
+    try {
+      return await Block.areUsersBlocked(userId1, userId2);
+    } catch (error) {
+      console.error("isUserBlocked error:", error);
+      return true;
+    }
+  };
+
+  const getOtherUserIdFromRoomId = (roomId, currentUserId) => {
+    if (!roomId || !roomId.startsWith("direct_")) return null;
+    const parts = roomId.split("_");
+    if (parts.length >= 3) {
+      const user1 = parts[1];
+      const user2 = parts[2];
+      return user1 === currentUserId.toString() ? user2 : user1;
+    }
+    return null;
+  };
+
+  // ===========================================================================
+  // BLOCK STATUS CHANGED - Handle real-time block updates
+  // ===========================================================================
+  socket.on(EVENTS.BLOCK_STATUS_CHANGED, async ({ blockedUserId }) => {
+    try {
+      const blockedUserIds = await BlockService.getBlockedUserIds(userId);
+      socket.blockedUserIds = blockedUserIds;
+
+      const rooms = await ChatRoom.find({
+        "participants.userId": userId,
+        type: "direct",
+      });
+
+      for (const room of rooms) {
+        const otherParticipant = room.participants.find(
+          (p) => p.userId.toString() !== userId.toString(),
+        );
+        if (
+          otherParticipant &&
+          blockedUserIds.includes(otherParticipant.userId.toString())
+        ) {
+          socket.leave(room.roomId);
+          socket.emit("left_room", {
+            roomId: room.roomId,
+            reason: "blocked",
+          });
+        }
+      }
+
+      if (blockedUserId) {
+        socket.to(`user_${blockedUserId}`).emit(EVENTS.USER_BLOCKED, {
+          blockedBy: userId,
+        });
+      }
+    } catch (error) {
+      console.error("Block status changed error:", error);
+    }
+  });
+
   // ===========================================================================
   // JOIN ROOM
   // ===========================================================================
@@ -84,7 +142,6 @@ const setupChatHandlers = (io, socket) => {
     EVENTS.JOIN_ROOM,
     async ({ roomId, otherUserId = null, type = "direct" }) => {
       try {
-        // ✅ Skip chat validation for non-chat rooms (events, notifications, etc.)
         if (
           type === "event" ||
           type === "notification" ||
@@ -98,9 +155,16 @@ const setupChatHandlers = (io, socket) => {
 
         let finalRoomId = roomId;
 
-        // For new direct chats, check connection first
         if (!finalRoomId && otherUserId) {
-          // ✅ Check if users are connected
+          const isBlocked = await isUserBlocked(userId, otherUserId);
+          if (isBlocked) {
+            socket.emit(EVENTS.ERROR, {
+              message: "Cannot join chat due to blocking",
+              isBlocked: true,
+            });
+            return;
+          }
+
           const isConnected = await areUsersConnected(userId, otherUserId);
           if (!isConnected) {
             socket.emit(EVENTS.ERROR, {
@@ -117,10 +181,22 @@ const setupChatHandlers = (io, socket) => {
           return;
         }
 
-        // For existing rooms, find or create
+        if (finalRoomId.startsWith("direct_")) {
+          const otherId = getOtherUserIdFromRoomId(finalRoomId, userId);
+          if (otherId && otherId.match(/^[0-9a-fA-F]{24}$/)) {
+            const isBlocked = await isUserBlocked(userId, otherId);
+            if (isBlocked) {
+              socket.emit(EVENTS.ERROR, {
+                message: "Cannot join chat due to blocking",
+                isBlocked: true,
+              });
+              return;
+            }
+          }
+        }
+
         let chatRoom = await ChatRoom.findOne({ roomId: finalRoomId });
 
-        // For group chats, verify user is a participant
         if (chatRoom && chatRoom.type === "group") {
           const isParticipant = chatRoom.participants.some(
             (p) => p.userId.toString() === userId.toString(),
@@ -133,19 +209,15 @@ const setupChatHandlers = (io, socket) => {
           }
         }
 
-        // For direct chats without existing room, create one (with connection check)
         if (!chatRoom) {
           const otherId =
-            otherUserId ||
-            finalRoomId.split("_").find((id) => id !== userId.toString());
+            otherUserId || getOtherUserIdFromRoomId(finalRoomId, userId);
 
-          // ✅ Verify the other user is a valid ObjectId
           if (!otherId || !otherId.match(/^[0-9a-fA-F]{24}$/)) {
             socket.emit(EVENTS.ERROR, { message: "Invalid user ID" });
             return;
           }
 
-          // ✅ Check connection before creating room
           const isConnected = await areUsersConnected(userId, otherId);
           if (!isConnected) {
             socket.emit(EVENTS.ERROR, {
@@ -178,11 +250,9 @@ const setupChatHandlers = (io, socket) => {
           await chatRoom.save();
         }
 
-        // Join the socket room
         socket.join(finalRoomId);
         addUserToRoom(userId, finalRoomId);
 
-        // Send cleared status for this user
         const clearedAt = chatRoom.getClearTimestamp
           ? chatRoom.getClearTimestamp(userId)
           : null;
@@ -197,7 +267,6 @@ const setupChatHandlers = (io, socket) => {
           isCleared: !!clearedAt,
         });
 
-        // Notify others in the room
         if (chatRoom.type === "group") {
           socket.to(finalRoomId).emit("user_joined_group", {
             userId,
@@ -232,7 +301,7 @@ const setupChatHandlers = (io, socket) => {
   });
 
   // ===========================================================================
-  // CLEAR CHAT - Sets clearedAt timestamp for current user only
+  // CLEAR CHAT
   // ===========================================================================
   socket.on(EVENTS.CLEAR_CHAT, async ({ roomId }) => {
     try {
@@ -257,7 +326,6 @@ const setupChatHandlers = (io, socket) => {
 
       const clearedAt = new Date();
 
-      // Replace existing clearedBy entry for this user
       room.clearedBy = room.clearedBy.filter(
         (entry) => entry.user.toString() !== userId,
       );
@@ -287,7 +355,6 @@ const setupChatHandlers = (io, socket) => {
       story = null,
     }) => {
       try {
-        // Validation
         if (!roomId || (!message && type !== "audio")) {
           socket.emit(EVENTS.MESSAGE_ERROR, {
             success: false,
@@ -297,82 +364,78 @@ const setupChatHandlers = (io, socket) => {
           return;
         }
 
-        // ✅ For direct chats, check connection before sending
         if (roomId.startsWith("direct_")) {
-          const parts = roomId.split("_");
-          if (parts.length >= 3) {
-            const user1 = parts[1];
-            const user2 = parts[2];
-            const otherUserId = user1 === userId.toString() ? user2 : user1;
+          const otherUserId = getOtherUserIdFromRoomId(roomId, userId);
+          if (otherUserId && otherUserId.match(/^[0-9a-fA-F]{24}$/)) {
+            const isBlocked = await isUserBlocked(userId, otherUserId);
+            if (isBlocked) {
+              socket.emit(EVENTS.MESSAGE_ERROR, {
+                success: false,
+                error: "Cannot send message due to blocking",
+                tempId,
+                isBlocked: true,
+              });
+              return;
+            }
 
-            if (otherUserId.match(/^[0-9a-fA-F]{24}$/)) {
-              const isConnected = await areUsersConnected(userId, otherUserId);
-              if (!isConnected) {
-                socket.emit(EVENTS.MESSAGE_ERROR, {
-                  success: false,
-                  error:
-                    "You can only message your connections. Please connect first.",
-                  tempId,
-                });
-                return;
-              }
+            const isConnected = await areUsersConnected(userId, otherUserId);
+            if (!isConnected) {
+              socket.emit(EVENTS.MESSAGE_ERROR, {
+                success: false,
+                error:
+                  "You can only message your connections. Please connect first.",
+                tempId,
+              });
+              return;
             }
           }
         }
 
-        // Find or create room
         let room = await ChatRoom.findOne({ roomId });
 
-        // Create room if it doesn't exist (for first message)
         if (!room) {
           if (roomId.startsWith("direct_")) {
-            const parts = roomId.split("_");
-            if (parts.length >= 3) {
-              const user1 = parts[1];
-              const user2 = parts[2];
-              const otherUserId = user1 === userId.toString() ? user2 : user1;
+            const otherUserId = getOtherUserIdFromRoomId(roomId, userId);
 
-              if (!otherUserId.match(/^[0-9a-fA-F]{24}$/)) {
-                socket.emit(EVENTS.MESSAGE_ERROR, {
-                  success: false,
-                  error: "Invalid room ID",
-                  tempId,
-                });
-                return;
-              }
-
-              // ✅ Double-check connection before creating room
-              const isConnected = await areUsersConnected(userId, otherUserId);
-              if (!isConnected) {
-                socket.emit(EVENTS.MESSAGE_ERROR, {
-                  success: false,
-                  error: "You can only message your connections.",
-                  tempId,
-                });
-                return;
-              }
-
-              room = await ChatRoom.create({
-                roomId,
-                type: "direct",
-                participants: [
-                  {
-                    userId,
-                    joinedAt: new Date(),
-                    role: "member",
-                    lastReadAt: new Date(),
-                  },
-                  {
-                    userId: otherUserId,
-                    joinedAt: new Date(),
-                    role: "member",
-                    lastReadAt: new Date(),
-                  },
-                ],
-                createdBy: userId,
-                messageCount: 0,
+            if (!otherUserId || !otherUserId.match(/^[0-9a-fA-F]{24}$/)) {
+              socket.emit(EVENTS.MESSAGE_ERROR, {
+                success: false,
+                error: "Invalid room ID",
+                tempId,
               });
+              return;
             }
+
+            const isConnected = await areUsersConnected(userId, otherUserId);
+            if (!isConnected) {
+              socket.emit(EVENTS.MESSAGE_ERROR, {
+                success: false,
+                error: "You can only message your connections.",
+                tempId,
+              });
+              return;
+            }
+
+            room = await ChatRoom.create({
+              roomId,
+              type: "direct",
+              participants: [
+                {
+                  userId,
+                  joinedAt: new Date(),
+                  role: "member",
+                  lastReadAt: new Date(),
+                },
+                {
+                  userId: otherUserId,
+                  joinedAt: new Date(),
+                  role: "member",
+                  lastReadAt: new Date(),
+                },
+              ],
+              createdBy: userId,
+              messageCount: 0,
+            });
           } else {
             socket.emit(EVENTS.MESSAGE_ERROR, {
               success: false,
@@ -383,7 +446,6 @@ const setupChatHandlers = (io, socket) => {
           }
         }
 
-        // For group chats, verify permissions
         if (room.type === "group") {
           if (!room.isParticipant(userId)) {
             socket.emit(EVENTS.MESSAGE_ERROR, {
@@ -405,7 +467,6 @@ const setupChatHandlers = (io, socket) => {
 
         const profile = await Profile.findOne({ user: userId });
 
-        // Build message data
         const messageData = {
           sender: userId,
           senderName: user?.name || "Unknown",
@@ -439,7 +500,6 @@ const setupChatHandlers = (io, socket) => {
           messageData.duration = duration || 0;
         }
 
-        // Attach reply data
         if (replyTo?.messageId) {
           const originalMsg = await Message.findById(replyTo.messageId)
             .select("thumbnailUrl")
@@ -457,18 +517,15 @@ const setupChatHandlers = (io, socket) => {
           };
         }
 
-        // Save message
         const savedMessage = new Message(messageData);
         await savedMessage.save();
 
-        // Populate for response
         const populatedMessage = await Message.findById(savedMessage._id)
           .populate("sender", "name email avatar")
           .lean();
 
         if (tempId) populatedMessage.tempId = tempId;
 
-        // Prepare last message text
         let lastMessageText;
         if (type === "audio") lastMessageText = "🎤 Voice message";
         else if (type === "image") lastMessageText = "📷 Photo";
@@ -476,7 +533,6 @@ const setupChatHandlers = (io, socket) => {
         else if (type === "location") lastMessageText = "📍 Location";
         else lastMessageText = message?.substring(0, 100) || "";
 
-        // Update room metadata
         await ChatRoom.findOneAndUpdate(
           { roomId },
           {
@@ -494,7 +550,6 @@ const setupChatHandlers = (io, socket) => {
           },
         );
 
-        // Confirm delivery to sender
         socket.emit(EVENTS.MESSAGE_DELIVERED, {
           success: true,
           messageId: savedMessage._id,
@@ -502,12 +557,9 @@ const setupChatHandlers = (io, socket) => {
           tempId,
         });
 
-        // Message delivery based on room type
         if (room.type === "group") {
-          // Group chat: broadcast to all in room
           io.to(roomId).emit(EVENTS.RECEIVE_MESSAGE, populatedMessage);
 
-          // Mark delivered for online participants
           const onlineParticipants = room.participants.filter(
             (p) =>
               p.userId.toString() !== userId.toString() &&
@@ -532,17 +584,20 @@ const setupChatHandlers = (io, socket) => {
             });
           }
         } else {
-          // Direct chat: deliver to recipient
           const otherParticipant = room.participants.find(
             (p) => p.userId.toString() !== userId.toString(),
           );
           if (otherParticipant) {
             const otherId = otherParticipant.userId.toString();
-            io.to(`user_${otherId}`).emit(
-              EVENTS.RECEIVE_MESSAGE,
-              populatedMessage,
-            );
-            socket.to(roomId).emit(EVENTS.RECEIVE_MESSAGE, populatedMessage);
+
+            const isBlocked = await isUserBlocked(userId, otherId);
+            if (!isBlocked) {
+              io.to(`user_${otherId}`).emit(
+                EVENTS.RECEIVE_MESSAGE,
+                populatedMessage,
+              );
+              socket.to(roomId).emit(EVENTS.RECEIVE_MESSAGE, populatedMessage);
+            }
 
             if (isUserOnline(otherId)) {
               await Message.findByIdAndUpdate(savedMessage._id, {
@@ -590,6 +645,23 @@ const setupChatHandlers = (io, socket) => {
           message: "Maximum 10 chats",
         });
         return;
+      }
+
+      for (const targetRoomId of targetChatIds) {
+        if (targetRoomId.startsWith("direct_")) {
+          const otherUserId = getOtherUserIdFromRoomId(targetRoomId, userId);
+          if (otherUserId) {
+            const isBlocked = await isUserBlocked(userId, otherUserId);
+            if (isBlocked) {
+              socket.emit(EVENTS.FORWARD_MESSAGE_ERROR, {
+                success: false,
+                message: "Cannot forward to a blocked user",
+                isBlocked: true,
+              });
+              return;
+            }
+          }
+        }
       }
 
       const originalMessage = await Message.findById(messageId)
@@ -736,7 +808,14 @@ const setupChatHandlers = (io, socket) => {
     try {
       if (!roomId) return;
 
-      // Find unread messages from OTHER users before marking
+      if (roomId.startsWith("direct_")) {
+        const otherUserId = getOtherUserIdFromRoomId(roomId, userId);
+        if (otherUserId) {
+          const isBlocked = await isUserBlocked(userId, otherUserId);
+          if (isBlocked) return;
+        }
+      }
+
       const unreadMessages = await Message.find({
         roomId,
         sender: { $ne: userId },
@@ -746,15 +825,12 @@ const setupChatHandlers = (io, socket) => {
         .select("sender")
         .lean();
 
-      // Collect unique sender IDs to notify
       const sendersToNotify = [
         ...new Set(unreadMessages.map((msg) => msg.sender.toString())),
       ];
 
-      // Mark all messages as read
       const modifiedCount = await Message.markRoomAsRead(roomId, userId);
 
-      // Update room's lastMessage.readBy
       const room = await ChatRoom.findOne({ roomId });
       if (
         room?.lastMessage &&
@@ -767,12 +843,10 @@ const setupChatHandlers = (io, socket) => {
         await room.save();
       }
 
-      // ✅ Broadcast to room (other sockets in the room)
       socket
         .to(roomId)
         .emit(EVENTS.MESSAGES_READ, { roomId, userId, readAt: new Date() });
 
-      // ✅ Also notify each sender directly (even if they left the room)
       sendersToNotify.forEach((senderId) => {
         io.to(`user_${senderId}`).emit(EVENTS.MESSAGES_READ, {
           roomId,
@@ -781,7 +855,6 @@ const setupChatHandlers = (io, socket) => {
         });
       });
 
-      // Acknowledge to reader
       socket.emit(EVENTS.MESSAGES_MARKED_READ, { roomId, modifiedCount });
     } catch (error) {
       console.error("Mark read error:", error);
@@ -797,20 +870,23 @@ const setupChatHandlers = (io, socket) => {
       if (message) {
         const senderId = message.sender.toString();
         if (senderId !== userId) {
-          io.to(message.roomId).emit(EVENTS.MESSAGE_READ, {
-            messageId,
-            roomId: message.roomId,
-            userId,
-            readAt: new Date(),
-          });
-          const senderSocketId = getUserSocketId(senderId);
-          if (senderSocketId) {
-            io.to(senderSocketId).emit(EVENTS.MESSAGE_READ, {
+          const isBlocked = await isUserBlocked(userId, senderId);
+          if (!isBlocked) {
+            io.to(message.roomId).emit(EVENTS.MESSAGE_READ, {
               messageId,
               roomId: message.roomId,
               userId,
               readAt: new Date(),
             });
+            const senderSocketId = getUserSocketId(senderId);
+            if (senderSocketId) {
+              io.to(senderSocketId).emit(EVENTS.MESSAGE_READ, {
+                messageId,
+                roomId: message.roomId,
+                userId,
+                readAt: new Date(),
+              });
+            }
           }
         }
         socket.emit("message_marked_read", { messageId });
@@ -819,22 +895,6 @@ const setupChatHandlers = (io, socket) => {
       console.error("Mark message read error:", error);
     }
   });
-
-  const emitUnreadChatCount = async (io, userId) => {
-    const Chat = require("../../models/Chat");
-    const Message = require("../../models/Message");
-
-    const chats = await Chat.find({ participants: userId }).select("_id");
-    const chatIds = chats.map((c) => c._id);
-
-    const unreadCount = await Message.countDocuments({
-      chat: { $in: chatIds },
-      sender: { $ne: userId },
-      readBy: { $ne: userId },
-    });
-
-    io.to(`user_${userId}`).emit("unreadChatCount", { count: unreadCount });
-  };
 
   // ===========================================================================
   // AUDIO PLAYED
@@ -942,20 +1002,34 @@ const setupChatHandlers = (io, socket) => {
   });
 
   // ===========================================================================
-  // TYPING INDICATORS
+  // TYPING INDICATORS - Blocked between blocked users
   // ===========================================================================
-  socket.on(EVENTS.TYPING, ({ roomId }) => {
+  socket.on(EVENTS.TYPING, async ({ roomId }) => {
+    if (roomId.startsWith("direct_")) {
+      const otherUserId = getOtherUserIdFromRoomId(roomId, userId);
+      if (otherUserId) {
+        const isBlocked = await isUserBlocked(userId, otherUserId);
+        if (isBlocked) return;
+      }
+    }
     socket
       .to(roomId)
       .emit(EVENTS.TYPING, { userId, userName: user?.name, roomId });
   });
 
-  socket.on(EVENTS.STOP_TYPING, ({ roomId }) => {
+  socket.on(EVENTS.STOP_TYPING, async ({ roomId }) => {
+    if (roomId.startsWith("direct_")) {
+      const otherUserId = getOtherUserIdFromRoomId(roomId, userId);
+      if (otherUserId) {
+        const isBlocked = await isUserBlocked(userId, otherUserId);
+        if (isBlocked) return;
+      }
+    }
     socket.to(roomId).emit(EVENTS.STOP_TYPING, { userId, roomId });
   });
 
   // ===========================================================================
-  // GET MESSAGE HISTORY (with clearedAt filter)
+  // GET MESSAGE HISTORY
   // ===========================================================================
   socket.on(
     EVENTS.GET_MESSAGES,
@@ -969,7 +1043,6 @@ const setupChatHandlers = (io, socket) => {
         );
         const clearedAt = clearedEntry ? clearedEntry.clearedAt : null;
 
-        // Build query with clearedAt filter
         let query = { roomId, isDeleted: false, deletedFor: { $ne: userId } };
         if (clearedAt) {
           query.createdAt = { $gt: clearedAt };

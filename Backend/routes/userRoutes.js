@@ -5,10 +5,16 @@ const router = express.Router();
 const mongoose = require("mongoose");
 const User = require("../models/User");
 const { protect } = require("../middleware/authmiddleware");
+const {
+  filterBlockedUsers,
+  checkBlockStatus,
+} = require("../middleware/blockMiddleware");
+const BlockService = require("../services/blockService");
 const { isUserOnline } = require("../socket/utils/roomManager");
 
-// All routes require authentication
+// Apply block filtering to all routes
 router.use(protect);
+router.use(filterBlockedUsers);
 
 // =============================================================================
 // HELPER: Validate MongoDB ObjectId
@@ -23,15 +29,79 @@ const isValidObjectId = (id) => {
 // =============================================================================
 
 /**
+ * GET /api/users/search
+ * Exclude blocked users from search results
+ */
+router.get("/search", async (req, res) => {
+  try {
+    const { query } = req.query;
+    const blockedUserIds = req.blockedUserIds;
+
+    if (!query || query.trim().length < 2) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const users = await User.find({
+      _id: { $nin: [...blockedUserIds, req.user._id] },
+      $or: [
+        { name: { $regex: query, $options: "i" } },
+        { username: { $regex: query, $options: "i" } },
+      ],
+    })
+      .select("name username profilePicture")
+      .limit(20)
+      .lean();
+
+    res.json({ success: true, data: users });
+  } catch (error) {
+    console.error("Search users error:", error.message);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+/**
+ * GET /api/users/suggestions
+ * Get connection suggestions excluding blocked users
+ */
+router.get("/suggestions", async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const limit = parseInt(req.query.limit) || 10;
+
+    const suggestions = await User.getConnectionSuggestions(userId, limit);
+
+    res.json({ success: true, data: suggestions });
+  } catch (error) {
+    console.error("Get suggestions error:", error.message);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+/**
+ * GET /api/users/online-friends
+ * Get online connected users excluding blocked users
+ */
+router.get("/online-friends", async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const onlineFriends = await User.getOnlineFriends(userId);
+
+    res.json({ success: true, data: onlineFriends });
+  } catch (error) {
+    console.error("Get online friends error:", error.message);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+/**
  * GET /api/users/:userId/online-status
  * Check if a user is currently online
- * Returns false gracefully for invalid IDs instead of crashing
+ * Blocked users can't see each other's online status
  */
-router.get("/:userId/online-status", async (req, res) => {
+router.get("/:userId/online-status", checkBlockStatus, async (req, res) => {
   try {
     const { userId } = req.params;
 
-    // ✅ Validate ObjectId BEFORE querying database
     if (!isValidObjectId(userId)) {
       return res.json({
         success: true,
@@ -50,7 +120,6 @@ router.get("/:userId/online-status", async (req, res) => {
       });
     }
 
-    // Check socket online status as well
     const socketOnline = isUserOnline ? isUserOnline(userId) : false;
 
     res.json({
@@ -60,7 +129,6 @@ router.get("/:userId/online-status", async (req, res) => {
     });
   } catch (error) {
     console.error("Get online status error:", error.message);
-    // Return false instead of error for better UX
     res.json({
       success: true,
       isOnline: false,
@@ -71,13 +139,12 @@ router.get("/:userId/online-status", async (req, res) => {
 
 /**
  * GET /api/users/:userId
- * Get user by ID
+ * Add block check
  */
-router.get("/:userId", async (req, res) => {
+router.get("/:userId", checkBlockStatus, async (req, res) => {
   try {
     const { userId } = req.params;
 
-    // Validate ObjectId
     if (!isValidObjectId(userId)) {
       return res.status(400).json({
         success: false,
@@ -99,38 +166,6 @@ router.get("/:userId", async (req, res) => {
     res.json({ success: true, data: user });
   } catch (error) {
     console.error("Get user error:", error.message);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-    });
-  }
-});
-
-/**
- * GET /api/users/search
- * Search users by name or username
- */
-router.get("/search", async (req, res) => {
-  try {
-    const { query } = req.query;
-
-    if (!query || query.trim().length < 2) {
-      return res.json({ success: true, data: [] });
-    }
-
-    const users = await User.find({
-      $or: [
-        { name: { $regex: query, $options: "i" } },
-        { username: { $regex: query, $options: "i" } },
-      ],
-    })
-      .select("name username profilePicture")
-      .limit(20)
-      .lean();
-
-    res.json({ success: true, data: users });
-  } catch (error) {
-    console.error("Search users error:", error.message);
     res.status(500).json({ success: false, message: "Server error" });
   }
 });

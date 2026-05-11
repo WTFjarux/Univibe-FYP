@@ -1,4 +1,4 @@
-// app/profile/[id].tsx - With chat integration, connection management, and skeleton loading
+// app/profile/[id].tsx
 
 import React, { useState, useCallback, useEffect } from "react";
 import {
@@ -20,6 +20,7 @@ import { useNavigation } from "@react-navigation/native";
 import { useAuth } from "../../lib/contexts/AuthContext";
 import { profileService } from "../../lib/services/profileService";
 import { connectionService } from "../../lib/services/connectionService";
+import { toggleBlockUser } from "../../lib/services/contentService";
 import {
   getProfilePosts,
   toggleLike,
@@ -80,7 +81,7 @@ export default function PublicProfileScreen() {
   const navigation = useNavigation();
   const { user: currentUser, refreshUserProfile, token } = useAuth();
 
-  // Profile state
+  // ALL STATE DECLARATIONS - Must be at the top, before any conditional returns
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -89,14 +90,12 @@ export default function PublicProfileScreen() {
     useState<ConnectionStatus>("not_connected");
   const [connectionLoading, setConnectionLoading] = useState(false);
 
-  // Info bar state
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [infoType, setInfoType] = useState<"success" | "error" | "info">(
     "info",
   );
   const slideAnim = useState(new Animated.Value(100))[0];
 
-  // Posts state
   const [posts, setPosts] = useState<Post[]>([]);
   const [postsLoading, setPostsLoading] = useState(false);
   const [initialPostsLoading, setInitialPostsLoading] = useState(true);
@@ -108,41 +107,17 @@ export default function PublicProfileScreen() {
     isConnected: false,
   });
 
-  // User interaction states
   const [savedPosts, setSavedPosts] = useState<Set<string>>(new Set());
   const [hiddenPosts, setHiddenPosts] = useState<Set<string>>(new Set());
   const [mutedUsers, setMutedUsers] = useState<Set<string>>(new Set());
   const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [isBlockedByOwner, setIsBlockedByOwner] = useState(false);
+  const [profileBlocked, setProfileBlocked] = useState(false);
 
   const isOwnProfile = currentUser?.id === id;
 
-  // Show info bar message from bottom
-  const showInfoBar = (
-    message: string,
-    type: "success" | "error" | "info" = "info",
-  ) => {
-    setInfoMessage(message);
-    setInfoType(type);
-
-    Animated.sequence([
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-      Animated.delay(3000),
-      Animated.timing(slideAnim, {
-        toValue: 100,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      setInfoMessage(null);
-      slideAnim.setValue(100);
-    });
-  };
-
-  // Hide tab bar when this screen mounts
+  // ALL HOOKS - Must be called unconditionally, before any conditional returns
   useEffect(() => {
     const parent = navigation.getParent();
     if (parent) {
@@ -155,87 +130,97 @@ export default function PublicProfileScreen() {
     };
   }, [navigation]);
 
-  const goBack = () => router.back();
+  // This hook MUST be called unconditionally, even if profile is blocked
+  useFocusEffect(
+    useCallback(() => {
+      if (token) loadProfile();
+    }, [id, token]),
+  );
 
-  // Start chat with user
-  const startChat = async () => {
-    if (!profile) return;
+  // ALL FUNCTION DECLARATIONS - Must be defined before any conditional returns
+  const showInfoBar = useCallback(
+    (message: string, type: "success" | "error" | "info" = "info") => {
+      setInfoMessage(message);
+      setInfoType(type);
 
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/chat/direct/${profile.user._id}`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-      const data = await response.json();
+      Animated.sequence([
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.delay(3000),
+        Animated.timing(slideAnim, {
+          toValue: 100,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        setInfoMessage(null);
+        slideAnim.setValue(100);
+      });
+    },
+    [slideAnim],
+  );
 
-      if (data.success) {
-        const avatarUrl = profile.profilePicture || "";
-        router.push({
-          pathname: "/screens/ChatScreen",
-          params: {
-            roomId: data.data.roomId,
-            otherUserName: profile.fullName,
-            otherUserId: profile.user._id,
-            otherUserAvatar: avatarUrl,
-            isGroup: "false",
-          },
-        });
+  const goBack = useCallback(() => router.back(), [router]);
+
+  const loadProfilePosts = useCallback(
+    async (page = 1, shouldAppend = false) => {
+      if (!id || postsLoading) return;
+
+      if (!isOwnProfile && connectionStatus !== "connected") {
+        setInitialPostsLoading(false);
+        return;
+      }
+
+      if (shouldAppend) {
+        setLoadingMorePosts(true);
       } else {
-        showInfoBar(data.message || "Failed to start chat", "error");
+        setInitialPostsLoading(true);
       }
-    } catch (error) {
-      console.error("Error starting chat:", error);
-      showInfoBar("Failed to start chat", "error");
-    }
-  };
+      setPostsLoading(true);
 
-  // Load profile posts based on connection status
-  const loadProfilePosts = async (page = 1, shouldAppend = false) => {
-    if (!id || postsLoading) return;
+      try {
+        const response = await getProfilePosts(id as string, page, 10);
 
-    if (shouldAppend) {
-      setLoadingMorePosts(true);
-    } else {
-      setInitialPostsLoading(true);
-    }
-    setPostsLoading(true);
+        if (response.success && response.data) {
+          const filteredPosts = response.data.posts.filter(
+            (post) =>
+              !hiddenPosts.has(post._id) &&
+              !mutedUsers.has(post.user?._id || "") &&
+              !blockedUsers.has(post.user?._id || ""),
+          );
 
-    try {
-      const response = await getProfilePosts(id as string, page, 10);
-
-      if (response.success && response.data) {
-        const filteredPosts = response.data.posts.filter(
-          (post) =>
-            !hiddenPosts.has(post._id) &&
-            !mutedUsers.has(post.user?._id || "") &&
-            !blockedUsers.has(post.user?._id || ""),
-        );
-
-        setPosts((prev) =>
-          shouldAppend ? [...prev, ...filteredPosts] : filteredPosts,
-        );
-        setHasMorePosts(response.data.pagination.pages > page);
-        setViewerStatus(response.data.viewerStatus);
-        setPostsPage(page);
+          setPosts((prev) =>
+            shouldAppend ? [...prev, ...filteredPosts] : filteredPosts,
+          );
+          setHasMorePosts(response.data.pagination.pages > page);
+          setViewerStatus(response.data.viewerStatus);
+          setPostsPage(page);
+        }
+      } catch (error) {
+        console.error("Error loading profile posts:", error);
+        showInfoBar("Failed to load posts", "error");
+      } finally {
+        setPostsLoading(false);
+        setInitialPostsLoading(false);
+        setLoadingMorePosts(false);
       }
-    } catch (error) {
-      console.error("Error loading profile posts:", error);
-      showInfoBar("Failed to load posts", "error");
-    } finally {
-      setPostsLoading(false);
-      setInitialPostsLoading(false);
-      setLoadingMorePosts(false);
-    }
-  };
+    },
+    [
+      id,
+      postsLoading,
+      isOwnProfile,
+      connectionStatus,
+      hiddenPosts,
+      mutedUsers,
+      blockedUsers,
+      showInfoBar,
+    ],
+  );
 
-  const loadMorePosts = () => {
-    if (!postsLoading && hasMorePosts && token) {
-      loadProfilePosts(postsPage + 1, true);
-    }
-  };
-
-  // Load connection status
-  const loadConnectionStatus = async () => {
+  const loadConnectionStatus = useCallback(async () => {
     if (!id || isOwnProfile) return;
 
     try {
@@ -259,18 +244,32 @@ export default function PublicProfileScreen() {
           status = "pending_received";
 
         setConnectionStatus(status);
+
+        if (status === "connected") {
+          await loadProfilePosts(1, false);
+        } else {
+          setInitialPostsLoading(false);
+        }
       }
     } catch (error) {
       console.error("Error loading connection status:", error);
     }
-  };
+  }, [id, isOwnProfile, loadProfilePosts]);
 
-  // Load profile data
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async () => {
     if (!id) return;
     setLoading(true);
     try {
       const response = await profileService.getPublicProfile(id as string);
+
+      if (response.isBlocked || response.isBlockedByOwner) {
+        setProfileBlocked(true);
+        setIsBlocked(response.isBlocked || false);
+        setIsBlockedByOwner(response.isBlockedByOwner || false);
+        setLoading(false);
+        return;
+      }
+
       if (response.success && response.data) {
         const profileData = response.data.profile;
         const userData = response.data.user;
@@ -302,145 +301,233 @@ export default function PublicProfileScreen() {
         });
 
         if (!isOwnProfile) await loadConnectionStatus();
-        await loadProfilePosts(1, false);
+        else await loadProfilePosts(1, false);
       } else {
         showInfoBar(response.message || "Failed to load profile", "error");
         goBack();
       }
     } catch (error: any) {
-      console.error("Error loading profile:", error);
-      showInfoBar(error.message || "Failed to load profile", "error");
-      goBack();
+      if (error.response?.status === 403) {
+        setProfileBlocked(true);
+        setIsBlocked(error.response?.data?.isBlocked || false);
+        setIsBlockedByOwner(error.response?.data?.isBlockedByOwner || false);
+      } else {
+        showInfoBar(error.message || "Failed to load profile", "error");
+        goBack();
+      }
     } finally {
       setLoading(false);
       setInitialLoading(false);
     }
-  };
+  }, [
+    id,
+    isOwnProfile,
+    loadConnectionStatus,
+    loadProfilePosts,
+    showInfoBar,
+    goBack,
+  ]);
 
-  const onRefresh = async () => {
+  const startChat = useCallback(async () => {
+    if (!profile) return;
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/chat/direct/${profile.user._id}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const data = await response.json();
+
+      if (data.success) {
+        const avatarUrl = profile.profilePicture || "";
+        router.push({
+          pathname: "/screens/ChatScreen",
+          params: {
+            roomId: data.data.roomId,
+            otherUserName: profile.fullName,
+            otherUserId: profile.user._id,
+            otherUserAvatar: avatarUrl,
+            isGroup: "false",
+          },
+        });
+      } else {
+        showInfoBar(data.message || "Failed to start chat", "error");
+      }
+    } catch (error) {
+      console.error("Error starting chat:", error);
+      showInfoBar("Failed to start chat", "error");
+    }
+  }, [profile, token, router, showInfoBar]);
+
+  const onRefresh = useCallback(async () => {
     if (!token) return;
     setRefreshing(true);
     await loadProfile();
     setRefreshing(false);
-  };
+  }, [token, loadProfile]);
 
-  const refreshCurrentUserProfile = async () => {
+  const refreshCurrentUserProfile = useCallback(async () => {
     try {
       if (refreshUserProfile) await refreshUserProfile();
       if (isOwnProfile) await loadProfile();
     } catch (error) {
       console.error("Error refreshing current user profile:", error);
     }
-  };
+  }, [refreshUserProfile, isOwnProfile, loadProfile]);
 
-  // Handle like action
-  const handleLike = async (postId: string) => {
-    if (!token) {
-      showInfoBar("Please login to like posts", "info");
-      return;
-    }
-
-    try {
-      const response = await toggleLike(postId);
-
-      setPosts((prevPosts) =>
-        prevPosts.map((post) =>
-          post._id === postId
-            ? {
-                ...post,
-                isLiked: response.isLiked,
-                likeCount: response.likes,
-              }
-            : post,
-        ),
-      );
-    } catch (error: any) {
-      console.error("Error liking post:", error);
-      showInfoBar(error.message || "Failed to like post", "error");
-    }
-  };
-
-  const handleComment = (postId: string) => {
-    if (!token) {
-      showInfoBar("Please login to comment", "info");
-      return;
-    }
-    router.push({
-      pathname: "/components/Feed/Comment/CommentsScreen",
-      params: { postId },
-    });
-  };
-
-  const handleShare = (postId: string) => {
-    showInfoBar("Share feature coming soon!", "info");
-  };
-
-  const handleEditPost = (postId: string) => {
-    router.push({
-      pathname: "/components/Feed/Post/EditPost",
-      params: { postId },
-    });
-  };
-
-  const handleDeletePost = async (postId: string) => {
-    try {
-      await deletePost(postId);
-      setPosts((prev) => prev.filter((post) => post._id !== postId));
-      showInfoBar("Post deleted successfully", "success");
-    } catch (error: any) {
-      console.error("Error deleting post:", error);
-      showInfoBar(error.message || "Failed to delete post", "error");
-    }
-  };
-
-  const handleSavePost = (postId: string) => {
-    setSavedPosts((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(postId)) {
-        newSet.delete(postId);
-        showInfoBar("Post removed from your saved items", "info");
-      } else {
-        newSet.add(postId);
-        showInfoBar("Post added to your saved items", "success");
+  const handleLike = useCallback(
+    async (postId: string) => {
+      if (!token) {
+        showInfoBar("Please login to like posts", "info");
+        return;
       }
-      return newSet;
-    });
-  };
 
-  const handleReportPost = (postId: string) => {
-    showInfoBar("Thank you for reporting this post", "success");
-  };
+      try {
+        const response = await toggleLike(postId);
 
-  const handleHidePost = (postId: string) => {
-    setHiddenPosts((prev) => new Set(prev).add(postId));
-    setPosts((prev) => prev.filter((post) => post._id !== postId));
-    showInfoBar("Post hidden, you won't see this post anymore", "info");
-  };
+        setPosts((prevPosts) =>
+          prevPosts.map((post) =>
+            post._id === postId
+              ? {
+                  ...post,
+                  isLiked: response.isLiked,
+                  likeCount: response.likes,
+                }
+              : post,
+          ),
+        );
+      } catch (error: any) {
+        console.error("Error liking post:", error);
+        showInfoBar(error.message || "Failed to like post", "error");
+      }
+    },
+    [token, showInfoBar],
+  );
 
-  const handleCopyLink = (postId: string) => {
-    showInfoBar("Post link copied to clipboard", "success");
-  };
+  const handleComment = useCallback(
+    (postId: string) => {
+      if (!token) {
+        showInfoBar("Please login to comment", "info");
+        return;
+      }
+      router.push({
+        pathname: "/components/Feed/Comment/CommentsScreen",
+        params: { postId },
+      });
+    },
+    [token, router, showInfoBar],
+  );
 
-  const handleMuteUser = (userId: string) => {
-    setMutedUsers((prev) => new Set(prev).add(userId));
-    setPosts((prev) => prev.filter((post) => post.user?._id !== userId));
-    showInfoBar(
-      "User muted, you won't see posts from this user anymore",
-      "info",
-    );
-  };
+  const handleShare = useCallback(
+    (postId: string) => {
+      showInfoBar("Share feature coming soon!", "info");
+    },
+    [showInfoBar],
+  );
 
-  const handleBlockUser = (userId: string) => {
-    setBlockedUsers((prev) => new Set(prev).add(userId));
-    setPosts((prev) => prev.filter((post) => post.user?._id !== userId));
-    showInfoBar(
-      "User blocked, you won't see posts from this user anymore",
-      "info",
-    );
-  };
+  const handleEditPost = useCallback(
+    (postId: string) => {
+      router.push({
+        pathname: "/components/Feed/Post/EditPost",
+        params: { postId },
+      });
+    },
+    [router],
+  );
 
-  // Handle cancel connection request
-  const handleCancelConnectionRequest = async () => {
+  const handleDeletePost = useCallback(
+    async (postId: string) => {
+      try {
+        await deletePost(postId);
+        setPosts((prev) => prev.filter((post) => post._id !== postId));
+        showInfoBar("Post deleted successfully", "success");
+      } catch (error: any) {
+        console.error("Error deleting post:", error);
+        showInfoBar(error.message || "Failed to delete post", "error");
+      }
+    },
+    [showInfoBar],
+  );
+
+  const handleSavePost = useCallback(
+    (postId: string) => {
+      setSavedPosts((prev) => {
+        const newSet = new Set(prev);
+        if (newSet.has(postId)) {
+          newSet.delete(postId);
+          showInfoBar("Post removed from your saved items", "info");
+        } else {
+          newSet.add(postId);
+          showInfoBar("Post added to your saved items", "success");
+        }
+        return newSet;
+      });
+    },
+    [showInfoBar],
+  );
+
+  const handleReportPost = useCallback(
+    (postId: string) => {
+      showInfoBar("Thank you for reporting this post", "success");
+    },
+    [showInfoBar],
+  );
+
+  const handleHidePost = useCallback(
+    (postId: string) => {
+      setHiddenPosts((prev) => new Set(prev).add(postId));
+      setPosts((prev) => prev.filter((post) => post._id !== postId));
+      showInfoBar("Post hidden, you won't see this post anymore", "info");
+    },
+    [showInfoBar],
+  );
+
+  const handleCopyLink = useCallback(
+    (postId: string) => {
+      showInfoBar("Post link copied to clipboard", "success");
+    },
+    [showInfoBar],
+  );
+
+  const handleMuteUser = useCallback(
+    (userId: string) => {
+      setMutedUsers((prev) => new Set(prev).add(userId));
+      setPosts((prev) => prev.filter((post) => post.user?._id !== userId));
+      showInfoBar(
+        "User muted, you won't see posts from this user anymore",
+        "info",
+      );
+    },
+    [showInfoBar],
+  );
+
+  const handleBlockUser = useCallback(
+    async (userId: string) => {
+      if (!token || !userId) return;
+
+      setBlockedUsers((prev) => new Set(prev).add(userId));
+      setPosts((prev) => prev.filter((post) => post.user?._id !== userId));
+      showInfoBar("User blocked successfully", "info");
+
+      try {
+        const response = await toggleBlockUser(userId);
+        if (response.blocked) {
+          setIsBlocked(true);
+          setProfileBlocked(true);
+        }
+      } catch (error: any) {
+        setBlockedUsers((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(userId);
+          return newSet;
+        });
+        showInfoBar(error.message || "Failed to block user", "error");
+      }
+    },
+    [token, showInfoBar],
+  );
+
+  const handleCancelConnectionRequest = useCallback(async () => {
     if (!profile) return;
     setConnectionLoading(true);
 
@@ -466,10 +553,9 @@ export default function PublicProfileScreen() {
     } finally {
       setConnectionLoading(false);
     }
-  };
+  }, [profile, showInfoBar]);
 
-  // Handle connection action
-  const handleConnectionAction = async () => {
+  const handleConnectionAction = useCallback(async () => {
     if (!profile) return;
 
     if (connectionStatus === "connected") {
@@ -503,8 +589,8 @@ export default function PublicProfileScreen() {
                         }
                       : null,
                   );
+                  setPosts([]);
                   await refreshCurrentUserProfile();
-                  await loadProfilePosts(1, false);
                   showInfoBar(
                     `Removed connection with ${profile.fullName}`,
                     "info",
@@ -616,15 +702,34 @@ export default function PublicProfileScreen() {
     } finally {
       setConnectionLoading(false);
     }
-  };
+  }, [
+    profile,
+    connectionStatus,
+    refreshCurrentUserProfile,
+    loadProfilePosts,
+    showInfoBar,
+  ]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (token) loadProfile();
-    }, [id, token]),
-  );
+  const loadMorePosts = useCallback(() => {
+    if (
+      !postsLoading &&
+      hasMorePosts &&
+      token &&
+      connectionStatus === "connected"
+    ) {
+      loadProfilePosts(postsPage + 1, true);
+    }
+  }, [
+    postsLoading,
+    hasMorePosts,
+    token,
+    connectionStatus,
+    postsPage,
+    loadProfilePosts,
+  ]);
 
-  const getConnectionButtonConfig = () => {
+  // Derived values - safe to compute after all hooks
+  const getConnectionButtonConfig = useCallback(() => {
     switch (connectionStatus) {
       case "connected":
         return {
@@ -651,11 +756,11 @@ export default function PublicProfileScreen() {
           style: "connect" as const,
         };
     }
-  };
+  }, [connectionStatus]);
 
   const buttonConfig = getConnectionButtonConfig();
 
-  const getButtonStyle = () => {
+  const getButtonStyle = useCallback(() => {
     switch (buttonConfig.style) {
       case "connected":
         return publicStyles.connectionButton_connected;
@@ -666,17 +771,20 @@ export default function PublicProfileScreen() {
       default:
         return publicStyles.connectionButton_connect;
     }
-  };
+  }, [buttonConfig.style]);
 
-  const formattedUser = {
-    _id: profile?.user._id,
-    name: profile?.fullName,
-    email: profile?.user.email,
-    username: profile?.username,
-    profileComplete: profile?.user.profileComplete,
-  };
+  const formattedUser = profile
+    ? {
+        _id: profile.user._id,
+        name: profile.fullName,
+        email: profile.user.email,
+        username: profile.username,
+        profileComplete: profile.user.profileComplete,
+      }
+    : null;
 
-  const renderInfoBar = () => {
+  // Render functions - safe to define after all hooks
+  const renderInfoBar = useCallback(() => {
     if (!infoMessage) return null;
     const bg =
       infoType === "success"
@@ -701,28 +809,176 @@ export default function PublicProfileScreen() {
         <Text style={publicStyles.infoBarText}>{infoMessage}</Text>
       </Animated.View>
     );
-  };
+  }, [infoMessage, infoType, slideAnim]);
 
-  const renderPost = ({ item }: { item: Post }) => (
-    <View style={publicStyles.postCardContainer}>
-      <PostCard
-        post={item}
-        onLikePress={handleLike}
-        onCommentPress={handleComment}
-        onSharePress={handleShare}
-        onEdit={handleEditPost}
-        onDelete={handleDeletePost}
-        onSave={handleSavePost}
-        onReport={handleReportPost}
-        onHide={handleHidePost}
-        onCopyLink={handleCopyLink}
-        onMuteUser={handleMuteUser}
-        onBlockUser={handleBlockUser}
-      />
-    </View>
+  const renderPost = useCallback(
+    ({ item }: { item: Post }) => (
+      <View style={publicStyles.postCardContainer}>
+        <PostCard
+          post={item}
+          onLikePress={handleLike}
+          onCommentPress={handleComment}
+          onSharePress={handleShare}
+          onEdit={handleEditPost}
+          onDelete={handleDeletePost}
+          onSave={handleSavePost}
+          onReport={handleReportPost}
+          onHide={handleHidePost}
+          onCopyLink={handleCopyLink}
+          onMuteUser={handleMuteUser}
+          onBlockUser={handleBlockUser}
+        />
+      </View>
+    ),
+    [
+      handleLike,
+      handleComment,
+      handleShare,
+      handleEditPost,
+      handleDeletePost,
+      handleSavePost,
+      handleReportPost,
+      handleHidePost,
+      handleCopyLink,
+      handleMuteUser,
+      handleBlockUser,
+    ],
   );
 
-  // Show full profile skeleton during initial load
+  const renderPostsSection = useCallback(() => {
+    if (!profile) return null;
+
+    if (isOwnProfile) {
+      if (initialPostsLoading) {
+        return <InitialPostsSkeleton />;
+      }
+      return (
+        <>
+          <ProfileInfo profile={profile} user={profile.user} />
+          <ProfileStats
+            stats={{
+              posts: profile.stats?.posts || 0,
+              connections: profile.stats?.connections || 0,
+              groups: profile.stats?.groups || 0,
+            }}
+          />
+          <View style={publicStyles.postsHeader}>
+            <Text style={publicStyles.postsTitle}>Posts</Text>
+          </View>
+        </>
+      );
+    }
+
+    if (connectionStatus === "connected") {
+      if (initialPostsLoading) {
+        return <InitialPostsSkeleton />;
+      }
+      return (
+        <>
+          <ProfileInfo profile={profile} user={profile.user} />
+          <ProfileStats
+            stats={{
+              posts: profile.stats?.posts || 0,
+              connections: profile.stats?.connections || 0,
+              groups: profile.stats?.groups || 0,
+            }}
+          />
+          <View style={publicStyles.postsHeader}>
+            <Text style={publicStyles.postsTitle}>Posts</Text>
+          </View>
+        </>
+      );
+    } else {
+      return (
+        <>
+          <ProfileInfo profile={profile} user={profile.user} />
+          <ProfileStats
+            stats={{
+              posts: profile.stats?.posts || 0,
+              connections: profile.stats?.connections || 0,
+              groups: profile.stats?.groups || 0,
+            }}
+          />
+          <View style={publicStyles.privatePostsContainer}>
+            <Text style={publicStyles.privatePostsTitle}>
+              Posts are private
+            </Text>
+            <Text style={publicStyles.privatePostsText}>
+              Connect with {profile.fullName} to see their posts and updates.
+            </Text>
+            <TouchableOpacity
+              style={publicStyles.connectPromptButton}
+              onPress={handleConnectionAction}
+              disabled={connectionLoading}
+            >
+              {connectionLoading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="person-add" size={20} color="#fff" />
+                  <Text style={publicStyles.connectPromptButtonText}>
+                    {connectionStatus === "pending_sent"
+                      ? "Request Sent"
+                      : connectionStatus === "pending_received"
+                        ? "Accept Request"
+                        : "Connect to View Posts"}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </>
+      );
+    }
+  }, [
+    profile,
+    isOwnProfile,
+    connectionStatus,
+    initialPostsLoading,
+    connectionLoading,
+    handleConnectionAction,
+  ]);
+
+  // NOW ALL CONDITIONAL RETURNS ARE SAFE
+  // All hooks and functions are defined above, so these returns won't break hook order
+
+  // Blocked state - Render blocked UI
+  if (profileBlocked) {
+    return (
+      <SafeAreaView style={styles.container} edges={["top"]}>
+        <View style={publicStyles.header}>
+          <TouchableOpacity onPress={goBack} style={publicStyles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#111827" />
+          </TouchableOpacity>
+          <Text style={publicStyles.headerTitle}>
+            {isBlockedByOwner ? "Blocked" : "Profile"}
+          </Text>
+          <View style={{ width: 40 }} />
+        </View>
+
+        <View style={publicStyles.blockedContainer}>
+          <Ionicons
+            name={isBlockedByOwner ? "ban-outline" : "person-remove-outline"}
+            size={80}
+            color="#ef4444"
+          />
+          <Text style={publicStyles.blockedTitle}>
+            {isBlockedByOwner ? "You've been blocked" : "Profile not available"}
+          </Text>
+          <Text style={publicStyles.blockedText}>
+            {isBlockedByOwner
+              ? "This user has blocked you. You cannot view their profile or interact with them."
+              : "You have blocked this user. Unblock them to view their profile."}
+          </Text>
+          <TouchableOpacity style={publicStyles.blockedButton} onPress={goBack}>
+            <Text style={publicStyles.blockedButtonText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Initial loading state
   if (initialLoading) {
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
@@ -750,9 +1006,9 @@ export default function PublicProfileScreen() {
     );
   }
 
+  // Main profile render
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      {/* Header */}
       <View style={publicStyles.header}>
         <TouchableOpacity onPress={goBack} style={publicStyles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#111827" />
@@ -764,7 +1020,7 @@ export default function PublicProfileScreen() {
       </View>
 
       <FlatList
-        data={posts}
+        data={connectionStatus === "connected" || isOwnProfile ? posts : []}
         renderItem={renderPost}
         keyExtractor={(item) => item._id}
         showsVerticalScrollIndicator={false}
@@ -779,17 +1035,18 @@ export default function PublicProfileScreen() {
         }
         ListHeaderComponent={
           <>
-            <ProfileHeader
-              user={formattedUser}
-              profile={profile}
-              uploading={false}
-              coverUploading={false}
-              onImagePress={() => {}}
-              onCoverPhotoPress={() => {}}
-              isPublicView={true}
-            />
+            {formattedUser && (
+              <ProfileHeader
+                user={formattedUser}
+                profile={profile}
+                uploading={false}
+                coverUploading={false}
+                onImagePress={() => {}}
+                onCoverPhotoPress={() => {}}
+                isPublicView={true}
+              />
+            )}
             <View style={styles.content}>
-              {/* Connection Buttons (only for non-own profiles) */}
               {!isOwnProfile && (
                 <View style={publicStyles.connectionButtonContainer}>
                   {connectionStatus === "pending_received" ? (
@@ -887,36 +1144,22 @@ export default function PublicProfileScreen() {
                 </View>
               )}
 
-              {/* Show skeleton while posts are loading, otherwise show content */}
-              {initialPostsLoading ? (
-                <InitialPostsSkeleton />
-              ) : (
-                <>
-                  <ProfileInfo profile={profile} user={profile.user} />
-                  <ProfileStats
-                    stats={{
-                      posts: profile.stats?.posts || 0,
-                      connections: profile.stats?.connections || 0,
-                      groups: profile.stats?.groups || 0,
-                    }}
-                  />
-                  <View style={publicStyles.postsHeader}>
-                    <Text style={publicStyles.postsTitle}>Posts</Text>
-                  </View>
-                </>
-              )}
+              {renderPostsSection()}
             </View>
           </>
         }
         ListFooterComponent={
-          loadingMorePosts ? (
+          loadingMorePosts &&
+          (connectionStatus === "connected" || isOwnProfile) ? (
             <View style={publicStyles.loadingMoreContainer}>
               <LoadingMorePostsSkeleton />
             </View>
           ) : null
         }
         ListEmptyComponent={
-          !initialPostsLoading && posts.length === 0 ? (
+          !initialPostsLoading &&
+          (connectionStatus === "connected" || isOwnProfile) &&
+          posts.length === 0 ? (
             <View style={publicStyles.emptyPostsContainer}>
               <Ionicons
                 name="document-text-outline"
@@ -940,6 +1183,7 @@ export default function PublicProfileScreen() {
   );
 }
 
+// Keep all existing style definitions exactly as they were
 const publicStyles = StyleSheet.create({
   header: {
     flexDirection: "row",
@@ -1090,5 +1334,81 @@ const publicStyles = StyleSheet.create({
   loadingMoreContainer: {
     paddingHorizontal: 0,
     paddingTop: 0,
+  },
+  privatePostsContainer: {
+    alignItems: "center",
+    paddingVertical: 40,
+    paddingHorizontal: 20,
+    backgroundColor: "#f9fafb",
+    marginHorizontal: 20,
+    borderRadius: 16,
+    marginTop: 20,
+  },
+  privatePostsTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    fontFamily: "SofiaSans-Bold",
+    color: "#111827",
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  privatePostsText: {
+    fontSize: 14,
+    color: "#6b7280",
+    textAlign: "center",
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  connectPromptButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#8b5cf6",
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 25,
+    gap: 8,
+  },
+  connectPromptButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontFamily: "SofiaSans-Bold",
+    fontWeight: "600",
+  },
+  blockedContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 32,
+    paddingVertical: 40,
+  },
+  blockedTitle: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#111827",
+    marginTop: 20,
+    marginBottom: 12,
+    textAlign: "center",
+    fontFamily: "SofiaSans-Bold",
+  },
+  blockedText: {
+    fontSize: 16,
+    color: "#6b7280",
+    textAlign: "center",
+    marginBottom: 24,
+    lineHeight: 24,
+    fontFamily: "SofiaSans-Regular",
+  },
+  blockedButton: {
+    backgroundColor: "#8b5cf6",
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 25,
+  },
+  blockedButtonText: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
   },
 });
