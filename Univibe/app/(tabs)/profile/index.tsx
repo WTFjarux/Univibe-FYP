@@ -46,7 +46,7 @@ import ProfileTabs from "@/app/components/Profile/ProfileTabs";
 import ProfilePosts from "@/app/components/Profile/ProfilePosts";
 import UploadModal from "@/app/components/Profile/UploadModal";
 import ImageViewModal from "@/app/components/Profile/ImageViewModal";
-import SettingsScreen from "@/app/components/Profile/SettingsScreen";
+import SettingsScreen from "@/app/settings";
 import { styles } from "@/app/components/Profile/profileStyles";
 import OwnProfilePageSkeleton, {
   OwnPostsLoadingSkeleton,

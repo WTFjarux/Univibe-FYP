@@ -551,6 +551,81 @@ const verifyAndRefreshToken = async (req, res) => {
 };
 
 /**
+ * Change user password
+ * Requires current password for verification
+ * Increments tokenVersion to invalidate all existing tokens
+ */
+const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    // Validate input
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Current password and new password are required",
+      });
+    }
+
+    // Validate new password length
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be at least 6 characters",
+      });
+    }
+
+    // Prevent same password
+    if (currentPassword === newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be different from current password",
+      });
+    }
+
+    // Get user with password field
+    const user = await User.findById(req.user.id).select("+password");
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Verify current password
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: "Current password is incorrect",
+      });
+    }
+
+    // Update password and invalidate all existing tokens
+    user.password = newPassword;
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
+    await user.save();
+
+    console.log(
+      `🔐 Password changed for user: ${user.email} (tokenVersion: ${user.tokenVersion})`,
+    );
+
+    res.json({
+      success: true,
+      message:
+        "Password changed successfully. Please login again with your new password.",
+    });
+  } catch (error) {
+    console.error("Change password error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while changing password",
+    });
+  }
+};
+
+/**
  * Cleanup unverified accounts older than 24 hours
  */
 const cleanupUnverifiedAccounts = async () => {
@@ -585,5 +660,6 @@ module.exports = {
   checkVerificationByEmail,
   refreshToken,
   verifyAndRefreshToken,
+  changePassword,
   cleanupUnverifiedAccounts,
 };

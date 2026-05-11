@@ -31,6 +31,15 @@ const userSchema = new mongoose.Schema(
       select: false,
     },
 
+    // ============================================
+    // TOKEN VERSIONING FOR SECURITY
+    // ============================================
+    // Incremented when password changes to invalidate all existing tokens
+    tokenVersion: {
+      type: Number,
+      default: 0,
+    },
+
     // Role and permissions
     role: {
       type: String,
@@ -114,13 +123,6 @@ const userSchema = new mongoose.Schema(
         ref: "User",
       },
     ],
-
-    // REMOVED: blockedUsers and blockedUsersTimestamps
-    // These are now managed in the separate Block model for:
-    // 1. Better query performance with dedicated indexes
-    // 2. Support for mutual blocking
-    // 3. Proper bidirectional enforcement
-    // 4. Scalability for millions of blocks
 
     // Timestamps for tracking actions
     savedPostsTimestamps: [

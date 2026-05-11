@@ -1,4 +1,4 @@
-// app/components/Profile/SettingsScreen.tsx
+// app/settings/index.tsx
 
 import React, { useState, useEffect } from "react";
 import {
@@ -215,7 +215,7 @@ export default function SettingsScreen({
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Account Settings - Moved Blocked & Muted Users here */}
+        {/* Account Settings */}
         {renderSection(
           "Account",
           <>
@@ -223,13 +223,16 @@ export default function SettingsScreen({
               navigateToScreen("/profile/edit" as Href),
             )}
             {renderActionItem("lock-closed-outline", "Change Password", () =>
+              // ✅ FIXED: /settings/change-password
               navigateToScreen("/settings/change-password" as Href),
             )}
             {renderActionItem("person-remove-outline", "Blocked Users", () =>
-              navigateToScreen("/profile/blocked-users" as Href),
+              // ✅ FIXED: /settings/blocked-users
+              navigateToScreen("/settings/blocked-users" as Href),
             )}
             {renderActionItem("volume-off-outline", "Muted Users", () =>
-              navigateToScreen("/profile/muted-users" as Href),
+              // ✅ FIXED: /settings/muted-users
+              navigateToScreen("/settings/muted-users" as Href),
             )}
           </>,
         )}
@@ -239,13 +242,16 @@ export default function SettingsScreen({
           "Content Management",
           <>
             {renderActionItem("bookmark-outline", "Saved Posts", () =>
-              navigateToScreen("/profile/saved-posts" as Href),
+              // /settings/saved-posts
+              navigateToScreen("/settings/saved-posts" as Href),
             )}
             {renderActionItem("eye-off-outline", "Hidden Posts", () =>
-              navigateToScreen("/profile/hidden-posts" as Href),
+              // /settings/hidden-posts
+              navigateToScreen("/settings/hidden-posts" as Href),
             )}
             {renderActionItem("trash-outline", "Deleted Posts", () =>
-              navigateToScreen("/profile/deleted-posts" as Href),
+              // /settings/deleted-posts
+              navigateToScreen("/settings/deleted-posts" as Href),
             )}
           </>,
         )}
@@ -288,17 +294,19 @@ export default function SettingsScreen({
           </>,
         )}
 
-        {/* Privacy & Security - Now navigates to in-app screens */}
+        {/* Privacy & Security */}
         {renderSection(
           "Privacy & Security",
           <>
             {renderActionItem(
               "shield-checkmark-outline",
               "Privacy Policy",
-              () => navigateToScreen("/profile/PrivacyPolicy" as Href),
+              // ✅ FIXED: /settings/PrivacyPolicy
+              () => navigateToScreen("/settings/PrivacyPolicy" as Href),
             )}
             {renderActionItem("document-text-outline", "Terms of Service", () =>
-              navigateToScreen("/profile/TermsOfService" as Href),
+              // ✅ FIXED: /settings/TermsOfService
+              navigateToScreen("/settings/TermsOfService" as Href),
             )}
             {renderActionItem(
               "download-outline",

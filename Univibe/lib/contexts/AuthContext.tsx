@@ -28,6 +28,7 @@ interface CustomJwtPayload {
   email: string;
   role: string;
   isEmailVerified: boolean;
+  tokenVersion?: number;
   exp?: number;
   iat?: number;
 }
@@ -407,12 +408,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           iat: decoded.iat,
         });
 
+        // ✅ CHECK TOKEN VERSION by making a quick API call
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+            headers: {
+              Authorization: `Bearer ${storedToken}`,
+              "Content-Type": "application/json",
+            },
+          });
+          const data = await response.json();
+
+          // If token version mismatch (password changed), force logout
+          if (data?.code === "TOKEN_VERSION_MISMATCH") {
+            console.log("🔐 Token invalidated due to password change");
+            await clearAuthData();
+            setIsLoading(false);
+            return;
+          }
+        } catch (apiError) {
+          // If API fails, continue with local token (offline support)
+          console.log(
+            "⚠️ Could not verify token with server, continuing offline",
+          );
+        }
+
         const profileData = await fetchUserProfile();
 
         if (hasCompletedProfile(profileData, { profileComplete: false })) {
           setUser((prev) => (prev ? { ...prev, profileComplete: true } : null));
-
-          // ✅ Connect socket when profile is complete
           connectSocket();
         } else {
           console.log("🔐 Profile incomplete, user needs setup");
@@ -637,6 +660,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       console.error("Logout error:", error);
       throw error;
     }
+  };
+
+  // ============================================
+  // HELPER: Handle token version mismatch
+  // ============================================
+
+  /**
+   * Check API response for token version mismatch
+   * If password was changed, force logout
+   */
+  const handleTokenVersionMismatch = async (data: any) => {
+    if (data?.code === "TOKEN_VERSION_MISMATCH") {
+      console.log("🔐 Token version mismatch - forcing logout");
+      await disconnectSocket();
+      await clearAuthData();
+      // Return true to indicate logout occurred
+      return true;
+    }
+    return false;
   };
 
   // ============================================

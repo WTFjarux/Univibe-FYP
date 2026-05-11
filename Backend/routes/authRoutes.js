@@ -11,6 +11,7 @@ const {
   checkVerificationByEmail,
   refreshToken,
   verifyAndRefreshToken,
+  changePassword,
 } = require("../controllers/authController");
 const { protect } = require("../middleware/authmiddleware");
 
@@ -37,5 +38,8 @@ router.get("/me", protect, getMe);
 router.get("/check-verification", protect, checkVerificationStatus);
 router.get("/refresh-token", protect, refreshToken);
 router.get("/verify-and-refresh", protect, verifyAndRefreshToken);
+
+// Change Password Route
+router.post("/change-password", protect, changePassword);
 
 module.exports = router;

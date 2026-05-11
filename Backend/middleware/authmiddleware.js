@@ -5,6 +5,7 @@ const User = require("../models/User");
 /**
  * Authentication middleware to protect routes
  * Verifies JWT token and attaches user to request
+ * Now also checks tokenVersion for password change invalidation
  */
 const protect = async (req, res, next) => {
   try {
@@ -25,16 +26,33 @@ const protect = async (req, res, next) => {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-      // Fetch user with verification status
+      // Fetch user with required fields
       req.user = await User.findById(decoded.id)
         .select("-password")
-        .select("+isEmailVerified +email +name +role");
+        .select("+isEmailVerified +email +name +role +tokenVersion");
 
       if (!req.user) {
         return res.status(401).json({
           success: false,
           message: "User not found or account deleted",
         });
+      }
+
+      // ✅ CHECK TOKEN VERSION
+      // If tokenVersion in JWT doesn't match user's current tokenVersion,
+      // it means the password was changed and this token is invalid
+      if (
+        decoded.tokenVersion !== undefined &&
+        req.user.tokenVersion !== undefined
+      ) {
+        if (decoded.tokenVersion !== req.user.tokenVersion) {
+          return res.status(401).json({
+            success: false,
+            message:
+              "Password has been changed. Please login again with your new password.",
+            code: "TOKEN_VERSION_MISMATCH",
+          });
+        }
       }
 
       // Attach decoded token data for reference
@@ -71,7 +89,6 @@ const protect = async (req, res, next) => {
 
 /**
  * Role-based authorization middleware
- * Restricts access to specific user roles
  */
 const authorize = (...roles) => {
   return (req, res, next) => {
@@ -95,7 +112,7 @@ const authorize = (...roles) => {
 
 /**
  * Generate JWT token for authenticated user
- * Includes user ID, email, role, and verification status
+ * Includes user ID, email, role, verification status, and tokenVersion
  */
 const generateToken = (user) => {
   const payload = {
@@ -103,6 +120,7 @@ const generateToken = (user) => {
     email: user.email,
     role: user.role,
     isEmailVerified: Boolean(user.isEmailVerified),
+    tokenVersion: user.tokenVersion || 0, // ✅ Include tokenVersion
   };
 
   return jwt.sign(payload, process.env.JWT_SECRET, {
@@ -122,7 +140,6 @@ const generateTokenById = (id) => {
 
 /**
  * Generate token with custom payload
- * Useful for specialized tokens or testing
  */
 const generateTokenWithData = (payload) => {
   return jwt.sign(payload, process.env.JWT_SECRET, {
@@ -132,7 +149,6 @@ const generateTokenWithData = (payload) => {
 
 /**
  * Check email verification status from token without database query
- * Useful for quick verification checks
  */
 const isEmailVerifiedFromToken = (token) => {
   try {
@@ -145,7 +161,6 @@ const isEmailVerifiedFromToken = (token) => {
 
 /**
  * Decode token without verification
- * Useful for inspecting token payload without validation
  */
 const decodeToken = (token) => {
   try {
