@@ -29,7 +29,7 @@ const groupRoutes = require("./routes/groupRoutes");
 const feedRoutes = require("./routes/feedRoutes");
 const storyRoutes = require("./routes/storyRoutes");
 const contentRoutes = require("./routes/contentRoutes");
-
+const searchRoutes = require("./routes/searchRoutes");
 // Connect to database
 connectDB();
 
@@ -91,6 +91,7 @@ app.use("/api/events", eventRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/stories", storyRoutes);
 app.use("/api/groups", groupRoutes);
+app.use("/api/search", searchRoutes);
 app.use(
   "/uploads/group-photos",
   express.static(path.join(__dirname, "uploads/group-photos")),
@@ -119,6 +120,7 @@ app.get("/", (req, res) => {
       events: "/api/events",
       chat: "/api/chat",
       groups: "/api/groups",
+      search: "/api/search",
     },
     websocket: {
       status: "active",

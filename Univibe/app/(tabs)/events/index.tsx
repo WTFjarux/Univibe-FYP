@@ -8,7 +8,6 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
-  TextInput,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -42,8 +41,6 @@ export default function EventsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState("all");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [showSearch, setShowSearch] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [categories, setCategories] = useState(
@@ -92,7 +89,6 @@ export default function EventsScreen() {
         skipCache: refresh, // Skip cache when refreshing
       };
       if (selectedCategory !== "all") params.category = selectedCategory;
-      if (searchQuery) params.search = searchQuery;
 
       const response = await eventService.getEvents(params);
 
@@ -370,30 +366,11 @@ export default function EventsScreen() {
           </View>
           <TouchableOpacity
             style={styles.searchIconButton}
-            onPress={() => setShowSearch(!showSearch)}
+            onPress={() => router.push("/(tabs)/search")}
           >
             <Ionicons name="search-outline" size={24} color="#111827" />
           </TouchableOpacity>
         </View>
-
-        {/* Search Bar */}
-        {showSearch && (
-          <View style={styles.searchContainer}>
-            <Ionicons name="search-outline" size={20} color="#9ca3af" />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search events..."
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              placeholderTextColor="#9ca3af"
-            />
-            {searchQuery !== "" && (
-              <TouchableOpacity onPress={() => setSearchQuery("")}>
-                <Ionicons name="close-circle" size={20} color="#9ca3af" />
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
 
         {/* Categories */}
         <ScrollView
@@ -422,9 +399,7 @@ export default function EventsScreen() {
               <Ionicons name="calendar-outline" size={64} color="#d1d5db" />
               <Text style={styles.emptyStateTitle}>No events found</Text>
               <Text style={styles.emptyStateText}>
-                {searchQuery
-                  ? `No events matching "${searchQuery}"`
-                  : "Be the first to create an event!"}
+                Be the first to create an event!
               </Text>
             </View>
           ) : (
@@ -497,24 +472,7 @@ const styles = StyleSheet.create({
   searchIconButton: {
     padding: 8,
   },
-  searchContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "white",
-    marginHorizontal: 20,
-    marginBottom: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    gap: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: "#111827",
-  },
+
   categoriesScroll: {
     marginBottom: 20,
   },

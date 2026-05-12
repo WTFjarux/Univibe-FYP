@@ -1,152 +1,482 @@
-// app/(tabs)/search/index.tsx
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   View,
   Text,
-  TextInput,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
   FlatList,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
+  TouchableOpacity,
+  StyleSheet,
+  Keyboard,
+  ActivityIndicator,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
+
+import { useSearch } from "../../../hooks/useSearch";
+import { useAuth } from "../../../lib/contexts/AuthContext";
+import { connectionService } from "../../../lib/services/connectionService";
+import { SearchBar } from "../../components/Search/SearchBar";
+import { SearchCategories } from "../../components/Search/SearchCategories";
+import { UserSearchResult } from "../../components/Search/UserSearchResult";
+import { PostSearchResult } from "../../components/Search/PostSearchResult";
+import { EventSearchResult } from "../../components/Search/EventSearchResult";
+import {
+  SearchSkeleton,
+  InitialSearchSkeleton,
+} from "../../components/Search/SearchSkeleton";
+import { SearchEmptyState } from "../../components/Search/SearchEmptyState";
+import { SearchErrorState } from "../../components/Search/SearchErrorState";
+import {
+  SearchCategory,
+  UserSearchResult as UserSearchResultType,
+  PostSearchResult as PostSearchResultType,
+  EventSearchResult as EventSearchResultType,
+} from "../../../lib/types/search";
 
 export default function SearchScreen() {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeCategory, setActiveCategory] = useState('all');
+  const router = useRouter();
+  const { token } = useAuth();
+  const flatListRef = useRef<FlatList>(null);
 
-  const categories = [
-    { id: 'all', label: 'All' },
-    { id: 'people', label: 'People' },
-    { id: 'groups', label: 'Groups' },
-    { id: 'posts', label: 'Posts' },
-    { id: 'events', label: 'Events' },
-  ];
+  const {
+    // State
+    query,
+    activeCategory,
+    isSearching,
+    userResults,
+    postResults,
+    eventResults,
+    userPagination,
+    postPagination,
+    eventPagination,
+    loadingUsers,
+    loadingPosts,
+    loadingEvents,
+    error,
+    hasSearched,
 
-  const recentSearches = [
-    { id: 1, text: 'Computer Science Club' },
-    { id: 2, text: 'Professor Smith' },
-    { id: 3, text: 'Study groups' },
-    { id: 4, text: 'Basketball tryouts' },
-  ];
+    // Recent searches
+    recentSearches,
+    recentSearchesLoaded,
+    addRecentSearch,
+    removeRecentSearch,
+    clearRecentSearches,
 
-  const suggested = [
-    { id: 1, name: 'CS101 Study Group', type: 'Group', members: 45 },
-    { id: 2, name: 'Alex Johnson', type: 'Student', major: 'Biology' },
-    { id: 3, name: 'Spring Carnival', type: 'Event', date: 'Apr 15' },
-    { id: 4, name: 'Library Hours Update', type: 'Post', author: 'Admin' },
-  ];
+    // Actions
+    setQuery,
+    setActiveCategory,
+    performSearch,
+    loadMore,
+    clearResults,
+  } = useSearch();
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>Search</Text>
-          <Text style={styles.subtitle}>Find students, groups, and more</Text>
-        </View>
+  const [connectionLoading, setConnectionLoading] = useState<string | null>(
+    null,
+  );
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const infoTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-        {/* Search Bar */}
-        <View style={styles.searchContainer}>
-          <Ionicons name="search" size={20} color="#6b7280" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search Univibes..."
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholderTextColor="#9ca3af"
+  // Show temporary info message
+  const showInfoMessage = useCallback((message: string) => {
+    setInfoMessage(message);
+    if (infoTimeoutRef.current) clearTimeout(infoTimeoutRef.current);
+    infoTimeoutRef.current = setTimeout(() => {
+      setInfoMessage(null);
+    }, 3000);
+  }, []);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (infoTimeoutRef.current) clearTimeout(infoTimeoutRef.current);
+    };
+  }, []);
+
+  // Handle category change — re-search if results already exist
+  const handleCategoryChange = useCallback(
+    (category: SearchCategory) => {
+      setActiveCategory(category);
+      if (hasSearched && query.trim().length >= 2) {
+        performSearch(category);
+      }
+    },
+    [query, hasSearched, setActiveCategory, performSearch],
+  );
+
+  // Handle search submit from keyboard (user presses return)
+  const handleSearchSubmit = useCallback(() => {
+    const trimmedQuery = query.trim();
+    if (trimmedQuery.length >= 2) {
+      performSearch();
+      Keyboard.dismiss();
+    }
+  }, [query, performSearch]);
+
+  // Handle clear search
+  const handleClearSearch = useCallback(() => {
+    setQuery("");
+    clearResults();
+  }, [setQuery, clearResults]);
+
+  // Handle recent search tap
+  const handleRecentSearchTap = useCallback(
+    (searchQuery: string, category: SearchCategory) => {
+      setQuery(searchQuery);
+      setActiveCategory(category);
+      // Pass query and category directly to avoid state timing issues
+      performSearch(category, searchQuery);
+      Keyboard.dismiss();
+    },
+    [setQuery, setActiveCategory, performSearch],
+  );
+
+  // Handle suggestion chip tap
+  const handleSuggestionTap = useCallback(
+    (label: string) => {
+      setQuery(label);
+      setActiveCategory("all");
+      performSearch("all", label);
+      Keyboard.dismiss();
+    },
+    [setQuery, setActiveCategory, performSearch],
+  );
+
+  // Handle connection action from user result
+  const handleConnectionPress = useCallback(
+    async (userId: string, currentStatus: string) => {
+      if (!token) {
+        showInfoMessage("Please login to connect");
+        return;
+      }
+
+      setConnectionLoading(userId);
+
+      try {
+        if (currentStatus === "connected") {
+          const response = await connectionService.removeConnection(userId);
+          if (response.success) {
+            showInfoMessage("Connection removed");
+          }
+        } else if (currentStatus === "pending_sent") {
+          const response =
+            await connectionService.cancelConnectionRequest(userId);
+          if (response.success) {
+            showInfoMessage("Request cancelled");
+          }
+        } else {
+          const response =
+            await connectionService.sendConnectionRequest(userId);
+          if (response.success) {
+            if (response.data?.autoAccepted) {
+              showInfoMessage("Connected!");
+            } else {
+              showInfoMessage("Request sent!");
+            }
+          }
+        }
+      } catch (error: any) {
+        showInfoMessage(error.message || "Action failed");
+      } finally {
+        setConnectionLoading(null);
+      }
+    },
+    [token, showInfoMessage],
+  );
+
+  // Get current results based on active category
+  const getCurrentResults = useCallback(() => {
+    switch (activeCategory) {
+      case "users":
+        return userResults;
+      case "posts":
+        return postResults;
+      case "events":
+        return eventResults;
+      case "all":
+      default: {
+        // Interleave results for "All" tab
+        const combined: any[] = [];
+        const maxLength = Math.max(
+          userResults.length,
+          postResults.length,
+          eventResults.length,
+        );
+        for (let i = 0; i < maxLength; i++) {
+          if (userResults[i])
+            combined.push({ ...userResults[i], _type: "user" });
+          if (postResults[i])
+            combined.push({ ...postResults[i], _type: "post" });
+          if (eventResults[i])
+            combined.push({ ...eventResults[i], _type: "event" });
+        }
+        return combined;
+      }
+    }
+  }, [activeCategory, userResults, postResults, eventResults]);
+
+  // Check if current category has more pages
+  const hasMorePages = useCallback(() => {
+    switch (activeCategory) {
+      case "users":
+        return userPagination
+          ? userPagination.page < userPagination.pages
+          : false;
+      case "posts":
+        return postPagination
+          ? postPagination.page < postPagination.pages
+          : false;
+      case "events":
+        return eventPagination
+          ? eventPagination.page < eventPagination.pages
+          : false;
+      default:
+        return false;
+    }
+  }, [activeCategory, userPagination, postPagination, eventPagination]);
+
+  // Check if currently loading for active category
+  const isLoadingCategory = useCallback(() => {
+    switch (activeCategory) {
+      case "users":
+        return loadingUsers;
+      case "posts":
+        return loadingPosts;
+      case "events":
+        return loadingEvents;
+      case "all":
+        return loadingUsers || loadingPosts || loadingEvents;
+    }
+  }, [activeCategory, loadingUsers, loadingPosts, loadingEvents]);
+
+  // Result counts for category tabs
+  const resultCounts = {
+    users: userResults.length,
+    posts: postResults.length,
+    events: eventResults.length,
+  };
+
+  const currentResults = getCurrentResults();
+  const isInitialLoading = !recentSearchesLoaded;
+  const isLoading = isLoadingCategory();
+
+  // ============================================
+  // RENDER FUNCTIONS
+  // ============================================
+
+  // Render a single search result item
+  const renderResultItem = useCallback(
+    ({ item }: { item: any }) => {
+      if (item._type === "user" || activeCategory === "users") {
+        return (
+          <UserSearchResult
+            user={item as UserSearchResultType}
+            onConnectionPress={handleConnectionPress}
+            connectionLoading={connectionLoading === item.user?._id}
           />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Ionicons name="close-circle" size={20} color="#9ca3af" />
-            </TouchableOpacity>
-          )}
-        </View>
+        );
+      }
+      if (item._type === "post" || activeCategory === "posts") {
+        return <PostSearchResult post={item as PostSearchResultType} />;
+      }
+      if (item._type === "event" || activeCategory === "events") {
+        return <EventSearchResult event={item as EventSearchResultType} />;
+      }
+      return null;
+    },
+    [activeCategory, handleConnectionPress, connectionLoading],
+  );
 
-        {/* Categories */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.categoriesContainer}
-          contentContainerStyle={styles.categoriesContent}
-        >
-          {categories.map((category) => (
+  // Recent searches section
+  const renderRecentSearches = useCallback(() => {
+    if (recentSearches.length === 0) {
+      return <SearchEmptyState type="no_recent" />;
+    }
+
+    return (
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Recent Searches</Text>
+          <TouchableOpacity onPress={clearRecentSearches}>
+            <Text style={styles.clearAllText}>Clear all</Text>
+          </TouchableOpacity>
+        </View>
+        {recentSearches.slice(0, 5).map((item) => (
+          <TouchableOpacity
+            key={item.id}
+            style={styles.recentItem}
+            onPress={() => handleRecentSearchTap(item.query, item.type)}
+          >
+            <Ionicons name="time-outline" size={18} color="#6b7280" />
+            <Text style={styles.recentText} numberOfLines={1}>
+              {item.query}
+            </Text>
             <TouchableOpacity
-              key={category.id}
-              style={[
-                styles.categoryButton,
-                activeCategory === category.id && styles.categoryButtonActive,
-              ]}
-              onPress={() => setActiveCategory(category.id)}
+              onPress={() => removeRecentSearch(item.id)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Text
-                style={[
-                  styles.categoryText,
-                  activeCategory === category.id && styles.categoryTextActive,
-                ]}
-              >
-                {category.label}
-              </Text>
+              <Ionicons name="close" size={16} color="#9ca3af" />
+            </TouchableOpacity>
+          </TouchableOpacity>
+        ))}
+      </View>
+    );
+  }, [
+    recentSearches,
+    clearRecentSearches,
+    removeRecentSearch,
+    handleRecentSearchTap,
+  ]);
+
+  // Trending suggestions
+  const renderTrendingSuggestions = useCallback(
+    () => (
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Suggested for You</Text>
+        <View style={styles.suggestionsGrid}>
+          {[
+            { id: "1", label: "Computer Science", icon: "laptop-outline" },
+            { id: "2", label: "Study Groups", icon: "people-outline" },
+            { id: "3", label: "Basketball", icon: "basketball-outline" },
+            { id: "4", label: "Career Fair", icon: "briefcase-outline" },
+            { id: "5", label: "Photography", icon: "camera-outline" },
+            { id: "6", label: "Hackathon", icon: "code-slash-outline" },
+          ].map((item) => (
+            <TouchableOpacity
+              key={item.id}
+              style={styles.suggestionChip}
+              onPress={() => handleSuggestionTap(item.label)}
+            >
+              <Ionicons name={item.icon as any} size={16} color="#6b7280" />
+              <Text style={styles.suggestionText}>{item.label}</Text>
             </TouchableOpacity>
           ))}
-        </ScrollView>
+        </View>
+      </View>
+    ),
+    [handleSuggestionTap],
+  );
 
-        {searchQuery.length === 0 ? (
-          <>
-            {/* Recent Searches */}
-            <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Recent Searches</Text>
-                <TouchableOpacity>
-                  <Text style={styles.clearAll}>Clear all</Text>
-                </TouchableOpacity>
-              </View>
-              {recentSearches.map((item) => (
-                <TouchableOpacity key={item.id} style={styles.recentItem}>
-                  <Ionicons name="time-outline" size={18} color="#6b7280" />
-                  <Text style={styles.recentText}>{item.text}</Text>
-                  <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
-                </TouchableOpacity>
-              ))}
-            </View>
+  // List header (recent + trending when no search)
+  const renderListHeader = useCallback(() => {
+    if (!hasSearched || query.trim().length === 0) {
+      return (
+        <View>
+          {renderRecentSearches()}
+          {renderTrendingSuggestions()}
+        </View>
+      );
+    }
+    return null;
+  }, [hasSearched, query, renderRecentSearches, renderTrendingSuggestions]);
 
-            {/* Suggested */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Suggested for You</Text>
-              {suggested.map((item) => (
-                <TouchableOpacity key={item.id} style={styles.suggestedCard}>
-                  <View style={styles.suggestedIcon}>
-                    <Ionicons
-                      name={
-                        item.type === 'Group' ? 'people' :
-                        item.type === 'Student' ? 'person' :
-                        item.type === 'Event' ? 'calendar' : 'chatbubble'
-                      }
-                      size={24}
-                      color="#8b5cf6"
-                    />
-                  </View>
-                  <View style={styles.suggestedInfo}>
-                    <Text style={styles.suggestedName}>{item.name}</Text>
-                    <Text style={styles.suggestedType}>
-                      {item.type} {item.major ? `• ${item.major}` : ''} {item.date ? `• ${item.date}` : ''} {item.members ? `• ${item.members} members` : ''}
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
-                </TouchableOpacity>
-              ))}
-            </View>
-          </>
-        ) : (
-          // Search Results
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Search Results</Text>
-            <Text style={styles.noResults}>No results found for "{searchQuery}"</Text>
-            <Text style={styles.trySearching}>Try searching for people, groups, or events</Text>
-          </View>
-        )}
-      </ScrollView>
+  // List empty
+  const renderListEmpty = useCallback(() => {
+    if (isLoading) return null;
+    if (!hasSearched || query.trim().length === 0) return null;
+    if (error) {
+      return (
+        <SearchErrorState message={error} onRetry={() => performSearch()} />
+      );
+    }
+    return <SearchEmptyState type="no_results" query={query} />;
+  }, [isLoading, hasSearched, query, error, performSearch]);
+
+  // List footer (loading more)
+  const renderListFooter = useCallback(() => {
+    if (isLoading && currentResults.length > 0) {
+      return (
+        <View style={styles.loadingMore}>
+          <ActivityIndicator size="small" color="#8b5cf6" />
+          <Text style={styles.loadingMoreText}>Loading more...</Text>
+        </View>
+      );
+    }
+    return null;
+  }, [isLoading, currentResults.length]);
+
+  // ============================================
+  // MAIN RENDER
+  // ============================================
+
+  if (isInitialLoading) {
+    return (
+      <SafeAreaView style={styles.container} edges={["top"]}>
+        <InitialSearchSkeleton />
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container} edges={["top"]}>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.title}>Search</Text>
+      </View>
+
+      {/* Search Bar */}
+      <SearchBar
+        value={query}
+        onChangeText={setQuery}
+        onSubmit={handleSearchSubmit}
+        loading={isSearching}
+        onClear={handleClearSearch}
+      />
+
+      {/* Categories */}
+      <View style={styles.categoriesWrapper}>
+        <SearchCategories
+          activeCategory={activeCategory}
+          onCategoryChange={handleCategoryChange}
+          resultCounts={hasSearched ? resultCounts : undefined}
+        />
+      </View>
+
+      {/* Info Toast */}
+      {infoMessage && (
+        <View style={styles.infoToast}>
+          <Ionicons
+            name="information-circle-outline"
+            size={16}
+            color="#ffffff"
+          />
+          <Text style={styles.infoToastText}>{infoMessage}</Text>
+        </View>
+      )}
+
+      {/* Results / Loading / Empty */}
+      {isLoading && currentResults.length === 0 ? (
+        <SearchSkeleton
+          type={activeCategory === "all" ? "mixed" : activeCategory}
+          count={6}
+        />
+      ) : (
+        <FlatList
+          ref={flatListRef}
+          data={currentResults}
+          renderItem={renderResultItem}
+          keyExtractor={(item, index) =>
+            item._id
+              ? `${item._type || activeCategory}-${item._id}`
+              : `result-${index}`
+          }
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          ListHeaderComponent={renderListHeader}
+          ListEmptyComponent={renderListEmpty}
+          ListFooterComponent={renderListFooter}
+          onEndReached={() => {
+            if (hasMorePages() && !isLoading) {
+              loadMore();
+            }
+          }}
+          onEndReachedThreshold={0.3}
+          contentContainerStyle={[
+            styles.listContent,
+            currentResults.length === 0 && styles.emptyListContent,
+          ]}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -154,159 +484,121 @@ export default function SearchScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: "#f8fafc",
   },
   header: {
-    padding: 20,
-    paddingBottom: 16,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 4,
   },
   title: {
     fontSize: 28,
-    fontWeight: 'bold',
-    color: '#111827',
+    fontWeight: "bold",
+    color: "#111827",
+    fontFamily: "SofiaSans-Bold",
   },
-  subtitle: {
-    fontSize: 14,
-    color: '#6b7280',
-    marginTop: 4,
+
+  listContent: {
+    paddingBottom: 40,
   },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    marginHorizontal: 20,
-    marginBottom: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+  emptyListContent: {
+    flexGrow: 1,
   },
-  searchIcon: {
-    marginRight: 12,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#111827',
-  },
-  categoriesContainer: {
-    marginHorizontal: 20,
-    marginBottom: 24,
-  },
-  categoriesContent: {
-    paddingRight: 20,
-  },
-  categoryButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: 'white',
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  categoryButtonActive: {
-    backgroundColor: '#8b5cf6',
-    borderColor: '#8b5cf6',
-  },
-  categoryText: {
-    fontSize: 14,
-    color: '#6b7280',
-    fontWeight: '500',
-  },
-  categoryTextActive: {
-    color: 'white',
-  },
+  // Sections
   section: {
     paddingHorizontal: 20,
-    marginBottom: 24,
+    paddingTop: 16,
+    paddingBottom: 8,
   },
   sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 12,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#111827',
+    fontSize: 17,
+    fontWeight: "600",
+    color: "#111827",
+    fontFamily: "SofiaSans-Bold",
   },
-  clearAll: {
-    fontSize: 14,
-    color: '#8b5cf6',
-    fontWeight: '500',
+  clearAllText: {
+    fontSize: 13,
+    color: "#8b5cf6",
+    fontFamily: "SofiaSans-Medium",
   },
+  // Recent items
   recentItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+
+    paddingHorizontal: 1,
+    paddingVertical: 8,
     borderRadius: 12,
-    marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    marginBottom: 6,
+    gap: 10,
   },
   recentText: {
     flex: 1,
     fontSize: 15,
-    color: '#374151',
-    marginLeft: 12,
+    color: "#374151",
+    fontFamily: "SofiaSans-Regular",
   },
-  suggestedCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+  // Suggestions
+  suggestionsGrid: {
+    paddingTop: 12,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
   },
-  suggestedIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#f3f4f6',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
+  suggestionChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 20,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
   },
-  suggestedInfo: {
+  suggestionText: {
+    fontSize: 13,
+    color: "#374151",
+    fontFamily: "SofiaSans-Medium",
+  },
+  // Info toast
+  infoToast: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#8b5cf6",
+    marginHorizontal: 20,
+    marginVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    gap: 8,
+  },
+  infoToastText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontFamily: "SofiaSans-Medium",
     flex: 1,
   },
-  suggestedName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: 4,
+  // Loading more
+  loadingMore: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 16,
+    gap: 8,
   },
-  suggestedType: {
+  loadingMoreText: {
     fontSize: 13,
-    color: '#6b7280',
+    color: "#8b5cf6",
+    fontFamily: "SofiaSans-Regular",
   },
-  noResults: {
-    fontSize: 16,
-    color: '#374151',
-    textAlign: 'center',
-    marginTop: 40,
-  },
-  trySearching: {
-    fontSize: 14,
-    color: '#6b7280',
-    textAlign: 'center',
-    marginTop: 8,
+  categoriesWrapper: {
+    marginBottom: 16,
   },
 });

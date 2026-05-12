@@ -301,7 +301,6 @@ export const eventService = {
     status?: string;
     page?: number;
     limit?: number;
-    search?: string;
     skipCache?: boolean;
   }): Promise<EventsResponse> => {
     try {
@@ -319,7 +318,6 @@ export const eventService = {
       if (params?.status) queryParams.append("status", params.status);
       if (params?.page) queryParams.append("page", params.page.toString());
       if (params?.limit) queryParams.append("limit", params.limit.toString());
-      if (params?.search) queryParams.append("search", params.search);
 
       const url = `${BASE_URL}/api/events${queryParams.toString() ? `?${queryParams.toString()}` : ""}`;
       const cacheKey = generateCacheKey(url, params);
@@ -382,8 +380,6 @@ export const eventService = {
           return cachedData;
         }
       }
-
-
 
       const response = await enhancedFetch(url, {
         headers: {

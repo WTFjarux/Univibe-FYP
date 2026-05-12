@@ -1,4 +1,4 @@
-// app/(tabs)/profile/index.tsx - With settings integration
+// app/(tabs)/profile/index.tsx 
 
 import React, {
   useRef,
