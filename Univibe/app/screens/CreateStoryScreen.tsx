@@ -284,7 +284,7 @@ export default function CreateStoryScreen() {
       const res = await storyApi.createStory(formData);
 
       if (res.success) {
-        Alert.alert("Success", "Your story has been posted!", [
+        Alert.alert("Success", "Your Moment has been posted!", [
           { text: "OK", onPress: () => router.back() },
         ]);
       } else {

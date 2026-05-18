@@ -347,7 +347,7 @@ export default function CampusMoments({
             </View>
 
             <Text style={styles.storyName} numberOfLines={1}>
-              {userStoryGroup ? "Your Story" : "Add Story"}
+              {userStoryGroup ? "Your Moment" : "Add Moment"}
             </Text>
           </TouchableOpacity>
 

@@ -1,4 +1,4 @@
-// app/(tabs)/feed.tsx or wherever your FeedScreen lives
+// app/(tabs)/feed.tsx - COMPLETE WORKING VERSION
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   Alert,
   Animated,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -84,7 +85,7 @@ export default function FeedScreen() {
   const [loadingMorePosts, setLoadingMorePosts] = useState(false);
 
   // ===========================================================================
-  // InfoBar State
+  // InfoBar State - EXACT PATTERN FROM NOTIFICATIONS
   // ===========================================================================
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [infoType, setInfoType] = useState<"success" | "error" | "info">(
@@ -92,12 +93,9 @@ export default function FeedScreen() {
   );
   const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
   const slideAnim = useRef(new Animated.Value(100)).current;
-  const undoTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
 
   // ===========================================================================
-  // Report Modal State - SINGLE SOURCE OF TRUTH
+  // Report Modal State
   // ===========================================================================
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [reportTargetId, setReportTargetId] = useState("");
@@ -106,21 +104,9 @@ export default function FeedScreen() {
   >("Post");
 
   // ===========================================================================
-  // Options Modal State - controlled by individual PostCards
-  // but we track if any is open for coordination
+  // Options Modal State
   // ===========================================================================
   const [isOptionsModalOpen, setIsOptionsModalOpen] = useState(false);
-
-  // ===========================================================================
-  // Cleanup
-  // ===========================================================================
-  useEffect(() => {
-    return () => {
-      if (undoTimeoutRef.current) {
-        clearTimeout(undoTimeoutRef.current);
-      }
-    };
-  }, []);
 
   // ===========================================================================
   // Filters
@@ -145,7 +131,7 @@ export default function FeedScreen() {
   );
 
   // ===========================================================================
-  // InfoBar Management
+  // InfoBar Management - EXACT COPY FROM NOTIFICATIONS
   // ===========================================================================
   const showInfoBar = (
     message: string,
@@ -156,8 +142,6 @@ export default function FeedScreen() {
     setInfoMessage(message);
     setInfoType(type);
     setUndoAction(action || null);
-
-    if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
 
     Animated.sequence([
       Animated.timing(slideAnim, {
@@ -182,18 +166,9 @@ export default function FeedScreen() {
         slideAnim.setValue(100);
       }
     });
-
-    if (autoHide) {
-      undoTimeoutRef.current = setTimeout(() => {
-        setInfoMessage(null);
-        setUndoAction(null);
-        slideAnim.setValue(100);
-      }, 5000);
-    }
   };
 
   const hideInfoBar = () => {
-    if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
     Animated.timing(slideAnim, {
       toValue: 100,
       duration: 300,
@@ -211,25 +186,22 @@ export default function FeedScreen() {
   const handleUndo = async () => {
     if (!undoAction) return;
 
+    // Hide immediately
+    hideInfoBar();
+
     switch (undoAction.type) {
       case "mute":
         if (undoAction.userId) {
           await toggleMuteUser(undoAction.userId);
           await invalidateAllFeeds();
-          showInfoBar(
-            `User ${undoAction.userName || "muted"} unmuted`,
-            "success",
-          );
+          showInfoBar(`User ${undoAction.userName || "unmuted"}`, "success");
         }
         break;
       case "block":
         if (undoAction.userId) {
           await toggleBlockUser(undoAction.userId);
           await invalidateAllFeeds();
-          showInfoBar(
-            `User ${undoAction.userName || "blocked"} unblocked`,
-            "success",
-          );
+          showInfoBar(`User ${undoAction.userName || "unblocked"}`, "success");
         }
         break;
       case "hide":
@@ -259,7 +231,6 @@ export default function FeedScreen() {
         }
         break;
     }
-    hideInfoBar();
   };
 
   // ===========================================================================
@@ -384,12 +355,13 @@ export default function FeedScreen() {
       "Post deleted",
       "info",
       { type: "delete", postId, deletedPost: postToDelete },
-      true,
+      false, // Don't auto-hide for delete to allow undo
     );
 
     try {
       await deletePost(postId);
       await invalidateAllFeeds();
+      hideInfoBar();
     } catch (error: any) {
       addNewPost(postToDelete);
       showInfoBar(error.message || "Failed to delete post", "error");
@@ -428,13 +400,8 @@ export default function FeedScreen() {
   };
 
   // ===========================================================================
-  // REPORT FLOW - Centralized Modal Orchestration
+  // REPORT FLOW
   // ===========================================================================
-
-  /**
-   * STEP 1: User taps "Report" in PostOptionsModal
-   * PostOptionsModal closes itself and calls this callback
-   */
   const handleReportPost = useCallback(
     (postId: string) => {
       if (!token) {
@@ -448,57 +415,39 @@ export default function FeedScreen() {
         return;
       }
 
-      // Set the report target immediately
       setReportTargetId(postId);
       setReportTargetType("Post");
 
-      // Open ReportModal - PostOptionsModal should already be closing
-      // Small delay to ensure PostOptionsModal's close animation has started
       setTimeout(() => {
         setReportModalVisible(true);
-      }, 300); // Match PostOptionsModal slide animation duration
+      }, 300);
     },
     [token, visiblePosts],
   );
 
-  /**
-   * Called when any PostOptionsModal closes
-   */
   const handleOptionsModalClose = useCallback(() => {
     setIsOptionsModalOpen(false);
   }, []);
 
-  /**
-   * Called when PostOptionsModal opens (for tracking)
-   */
   const handleOptionsModalOpen = useCallback(() => {
     setIsOptionsModalOpen(true);
   }, []);
 
-  /**
-   * Called when ReportModal closes
-   */
   const handleReportModalClose = useCallback(() => {
     setReportModalVisible(false);
   }, []);
 
-  /**
-   * Called when report is successfully submitted
-   */
   const handleReportSuccess = useCallback(() => {
     if (reportTargetType === "Post" && reportTargetId) {
       updatePost(reportTargetId, { isReported: true });
     }
   }, [reportTargetType, reportTargetId, updatePost]);
 
-  /**
-   * Report modal's showInfoBar callback
-   */
   const handleReportShowInfoBar = useCallback(
     (message: string, type: "success" | "error" | "info") => {
       showInfoBar(message, type);
     },
-    [showInfoBar],
+    [],
   );
 
   // ===========================================================================
@@ -594,6 +543,7 @@ export default function FeedScreen() {
   // ===========================================================================
   const renderInfoBar = () => {
     if (!infoMessage) return null;
+
     const bg =
       infoType === "success"
         ? "#10b981"
@@ -762,9 +712,7 @@ export default function FeedScreen() {
         <View style={styles.bottomPadding} />
       </ScrollView>
 
-      {renderInfoBar()}
-
-      {/* Share Modal - at root level */}
+      {/* Share Modal */}
       {sharePostData && (
         <SharePostModal
           visible={shareModalVisible}
@@ -777,7 +725,7 @@ export default function FeedScreen() {
         />
       )}
 
-      {/* Report Modal - at root level, controlled ONLY by FeedScreen */}
+      {/* Report Modal */}
       <ReportModal
         visible={reportModalVisible}
         onClose={handleReportModalClose}
@@ -789,6 +737,9 @@ export default function FeedScreen() {
           reportContent(reportTargetType, targetId, reason)
         }
       />
+
+      {/* Info Bar - Positioned at bottom */}
+      {renderInfoBar()}
     </SafeAreaView>
   );
 }

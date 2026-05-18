@@ -247,7 +247,7 @@ const StoryViewersModal = memo(
                     <Ionicons name="eye-off-outline" size={48} color="#666" />
                     <Text style={styles.emptyText}>No viewers yet</Text>
                     <Text style={styles.emptySubtext}>
-                      When someone views your story, they'll appear here
+                      When someone views your Moment, they'll appear here
                     </Text>
                   </View>
                 }
@@ -274,7 +274,6 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
   },
   container: {
     backgroundColor: "#1c1c1e",

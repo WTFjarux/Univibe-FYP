@@ -753,7 +753,7 @@ const PostCard: React.FC<PostCardProps> = ({
           onDelete={onDelete || (() => {})}
           onSave={onSave || (() => {})}
           onReport={onReport || (() => {})}
-          onHide={onHide || (() => {})}
+          onHide={localIsHidden ? onUnhide || (() => {}) : onHide || (() => {})}
           onShare={onSharePress}
           onCopyLink={onCopyLink || (() => {})}
           onMuteUser={onMuteUser || (() => {})}

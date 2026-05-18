@@ -926,7 +926,7 @@ const menuStyles = StyleSheet.create({
 });
 
 const scrollStyles = StyleSheet.create({
-  scrollContent: { paddingBottom: 20 },
+  scrollContent: { paddingBottom: Platform.OS === "ios" ? 90 : 80 },
 });
 
 const cacheStyles = StyleSheet.create({

@@ -1,5 +1,5 @@
 // app/(tabs)/feed/styles.ts
-import { StyleSheet } from "react-native";
+import { StyleSheet, Platform } from "react-native";
 
 const styles = StyleSheet.create({
   container: {
@@ -107,44 +107,44 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   infoBar: {
-    position: "absolute" as "absolute",
-    bottom: 5,
+    position: "absolute",
+    bottom: Platform.OS === "ios" ? 100 : 80,
     left: 16,
     right: 16,
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderRadius: 12,
-    gap: 10,
+    gap: 8,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 5,
-    zIndex: 1000,
-    minHeight: 25,
+    elevation: 45, // Higher than tab bar's elevation (10)
+    zIndex: 9999,
   },
   infoBarText: {
     color: "#fff",
     fontSize: 14,
+    fontWeight: "500",
     fontFamily: "SofiaSans-Regular",
-    fontWeight: "500" as "500",
     flex: 1,
-    textAlign: "left" as "left",
+    textAlign: "left",
     lineHeight: 20,
   },
   undoButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     backgroundColor: "rgba(255, 255, 255, 0.2)",
     borderRadius: 6,
   },
   undoButtonText: {
     color: "#fff",
     fontSize: 12,
+    fontWeight: "600",
     fontFamily: "SofiaSans-Bold",
-    fontWeight: "600" as "600",
     letterSpacing: 0.5,
   },
 });
