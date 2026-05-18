@@ -1,3 +1,5 @@
+// app/components/Feed/Comment/CommentItem.tsx
+
 import React, {
   useState,
   useCallback,
@@ -24,7 +26,6 @@ import { useRouter } from "expo-router";
 import { Comment, areRepliesPopulated } from "@/lib/services/postService";
 import {
   formatCommentUserDisplay,
-  // REMOVED: getCommentUserProfileImage,
   getCommentDepthColor,
   isCommentFromPostAuthor,
   formatCommentTimestamp,
@@ -33,7 +34,7 @@ import CommentOptionsModal from "./CommentOptionsModal";
 import { API_BASE_URL } from "@/constants/ipConstants";
 import { useAuth } from "@/lib/contexts/AuthContext";
 
-// ✅ Local default avatar
+// Local default avatar
 const DEFAULT_AVATAR: ImageSourcePropType = require("../../../../assets/images/default-avatar.png");
 
 interface CommentItemProps {
@@ -57,6 +58,10 @@ interface CommentItemProps {
   currentUserId: string;
   level?: number;
   onEditStateChange?: (isEditing: boolean) => void;
+  // NEW PROPS for modal orchestration
+  onOptionsOpen?: () => void;
+  onOptionsClose?: () => void;
+  onShowInfoBar?: (message: string, type: "success" | "error" | "info") => void;
 }
 
 /**
@@ -83,17 +88,11 @@ const getProfileImageSource = (
 const extractMention = (
   content: string,
 ): { mention: string; remaining: string } => {
-  // Only process if the content starts with @
   if (!content.startsWith("@")) {
     return { mention: "", remaining: content };
   }
 
-  // Remove the @ symbol temporarily
   const withoutAt = content.substring(1);
-
-  // Find where the mention ends:
-  // Look for a space that is followed by text that doesn't start with @
-  // This allows names with spaces like "John Doe Smith"
   let mentionEnd = content.length;
 
   for (let i = 1; i < content.length; i++) {
@@ -102,7 +101,6 @@ const extractMention = (
       i + 1 < content.length &&
       content[i + 1] !== "@"
     ) {
-      // Found a space that separates mention from message
       mentionEnd = i;
       break;
     }
@@ -133,6 +131,9 @@ const CommentItem: React.FC<CommentItemProps> = ({
   currentUserId,
   level = 0,
   onEditStateChange,
+  onOptionsOpen, // NEW
+  onOptionsClose, // NEW
+  onShowInfoBar, // NEW
 }) => {
   // ===== Hooks =====
   const router = useRouter();
@@ -210,13 +211,11 @@ const CommentItem: React.FC<CommentItemProps> = ({
 
   // ===== Navigation Handler =====
   const handleUserPress = useCallback(() => {
-    // Don't navigate for anonymous comments
     if (isAnonymous) return;
 
     const userId = comment.user?._id?.toString();
     if (!userId) return;
 
-    // Check if it's the current user's own profile
     if (userId === currentUserData?.id?.toString()) {
       router.push("/(tabs)/profile");
     } else {
@@ -247,8 +246,20 @@ const CommentItem: React.FC<CommentItemProps> = ({
     setLongPressed(true);
     handlePressOut();
     setOptionsVisible(true);
+    // Notify parent that options modal is open
+    if (onOptionsOpen) {
+      onOptionsOpen();
+    }
     setTimeout(() => setLongPressed(false), 200);
   };
+
+  const handleOptionsClose = useCallback(() => {
+    setOptionsVisible(false);
+    // Notify parent that options modal is closed
+    if (onOptionsClose) {
+      onOptionsClose();
+    }
+  }, [onOptionsClose]);
 
   const handleReplyPress = useCallback(() => {
     const usernameForBackend =
@@ -526,6 +537,9 @@ const CommentItem: React.FC<CommentItemProps> = ({
                 currentUserId={currentUserId}
                 level={level + 1}
                 onEditStateChange={onEditStateChange}
+                onOptionsOpen={onOptionsOpen} // Pass down to nested replies
+                onOptionsClose={onOptionsClose} // Pass down to nested replies
+                onShowInfoBar={onShowInfoBar} // Pass down to nested replies
               />
             ))}
           </View>
@@ -588,18 +602,22 @@ const CommentItem: React.FC<CommentItemProps> = ({
         {renderReplies()}
       </Animated.View>
 
+      {/* Updated CommentOptionsModal with new props */}
       <CommentOptionsModal
         visible={optionsVisible}
-        onClose={() => setOptionsVisible(false)}
+        onClose={handleOptionsClose}
         commentId={comment._id}
+        postId={postId}
         isOwnComment={isOwnComment}
         isPostOwner={isPostOwner}
+        isReported={comment.isReported || false}
         onReply={handleModalReply}
         onShare={handleShare}
         onEdit={handleStartEdit}
         onDelete={handleDelete}
         onHide={handleHide}
         onReport={handleReport}
+        onShowInfoBar={onShowInfoBar}
       />
     </>
   );

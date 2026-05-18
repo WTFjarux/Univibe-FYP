@@ -1,12 +1,13 @@
 // lib/services/postService.ts
+
 import * as SecureStore from "expo-secure-store";
 import { API_BASE_URL } from "../../constants/ipConstants";
 
 export const DEFAULT_AVATAR = "default-avatar";
 
-// ============================================
-// INTERFACES
-// ============================================
+// -----------------------------------------------------------------------------
+// Interfaces
+// -----------------------------------------------------------------------------
 
 export interface Post {
   _id: string;
@@ -41,16 +42,13 @@ export interface Post {
   updatedAt: string;
   isLiked: boolean;
   isSaved?: boolean;
+  isReported?: boolean;
   isOwner?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
   likeCount: number;
   commentCount: number;
-  likes?: Array<{
-    _id: string;
-    name: string;
-    username: string;
-  }>;
+  likes?: Array<{ _id: string; name: string; username: string }>;
   comments?: any[];
   reposts?: any[];
   mentions?: any[];
@@ -87,6 +85,7 @@ export interface Comment {
   createdAt: string;
   updatedAt: string;
   isLiked?: boolean;
+  isReported?: boolean;
   likeCount?: number;
   replyCount?: number;
 }
@@ -100,11 +99,7 @@ export interface LikeResponse {
 export interface DeletePostResponse {
   success: boolean;
   message: string;
-  post?: {
-    _id: string;
-    isDeleted: boolean;
-    deletedAt?: string;
-  };
+  post?: { _id: string; isDeleted: boolean; deletedAt?: string };
 }
 
 export interface RestorePostResponse {
@@ -116,12 +111,7 @@ export interface RestorePostResponse {
 export interface CommentsResponse {
   success: boolean;
   comments: Comment[];
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    pages: number;
-  };
+  pagination: { page: number; limit: number; total: number; pages: number };
   totalComments: number;
 }
 
@@ -134,12 +124,7 @@ export interface ProfilePostsResponse {
   success: boolean;
   data?: {
     posts: Post[];
-    pagination: {
-      page: number;
-      limit: number;
-      total: number;
-      pages: number;
-    };
+    pagination: { page: number; limit: number; total: number; pages: number };
     viewerStatus: {
       isOwnProfile: boolean;
       isConnected: boolean;
@@ -156,9 +141,9 @@ export interface BlockError {
   message: string;
 }
 
-// ============================================
-// HELPER FUNCTIONS
-// ============================================
+// -----------------------------------------------------------------------------
+// Helper Functions
+// -----------------------------------------------------------------------------
 
 export const getAuthToken = async (): Promise<string | null> => {
   try {
@@ -172,9 +157,7 @@ export const getAuthToken = async (): Promise<string | null> => {
 
 const buildApiUrl = (endpoint: string): string => {
   let baseUrl = API_BASE_URL;
-  if (!baseUrl.endsWith("/")) {
-    baseUrl += "/";
-  }
+  if (!baseUrl.endsWith("/")) baseUrl += "/";
   let cleanEndpoint = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
   if (!baseUrl.includes("/api/") && !cleanEndpoint.startsWith("api/")) {
     cleanEndpoint = `api/${cleanEndpoint}`;
@@ -204,7 +187,6 @@ const getMimeTypeFromExtension = (extension: string): string => {
 export const getFullImageUrl = (url: string): string => {
   if (!url) return "";
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
-
   const baseUrl = API_BASE_URL.endsWith("/")
     ? API_BASE_URL.slice(0, -1)
     : API_BASE_URL;
@@ -212,7 +194,49 @@ export const getFullImageUrl = (url: string): string => {
   return `${baseUrl}${cleanUrl}`;
 };
 
-const handleBlockError = (response: Response, data: any): never => {
+// -----------------------------------------------------------------------------
+// Auth Error Handler
+// Silently clears tokens. AuthContext handles alerts to avoid duplicates.
+// -----------------------------------------------------------------------------
+
+const handleAuthError = async (data: any): Promise<boolean> => {
+  if (!data) return false;
+
+  if (data.code === "ACCOUNT_BANNED") {
+    await SecureStore.deleteItemAsync("authToken");
+    await SecureStore.deleteItemAsync("refreshToken");
+    return true;
+  }
+
+  if (data.code === "ACCOUNT_SUSPENDED") {
+    return true;
+  }
+
+  if (data.code === "TOKEN_VERSION_MISMATCH") {
+    await SecureStore.deleteItemAsync("authToken");
+    await SecureStore.deleteItemAsync("refreshToken");
+    return true;
+  }
+
+  return false;
+};
+
+// -----------------------------------------------------------------------------
+// Error Handler
+// -----------------------------------------------------------------------------
+
+const handleBlockError = async (
+  response: Response,
+  data: any,
+): Promise<never> => {
+  const authHandled = await handleAuthError(data);
+  if (authHandled) {
+    const error = new Error(data.message || "Account restricted") as any;
+    error.code = data.code;
+    error.isAuthError = true;
+    throw error;
+  }
+
   if (response.status === 403 && (data.isBlocked || data.isBlockedByOwner)) {
     const error = new Error(
       data.message || "Access denied due to block",
@@ -222,12 +246,13 @@ const handleBlockError = (response: Response, data: any): never => {
     error.status = 403;
     throw error;
   }
+
   throw new Error(data.error || data.message || "Request failed");
 };
 
-// ============================================
-// POST CRUD OPERATIONS
-// ============================================
+// -----------------------------------------------------------------------------
+// Post CRUD Operations
+// -----------------------------------------------------------------------------
 
 export const createPost = async (
   content: string,
@@ -252,9 +277,8 @@ export const createPost = async (
         const mimeType = getMimeTypeFromExtension(ext);
         const filename =
           uri.split("/").pop() || `post_${Date.now()}_${i}.${ext}`;
-
         formData.append("images", {
-          uri: uri,
+          uri,
           name: filename,
           type: mimeType,
         } as any);
@@ -263,27 +287,18 @@ export const createPost = async (
 
     const response = await fetch(url, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
       body: formData,
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      let errorDetail = "";
-      try {
-        const errorData = await response.json();
-        errorDetail = errorData.message || errorData.error || "Unknown error";
-      } catch {
-        errorDetail = await response.text();
-      }
-      throw new Error(
-        `Failed to create post: ${response.status} - ${errorDetail}`,
-      );
+      await handleBlockError(response, data);
+      throw new Error(data.message || "Failed to create post");
     }
-
-    return await response.json();
+    return data;
   } catch (error: any) {
+    if (error.isAuthError) throw error;
     console.error("Error creating post:", error.message || error);
     throw error;
   }
@@ -303,15 +318,16 @@ export const getPostById = async (
       },
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      const data = await response.json();
-      handleBlockError(response, data);
-      throw new Error(`Failed to fetch post: ${response.status}`);
+      await handleBlockError(response, data);
+      throw new Error(
+        data.message || `Failed to fetch post: ${response.status}`,
+      );
     }
-
-    return await response.json();
+    return data;
   } catch (error: any) {
-    if (error.isBlocked) throw error;
+    if (error.isBlocked || error.isAuthError) throw error;
     console.error("Error fetching post:", error);
     throw error;
   }
@@ -327,19 +343,18 @@ export const updatePost = async (
 
     const response = await fetch(url, {
       method: "PUT",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
       body: formData,
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || "Failed to update post");
+      await handleBlockError(response, data);
+      throw new Error(data.message || "Failed to update post");
     }
-
-    return await response.json();
-  } catch (error) {
+    return data;
+  } catch (error: any) {
+    if (error.isAuthError) throw error;
     console.error("Error updating post:", error);
     throw error;
   }
@@ -360,12 +375,16 @@ export const deletePost = async (
       },
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      throw new Error(`Failed to delete post: ${response.status}`);
+      await handleBlockError(response, data);
+      throw new Error(
+        data.message || `Failed to delete post: ${response.status}`,
+      );
     }
-
-    return await response.json();
-  } catch (error) {
+    return data;
+  } catch (error: any) {
+    if (error.isAuthError) throw error;
     console.error("Error deleting post:", error);
     throw error;
   }
@@ -386,20 +405,14 @@ export const restorePost = async (
       },
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      let errorMessage = `Failed to restore post: ${response.status}`;
-      try {
-        const errorData = await response.json();
-        errorMessage = errorData.error || errorData.message || errorMessage;
-      } catch {
-        const errorText = await response.text();
-        if (errorText) errorMessage = errorText;
-      }
-      throw new Error(errorMessage);
+      await handleBlockError(response, data);
+      throw new Error(data.message || "Failed to restore post");
     }
-
-    return await response.json();
-  } catch (error) {
+    return data;
+  } catch (error: any) {
+    if (error.isAuthError) throw error;
     console.error("Error restoring post:", error);
     throw error;
   }
@@ -420,20 +433,22 @@ export const permanentlyDeletePost = async (
       },
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      throw new Error(`Failed to permanently delete post: ${response.status}`);
+      await handleBlockError(response, data);
+      throw new Error(data.message || "Failed to permanently delete post");
     }
-
-    return await response.json();
-  } catch (error) {
+    return data;
+  } catch (error: any) {
+    if (error.isAuthError) throw error;
     console.error("Error permanently deleting post:", error);
     throw error;
   }
 };
 
-// ============================================
-// POST INTERACTIONS
-// ============================================
+// -----------------------------------------------------------------------------
+// Post Interactions
+// -----------------------------------------------------------------------------
 
 export const toggleLike = async (postId: string): Promise<LikeResponse> => {
   try {
@@ -448,23 +463,22 @@ export const toggleLike = async (postId: string): Promise<LikeResponse> => {
       },
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      const data = await response.json();
-      handleBlockError(response, data);
-      throw new Error(`Failed to toggle like: ${response.status}`);
+      await handleBlockError(response, data);
+      throw new Error(data.message || "Failed to toggle like");
     }
-
-    return await response.json();
+    return data;
   } catch (error: any) {
-    if (error.isBlocked) throw error;
+    if (error.isBlocked || error.isAuthError) throw error;
     console.error("Error toggling like:", error);
     throw error;
   }
 };
 
-// ============================================
-// PROFILE POSTS
-// ============================================
+// -----------------------------------------------------------------------------
+// Profile Posts
+// -----------------------------------------------------------------------------
 
 export const getProfilePosts = async (
   userId: string,
@@ -473,15 +487,12 @@ export const getProfilePosts = async (
 ): Promise<ProfilePostsResponse> => {
   try {
     const token = await getAuthToken();
-    if (!token) {
-      return { success: false, message: "No authentication token" };
-    }
+    if (!token) return { success: false, message: "No authentication token" };
 
     const params = new URLSearchParams({
       page: page.toString(),
       limit: limit.toString(),
     });
-
     const url = `${buildApiUrl(`posts/user/${userId}`)}?${params.toString()}`;
 
     const response = await fetch(url, {
@@ -523,13 +534,11 @@ export const searchPosts = async (
 ): Promise<{ success: boolean; posts: Post[] }> => {
   try {
     const token = await getAuthToken();
-
     const params = new URLSearchParams({
       q: query,
       page: page.toString(),
       limit: limit.toString(),
     });
-
     const url = `${buildApiUrl("posts/search")}?${params.toString()}`;
 
     const response = await fetch(url, {
@@ -539,20 +548,22 @@ export const searchPosts = async (
       },
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      throw new Error(`Failed to search posts: ${response.status}`);
+      await handleBlockError(response, data);
+      throw new Error(data.message || "Failed to search posts");
     }
-
-    return await response.json();
-  } catch (error) {
+    return data;
+  } catch (error: any) {
+    if (error.isAuthError) throw error;
     console.error("Error searching posts:", error);
     throw error;
   }
 };
 
-// ============================================
-// COMMENT OPERATIONS
-// ============================================
+// -----------------------------------------------------------------------------
+// Comment Operations
+// -----------------------------------------------------------------------------
 
 export const getPostComments = async (
   postId: string,
@@ -561,12 +572,10 @@ export const getPostComments = async (
 ): Promise<CommentsResponse> => {
   try {
     const token = await getAuthToken();
-
     const params = new URLSearchParams({
       page: page.toString(),
       limit: limit.toString(),
     });
-
     const url = `${buildApiUrl(`posts/${postId}/comments`)}?${params.toString()}`;
 
     const response = await fetch(url, {
@@ -576,15 +585,14 @@ export const getPostComments = async (
       },
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      const data = await response.json();
-      handleBlockError(response, data);
-      throw new Error(data.error || "Failed to fetch comments");
+      await handleBlockError(response, data);
+      throw new Error(data.message || "Failed to fetch comments");
     }
-
-    return await response.json();
+    return data;
   } catch (error: any) {
-    if (error.isBlocked) throw error;
+    if (error.isBlocked || error.isAuthError) throw error;
     console.error("Error fetching comments:", error);
     throw error;
   }
@@ -608,15 +616,14 @@ export const addComment = async (
       body: JSON.stringify({ content, isAnonymous }),
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      const data = await response.json();
-      handleBlockError(response, data);
-      throw new Error(data.error || "Failed to add comment");
+      await handleBlockError(response, data);
+      throw new Error(data.message || "Failed to add comment");
     }
-
-    return await response.json();
+    return data;
   } catch (error: any) {
-    if (error.isBlocked) throw error;
+    if (error.isBlocked || error.isAuthError) throw error;
     console.error("Error adding comment:", error);
     throw error;
   }
@@ -641,15 +648,14 @@ export const addReply = async (
       body: JSON.stringify({ content, isAnonymous }),
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      const data = await response.json();
-      handleBlockError(response, data);
-      throw new Error(data.error || "Failed to add reply");
+      await handleBlockError(response, data);
+      throw new Error(data.message || "Failed to add reply");
     }
-
-    return await response.json();
+    return data;
   } catch (error: any) {
-    if (error.isBlocked) throw error;
+    if (error.isBlocked || error.isAuthError) throw error;
     console.error("Error adding reply:", error);
     throw error;
   }
@@ -670,15 +676,14 @@ export const getCommentThread = async (
       },
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      const data = await response.json();
-      handleBlockError(response, data);
-      throw new Error(data.error || "Failed to fetch comment thread");
+      await handleBlockError(response, data);
+      throw new Error(data.message || "Failed to fetch comment thread");
     }
-
-    return await response.json();
+    return data;
   } catch (error: any) {
-    if (error.isBlocked) throw error;
+    if (error.isBlocked || error.isAuthError) throw error;
     console.error("Error fetching comment thread:", error);
     throw error;
   }
@@ -700,15 +705,14 @@ export const toggleCommentLike = async (
       },
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      const data = await response.json();
-      handleBlockError(response, data);
-      throw new Error(data.error || "Failed to toggle comment like");
+      await handleBlockError(response, data);
+      throw new Error(data.message || "Failed to toggle comment like");
     }
-
-    return await response.json();
+    return data;
   } catch (error: any) {
-    if (error.isBlocked) throw error;
+    if (error.isBlocked || error.isAuthError) throw error;
     console.error("Error toggling comment like:", error);
     throw error;
   }
@@ -732,13 +736,14 @@ export const updateComment = async (
       body: JSON.stringify({ content }),
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || "Failed to update comment");
+      await handleBlockError(response, data);
+      throw new Error(data.message || "Failed to update comment");
     }
-
-    return await response.json();
-  } catch (error) {
+    return data;
+  } catch (error: any) {
+    if (error.isAuthError) throw error;
     console.error("Error updating comment:", error);
     throw error;
   }
@@ -760,21 +765,22 @@ export const deleteComment = async (
       },
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || "Failed to delete comment");
+      await handleBlockError(response, data);
+      throw new Error(data.message || "Failed to delete comment");
     }
-
-    return await response.json();
-  } catch (error) {
+    return data;
+  } catch (error: any) {
+    if (error.isAuthError) throw error;
     console.error("Error deleting comment:", error);
     throw error;
   }
 };
 
-// ============================================
-// CONTENT MODERATION (NEW BLOCK SYSTEM)
-// ============================================
+// -----------------------------------------------------------------------------
+// Content Moderation
+// -----------------------------------------------------------------------------
 
 export const toggleBlockUser = async (
   userId: string,
@@ -798,13 +804,14 @@ export const toggleBlockUser = async (
       body: JSON.stringify({ reason: reason || null }),
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || "Failed to toggle block");
+      await handleBlockError(response, data);
+      throw new Error(data.message || "Failed to toggle block");
     }
-
-    return await response.json();
-  } catch (error) {
+    return data;
+  } catch (error: any) {
+    if (error.isAuthError) throw error;
     console.error("Error toggling block:", error);
     throw error;
   }
@@ -828,13 +835,14 @@ export const getBlockedUsers = async (
       },
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || "Failed to fetch blocked users");
+      await handleBlockError(response, data);
+      throw new Error(data.message || "Failed to fetch blocked users");
     }
-
-    return await response.json();
-  } catch (error) {
+    return data;
+  } catch (error: any) {
+    if (error.isAuthError) throw error;
     console.error("Error fetching blocked users:", error);
     throw error;
   }
@@ -855,15 +863,14 @@ export const toggleMuteUser = async (
       },
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      const data = await response.json();
-      handleBlockError(response, data);
+      await handleBlockError(response, data);
       throw new Error(data.message || "Failed to toggle mute");
     }
-
-    return await response.json();
+    return data;
   } catch (error: any) {
-    if (error.isBlocked) throw error;
+    if (error.isBlocked || error.isAuthError) throw error;
     console.error("Error toggling mute:", error);
     throw error;
   }
@@ -884,15 +891,14 @@ export const toggleSavePost = async (
       },
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      const data = await response.json();
-      handleBlockError(response, data);
+      await handleBlockError(response, data);
       throw new Error(data.message || "Failed to toggle save");
     }
-
-    return await response.json();
+    return data;
   } catch (error: any) {
-    if (error.isBlocked) throw error;
+    if (error.isBlocked || error.isAuthError) throw error;
     console.error("Error toggling save:", error);
     throw error;
   }
@@ -913,15 +919,14 @@ export const hidePost = async (
       },
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      const data = await response.json();
-      handleBlockError(response, data);
+      await handleBlockError(response, data);
       throw new Error(data.message || "Failed to hide post");
     }
-
-    return await response.json();
+    return data;
   } catch (error: any) {
-    if (error.isBlocked) throw error;
+    if (error.isBlocked || error.isAuthError) throw error;
     console.error("Error hiding post:", error);
     throw error;
   }
@@ -942,23 +947,22 @@ export const unhidePost = async (
       },
     });
 
+    const data = await response.json();
     if (!response.ok) {
-      const data = await response.json();
-      handleBlockError(response, data);
+      await handleBlockError(response, data);
       throw new Error(data.message || "Failed to unhide post");
     }
-
-    return await response.json();
+    return data;
   } catch (error: any) {
-    if (error.isBlocked) throw error;
+    if (error.isBlocked || error.isAuthError) throw error;
     console.error("Error unhiding post:", error);
     throw error;
   }
 };
 
-// ============================================
-// TYPE GUARDS
-// ============================================
+// -----------------------------------------------------------------------------
+// Type Guards
+// -----------------------------------------------------------------------------
 
 export function areRepliesPopulated(replies: string[] | Comment[]): boolean {
   if (!Array.isArray(replies) || replies.length === 0) return false;
@@ -968,9 +972,7 @@ export function areRepliesPopulated(replies: string[] | Comment[]): boolean {
 export function getPopulatedReplies(comment: Comment): Comment[] {
   if (Array.isArray(comment.replies) && comment.replies.length > 0) {
     const firstReply = comment.replies[0];
-    if (typeof firstReply !== "string") {
-      return comment.replies as Comment[];
-    }
+    if (typeof firstReply !== "string") return comment.replies as Comment[];
   }
   return [];
 }
@@ -980,22 +982,17 @@ export function hasReplies(comment: Comment): boolean {
 }
 
 export function getReplyCount(comment: Comment): number {
-  if (Array.isArray(comment.replies)) {
-    return comment.replies.length;
-  }
-  return 0;
+  return Array.isArray(comment.replies) ? comment.replies.length : 0;
 }
 
-// ============================================
-// UTILITY FUNCTIONS
-// ============================================
+// -----------------------------------------------------------------------------
+// Utility Functions
+// -----------------------------------------------------------------------------
 
 export const formatUserDisplay = (
   post: Post,
 ): { name: string; username: string } => {
-  if (post.isAnonymous) {
-    return { name: "Anonymous", username: "anonymous" };
-  }
+  if (post.isAnonymous) return { name: "Anonymous", username: "anonymous" };
   return {
     name: post.user?.name || "User",
     username: post.user?.username ? `@${post.user.username}` : "@user",
@@ -1068,9 +1065,5 @@ export const getVisibilityIcon = (visibility: string): string => {
       return "globe-outline";
   }
 };
-
-// ============================================
-// RE-EXPORT BLOCK SERVICE FUNCTIONS
-// ============================================
 
 export { toggleBlockUser as blockUser };

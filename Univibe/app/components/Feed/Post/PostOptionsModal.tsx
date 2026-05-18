@@ -8,43 +8,54 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+
+interface PostData {
+  postId: string;
+  isOwnPost: boolean;
+  isSaved: boolean;
+  isReported: boolean;
+  isHidden: boolean;
+  isMuted: boolean;
+  isBlocked: boolean;
+  userId?: string;
+  userName?: string;
+}
 
 interface PostOptionsModalProps {
   visible: boolean;
   onClose: () => void;
-  postId: string;
-  isOwnPost: boolean;
-  isSaved?: boolean;
-  isReported?: boolean;
-  isHidden?: boolean;
-  isMuted?: boolean;
-  isBlocked?: boolean;
-  userName?: string;
-  onEdit?: (postId: string) => void;
-  onDelete?: (postId: string) => void;
-  onSave?: (postId: string) => void;
-  onReport?: (postId: string) => void;
-  onHide?: (postId: string) => void;
-  onShare?: (postId: string) => void;
-  onCopyLink?: (postId: string) => void;
-  onMuteUser?: (userId: string, userName?: string) => void;
-  onBlockUser?: (userId: string, userName?: string) => void;
-  userId?: string;
+  postData: PostData;
+  onEdit: (postId: string) => void;
+  onDelete: (postId: string) => void;
+  onSave: (postId: string) => void;
+  onReport: (postId: string) => void;
+  onHide: (postId: string) => void;
+  onShare: (postId: string) => void;
+  onCopyLink: (postId: string) => void;
+  onMuteUser: (userId: string, userName?: string) => void;
+  onBlockUser: (userId: string, userName?: string) => void;
 }
 
+/**
+ * PostOptionsModal - Pure Presentational Component
+ *
+ * Responsibilities:
+ * - Display options for a post
+ * - Fire callbacks when user selects an option
+ *
+ * DOES NOT:
+ * - Manage ReportModal visibility
+ * - Contain timeout chains
+ * - Track processing state
+ * - Render nested modals
+ */
 const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
   visible,
   onClose,
-  postId,
-  isOwnPost,
-  isSaved = false,
-  isReported = false,
-  isHidden = false,
-  isMuted = false,
-  isBlocked = false,
-  userName,
+  postData,
   onEdit,
   onDelete,
   onSave,
@@ -54,11 +65,25 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
   onCopyLink,
   onMuteUser,
   onBlockUser,
-  userId,
 }) => {
+  const {
+    postId,
+    isOwnPost,
+    isSaved,
+    isReported,
+    isHidden,
+    isMuted,
+    isBlocked,
+    userId,
+    userName,
+  } = postData;
+
   const handleEdit = () => {
     onClose();
-    if (onEdit) onEdit(postId);
+    // Small delay to ensure modal close animation starts before navigation
+    requestAnimationFrame(() => {
+      onEdit(postId);
+    });
   };
 
   const handleDelete = () => {
@@ -72,7 +97,9 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
           style: "destructive",
           onPress: () => {
             onClose();
-            if (onDelete) onDelete(postId);
+            requestAnimationFrame(() => {
+              onDelete(postId);
+            });
           },
         },
       ],
@@ -81,39 +108,27 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
 
   const handleSave = () => {
     onClose();
-    if (onSave) onSave(postId);
-  };
-
-  const handleCopyLink = () => {
-    onClose();
-    if (onCopyLink) onCopyLink(postId);
+    requestAnimationFrame(() => {
+      onSave(postId);
+    });
   };
 
   const handleReport = () => {
-    Alert.alert("Report Post", "Why are you reporting this post?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Spam",
-        onPress: () => {
-          onClose();
-          if (onReport) onReport(postId);
-        },
-      },
-      {
-        text: "Inappropriate",
-        onPress: () => {
-          onClose();
-          if (onReport) onReport(postId);
-        },
-      },
-      {
-        text: "Harassment",
-        onPress: () => {
-          onClose();
-          if (onReport) onReport(postId);
-        },
-      },
-    ]);
+    // If already reported, close immediately
+    if (isReported) {
+      onClose();
+      return;
+    }
+
+    // IMPORTANT: Close this modal FIRST
+    // The parent (FeedScreen) will detect onClose and check for pending report
+    onClose();
+
+    // After closing, tell parent we want to report
+    // Use requestAnimationFrame to ensure close animation starts
+    requestAnimationFrame(() => {
+      onReport(postId);
+    });
   };
 
   const handleHide = () => {
@@ -129,7 +144,9 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
         style: isHidden ? "default" : "destructive",
         onPress: () => {
           onClose();
-          if (onHide) onHide(postId);
+          requestAnimationFrame(() => {
+            onHide(postId);
+          });
         },
       },
     ]);
@@ -137,10 +154,20 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
 
   const handleShare = () => {
     onClose();
-    if (onShare) onShare(postId);
+    requestAnimationFrame(() => {
+      onShare(postId);
+    });
+  };
+
+  const handleCopyLink = () => {
+    onClose();
+    requestAnimationFrame(() => {
+      onCopyLink(postId);
+    });
   };
 
   const handleMuteUser = () => {
+    if (!userId) return;
     const displayName = userName || "this user";
     const actionText = isMuted ? "unmute" : "mute";
     const actionMessage = isMuted
@@ -154,13 +181,16 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
         style: isMuted ? "default" : "destructive",
         onPress: () => {
           onClose();
-          if (onMuteUser && userId) onMuteUser(userId, displayName);
+          requestAnimationFrame(() => {
+            onMuteUser(userId, displayName);
+          });
         },
       },
     ]);
   };
 
   const handleBlockUser = () => {
+    if (!userId) return;
     const displayName = userName || "this user";
     const actionText = isBlocked ? "unblock" : "block";
     const actionMessage = isBlocked
@@ -174,7 +204,9 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
         style: isBlocked ? "default" : "destructive",
         onPress: () => {
           onClose();
-          if (onBlockUser && userId) onBlockUser(userId, displayName);
+          requestAnimationFrame(() => {
+            onBlockUser(userId, displayName);
+          });
         },
       },
     ]);
@@ -204,7 +236,7 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
           size={22}
           color={isMuted ? "#8b5cf6" : "#6b7280"}
         />
-        <Text style={[styles.optionText, isMuted && styles.savedText]}>
+        <Text style={[styles.optionText, isMuted && styles.activeText]}>
           {isMuted ? "Unmute User" : "Mute User"}
         </Text>
       </TouchableOpacity>
@@ -218,8 +250,8 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
         <Text
           style={[
             styles.optionText,
-            isBlocked && styles.savedText,
-            isBlocked ? {} : styles.deleteText,
+            isBlocked && styles.activeText,
+            !isBlocked && styles.deleteText,
           ]}
         >
           {isBlocked ? "Unblock User" : "Block User"}
@@ -238,7 +270,7 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
           size={22}
           color={isSaved ? "#8b5cf6" : "#6b7280"}
         />
-        <Text style={[styles.optionText, isSaved && styles.savedText]}>
+        <Text style={[styles.optionText, isSaved && styles.activeText]}>
           {isSaved ? "Unsave Post" : "Save Post"}
         </Text>
       </TouchableOpacity>
@@ -249,7 +281,7 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
           size={22}
           color={isHidden ? "#8b5cf6" : "#6b7280"}
         />
-        <Text style={[styles.optionText, isHidden && styles.savedText]}>
+        <Text style={[styles.optionText, isHidden && styles.activeText]}>
           {isHidden ? "Unhide Post" : "Hide Post"}
         </Text>
       </TouchableOpacity>
@@ -272,11 +304,11 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
       <TouchableOpacity style={styles.optionItem} onPress={handleReport}>
         <Ionicons
           name={isReported ? "flag" : "flag-outline"}
-          size={22}
-          color={isReported ? "#ef4444" : "#6b7280"}
+          size={24}
+          color={isReported ? "#ef4444" : "#374151"}
         />
         <Text style={[styles.optionText, isReported && styles.reportedText]}>
-          {isReported ? "Reported" : "Report Post"}
+          {isReported ? "Reported" : "Report"}
         </Text>
       </TouchableOpacity>
     </>
@@ -288,6 +320,8 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
       transparent={true}
       animationType="slide"
       onRequestClose={onClose}
+      // Use hardware back button on Android
+      statusBarTranslucent={Platform.OS === "android"}
     >
       <TouchableOpacity
         style={styles.modalOverlay}
@@ -314,14 +348,13 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    backgroundColor: "transparent",
     justifyContent: "flex-end",
   },
   modalContent: {
     backgroundColor: "white",
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    paddingBottom: 20,
+    paddingBottom: Platform.OS === "ios" ? 34 : 20,
     maxHeight: "80%",
     shadowColor: "#000",
     shadowOffset: {
@@ -363,7 +396,7 @@ const styles = StyleSheet.create({
   deleteText: {
     color: "#ef4444",
   },
-  savedText: {
+  activeText: {
     color: "#8b5cf6",
   },
   reportedText: {
@@ -376,4 +409,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default PostOptionsModal;
+export default React.memo(PostOptionsModal);

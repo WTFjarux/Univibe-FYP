@@ -1,0 +1,34 @@
+@font-face {
+  font-family: 'Sofia';
+  src: url('/fonts/Sofia-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Sofia Sans';
+  src: url('/fonts/SofiaSans-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Sofia Sans';
+  src: url('/fonts/SofiaSans-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Sofia Sans';
+  src: url('/fonts/SofiaSans-SemiBold.ttf') format('truetype');
+  font-weight: 600;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Sofia Sans';
+  src: url('/fonts/SofiaSans-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+}

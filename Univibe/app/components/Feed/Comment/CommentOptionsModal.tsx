@@ -1,3 +1,5 @@
+// app/components/CommentOptionsModal.tsx
+
 import React from "react";
 import {
   View,
@@ -6,6 +8,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -13,37 +16,60 @@ interface CommentOptionsModalProps {
   visible: boolean;
   onClose: () => void;
   commentId: string;
+  postId: string;
   isOwnComment: boolean;
   isPostOwner: boolean;
+  isReported?: boolean;
   onEdit?: (commentId: string) => void;
   onDelete?: (commentId: string) => void;
   onReport?: (commentId: string) => void;
   onReply?: (commentId: string) => void;
   onShare?: (commentId: string) => void;
   onHide?: (commentId: string) => void;
+  onShowInfoBar?: (message: string, type: "success" | "error" | "info") => void;
 }
 
+/**
+ * CommentOptionsModal - Pure Presentational Component
+ *
+ * Responsibilities:
+ * - Display options for a comment
+ * - Fire callbacks when user selects an option
+ *
+ * DOES NOT:
+ * - Manage ReportModal visibility
+ * - Handle report submission directly
+ * - Contain timeout chains
+ * - Render nested modals
+ */
 const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
   visible,
   onClose,
   commentId,
+  postId,
   isOwnComment,
   isPostOwner,
+  isReported = false,
   onEdit,
   onDelete,
   onReport,
   onReply,
   onShare,
   onHide,
+  onShowInfoBar,
 }) => {
   const handleReply = () => {
     onClose();
-    if (onReply) onReply(commentId);
+    requestAnimationFrame(() => {
+      if (onReply) onReply(commentId);
+    });
   };
 
   const handleEdit = () => {
     onClose();
-    if (onEdit) onEdit(commentId);
+    requestAnimationFrame(() => {
+      if (onEdit) onEdit(commentId);
+    });
   };
 
   const handleDelete = () => {
@@ -57,7 +83,9 @@ const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
           style: "destructive",
           onPress: () => {
             onClose();
-            if (onDelete) onDelete(commentId);
+            requestAnimationFrame(() => {
+              if (onDelete) onDelete(commentId);
+            });
           },
         },
       ],
@@ -66,7 +94,9 @@ const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
 
   const handleShare = () => {
     onClose();
-    if (onShare) onShare(commentId);
+    requestAnimationFrame(() => {
+      if (onShare) onShare(commentId);
+    });
   };
 
   const handleHide = () => {
@@ -77,37 +107,31 @@ const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
         style: "destructive",
         onPress: () => {
           onClose();
-          if (onHide) onHide(commentId);
+          requestAnimationFrame(() => {
+            if (onHide) onHide(commentId);
+          });
         },
       },
     ]);
   };
 
   const handleReport = () => {
-    Alert.alert("Report Comment", "Why are you reporting this comment?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Spam",
-        onPress: () => {
-          onClose();
-          if (onReport) onReport(commentId);
-        },
-      },
-      {
-        text: "Inappropriate",
-        onPress: () => {
-          onClose();
-          if (onReport) onReport(commentId);
-        },
-      },
-      {
-        text: "Harassment",
-        onPress: () => {
-          onClose();
-          if (onReport) onReport(commentId);
-        },
-      },
-    ]);
+    // If already reported, show info and close
+    if (isReported) {
+      if (onShowInfoBar) {
+        onShowInfoBar("You have already reported this comment", "info");
+      }
+      onClose();
+      return;
+    }
+
+    // Close this modal - parent will handle opening ReportModal
+    onClose();
+
+    // Tell parent we want to report this comment
+    requestAnimationFrame(() => {
+      if (onReport) onReport(commentId);
+    });
   };
 
   return (
@@ -116,6 +140,7 @@ const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
       transparent={true}
       animationType="slide"
       onRequestClose={onClose}
+      statusBarTranslucent={Platform.OS === "android"}
     >
       <TouchableOpacity
         style={styles.modalOverlay}
@@ -179,8 +204,19 @@ const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
                 style={styles.optionItem}
                 onPress={handleReport}
               >
-                <Ionicons name="flag-outline" size={24} color="#374151" />
-                <Text style={styles.optionText}>Report</Text>
+                <Ionicons
+                  name={isReported ? "flag" : "flag-outline"}
+                  size={24}
+                  color={isReported ? "#ef4444" : "#374151"}
+                />
+                <Text
+                  style={[
+                    styles.optionText,
+                    isReported && { color: "#ef4444" },
+                  ]}
+                >
+                  {isReported ? "Reported" : "Report"}
+                </Text>
               </TouchableOpacity>
             </>
           ) : (
@@ -192,8 +228,19 @@ const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
                 style={styles.optionItem}
                 onPress={handleReport}
               >
-                <Ionicons name="flag-outline" size={24} color="#374151" />
-                <Text style={styles.optionText}>Report</Text>
+                <Ionicons
+                  name={isReported ? "flag" : "flag-outline"}
+                  size={24}
+                  color={isReported ? "#ef4444" : "#374151"}
+                />
+                <Text
+                  style={[
+                    styles.optionText,
+                    isReported && { color: "#ef4444" },
+                  ]}
+                >
+                  {isReported ? "Reported" : "Report"}
+                </Text>
               </TouchableOpacity>
             </>
           )}
@@ -211,14 +258,13 @@ const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0)",
     justifyContent: "flex-end",
   },
   modalContent: {
     backgroundColor: "white",
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    paddingBottom: 20,
+    paddingBottom: Platform.OS === "ios" ? 34 : 20,
     paddingTop: 8,
   },
   optionItem: {
@@ -258,4 +304,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default CommentOptionsModal;
+export default React.memo(CommentOptionsModal);

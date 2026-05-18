@@ -292,7 +292,7 @@ export default function BlockedUsersScreen() {
   );
 }
 
-// ✅ Styles placed AFTER the component (not inside it)
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,

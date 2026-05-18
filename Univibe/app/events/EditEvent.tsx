@@ -256,7 +256,20 @@ export default function EditEventScreen() {
   const onEndDateConfirm = () => {
     const newDate = new Date(tempEndDate);
     newDate.setHours(endDate.getHours(), endDate.getMinutes());
-    if (newDate > startDate) {
+
+    // Compare dates only (ignore time)
+    const startDay = new Date(
+      startDate.getFullYear(),
+      startDate.getMonth(),
+      startDate.getDate(),
+    );
+    const endDay = new Date(
+      newDate.getFullYear(),
+      newDate.getMonth(),
+      newDate.getDate(),
+    );
+
+    if (endDay >= startDay) {
       setEndDate(newDate);
     } else {
       Alert.alert("Invalid Date", "End date must be after start date");
@@ -696,7 +709,6 @@ export default function EditEventScreen() {
           title="Select End Date"
           date={tempEndDate}
           setDate={setTempEndDate}
-          minimumDate={startDate}
         />
 
         <TimePickerModal

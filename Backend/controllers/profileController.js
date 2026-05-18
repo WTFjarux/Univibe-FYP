@@ -1166,3 +1166,110 @@ exports.searchConnections = async (req, res) => {
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
+
+/**
+ * Report a user
+ */
+exports.reportUser = async (req, res) => {
+  try {
+    const { userId: targetUserId } = req.params;
+    const reporterId = req.user._id;
+    const { reason, description } = req.body;
+
+    console.log("📝 Report user request:", {
+      targetUserId,
+      reporterId,
+      reason,
+      description,
+    });
+
+    // Validate required fields
+    if (!reason) {
+      return res.status(400).json({
+        success: false,
+        message: "Reason is required",
+      });
+    }
+
+    // Validate reason enum
+    const validReasons = [
+      "spam",
+      "harassment",
+      "hate_speech",
+      "inappropriate_content",
+      "violence",
+      "self_harm",
+      "misinformation",
+      "impersonation",
+      "copyright",
+      "other",
+    ];
+
+    if (!validReasons.includes(reason)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid report reason",
+      });
+    }
+
+    // Check if target user exists
+    const targetUser = await User.findById(targetUserId);
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Prevent self-reporting
+    if (targetUserId.toString() === reporterId.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: "You cannot report yourself",
+      });
+    }
+
+    // FIX: Use getAdminModel to get the Report model
+    const { getAdminModel } = require("../config/database");
+    const Report = getAdminModel("Report");
+
+    // Check for existing report
+    const existingReport = await Report.findOne({
+      reportedBy: reporterId,
+      targetType: "User",
+      targetId: targetUserId,
+      status: { $in: ["pending", "reviewing"] },
+    });
+
+    if (existingReport) {
+      return res.status(400).json({
+        success: false,
+        message: "You have already reported this user",
+      });
+    }
+
+    // Create the report
+    const report = await Report.create({
+      reportedBy: reporterId,
+      targetType: "User",
+      targetId: targetUserId,
+      reason,
+      description: description || "",
+      status: "pending",
+    });
+
+    console.log("✅ Report created successfully:", report._id);
+
+    res.status(201).json({
+      success: true,
+      message: "User reported successfully. We'll review this report.",
+      reportId: report._id,
+    });
+  } catch (error) {
+    console.error("Report user error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to report user",
+    });
+  }
+};

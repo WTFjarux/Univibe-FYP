@@ -39,7 +39,7 @@ const getSocketUrl = (): string => {
 const SOCKET_URL = getSocketUrl();
 
 // -----------------------------------------------------------------------------
-// Types (only socket-specific types not in chat.types)
+// Internal Types
 // -----------------------------------------------------------------------------
 
 interface ReplyToData {
@@ -123,7 +123,6 @@ class SocketService {
     try {
       const token = await SecureStore.getItemAsync("authToken");
       if (!token) {
-        console.log("⚠️ No auth token found, retrying in 2s...");
         if (this.connectionRetryTimeout) {
           clearTimeout(this.connectionRetryTimeout);
         }
@@ -155,20 +154,18 @@ class SocketService {
       this.isConnecting = false;
       return this.socket;
     } catch (error) {
-      console.error("❌ Socket connection error:", error);
+      console.error("Socket connection error:", error);
       this.isConnecting = false;
       return null;
     }
   }
 
   // ---------------------------------------------------------------------------
-  // Room Reconnection
+  // Room Management
   // ---------------------------------------------------------------------------
 
   rejoinRooms(): void {
     if (this.pendingRooms.length === 0) return;
-
-    console.log(`🔄 Rejoining ${this.pendingRooms.length} rooms...`);
 
     this.pendingRooms.forEach((room) => {
       if (
@@ -186,60 +183,111 @@ class SocketService {
     });
   }
 
+  joinRoom(
+    roomId: string,
+    otherUserId: string | null = null,
+    type: string = "direct",
+  ): void {
+    const alreadyPending = this.pendingRooms.some((r) => r.roomId === roomId);
+    if (!alreadyPending) {
+      this.pendingRooms.push({ roomId, otherUserId, type });
+    }
+
+    if (this.socket && this.isConnected && !this.activeRooms.has(roomId)) {
+      this.activeRooms.add(roomId);
+      this.socket.emit("join_room", { roomId, type, otherUserId });
+    } else if (!this.socket || !this.isConnected) {
+      this.connect();
+    }
+  }
+
+  leaveRoom(roomId: string): void {
+    this.activeRooms.delete(roomId);
+    if (this.socket && this.isConnected) {
+      this.socket.emit("leave_room", { roomId });
+      this.pendingRooms = this.pendingRooms.filter((r) => r.roomId !== roomId);
+    }
+  }
+
   // ---------------------------------------------------------------------------
-  // Socket Event Forwarding
+  // Event Listeners Setup
   // ---------------------------------------------------------------------------
 
   private setupEventListeners(): void {
     if (!this.socket) return;
 
-    // ===== CONNECTION EVENTS =====
+    // Connection events
     this.socket.on("connect", () => {
       this.isConnected = true;
       this.reconnectAttempts = 0;
-      console.log("🟢 Socket connected:", this.socket?.id);
       this.emitEvent("socket_connected", {});
       this.rejoinRooms();
     });
 
     this.socket.on("disconnect", (reason: string) => {
       this.isConnected = false;
-      console.log("🔴 Socket disconnected:", reason);
       this.emitEvent("socket_disconnected", { reason });
     });
 
     this.socket.on("connect_error", (error: Error) => {
+      const msg = error.message || "";
+
+      // Stop reconnecting for auth-related rejections (banned, suspended, expired)
+      if (
+        msg.includes("banned") ||
+        msg.includes("suspended") ||
+        msg.includes("Session expired")
+      ) {
+        this.clearAuthAndRedirect(msg);
+        this.disconnect();
+        return;
+      }
+
       this.reconnectAttempts++;
       if (this.reconnectAttempts % 3 === 0) {
         console.error(
-          `❌ Socket connect error (attempt ${this.reconnectAttempts}):`,
+          `Socket connect error (attempt ${this.reconnectAttempts}):`,
           error.message,
         );
       }
       this.emitEvent("socket_error", error);
     });
 
+    // Force logout from server (admin ban/suspend)
+    this.socket.on(
+      "force_logout",
+      (data: { message: string; reason?: string }) => {
+        this.clearAuthAndRedirect(data.message);
+      },
+    );
+
     this.socket.on("reconnect", (attemptNumber: number) => {
       this.isConnected = true;
-      console.log("🔄 Socket reconnected after", attemptNumber, "attempts");
       this.emitEvent("socket_reconnected", {});
       this.rejoinRooms();
     });
 
-    this.socket.on("reconnect_attempt", (attemptNumber: number) => {
-      console.log(`🔄 Reconnect attempt ${attemptNumber}...`);
+    this.socket.on("reconnect_attempt", () => {
+      // Silent
     });
 
     this.socket.on("reconnect_error", (error: Error) => {
-      console.error("❌ Reconnect error:", error.message);
+      const msg = error.message || "";
+      if (
+        msg.includes("banned") ||
+        msg.includes("suspended") ||
+        msg.includes("Session expired")
+      ) {
+        return;
+      }
+      console.error("Reconnect error:", error.message);
     });
 
     this.socket.on("reconnect_failed", () => {
-      console.error("❌ Socket reconnection failed after max attempts");
       this.emitEvent("socket_reconnect_failed", {});
     });
 
-    // ===== MESSAGE EVENTS =====
+    // Message events
     this.socket.on("receive_message", (message: Message) => {
       this.emitEvent("receive_message", message);
       this.emitEvent("new_message", message);
@@ -272,7 +320,7 @@ class SocketService {
       },
     );
 
-    // ===== READ RECEIPTS (from chat.types) =====
+    // Read receipts
     this.socket.on("messages_read", (data: ReadReceiptData) => {
       this.emitEvent("messages_read", data);
     });
@@ -303,12 +351,12 @@ class SocketService {
       },
     );
 
-    // ===== MESSAGE DELETED (from chat.types) =====
+    // Message deletion
     this.socket.on("message_deleted", (data: MessageDeleteData) => {
       this.emitEvent("message_deleted", data);
     });
 
-    // ===== REACTIONS (from chat.types) =====
+    // Reactions
     this.socket.on("reaction_added", (data: ReactionData) => {
       this.emitEvent("reaction_added", data);
     });
@@ -317,7 +365,7 @@ class SocketService {
       this.emitEvent("reaction_removed", data);
     });
 
-    // ===== CHAT CLEAR/RESTORE (from chat.types) =====
+    // Chat clear/restore
     this.socket.on("chat_cleared", (data: ChatClearedData) => {
       this.emitEvent("chat_cleared", data);
     });
@@ -326,7 +374,7 @@ class SocketService {
       this.emitEvent("chat_restored", data);
     });
 
-    // ===== TYPING INDICATORS (from chat.types) =====
+    // Typing indicators
     this.socket.on("typing", (data: TypingData) => {
       this.emitEvent("typing", data);
       this.emitEvent("user_typing", data);
@@ -337,7 +385,7 @@ class SocketService {
       this.emitEvent("user_stop_typing", data);
     });
 
-    // ===== USER PRESENCE =====
+    // User presence
     this.socket.on("user_online", (data: UserStatus) => {
       this.emitEvent("user_online", data);
     });
@@ -353,7 +401,7 @@ class SocketService {
       },
     );
 
-    // ===== GROUP EVENTS (from chat.types) =====
+    // Group events
     this.socket.on("group_created", (data: GroupCreatedData) => {
       this.emitEvent("group_created", data);
     });
@@ -398,9 +446,8 @@ class SocketService {
       },
     );
 
-    // ===== NOTIFICATION EVENTS =====
+    // Notifications
     this.socket.on("notification:new", (data: any) => {
-      console.log(data?.notification?.message);
       this.emitEvent("notification:new", data);
     });
 
@@ -408,28 +455,25 @@ class SocketService {
       this.emitEvent("notification:unreadCount", data);
     });
 
-    // ===== STORY EVENTS =====
+    // Stories
     this.socket.on("story_created", (data: any) => {
-      console.log("📱 Story created:", data);
       this.emitEvent("story_created", data);
     });
 
     this.socket.on("story_viewed", (data: any) => {
-      console.log("👁️ Story viewed:", data);
       this.emitEvent("story_viewed", data);
     });
 
     this.socket.on("story_deleted", (data: any) => {
-      console.log("🗑️ Story deleted:", data);
       this.emitEvent("story_deleted", data);
     });
 
-    // ===== EVENT UPDATES =====
+    // Event updates
     this.socket.on("event:updated", (data: any) => {
       this.emitEvent("event:updated", data);
     });
 
-    // ===== ERROR EVENTS =====
+    // Errors
     this.socket.on("error", (error: Error) => {
       console.error("Socket error:", error.message);
       this.emitEvent("socket_error", error);
@@ -444,7 +488,7 @@ class SocketService {
   }
 
   // ---------------------------------------------------------------------------
-  // Event Management
+  // Event Management (Public API)
   // ---------------------------------------------------------------------------
 
   on(event: string, callback: EventCallback): void {
@@ -475,7 +519,7 @@ class SocketService {
         try {
           callback(data);
         } catch (error) {
-          /* silent */
+          // Silent
         }
       });
     }
@@ -484,32 +528,6 @@ class SocketService {
   // ---------------------------------------------------------------------------
   // Chat Actions
   // ---------------------------------------------------------------------------
-
-  joinRoom(
-    roomId: string,
-    otherUserId: string | null = null,
-    type: string = "direct",
-  ): void {
-    const alreadyPending = this.pendingRooms.some((r) => r.roomId === roomId);
-    if (!alreadyPending) {
-      this.pendingRooms.push({ roomId, otherUserId, type });
-    }
-
-    if (this.socket && this.isConnected && !this.activeRooms.has(roomId)) {
-      this.activeRooms.add(roomId);
-      this.socket.emit("join_room", { roomId, type, otherUserId });
-    } else if (!this.socket || !this.isConnected) {
-      this.connect();
-    }
-  }
-
-  leaveRoom(roomId: string): void {
-    this.activeRooms.delete(roomId);
-    if (this.socket && this.isConnected) {
-      this.socket.emit("leave_room", { roomId });
-      this.pendingRooms = this.pendingRooms.filter((r) => r.roomId !== roomId);
-    }
-  }
 
   sendMessage(
     roomId: string,
@@ -663,6 +681,29 @@ class SocketService {
   // ---------------------------------------------------------------------------
   // Utility Methods
   // ---------------------------------------------------------------------------
+
+  /**
+   * Clear auth tokens and emit force_logout event.
+   * AuthContext listens for this event and shows the alert.
+   * No Alert.alert here to avoid duplicate alerts.
+   */
+  private async clearAuthAndRedirect(message: string) {
+    try {
+      await SecureStore.deleteItemAsync("authToken");
+      await SecureStore.deleteItemAsync("refreshToken");
+
+      const code = message.includes("banned")
+        ? "ACCOUNT_BANNED"
+        : message.includes("suspended")
+          ? "ACCOUNT_SUSPENDED"
+          : "FORCE_LOGOUT";
+
+      // Emit event so AuthContext handles the alert and state cleanup
+      this.emitEvent("force_logout", { message, code });
+    } catch (error) {
+      console.error("Error clearing auth:", error);
+    }
+  }
 
   emit(event: string, data: any): void {
     if (this.socket && this.isConnected) this.socket.emit(event, data);

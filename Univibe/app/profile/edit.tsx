@@ -426,91 +426,97 @@ export default function EditProfileScreen() {
   /**
    * Handle save button press - validate and save profile data
    */
-  const handleSave = useCallback(async () => {
-    // Validation
-    if (!user.username || !user.major || !user.year) {
-      Alert.alert("Required Fields", "Username, major, and year are required");
-      return;
+const handleSave = useCallback(async () => {
+  // Validation
+  if (!user.username || !user.major || !user.year) {
+    Alert.alert("Required Fields", "Username, major, and year are required");
+    return;
+  }
+
+  if (user.universityEmail && !user.universityEmail.includes("@")) {
+    Alert.alert("Invalid Email", "Please enter a valid email address");
+    return;
+  }
+
+  setSaving(true);
+
+  try {
+    let profilePictureUrl =
+      originalUser?.profilePicture || user.profilePicture;
+
+    // Handle profile picture upload
+    if (selectedImageUri) {
+      try {
+        profilePictureUrl =
+          await handleProfilePictureUpload(selectedImageUri);
+      } catch (uploadError: any) {
+        Alert.alert("Image Upload Error", uploadError.message);
+        setSaving(false);
+        return;
+      }
+    }
+    // Handle profile picture deletion
+    else if (pendingChanges.profilePicture === "") {
+      await handleProfilePictureDeletion();
+      profilePictureUrl = "";
     }
 
-    if (user.universityEmail && !user.universityEmail.includes("@")) {
-      Alert.alert("Invalid Email", "Please enter a valid email address");
-      return;
+    // Build and send update payload
+    const updatePayload = buildUpdatePayload();
+
+    // Add profile picture URL if uploaded
+    if (selectedImageUri) {
+      updatePayload.profilePicture = profilePictureUrl;
+    } else if (pendingChanges.profilePicture === "") {
+      updatePayload.profilePicture = "";
     }
 
-    setSaving(true);
+    console.log("Sending update payload:", updatePayload);
 
-    try {
-      let profilePictureUrl =
-        originalUser?.profilePicture || user.profilePicture;
+    const response = await profileService.updateProfile(updatePayload);
 
-      // Handle profile picture upload
-      if (selectedImageUri) {
-        try {
-          profilePictureUrl =
-            await handleProfilePictureUpload(selectedImageUri);
-        } catch (uploadError: any) {
-          Alert.alert("Image Upload Error", uploadError.message);
-          setSaving(false);
-          return;
-        }
-      }
-      // Handle profile picture deletion
-      else if (pendingChanges.profilePicture === "") {
-        await handleProfilePictureDeletion();
-        profilePictureUrl = "";
-      }
-
-      // Build and send update payload
-      const updatePayload = buildUpdatePayload();
-
-      // Add profile picture URL if uploaded
-      if (selectedImageUri) {
-        updatePayload.profilePicture = profilePictureUrl;
-      } else if (pendingChanges.profilePicture === "") {
-        updatePayload.profilePicture = "";
-      }
-
-      console.log("Sending update payload:", updatePayload);
-
-      const response = await profileService.updateProfile(updatePayload);
-
-      if (response.success) {
-        await updateLocalStorage(profilePictureUrl);
-        await refreshGlobalProfile();
-
-        Alert.alert("Success", "Profile updated successfully!", [
-          {
-            text: "OK",
-            onPress: () => {
-              navigateToProfile();
-            },
-          },
-        ]);
-
-        setPendingChanges({});
-        setSelectedImageUri(null);
-      } else {
-        Alert.alert("Update Failed", response.message || "Unknown error");
-      }
-    } catch (error: any) {
-      console.error("Update error:", error);
-      Alert.alert("Error", error.message || "Failed to update profile");
-    } finally {
+    // ✅ Check for null (auth error handled by service - Alert already shown)
+    if (response === null || !response) {
       setSaving(false);
+      return;
     }
-  }, [
-    user,
-    originalUser,
-    pendingChanges,
-    selectedImageUri,
-    handleProfilePictureUpload,
-    handleProfilePictureDeletion,
-    buildUpdatePayload,
-    updateLocalStorage,
-    refreshGlobalProfile,
-    navigateToProfile,
-  ]);
+
+    if (response.success) {
+      await updateLocalStorage(profilePictureUrl);
+      await refreshGlobalProfile();
+
+      Alert.alert("Success", "Profile updated successfully!", [
+        {
+          text: "OK",
+          onPress: () => {
+            navigateToProfile();
+          },
+        },
+      ]);
+
+      setPendingChanges({});
+      setSelectedImageUri(null);
+    } else {
+      Alert.alert("Update Failed", response.message || "Unknown error");
+    }
+  } catch (error: any) {
+    console.error("Update error:", error);
+    Alert.alert("Error", error.message || "Failed to update profile");
+  } finally {
+    setSaving(false);
+  }
+}, [
+  user,
+  originalUser,
+  pendingChanges,
+  selectedImageUri,
+  handleProfilePictureUpload,
+  handleProfilePictureDeletion,
+  buildUpdatePayload,
+  updateLocalStorage,
+  refreshGlobalProfile,
+  navigateToProfile,
+]);
 
   // Image Upload Functions
   const openUploadModal = useCallback(() => setUploadModal(true), []);

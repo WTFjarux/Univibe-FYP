@@ -343,6 +343,7 @@ exports.createEvent = async (req, res) => {
       tags: tags ? (Array.isArray(tags) ? tags : tags.split(",")) : [],
       images: formattedImages,
       status: initialStatus, // Set correct initial status
+      approvalStatus: visibility === "connections" ? "approved" : "pending",
     });
 
     if (formattedImages.length > 0) {
@@ -392,7 +393,6 @@ exports.getEvents = async (req, res) => {
       limit = 20,
       search,
     } = req.query;
-
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const userId = req.user._id;
 
@@ -406,21 +406,14 @@ exports.getEvents = async (req, res) => {
 
     let query = {};
 
-    if (campus) {
-      query.campus = campus;
-    } else if (userCampus) {
-      query.campus = userCampus;
-    }
+    if (campus) query.campus = campus;
+    else if (userCampus) query.campus = userCampus;
 
-    if (category && category !== "All" && category !== "all") {
+    if (category && category !== "All" && category !== "all")
       query.category = category;
-    }
 
-    if (status && status !== "all") {
-      query.status = status;
-    } else {
-      query.status = { $in: ["upcoming", "ongoing"] };
-    }
+    if (status && status !== "all") query.status = status;
+    else query.status = { $in: ["upcoming", "ongoing"] };
 
     if (search && search.trim()) {
       const searchRegex = new RegExp(search.trim(), "i");
@@ -432,11 +425,17 @@ exports.getEvents = async (req, res) => {
       ];
     }
 
-    query.$or = [
-      { visibility: "campus" },
-      { visibility: "public" },
-      { visibility: "connections", organizer: userId },
-      { visibility: "connections", organizer: { $in: connectionIds } },
+    // ✅ Only show approved events OR user's own non-rejected events
+    query.$and = [
+      {
+        $or: [
+          { visibility: "campus", approvalStatus: "approved" },
+          { visibility: "public", approvalStatus: "approved" },
+          { visibility: "connections", organizer: userId },
+          { visibility: "connections", organizer: { $in: connectionIds } },
+          { organizer: userId, approvalStatus: { $ne: "rejected" } },
+        ],
+      },
     ];
 
     const [events, total] = await Promise.all([
@@ -449,13 +448,10 @@ exports.getEvents = async (req, res) => {
       Event.countDocuments(query),
     ]);
 
-    // Update status for each event if needed
     const eventsWithUpdatedStatus = await Promise.all(
       events.map(async (event) => {
         const eventDoc = await Event.findById(event._id);
-        if (eventDoc) {
-          await eventDoc.updateStatusIfNeeded();
-        }
+        if (eventDoc) await eventDoc.updateStatusIfNeeded();
         return event;
       }),
     );
@@ -464,7 +460,6 @@ exports.getEvents = async (req, res) => {
       eventsWithUpdatedStatus.map(async (event) => {
         const organizerWithProfile = await getUserWithProfile(event.organizer);
         const processedEvent = processEventImagesForResponse(req, event);
-
         return {
           ...processedEvent,
           organizer: organizerWithProfile,
@@ -494,10 +489,7 @@ exports.getEvents = async (req, res) => {
     });
   } catch (error) {
     console.error("Get events error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch events",
-    });
+    res.status(500).json({ success: false, message: "Failed to fetch events" });
   }
 };
 
@@ -1228,11 +1220,11 @@ exports.getMyEvents = async (req, res) => {
     const userId = req.user._id;
     const { status, page = 1, limit = 20 } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    let query = { organizer: userId };
-    if (status && status !== "all") {
-      query.status = status;
-    }
+    let query = {
+      organizer: userId,
+      approvalStatus: { $ne: "rejected" },
+    };
+    if (status && status !== "all") query.status = status;
 
     const [events, total] = await Promise.all([
       Event.find(query)
@@ -1243,7 +1235,6 @@ exports.getMyEvents = async (req, res) => {
         .lean(),
       Event.countDocuments(query),
     ]);
-
     // Update status for each event if needed
     await Promise.all(
       events.map(async (event) => {

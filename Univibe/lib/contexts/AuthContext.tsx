@@ -1,7 +1,7 @@
-// Univibe/lib/AuthContext.tsx
 /**
  * Authentication Context
  * Manages user authentication state, token handling, profile data, and socket connection
+ * Handles force logout for banned/suspended users in real-time
  */
 
 import React, {
@@ -14,10 +14,11 @@ import React, {
 } from "react";
 import socketService from "../services/socketService";
 import { jwtDecode } from "jwt-decode";
-import { AppState, AppStateStatus } from "react-native";
+import { AppState, AppStateStatus, Alert, Platform } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import { profileService } from "../services/profileService";
 import { API_BASE_URL } from "../../constants/ipConstants";
+import { handleAuthError } from "../utils/handleApiError";
 
 // ============================================
 // TYPES
@@ -45,6 +46,14 @@ interface User {
   iat?: number;
 }
 
+interface ForceLogoutData {
+  message: string;
+  code: string;
+  reason?: string;
+  timestamp?: string;
+  immediate?: boolean;
+}
+
 interface AuthContextType {
   user: User | null;
   token: string | null;
@@ -69,6 +78,7 @@ interface AuthContextType {
     success: boolean;
     message?: string;
   }>;
+  handleTokenVersionMismatch: (data: any) => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -88,25 +98,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     !!token && !!user?.isEmailVerified && !!user?.profileComplete;
   const appState = useRef(AppState.currentState);
   const socketConnectedRef = useRef(false);
+  const accountCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
+  const isLoggingOut = useRef(false);
 
   // ============================================
   // SOCKET CONNECTION MANAGEMENT
   // ============================================
 
   const connectSocket = useCallback(async () => {
-    if (socketConnectedRef.current) {
-      return;
-    }
+    if (socketConnectedRef.current) return;
 
     const currentToken = token || (await SecureStore.getItemAsync("authToken"));
-
-    if (!currentToken) {
-      console.log("🔌 No token available for socket connection");
-      return;
-    }
+    if (!currentToken) return;
 
     try {
-      // Decode token to get user ID
       let userId = user?.id;
       if (!userId && currentToken) {
         try {
@@ -120,9 +127,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       const socket = await socketService.connect();
       if (socket) {
         socketConnectedRef.current = true;
-        console.log("🟢 Socket connected via AuthContext");
-
-        // Join personal notification room
         if (userId) {
           socketService.emit("join_room", {
             roomId: `user_${userId}`,
@@ -131,29 +135,166 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       }
     } catch (error) {
-      console.error("❌ Failed to connect socket:", error);
+      console.error("Failed to connect socket:", error);
     }
   }, [token, user?.id]);
 
-  /**
-   * Disconnect socket on logout
-   */
   const disconnectSocket = useCallback(() => {
     socketService.disconnect();
     socketConnectedRef.current = false;
-    console.log("🔴 Socket disconnected via AuthContext");
   }, []);
+
+  // ============================================
+  // CLEAR AUTH DATA
+  // ============================================
+
+  const clearAuthData = useCallback(async () => {
+    try {
+      await SecureStore.deleteItemAsync("authToken");
+      await SecureStore.deleteItemAsync("profile_complete");
+    } catch (error) {
+      console.error("Error clearing token:", error);
+    }
+    setToken(null);
+    setUser(null);
+    setProfile(null);
+  }, []);
+
+  // ============================================
+  // STOP PERIODIC CHECK
+  // Declared before handleForceLogout and startAccountStatusCheck
+  // to avoid "used before declaration" errors
+  // ============================================
+
+  const stopAccountStatusCheck = useCallback(() => {
+    if (accountCheckIntervalRef.current) {
+      clearInterval(accountCheckIntervalRef.current);
+      accountCheckIntervalRef.current = null;
+    }
+  }, []);
+
+  // ============================================
+  // FORCE LOGOUT HANDLER
+  // ============================================
+
+  const handleForceLogout = useCallback(
+    async (data: ForceLogoutData) => {
+      if (isLoggingOut.current) return;
+      isLoggingOut.current = true;
+
+      // Stop periodic checks immediately
+      stopAccountStatusCheck();
+
+      const title =
+        data.code === "ACCOUNT_BANNED" ? "Account Banned" : "Account Suspended";
+
+      if (Platform.OS !== "web") {
+        Alert.alert(
+          title,
+          data.message || "Your account has been actioned by an administrator.",
+          [
+            {
+              text: "OK",
+              onPress: async () => {
+                await disconnectSocket();
+                await clearAuthData();
+                isLoggingOut.current = false;
+              },
+            },
+          ],
+          { cancelable: false },
+        );
+      } else {
+        await disconnectSocket();
+        await clearAuthData();
+        isLoggingOut.current = false;
+      }
+    },
+    [disconnectSocket, clearAuthData, stopAccountStatusCheck],
+  );
+
+  // ============================================
+  // PERIODIC ACCOUNT STATUS CHECK
+  // ============================================
+
+  const startAccountStatusCheck = useCallback(() => {
+    if (accountCheckIntervalRef.current) return;
+
+    accountCheckIntervalRef.current = setInterval(async () => {
+      if (isLoggingOut.current) return;
+
+      const currentToken =
+        token || (await SecureStore.getItemAsync("authToken"));
+      if (!currentToken) return;
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+          headers: {
+            Authorization: `Bearer ${currentToken}`,
+            "Content-Type": "application/json",
+          },
+        });
+        const data = await response.json();
+
+        if (
+          data.code === "ACCOUNT_BANNED" ||
+          data.code === "ACCOUNT_SUSPENDED"
+        ) {
+          if (!isLoggingOut.current) {
+            await handleForceLogout({
+              message: data.message,
+              code: data.code,
+            });
+          }
+        }
+      } catch (error) {
+        // Silent fail for periodic checks
+      }
+    }, 15000);
+  }, [token, handleForceLogout]);
 
   // ============================================
   // INITIALIZATION
   // ============================================
 
-  // Initialize auth state on mount
   useEffect(() => {
     checkAuthState();
   }, []);
 
-  // Monitor app state to refresh verification status when app returns to foreground
+  // Socket force logout listener
+  useEffect(() => {
+    const onForceLogout = (data: ForceLogoutData) => {
+      handleForceLogout(data);
+    };
+    const onAccountBanned = (data: any) => {
+      handleForceLogout({ ...data, code: "ACCOUNT_BANNED" });
+    };
+    const onAccountSuspended = (data: any) => {
+      handleForceLogout({ ...data, code: "ACCOUNT_SUSPENDED" });
+    };
+
+    socketService.on("force_logout", onForceLogout);
+    socketService.on("account_banned", onAccountBanned);
+    socketService.on("account_suspended", onAccountSuspended);
+
+    return () => {
+      socketService.off("force_logout", onForceLogout);
+      socketService.off("account_banned", onAccountBanned);
+      socketService.off("account_suspended", onAccountSuspended);
+    };
+  }, [handleForceLogout]);
+
+  // Start/stop periodic checks based on auth state
+  useEffect(() => {
+    if (isAuthenticated) {
+      startAccountStatusCheck();
+    } else {
+      stopAccountStatusCheck();
+    }
+    return () => stopAccountStatusCheck();
+  }, [isAuthenticated, startAccountStatusCheck, stopAccountStatusCheck]);
+
+  // App state change handler
   useEffect(() => {
     const subscription = AppState.addEventListener(
       "change",
@@ -163,51 +304,62 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           nextAppState === "active" &&
           token
         ) {
+          // Check verification status
           try {
-            const decoded = jwtDecode<CustomJwtPayload>(token);
             const response = await fetch(
               `${API_BASE_URL}/api/auth/check-verification`,
               {
-                method: "GET",
                 headers: {
                   Authorization: `Bearer ${token}`,
                   "Content-Type": "application/json",
                 },
               },
             );
-
             const data = await response.json();
-
-            if (
-              data.success &&
-              data.isEmailVerified &&
-              !decoded.isEmailVerified
-            ) {
-              await refreshToken();
+            if (data.success && data.isEmailVerified) {
+              const decoded = jwtDecode<CustomJwtPayload>(token);
+              if (!decoded.isEmailVerified) await refreshToken();
             }
           } catch (error) {
             // Silent fail
           }
 
-          // ✅ Reconnect socket when app returns to foreground
-          if (isAuthenticated) {
-            connectSocket();
+          // Check account status
+          try {
+            const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+            });
+            const data = await response.json();
+            if (
+              data.code === "ACCOUNT_BANNED" ||
+              data.code === "ACCOUNT_SUSPENDED"
+            ) {
+              await handleForceLogout({
+                message: data.message,
+                code: data.code,
+              });
+              return;
+            }
+          } catch (error) {
+            // Silent fail
           }
+
+          if (isAuthenticated) connectSocket();
         }
         appState.current = nextAppState;
       },
     );
 
     return () => subscription.remove();
-  }, [token, isAuthenticated, connectSocket]);
+  }, [token, isAuthenticated, connectSocket, handleForceLogout]);
 
   // ============================================
   // TOKEN MANAGEMENT
   // ============================================
 
-  /**
-   * Refresh authentication token
-   */
   const refreshToken = async (): Promise<boolean> => {
     try {
       const currentToken =
@@ -223,6 +375,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       });
 
       const data = await response.json();
+
+      if (data.code === "ACCOUNT_BANNED" || data.code === "ACCOUNT_SUSPENDED") {
+        await handleForceLogout({ message: data.message, code: data.code });
+        return false;
+      }
 
       if (data.success && data.token) {
         await SecureStore.setItemAsync("authToken", data.token);
@@ -249,32 +406,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
-  /**
-   * Clear all authentication data
-   */
-  const clearAuthData = async () => {
-    try {
-      await SecureStore.deleteItemAsync("authToken");
-      await SecureStore.deleteItemAsync("profile_complete");
-    } catch (error) {
-      console.error("Error clearing token:", error);
-    }
-    setToken(null);
-    setUser(null);
-    setProfile(null);
-  };
-
   // ============================================
   // PROFILE MANAGEMENT
   // ============================================
 
-  /**
-   * Fetch and update user profile data
-   */
   const fetchUserProfile = async () => {
     try {
       const response = await profileService.getProfileDetails();
-
       if (!response) {
         setProfile(null);
         return null;
@@ -312,23 +450,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
-  /**
-   * Check if user has completed profile setup
-   */
   const hasCompletedProfile = (profileData: any, userData?: any): boolean => {
     if (userData?.profileComplete === true) return true;
     if (profileData?.user?.profileComplete === true) return true;
     if (profileData?.data?.user?.profileComplete === true) return true;
-
     const p = profileData?.data?.profile || profileData?.profile || profileData;
     if (p?.major && p.major !== "Undecided" && p?.username) return true;
-
     return false;
   };
 
-  /**
-   * Refresh current user's profile data
-   */
   const refreshUserProfile = async () => {
     try {
       const currentToken =
@@ -365,14 +495,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   // AUTH STATE MANAGEMENT
   // ============================================
 
-  /**
-   * Check and restore authentication state on app start
-   */
   const checkAuthState = async () => {
     try {
       const storedToken = await SecureStore.getItemAsync("authToken");
       if (!storedToken) {
-        console.log("🔐 No token found, user not authenticated");
         setIsLoading(false);
         return;
       }
@@ -381,83 +507,77 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       try {
         decoded = jwtDecode<CustomJwtPayload>(storedToken);
       } catch (decodeError) {
-        console.error("🔐 Invalid token format:", decodeError);
         await clearAuthData();
         setIsLoading(false);
         return;
       }
 
       if (!decoded.isEmailVerified) {
-        console.log("🔐 Email not verified, clearing session");
         await clearAuthData();
         setIsLoading(false);
         return;
       }
 
       const currentTime = Date.now() / 1000;
-
-      if (decoded.exp && decoded.exp > currentTime) {
-        console.log("🔐 Verified session found, restoring...");
-        setToken(storedToken);
-        setUser({
-          id: decoded.id,
-          email: decoded.email,
-          role: decoded.role,
-          isEmailVerified: decoded.isEmailVerified,
-          exp: decoded.exp,
-          iat: decoded.iat,
-        });
-
-        // ✅ CHECK TOKEN VERSION by making a quick API call
-        try {
-          const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
-            headers: {
-              Authorization: `Bearer ${storedToken}`,
-              "Content-Type": "application/json",
-            },
-          });
-          const data = await response.json();
-
-          // If token version mismatch (password changed), force logout
-          if (data?.code === "TOKEN_VERSION_MISMATCH") {
-            console.log("🔐 Token invalidated due to password change");
-            await clearAuthData();
-            setIsLoading(false);
-            return;
-          }
-        } catch (apiError) {
-          // If API fails, continue with local token (offline support)
-          console.log(
-            "⚠️ Could not verify token with server, continuing offline",
-          );
-        }
-
-        const profileData = await fetchUserProfile();
-
-        if (hasCompletedProfile(profileData, { profileComplete: false })) {
-          setUser((prev) => (prev ? { ...prev, profileComplete: true } : null));
-          connectSocket();
-        } else {
-          console.log("🔐 Profile incomplete, user needs setup");
-          setUser((prev) =>
-            prev ? { ...prev, profileComplete: false } : null,
-          );
-        }
-      } else {
-        console.log("🔐 Token expired, clearing session");
+      if (!decoded.exp || decoded.exp <= currentTime) {
         await clearAuthData();
+        setIsLoading(false);
+        return;
+      }
+
+      setToken(storedToken);
+      setUser({
+        id: decoded.id,
+        email: decoded.email,
+        role: decoded.role,
+        isEmailVerified: decoded.isEmailVerified,
+        exp: decoded.exp,
+        iat: decoded.iat,
+      });
+
+      // Verify account status with server
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+          headers: {
+            Authorization: `Bearer ${storedToken}`,
+            "Content-Type": "application/json",
+          },
+        });
+        const data = await response.json();
+
+        if (data.code === "TOKEN_VERSION_MISMATCH") {
+          await clearAuthData();
+          setIsLoading(false);
+          return;
+        }
+
+        if (data.code === "ACCOUNT_BANNED") {
+          await clearAuthData();
+          setIsLoading(false);
+          return;
+        }
+
+        if (data.code === "ACCOUNT_SUSPENDED") {
+        }
+      } catch (apiError) {
+        // Continue offline
+      }
+
+      const profileData = await fetchUserProfile();
+      if (hasCompletedProfile(profileData, { profileComplete: false })) {
+        setUser((prev) => (prev ? { ...prev, profileComplete: true } : null));
+        connectSocket();
+      } else {
+        setUser((prev) => (prev ? { ...prev, profileComplete: false } : null));
       }
     } catch (error) {
-      console.error("🔐 Auth state check error:", error);
+      console.error("Auth state check error:", error);
       await clearAuthData();
     } finally {
       setIsLoading(false);
     }
   };
 
-  /**
-   * Check if user's email is verified
-   */
   const checkVerificationStatus = async () => {
     try {
       const currentToken =
@@ -476,19 +596,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       );
 
       const data = await response.json();
-
       if (data.success) {
         if (data.isEmailVerified && currentToken) {
           try {
             const decoded = jwtDecode<CustomJwtPayload>(currentToken);
-            if (!decoded.isEmailVerified) {
-              await refreshToken();
-            }
+            if (!decoded.isEmailVerified) await refreshToken();
           } catch (err) {
             // Silent fail
           }
         }
-
         return {
           isEmailVerified: data.isEmailVerified,
           email: data.user?.email,
@@ -496,17 +612,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           tokenExpired: data.tokenExpired,
         };
       }
-
       return { isEmailVerified: false };
     } catch (error) {
-      console.error("Check verification error:", error);
       return { isEmailVerified: false };
     }
   };
 
-  /**
-   * Resend email verification link
-   */
   const resendVerificationEmail = async (email: string) => {
     try {
       const response = await fetch(
@@ -517,7 +628,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           body: JSON.stringify({ email }),
         },
       );
-
       const data = await response.json();
       return { success: data.success, message: data.message };
     } catch (error) {
@@ -529,9 +639,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   // AUTHENTICATION ACTIONS
   // ============================================
 
-  /**
-   * Login user with email and password
-   */
   const login = async (email: string, password: string) => {
     try {
       setIsLoading(true);
@@ -543,6 +650,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       });
 
       const responseData = await response.json();
+
+      if (responseData?.code === "ACCOUNT_BANNED") {
+        await handleAuthError(responseData);
+        throw new Error("ACCOUNT_BANNED");
+      }
+
+      if (responseData?.code === "ACCOUNT_SUSPENDED") {
+        await handleAuthError(responseData);
+        throw new Error("ACCOUNT_SUSPENDED");
+      }
 
       if (!response.ok) {
         if (responseData.code === "EMAIL_NOT_VERIFIED") {
@@ -568,15 +685,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
         await fetchUserProfile();
 
-        // ✅ Connect socket after successful login
         if (responseData.user?.profileComplete) {
           connectSocket();
         }
-
-        console.log(
-          "🔐 Login successful, profileComplete:",
-          responseData.user?.profileComplete,
-        );
       } else {
         throw new Error("Authentication failed");
       }
@@ -587,9 +698,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
-  /**
-   * Register new user account
-   */
   const signup = async (name: string, email: string, password: string) => {
     try {
       setIsLoading(true);
@@ -601,10 +709,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       });
 
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || "Registration failed");
-      }
+      if (!response.ok) throw new Error(data.message || "Registration failed");
 
       await SecureStore.deleteItemAsync("authToken");
       setToken(null);
@@ -619,9 +724,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
-  /**
-   * Complete profile setup after registration
-   */
   const setupProfile = async (profileData: any) => {
     try {
       setIsLoading(true);
@@ -631,14 +733,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       if (response?.success === true) {
         await fetchUserProfile();
         setUser((prev) => (prev ? { ...prev, profileComplete: true } : null));
-
-        // ✅ Connect socket after profile setup
         connectSocket();
-
         return response;
-      } else {
-        throw new Error(response?.message || "Profile creation failed");
       }
+      throw new Error(response?.message || "Profile creation failed");
     } catch (error: any) {
       throw error;
     } finally {
@@ -646,36 +744,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
-  /**
-   * Logout user and clear all data
-   */
   const logout = async () => {
     try {
-      // ✅ Disconnect socket before clearing auth data
+      stopAccountStatusCheck();
       disconnectSocket();
-
       await clearAuthData();
-      console.log("🔐 Logout successful");
     } catch (error) {
       console.error("Logout error:", error);
       throw error;
     }
   };
 
-  // ============================================
-  // HELPER: Handle token version mismatch
-  // ============================================
-
-  /**
-   * Check API response for token version mismatch
-   * If password was changed, force logout
-   */
   const handleTokenVersionMismatch = async (data: any) => {
     if (data?.code === "TOKEN_VERSION_MISMATCH") {
-      console.log("🔐 Token version mismatch - forcing logout");
       await disconnectSocket();
       await clearAuthData();
-      // Return true to indicate logout occurred
       return true;
     }
     return false;
@@ -703,16 +786,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         refreshUserProfile,
         checkVerificationStatus,
         resendVerificationEmail,
+        handleTokenVersionMismatch,
       }}
     >
       {children}
     </AuthContext.Provider>
   );
 };
-
-// ============================================
-// CUSTOM HOOK
-// ============================================
 
 export const useAuth = () => {
   const context = useContext(AuthContext);

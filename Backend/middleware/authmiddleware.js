@@ -1,6 +1,7 @@
 // Backend/middleware/authmiddleware.js
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const checkAccountStatus = require("./accountStatusCheck");
 
 /**
  * Authentication middleware to protect routes
@@ -86,6 +87,11 @@ const protect = async (req, res, next) => {
     });
   }
 };
+/**
+ * Combined middleware: Authentication + Account Status Check
+ * Use this for routes that require both auth AND active account status
+ */
+const protectWithStatusCheck = [protect, checkAccountStatus];
 
 /**
  * Role-based authorization middleware
@@ -172,6 +178,7 @@ const decodeToken = (token) => {
 
 module.exports = {
   protect,
+  protectWithStatusCheck,
   generateToken,
   generateTokenById,
   generateTokenWithData,

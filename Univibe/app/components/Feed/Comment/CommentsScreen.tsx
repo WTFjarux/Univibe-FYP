@@ -1,3 +1,5 @@
+// app/components/Feed/Comment/CommentScreen.tsx
+
 import React, {
   useState,
   useEffect,
@@ -16,6 +18,8 @@ import {
   ActivityIndicator,
   StyleSheet,
   Alert,
+  TouchableOpacity,
+  Animated,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -28,6 +32,7 @@ import PostPreview from "./PostPreview";
 import CommentItem from "./CommentItem";
 import CommentInput from "./CommentInput";
 import ImageModal from "./ImageModal";
+import ReportModal from "@/app/components/ReportModal";
 
 // Hooks
 import useComments from "./useComments";
@@ -41,6 +46,7 @@ import {
   Post,
   Comment,
 } from "@/lib/services/postService";
+import { reportContent } from "@/lib/services/contentService";
 
 const { width: screenWidth } = Dimensions.get("window");
 
@@ -77,6 +83,9 @@ export default function CommentScreen() {
   const router = useRouter();
   const { user, token } = useAuth();
 
+  // ===========================================================================
+  // Post & Comments State
+  // ===========================================================================
   const [post, setPost] = useState<Post | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [totalComments, setTotalComments] = useState(0);
@@ -92,6 +101,32 @@ export default function CommentScreen() {
   const [isPostLiked, setIsPostLiked] = useState(false);
   const [postLikesCount, setPostLikesCount] = useState(0);
 
+  // ===========================================================================
+  // InfoBar State (like FeedScreen)
+  // ===========================================================================
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [infoType, setInfoType] = useState<"success" | "error" | "info">(
+    "info",
+  );
+  const slideAnim = useRef(new Animated.Value(100)).current;
+  const infoTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+
+  // ===========================================================================
+  // Report Modal State - SINGLE SOURCE OF TRUTH
+  // ===========================================================================
+  const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [reportTargetId, setReportTargetId] = useState("");
+  const [reportTargetType, setReportTargetType] = useState<
+    "Post" | "Comment" | "User" | "Event"
+  >("Comment");
+
+  // ===========================================================================
+  // Options Modal Tracking
+  // ===========================================================================
+  const [isOptionsModalOpen, setIsOptionsModalOpen] = useState(false);
+
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<any>(null);
 
@@ -105,8 +140,10 @@ export default function CommentScreen() {
     handleSubmit,
     handleLike,
     handleDelete,
-    handleReport,
+    handleReport: handleReportFromHook,
     handleEdit,
+    handleShare,
+    handleHide,
   } = useComments(
     postId,
     comments,
@@ -116,13 +153,174 @@ export default function CommentScreen() {
     user,
   );
 
+  // ===========================================================================
+  // InfoBar Management (same pattern as FeedScreen)
+  // ===========================================================================
+
+  const showInfoBar = useCallback(
+    (
+      message: string,
+      type: "success" | "error" | "info" = "info",
+      autoHide = true,
+    ) => {
+      // Clear any existing timeout
+      if (infoTimeoutRef.current) {
+        clearTimeout(infoTimeoutRef.current);
+      }
+
+      setInfoMessage(message);
+      setInfoType(type);
+
+      // Slide in
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+
+      if (autoHide) {
+        infoTimeoutRef.current = setTimeout(() => {
+          Animated.timing(slideAnim, {
+            toValue: 100,
+            duration: 300,
+            useNativeDriver: true,
+          }).start(() => {
+            setInfoMessage(null);
+            slideAnim.setValue(100);
+          });
+        }, 3000);
+      }
+    },
+    [slideAnim],
+  );
+
+  const hideInfoBar = useCallback(() => {
+    if (infoTimeoutRef.current) {
+      clearTimeout(infoTimeoutRef.current);
+    }
+    Animated.timing(slideAnim, {
+      toValue: 100,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      setInfoMessage(null);
+      slideAnim.setValue(100);
+    });
+  }, [slideAnim]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (infoTimeoutRef.current) {
+        clearTimeout(infoTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // ===========================================================================
+  // REPORT FLOW - Centralized Modal Orchestration
+  // ===========================================================================
+
+  /**
+   * Called when user taps "Report" in CommentOptionsModal
+   * CommentOptionsModal closes itself first (calls onClose), then calls this
+   * via requestAnimationFrame to ensure close animation has started
+   */
+  const handleCommentReportPress = useCallback(
+    (commentId: string) => {
+      if (!token) {
+        showInfoBar("Please login to report comments", "info");
+        return;
+      }
+
+      // Find the comment in the tree to check if already reported
+      const findComment = (commentsList: Comment[]): Comment | null => {
+        for (const comment of commentsList) {
+          if (comment._id === commentId) return comment;
+          if (
+            Array.isArray(comment.replies) &&
+            comment.replies.length > 0 &&
+            typeof comment.replies[0] === "object"
+          ) {
+            const found = findComment(comment.replies as Comment[]);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+
+      const comment = findComment(comments);
+      if (comment?.isReported) {
+        showInfoBar("You have already reported this comment", "info");
+        return;
+      }
+
+      // Set target and open ReportModal after CommentOptionsModal close animation
+      setReportTargetId(commentId);
+      setReportTargetType("Comment");
+
+      // Delay to ensure CommentOptionsModal's close animation has started
+      setTimeout(() => {
+        setReportModalVisible(true);
+      }, 300);
+    },
+    [token, comments, showInfoBar],
+  );
+
+  /**
+   * Called when ReportModal closes (user cancels or submits)
+   */
+  const handleReportModalClose = useCallback(() => {
+    setReportModalVisible(false);
+  }, []);
+
+  /**
+   * Called when report is successfully submitted
+   * ReportModal has already closed itself by this point
+   * We just need to update the comment's isReported flag in the tree
+   */
+  const handleReportSuccess = useCallback(() => {
+    if (reportTargetType === "Comment" && reportTargetId) {
+      // Mark the comment as reported in the tree
+      handleReportFromHook(reportTargetId);
+    }
+  }, [reportTargetType, reportTargetId, handleReportFromHook]);
+
+  /**
+   * InfoBar callback from ReportModal
+   * Uses the InfoBar instead of Alert
+   */
+  const handleReportShowInfoBar = useCallback(
+    (message: string, type: "success" | "error" | "info") => {
+      showInfoBar(message, type);
+    },
+    [showInfoBar],
+  );
+
+  /**
+   * Called when CommentOptionsModal opens
+   */
+  const handleOptionsModalOpen = useCallback(() => {
+    setIsOptionsModalOpen(true);
+  }, []);
+
+  /**
+   * Called when CommentOptionsModal closes
+   */
+  const handleOptionsModalClose = useCallback(() => {
+    setIsOptionsModalOpen(false);
+  }, []);
+
+  // ===========================================================================
+  // Fetch Logic
+  // ===========================================================================
+
   const fetchPostDetails = async () => {
     try {
       const response = await getPostById(postId);
       setPost(response.post);
       setIsPostLiked(response.post.isLiked || false);
       setPostLikesCount(response.post.likes?.length || 0);
-      // DON'T set totalComments here - let fetchComments handle it
     } catch (error) {
       console.error("Error fetching post:", error);
     }
@@ -142,7 +340,6 @@ export default function CommentScreen() {
 
       if (refresh || pageNum === 1) {
         setComments(typedComments);
-        // Use the count from our tree calculation - most accurate
         setTotalComments(actualCount);
       } else {
         setComments((prev) => [...prev, ...typedComments]);
@@ -152,7 +349,7 @@ export default function CommentScreen() {
     } catch (error: any) {
       console.error("Error fetching comments:", error);
       if (pageNum === 1) {
-        Alert.alert("Error", error.message || "Failed to load comments");
+        showInfoBar(error.message || "Failed to load comments", "error");
       }
     } finally {
       setLoading(false);
@@ -169,7 +366,6 @@ export default function CommentScreen() {
       setComments([]);
       setTotalComments(0);
 
-      // Fetch post details first, then comments (sequential, not parallel)
       fetchPostDetails().then(() => {
         fetchComments(1, true);
       });
@@ -194,6 +390,10 @@ export default function CommentScreen() {
       fetchComments(nextPage);
     }
   };
+
+  // ===========================================================================
+  // Post & Comment Actions
+  // ===========================================================================
 
   const handlePostLike = async () => {
     if (!token || !post) return;
@@ -253,6 +453,10 @@ export default function CommentScreen() {
     setSelectedImageIndex(index);
   };
 
+  // ===========================================================================
+  // Render Functions
+  // ===========================================================================
+
   const renderPostHeader = useMemo(() => {
     if (!post) return null;
     return (
@@ -277,9 +481,14 @@ export default function CommentScreen() {
         onLike={handleLike}
         onUpdate={handleEdit}
         onDelete={handleDelete}
-        onReport={handleReport}
+        onReport={handleCommentReportPress}
+        onHide={handleHide}
+        onShare={handleShare}
         currentUserId={user?.id || ""}
         onEditStateChange={setIsAnyCommentEditing}
+        onOptionsOpen={handleOptionsModalOpen}
+        onOptionsClose={handleOptionsModalClose}
+        onShowInfoBar={handleReportShowInfoBar}
       />
     ),
     [
@@ -290,7 +499,12 @@ export default function CommentScreen() {
       handleLike,
       handleDelete,
       handleEdit,
-      handleReport,
+      handleCommentReportPress,
+      handleHide,
+      handleShare,
+      handleOptionsModalOpen,
+      handleOptionsModalClose,
+      handleReportShowInfoBar,
     ],
   );
 
@@ -310,6 +524,46 @@ export default function CommentScreen() {
     return <ActivityIndicator style={styles.footerLoader} color="#8b5cf6" />;
   }, [loading, comments.length]);
 
+  // ===========================================================================
+  // InfoBar Render
+  // ===========================================================================
+  const renderInfoBar = () => {
+    if (!infoMessage) return null;
+
+    const bg =
+      infoType === "success"
+        ? "#10b981"
+        : infoType === "error"
+          ? "#ef4444"
+          : "#8b5cf6";
+
+    const icon =
+      infoType === "success"
+        ? "checkmark-circle"
+        : infoType === "error"
+          ? "alert-circle"
+          : "information-circle";
+
+    return (
+      <Animated.View
+        style={[
+          styles.infoBar,
+          { backgroundColor: bg, transform: [{ translateY: slideAnim }] },
+        ]}
+      >
+        <Ionicons name={icon} size={20} color="#fff" />
+        <Text style={styles.infoBarText}>{infoMessage}</Text>
+        <TouchableOpacity onPress={hideInfoBar} style={styles.infoBarClose}>
+          <Ionicons name="close" size={20} color="#fff" />
+        </TouchableOpacity>
+      </Animated.View>
+    );
+  };
+
+  // ===========================================================================
+  // Loading State
+  // ===========================================================================
+
   if (loading && !post) {
     return (
       <SafeAreaView style={styles.container}>
@@ -319,6 +573,10 @@ export default function CommentScreen() {
       </SafeAreaView>
     );
   }
+
+  // ===========================================================================
+  // Main Render
+  // ===========================================================================
 
   return (
     <SafeAreaView style={styles.container}>
@@ -381,7 +639,23 @@ export default function CommentScreen() {
           selectedIndex={selectedImageIndex}
           onScroll={handleModalScroll}
         />
+
+        {/* Report Modal - at root level, controlled ONLY by CommentScreen */}
+        <ReportModal
+          visible={reportModalVisible}
+          onClose={handleReportModalClose}
+          targetType={reportTargetType}
+          targetId={reportTargetId}
+          onReportSuccess={handleReportSuccess}
+          onShowInfoBar={handleReportShowInfoBar}
+          reportFunction={(targetId: string, reason: string) =>
+            reportContent(reportTargetType, targetId, reason)
+          }
+        />
       </KeyboardAvoidingView>
+
+      {/* InfoBar - Rendered outside KeyboardAvoidingView to overlay everything */}
+      {renderInfoBar()}
     </SafeAreaView>
   );
 }
@@ -406,4 +680,34 @@ const styles = StyleSheet.create({
     color: "#6b7280",
   },
   footerLoader: { paddingVertical: 20, alignItems: "center" },
+  // InfoBar Styles
+  infoBar: {
+    position: "absolute" as "absolute",
+    bottom: 35,
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    gap: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+    zIndex: 1000,
+    minHeight: 35,
+  },
+  infoBarText: {
+    flex: 1,
+    color: "#fff",
+    fontSize: 14,
+    fontFamily: "SofiaSans-Regular",
+    fontWeight: "500",
+  },
+  infoBarClose: {
+    padding: 4,
+  },
 });

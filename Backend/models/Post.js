@@ -107,6 +107,23 @@ const postSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    deletedByAdmin: {
+      type: Boolean,
+      default: false,
+    },
+    deleteReason: {
+      type: String,
+      default: null,
+    },
+    permanentlyDeleted: {
+      type: Boolean,
+      default: false,
+    },
     permanentlyDeleted: {
       type: Boolean,
       default: false,
@@ -361,14 +378,12 @@ postSchema.statics.cleanupOldDeletedPosts = async function (daysToKeep = 30) {
 
 // === QUERY HELPER TO INCLUDE SOFT-DELETED POSTS ===
 postSchema.query.includeDeleted = function () {
-
   this._includeDeleted = true;
   return this;
 };
 
 // === QUERY HELPER TO EXPLICITLY EXCLUDE SOFT-DELETED POSTS ===
 postSchema.query.excludeDeleted = function () {
-
   this._includeDeleted = false;
   return this;
 };

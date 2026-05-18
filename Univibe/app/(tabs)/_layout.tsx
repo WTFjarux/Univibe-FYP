@@ -1,123 +1,236 @@
-// app/(tabs)/_layout.tsx
-
-import { Tabs, Redirect } from "expo-router";
+import { Tabs, Redirect, useRouter, usePathname } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../lib/contexts/AuthContext";
-import { View, ActivityIndicator, Text } from "react-native";
+import {
+  View,
+  ActivityIndicator,
+  Text,
+  StyleSheet,
+  Platform,
+} from "react-native";
+import { useEffect, useRef } from "react";
+import { BlurView } from "expo-blur";
 
 export default function TabLayout() {
   const { isLoading, token, user } = useAuth();
+  const router = useRouter();
+  const pathname = usePathname();
+  const prevTokenRef = useRef(token);
 
-  // Show loading screen while checking auth
+  useEffect(() => {
+    if (isLoading) return;
+
+    const hadToken = prevTokenRef.current;
+    const hasToken = !!token;
+
+    if (hadToken && !hasToken) {
+      router.replace("/screens/landingPage");
+    } else if (hadToken && hasToken && user && !user.isEmailVerified) {
+      router.replace("/(auth)/login");
+    }
+
+    prevTokenRef.current = token;
+  }, [isLoading, token, user?.isEmailVerified]);
+
   if (isLoading) {
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: "center",
-          alignItems: "center",
-          backgroundColor: "#fff",
-        }}
-      >
+      <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#8b5cf6" />
-        <Text style={{ marginTop: 12, color: "#6b7280" }}>Loading...</Text>
+        <Text style={styles.loadingText}>Loading...</Text>
       </View>
     );
   }
 
-  // If no token, redirect to landing page
-  if (!token) {
-    console.log("🚫 No token, redirecting to landing page");
-    return <Redirect href="/screens/landingPage" />;
-  }
-
-  // If email not verified, redirect to login
-  if (!user?.isEmailVerified) {
-    console.log("🚫 Email not verified, redirecting to login");
-    return <Redirect href="/(auth)/login" />;
-  }
-
-  // ✅ If profile not complete, redirect to setup
-  if (user?.profileComplete === false) {
-    console.log("🚫 Profile not complete, redirecting to setup");
+  if (!token) return <Redirect href="/screens/landingPage" />;
+  if (!user?.isEmailVerified) return <Redirect href="/(auth)/login" />;
+  if (user?.profileComplete === false)
     return <Redirect href="/(auth)/setup-profile" />;
-  }
 
-  // User is fully authenticated, verified, and has completed profile
-  console.log("✅ User fully authenticated - showing tabs");
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: "#ffffff",
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: Platform.OS === "ios" ? 92 : 76,
+          backgroundColor: Platform.select({
+            ios: "rgba(255, 255, 255, 0.85)",
+            android: "#ffffff",
+          }),
           borderTopWidth: 1,
-          borderTopColor: "#e5e7eb",
-          height: 85,
-          paddingBottom: 8,
-          paddingTop: 8,
+          borderTopColor: "rgba(0,0,0,0.06)",
+          borderTopLeftRadius: 20,
+          borderTopRightRadius: 20,
+          paddingTop: 10,
+          paddingBottom: Platform.OS === "ios" ? 30 : 14,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: -4 },
+          shadowOpacity: 0.12,
+          shadowRadius: 16,
+          elevation: 10,
         },
         tabBarActiveTintColor: "#8b5cf6",
-        tabBarInactiveTintColor: "#000000ff",
+        tabBarInactiveTintColor: "#6b7280",
         tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: "500",
+          fontSize: 11,
           fontFamily: "SofiaSans-Bold",
+          marginTop: 4,
+          marginBottom: 0,
+          fontWeight: "700",
         },
         tabBarIconStyle: {
-          marginBottom: 5,
+          marginBottom: 2,
         },
+        tabBarBackground: () => (
+          <BlurView
+            intensity={Platform.OS === "ios" ? 65 : 90}
+            tint="light"
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                borderTopLeftRadius: 20,
+                borderTopRightRadius: 20,
+                overflow: "hidden",
+              },
+            ]}
+          />
+        ),
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
           title: "Home",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <View
+              style={[
+                styles.iconContainer,
+                focused && styles.focusedIconContainer,
+              ]}
+            >
+              <Ionicons
+                name={focused ? "home" : "home-outline"}
+                size={22}
+                color={focused ? "#ffffff" : color}
+              />
+            </View>
           ),
         }}
       />
-
       <Tabs.Screen
         name="feed/index"
         options={{
           title: "Feed",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="newspaper" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <View
+              style={[
+                styles.iconContainer,
+                focused && styles.focusedIconContainer,
+              ]}
+            >
+              <Ionicons
+                name={focused ? "newspaper" : "newspaper-outline"}
+                size={22}
+                color={focused ? "#ffffff" : color}
+              />
+            </View>
           ),
         }}
       />
-
       <Tabs.Screen
         name="search/index"
         options={{
           title: "Search",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="search" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <View
+              style={[
+                styles.iconContainer,
+                focused && styles.focusedIconContainer,
+              ]}
+            >
+              <Ionicons
+                name={focused ? "search" : "search-outline"}
+                size={22}
+                color={focused ? "#ffffff" : color}
+              />
+            </View>
           ),
         }}
       />
-
       <Tabs.Screen
         name="events/index"
         options={{
           title: "Events",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="calendar" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <View
+              style={[
+                styles.iconContainer,
+                focused && styles.focusedIconContainer,
+              ]}
+            >
+              <Ionicons
+                name={focused ? "calendar" : "calendar-outline"}
+                size={22}
+                color={focused ? "#ffffff" : color}
+              />
+            </View>
           ),
         }}
       />
-
       <Tabs.Screen
         name="profile"
         options={{
           title: "Profile",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <View
+              style={[
+                styles.iconContainer,
+                focused && styles.focusedIconContainer,
+              ]}
+            >
+              <Ionicons
+                name={focused ? "person" : "person-outline"}
+                size={22}
+                color={focused ? "#ffffff" : color}
+              />
+            </View>
           ),
         }}
       />
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#f8fafc",
+  },
+  loadingText: {
+    marginTop: 12,
+    color: "#6b7280",
+    fontFamily: "SofiaSans-Regular",
+    fontSize: 14,
+  },
+  iconContainer: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
+  },
+  focusedIconContainer: {
+    backgroundColor: "#8b5cf6",
+    shadowColor: "#8b5cf6",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+});

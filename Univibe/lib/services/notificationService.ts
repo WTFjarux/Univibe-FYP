@@ -1,7 +1,9 @@
-// lib/notificationService.ts
+// lib/services/notificationService.ts
+
 import * as SecureStore from "expo-secure-store";
 import { API_BASE_URL } from "../../constants/ipConstants";
 import socketService from "./socketService";
+
 export interface Notification {
   _id: string;
   type:
@@ -10,7 +12,12 @@ export interface Notification {
     | "comment"
     | "like"
     | "repost"
-    | "mention";
+    | "mention"
+    | "event_interest"
+    | "event_rsvp"
+    | "event_approved"
+    | "event_rejected"
+    | "post_removed";
   title: string;
   message: string;
   createdAt: string;
@@ -67,10 +74,7 @@ export const notificationService = {
   ): Promise<NotificationsResponse> => {
     try {
       const token = await getAuthToken();
-      if (!token) {
-        return { success: false, message: "No authentication token" };
-      }
-
+      if (!token) return { success: false, message: "No authentication token" };
       const response = await fetch(
         `${API_BASE_URL}/api/notifications?page=${page}&limit=${limit}`,
         {
@@ -81,9 +85,7 @@ export const notificationService = {
           },
         },
       );
-
-      const data = await response.json();
-      return data;
+      return await response.json();
     } catch (error) {
       console.error("Error fetching notifications:", error);
       return { success: false, message: "Failed to fetch notifications" };
@@ -95,10 +97,7 @@ export const notificationService = {
   ): Promise<{ success: boolean; message?: string }> => {
     try {
       const token = await getAuthToken();
-      if (!token) {
-        return { success: false, message: "No authentication token" };
-      }
-
+      if (!token) return { success: false, message: "No authentication token" };
       const response = await fetch(
         `${API_BASE_URL}/api/notifications/${notificationId}/read`,
         {
@@ -109,24 +108,19 @@ export const notificationService = {
           },
         },
       );
-
-      const data = await response.json();
-      return data;
+      return await response.json();
     } catch (error) {
-      console.error("Error marking as read:", error);
       return { success: false, message: "Failed to mark as read" };
     }
   },
 
+  // ADD THIS METHOD
   markAsUnread: async (
     notificationId: string,
   ): Promise<{ success: boolean; message?: string }> => {
     try {
       const token = await getAuthToken();
-      if (!token) {
-        return { success: false, message: "No authentication token" };
-      }
-
+      if (!token) return { success: false, message: "No authentication token" };
       const response = await fetch(
         `${API_BASE_URL}/api/notifications/${notificationId}/unread`,
         {
@@ -137,11 +131,8 @@ export const notificationService = {
           },
         },
       );
-
-      const data = await response.json();
-      return data;
+      return await response.json();
     } catch (error) {
-      console.error("Error marking as unread:", error);
       return { success: false, message: "Failed to mark as unread" };
     }
   },
@@ -149,10 +140,7 @@ export const notificationService = {
   markAllAsRead: async (): Promise<{ success: boolean; message?: string }> => {
     try {
       const token = await getAuthToken();
-      if (!token) {
-        return { success: false, message: "No authentication token" };
-      }
-
+      if (!token) return { success: false, message: "No authentication token" };
       const response = await fetch(
         `${API_BASE_URL}/api/notifications/read-all`,
         {
@@ -163,11 +151,8 @@ export const notificationService = {
           },
         },
       );
-
-      const data = await response.json();
-      return data;
+      return await response.json();
     } catch (error) {
-      console.error("Error marking all as read:", error);
       return { success: false, message: "Failed to mark all as read" };
     }
   },
@@ -177,10 +162,7 @@ export const notificationService = {
   ): Promise<{ success: boolean; message?: string }> => {
     try {
       const token = await getAuthToken();
-      if (!token) {
-        return { success: false, message: "No authentication token" };
-      }
-
+      if (!token) return { success: false, message: "No authentication token" };
       const response = await fetch(
         `${API_BASE_URL}/api/notifications/${notificationId}`,
         {
@@ -191,47 +173,9 @@ export const notificationService = {
           },
         },
       );
-
-      const data = await response.json();
-      return data;
+      return await response.json();
     } catch (error) {
-      console.error("Error deleting notification:", error);
       return { success: false, message: "Failed to delete notification" };
-    }
-  },
-
-  /**
-   * Delete all pending connection request notifications from a specific sender
-   * This prevents duplicate/spam notifications when users cancel and resend requests
-   */
-  deletePendingConnectionNotifications: async (
-    senderId: string,
-  ): Promise<{ success: boolean; message?: string; deletedCount?: number }> => {
-    try {
-      const token = await getAuthToken();
-      if (!token) {
-        return { success: false, message: "No authentication token" };
-      }
-
-      const response = await fetch(
-        `${API_BASE_URL}/api/notifications/connection-requests/${senderId}`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        },
-      );
-
-      const data = await response.json();
-      return data;
-    } catch (error) {
-      console.error("Error deleting pending connection notifications:", error);
-      return {
-        success: false,
-        message: "Failed to delete pending connection notifications",
-      };
     }
   },
 
@@ -242,10 +186,7 @@ export const notificationService = {
   }> => {
     try {
       const token = await getAuthToken();
-      if (!token) {
-        return { success: false, message: "No authentication token" };
-      }
-
+      if (!token) return { success: false, message: "No authentication token" };
       const response = await fetch(
         `${API_BASE_URL}/api/notifications/unread-count`,
         {
@@ -256,39 +197,25 @@ export const notificationService = {
           },
         },
       );
-
-      const data = await response.json();
-      return {
-        success: data.success,
-        count: data.count,
-        message: data.message,
-      };
+      return await response.json();
     } catch (error) {
-      console.error("Error fetching unread count:", error);
       return { success: false, message: "Failed to fetch unread count" };
     }
   },
 };
 
-/**
- * Listen for real-time notifications via socket
- */
 export const listenForNotifications = (
   onNewNotification: (notification: Notification) => void,
   onUnreadCountUpdate: (count: number) => void,
 ) => {
   const handleNewNotification = (data: { notification: Notification }) => {
-    console.log("📢 New notification via socket:", data.notification.message);
     onNewNotification(data.notification);
   };
-
   const handleUnreadCount = (data: { count: number }) => {
     onUnreadCountUpdate(data.count);
   };
-
   socketService.on("notification:new", handleNewNotification);
   socketService.on("notification:unreadCount", handleUnreadCount);
-
   return () => {
     socketService.off("notification:new", handleNewNotification);
     socketService.off("notification:unreadCount", handleUnreadCount);

@@ -1,8 +1,6 @@
-// app/_layout.tsx
-
 import { Stack } from "expo-router";
 import { useFonts } from "expo-font";
-import { SplashScreen } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
 import { AuthProvider } from "../lib/contexts/AuthContext";
 import { ProfileProvider } from "../lib/contexts/ProfileContext";
 import { ChatProvider } from "../lib/contexts/ChatContext";
@@ -47,7 +45,10 @@ export default function RootLayout() {
                 <Stack screenOptions={{ headerShown: false }}>
                   {/* Public routes */}
                   <Stack.Screen name="index" />
-                  <Stack.Screen name="(auth)" />
+                  <Stack.Screen
+                    name="(auth)"
+                    options={{ gestureEnabled: false }}
+                  />
 
                   {/* Verification route */}
                   <Stack.Screen
@@ -58,11 +59,14 @@ export default function RootLayout() {
                     }}
                   />
 
-                  {/* Main tabs */}
-                  <Stack.Screen name="(tabs)" />
+                  {/* Main tabs - prevent back swipe to auth */}
+                  <Stack.Screen
+                    name="(tabs)"
+                    options={{ gestureEnabled: false }}
+                  />
                   <Stack.Screen name="profile" />
 
-                  {/* Story Screens - FULL SCREEN MODAL */}
+                  {/* Story Screens */}
                   <Stack.Screen
                     name="screens/CreateStoryScreen"
                     options={{
@@ -83,17 +87,11 @@ export default function RootLayout() {
                   {/* Chat Screens */}
                   <Stack.Screen
                     name="screens/ChatScreen"
-                    options={{
-                      headerShown: false,
-                      presentation: "card",
-                    }}
+                    options={{ headerShown: false, presentation: "card" }}
                   />
                   <Stack.Screen
                     name="screens/ChatListScreen"
-                    options={{
-                      headerShown: false,
-                      presentation: "card",
-                    }}
+                    options={{ headerShown: false, presentation: "card" }}
                   />
                   <Stack.Screen
                     name="screens/GroupInfoScreen"

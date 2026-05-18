@@ -6,6 +6,7 @@ const User = require("../models/User");
 const Profile = require("../models/Profile");
 const Notification = require("../models/Notification");
 const Block = require("../models/Block");
+const { getAdminModel } = require("../config/database");
 
 // ===================== HELPER FUNCTIONS =====================
 
@@ -600,6 +601,37 @@ exports.getPostComments = async (req, res) => {
         processCommentForAnonymous(comment, post, userId),
       );
     }
+
+    const Report = getAdminModel("Report");
+
+    // Collect all comment IDs (top-level + replies)
+    const allCommentIds = [];
+    commentsWithReplies.forEach((c) => {
+      allCommentIds.push(c._id);
+      if (c.replies) {
+        c.replies.forEach((r) => allCommentIds.push(r._id));
+      }
+    });
+
+    const userReports = await Report.find({
+      reportedBy: userId,
+      targetType: "Comment",
+      targetId: { $in: allCommentIds },
+      status: { $in: ["pending", "reviewing"] },
+    }).lean();
+
+    const reportedCommentIds = new Set(
+      userReports.map((r) => r.targetId.toString()),
+    );
+
+    // Add isReported to each comment
+    const addReported = (comment) => {
+      comment.isReported = reportedCommentIds.has(comment._id.toString());
+      if (comment.replies) {
+        comment.replies.forEach(addReported);
+      }
+    };
+    commentsWithReplies.forEach(addReported);
 
     await Post.findByIdAndUpdate(postId, { commentCount: totalComments });
 

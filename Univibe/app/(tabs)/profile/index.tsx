@@ -1,4 +1,4 @@
-// app/(tabs)/profile/index.tsx 
+// app/(tabs)/profile/index.tsx
 
 import React, {
   useRef,
@@ -305,16 +305,25 @@ export default function ProfileScreen() {
   };
   const handleSavePost = () =>
     Alert.alert("Saved", "Post saved to your bookmarks");
-  const handleReportPost = () =>
+
+  const handleReportPost = (postId: string) => {
+    setPosts((prev) =>
+      prev.map((p) => (p._id === postId ? { ...p, isReported: true } : p)),
+    );
     Alert.alert("Report Submitted", "Thank you for reporting this post.");
+  };
+
   const handleHidePost = (postId: string) => {
     setPosts((prev) => prev.filter((post) => post._id !== postId));
     Alert.alert("Post Hidden", "You won't see this post anymore");
   };
+
   const handleCopyLink = () =>
     Alert.alert("Link Copied", "Post link copied to clipboard");
+
   const handleMuteUser = () =>
     Alert.alert("User Muted", "You won't see posts from this user anymore");
+
   const handleBlockUser = () =>
     Alert.alert("User Blocked", "You won't see posts from this user anymore");
 

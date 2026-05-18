@@ -4,6 +4,7 @@ const User = require("../models/User");
 const Profile = require("../models/Profile");
 const Comment = require("../models/Comment");
 const BlockService = require("../services/blockService");
+const { getAdminModel } = require("../config/database");
 
 /**
  * Get Campus Feed (Default/ALL Feed)
@@ -46,24 +47,19 @@ exports.getCampusFeed = async (req, res) => {
       $or: [
         { visibility: "campus", campus: userCampus },
         { isAnonymous: true },
-        {
-          visibility: "connections",
-          user: { $in: connectionIds },
-        },
+        { visibility: "connections", user: { $in: connectionIds } },
         { user: currentUserId },
       ],
     };
 
     if (cursor) {
       const cursorPost = await Post.findById(cursor).select("createdAt").lean();
-
       if (!cursorPost) {
         return res.status(400).json({
           success: false,
           error: "Invalid cursor. Post not found.",
         });
       }
-
       query.$and = [
         {
           $or: [
@@ -84,10 +80,22 @@ exports.getCampusFeed = async (req, res) => {
     const hasMore = posts.length > limit;
     const paginatedPosts = hasMore ? posts.slice(0, limit) : posts;
 
-    const [profilePictures, commentCounts] = await Promise.all([
+    const [profilePictures, commentCounts, userReports] = await Promise.all([
       batchGetProfilePictures(paginatedPosts),
       batchGetCommentCounts(paginatedPosts),
+      getAdminModel("Report")
+        .find({
+          reportedBy: currentUserId,
+          targetType: "Post",
+          targetId: { $in: paginatedPosts.map((p) => p._id) },
+          status: { $in: ["pending", "reviewing"] },
+        })
+        .lean(),
     ]);
+
+    const reportedPostIds = new Set(
+      userReports.map((r) => r.targetId.toString()),
+    );
 
     const processedPosts = processPosts(paginatedPosts, {
       profilePictures,
@@ -95,6 +103,7 @@ exports.getCampusFeed = async (req, res) => {
       currentUserId,
       userConnections: connectionIds,
       savedPostIds,
+      reportedPostIds,
       forceAnonymous: false,
     });
 
@@ -169,14 +178,11 @@ exports.getConnectionsFeed = async (req, res) => {
 
     if (cursor) {
       const cursorPost = await Post.findById(cursor).select("createdAt").lean();
-
       if (!cursorPost) {
-        return res.status(400).json({
-          success: false,
-          error: "Invalid cursor",
-        });
+        return res
+          .status(400)
+          .json({ success: false, error: "Invalid cursor" });
       }
-
       query.$and = [
         {
           $or: [
@@ -197,10 +203,22 @@ exports.getConnectionsFeed = async (req, res) => {
     const hasMore = posts.length > limit;
     const paginatedPosts = hasMore ? posts.slice(0, limit) : posts;
 
-    const [profilePictures, commentCounts] = await Promise.all([
+    const [profilePictures, commentCounts, userReports] = await Promise.all([
       batchGetProfilePictures(paginatedPosts),
       batchGetCommentCounts(paginatedPosts),
+      getAdminModel("Report")
+        .find({
+          reportedBy: currentUserId,
+          targetType: "Post",
+          targetId: { $in: paginatedPosts.map((p) => p._id) },
+          status: { $in: ["pending", "reviewing"] },
+        })
+        .lean(),
     ]);
+
+    const reportedPostIds = new Set(
+      userReports.map((r) => r.targetId.toString()),
+    );
 
     const processedPosts = processPosts(paginatedPosts, {
       profilePictures,
@@ -208,6 +226,7 @@ exports.getConnectionsFeed = async (req, res) => {
       currentUserId,
       userConnections: connectionIds,
       savedPostIds,
+      reportedPostIds,
       forceAnonymous: false,
     });
 
@@ -258,14 +277,11 @@ exports.getAnonymousFeed = async (req, res) => {
 
     if (cursor) {
       const cursorPost = await Post.findById(cursor).select("createdAt").lean();
-
       if (!cursorPost) {
-        return res.status(400).json({
-          success: false,
-          error: "Invalid cursor",
-        });
+        return res
+          .status(400)
+          .json({ success: false, error: "Invalid cursor" });
       }
-
       query.$or = [
         { createdAt: { $lt: cursorPost.createdAt } },
         { createdAt: cursorPost.createdAt, _id: { $lt: cursor } },
@@ -282,10 +298,22 @@ exports.getAnonymousFeed = async (req, res) => {
     const hasMore = posts.length > limit;
     const paginatedPosts = hasMore ? posts.slice(0, limit) : posts;
 
-    const [profilePictures, commentCounts] = await Promise.all([
+    const [profilePictures, commentCounts, userReports] = await Promise.all([
       batchGetProfilePictures(paginatedPosts),
       batchGetCommentCounts(paginatedPosts),
+      getAdminModel("Report")
+        .find({
+          reportedBy: currentUserId,
+          targetType: "Post",
+          targetId: { $in: paginatedPosts.map((p) => p._id) },
+          status: { $in: ["pending", "reviewing"] },
+        })
+        .lean(),
     ]);
+
+    const reportedPostIds = new Set(
+      userReports.map((r) => r.targetId.toString()),
+    );
 
     const processedPosts = processPosts(paginatedPosts, {
       profilePictures,
@@ -293,6 +321,7 @@ exports.getAnonymousFeed = async (req, res) => {
       currentUserId,
       userConnections: [],
       savedPostIds,
+      reportedPostIds,
       forceAnonymous: true,
     });
 
@@ -367,6 +396,7 @@ function processPosts(
     currentUserId,
     userConnections,
     savedPostIds = [],
+    reportedPostIds = new Set(),
     forceAnonymous = false,
   },
 ) {
@@ -412,6 +442,7 @@ function processPosts(
         updatedAt: post.updatedAt,
         isLiked,
         isSaved,
+        isReported: reportedPostIds.has(post._id.toString()),
         canView,
         isOwner,
         user: shouldAnonymize

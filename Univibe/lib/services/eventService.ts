@@ -245,6 +245,8 @@ export interface Event {
   updatedAt: string;
   rsvp?: User[];
   interested?: User[];
+  approvalStatus?: "pending" | "approved" | "rejected"; 
+  isFeatured?: boolean; 
 }
 
 export interface EventsResponse {

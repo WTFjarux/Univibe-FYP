@@ -34,16 +34,21 @@ const userSchema = new mongoose.Schema(
     // ============================================
     // TOKEN VERSIONING FOR SECURITY
     // ============================================
-    // Incremented when password changes to invalidate all existing tokens
     tokenVersion: {
       type: Number,
       default: 0,
     },
 
-    // Role and permissions
+    // Refresh token for session management
+    refreshToken: {
+      type: String,
+      select: false,
+    },
+
+    // Role and permissions (UPDATED: added moderator role)
     role: {
       type: String,
-      enum: ["user", "admin"],
+      enum: ["user", "moderator", "admin"],
       default: "user",
     },
 
@@ -63,10 +68,49 @@ const userSchema = new mongoose.Schema(
     },
 
     // ============================================
+    // ADMIN MODERATION FIELDS (NEW)
+    // ============================================
+
+    // Ban status
+    isBanned: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    banReason: {
+      type: String,
+      maxlength: 500,
+    },
+    bannedAt: {
+      type: Date,
+    },
+    bannedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+
+    // Suspension status
+    isSuspended: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    suspendReason: {
+      type: String,
+      maxlength: 500,
+    },
+    suspendedAt: {
+      type: Date,
+    },
+    suspendedUntil: {
+      type: Date,
+      index: true,
+    },
+
+    // ============================================
     // CONNECTION SYSTEM
     // ============================================
 
-    // Array of user IDs that this user is connected with (mutual connections)
     connections: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -74,7 +118,6 @@ const userSchema = new mongoose.Schema(
       },
     ],
 
-    // Track pending connection requests sent by this user
     connectionRequestsSent: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -82,7 +125,6 @@ const userSchema = new mongoose.Schema(
       },
     ],
 
-    // Track pending connection requests received by this user
     connectionRequestsReceived: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -90,7 +132,6 @@ const userSchema = new mongoose.Schema(
       },
     ],
 
-    // Connection stats (denormalized for performance)
     connectionCount: {
       type: Number,
       default: 0,
@@ -100,7 +141,6 @@ const userSchema = new mongoose.Schema(
     // CONTENT MANAGEMENT
     // ============================================
 
-    // Saved posts - posts the user has bookmarked
     savedPosts: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -108,7 +148,6 @@ const userSchema = new mongoose.Schema(
       },
     ],
 
-    // Hidden posts - posts the user has hidden from feed
     hiddenPosts: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -116,7 +155,6 @@ const userSchema = new mongoose.Schema(
       },
     ],
 
-    // Muted users - users whose content the user doesn't want to see
     mutedUsers: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -124,7 +162,6 @@ const userSchema = new mongoose.Schema(
       },
     ],
 
-    // Timestamps for tracking actions
     savedPostsTimestamps: [
       {
         postId: { type: mongoose.Schema.Types.ObjectId, ref: "Post" },
@@ -186,8 +223,14 @@ const userSchema = new mongoose.Schema(
 );
 
 // ============================================
-// INDEXES
+// INDEXES (UPDATED with new moderation indexes)
 // ============================================
+
+// Moderation indexes
+userSchema.index({ isBanned: 1, createdAt: -1 });
+userSchema.index({ isSuspended: 1, suspendedUntil: 1 });
+userSchema.index({ role: 1 });
+userSchema.index({ "bannedBy.user": 1 });
 
 // Connection indexes
 userSchema.index({ connections: 1 });
@@ -204,10 +247,11 @@ userSchema.index({ username: 1 });
 userSchema.index({ email: 1 });
 userSchema.index({ isOnline: 1 });
 
-// Compound indexes for better query performance
+// Compound indexes
 userSchema.index({ savedPosts: 1, createdAt: -1 });
+userSchema.index({ isBanned: 1, isSuspended: 1 }); // Combined status lookup
 
-// Full-text search index for user discovery
+// Full-text search index
 userSchema.index({ name: "text", username: "text" });
 
 // ============================================
@@ -232,6 +276,67 @@ userSchema.pre("save", async function (next) {
 // Compare password for login
 userSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
+};
+
+// ============================================
+// MODERATION METHODS (NEW)
+// ============================================
+
+/**
+ * Check if user is currently banned
+ */
+userSchema.methods.isCurrentlyBanned = function () {
+  return this.isBanned === true;
+};
+
+/**
+ * Check if user is currently suspended
+ * Also checks if suspension has expired
+ */
+userSchema.methods.isCurrentlySuspended = function () {
+  if (!this.isSuspended) return false;
+
+  // Check if suspension has expired
+  if (this.suspendedUntil && new Date() > this.suspendedUntil) {
+    return false;
+  }
+
+  return true;
+};
+
+/**
+ * Check if user account is restricted (banned or suspended)
+ */
+userSchema.methods.isRestricted = function () {
+  return this.isCurrentlyBanned() || this.isCurrentlySuspended();
+};
+
+/**
+ * Get moderation status summary
+ */
+userSchema.methods.getModerationStatus = function () {
+  if (this.isBanned) {
+    return {
+      status: "banned",
+      reason: this.banReason,
+      since: this.bannedAt,
+    };
+  }
+
+  if (
+    this.isSuspended &&
+    this.suspendedUntil &&
+    new Date() < this.suspendedUntil
+  ) {
+    return {
+      status: "suspended",
+      reason: this.suspendReason,
+      since: this.suspendedAt,
+      until: this.suspendedUntil,
+    };
+  }
+
+  return { status: "active" };
 };
 
 // ============================================
@@ -275,13 +380,11 @@ userSchema.methods.getConnectionStatus = function (userId) {
 
 /**
  * Send a connection request to another user
- * Added block check before sending request
  */
 userSchema.methods.sendConnectionRequest = async function (userId) {
   const User = mongoose.model("User");
   const Block = mongoose.model("Block");
 
-  // Check if blocked (either direction)
   const isBlocked = await Block.exists({
     $or: [
       { blocker: this._id, blocked: userId },
@@ -293,25 +396,20 @@ userSchema.methods.sendConnectionRequest = async function (userId) {
     throw new Error("Cannot send connection request to this user");
   }
 
-  // Check if already connected
   if (this.isConnectedWith(userId)) {
     throw new Error("Already connected with this user");
   }
 
-  // Check if request already sent
   if (this.hasSentRequestTo(userId)) {
     throw new Error("Connection request already sent");
   }
 
-  // Get recipient
   const recipient = await User.findById(userId);
   if (!recipient) {
     throw new Error("User not found");
   }
 
-  // Check if they already sent a request to us (auto-accept)
   if (this.hasReceivedRequestFrom(userId)) {
-    // Check block again for auto-accept case
     const blockExists = await Block.exists({
       $or: [
         { blocker: this._id, blocked: userId },
@@ -327,11 +425,9 @@ userSchema.methods.sendConnectionRequest = async function (userId) {
     return { autoAccepted: true };
   }
 
-  // Send new request
   this.connectionRequestsSent.push(userId);
   await this.save();
 
-  // Add to recipient's received requests
   recipient.connectionRequestsReceived.push(this._id);
   await recipient.save();
 
@@ -345,12 +441,10 @@ userSchema.methods.acceptConnectionRequest = async function (userId) {
   const User = mongoose.model("User");
   const Block = mongoose.model("Block");
 
-  // Verify request exists
   if (!this.hasReceivedRequestFrom(userId)) {
     throw new Error("No connection request from this user");
   }
 
-  // Check if blocked
   const isBlocked = await Block.exists({
     $or: [
       { blocker: this._id, blocked: userId },
@@ -359,18 +453,15 @@ userSchema.methods.acceptConnectionRequest = async function (userId) {
   });
 
   if (isBlocked) {
-    // Remove the request since they're blocked
     await this.rejectConnectionRequest(userId);
     throw new Error("Cannot accept connection request from blocked user");
   }
 
-  // Get the requester
   const requester = await User.findById(userId);
   if (!requester) {
     throw new Error("User not found");
   }
 
-  // Add to current user's connections
   this.connections.push(userId);
   this.connectionRequestsReceived = this.connectionRequestsReceived.filter(
     (id) => id.toString() !== userId.toString(),
@@ -378,7 +469,6 @@ userSchema.methods.acceptConnectionRequest = async function (userId) {
   this.connectionCount = this.connections.length;
   await this.save();
 
-  // Add to requester's connections
   requester.connections.push(this._id);
   requester.connectionRequestsSent = requester.connectionRequestsSent.filter(
     (id) => id.toString() !== this._id.toString(),
@@ -395,18 +485,15 @@ userSchema.methods.acceptConnectionRequest = async function (userId) {
 userSchema.methods.rejectConnectionRequest = async function (userId) {
   const User = mongoose.model("User");
 
-  // Verify request exists
   if (!this.hasReceivedRequestFrom(userId)) {
     throw new Error("No connection request from this user");
   }
 
-  // Remove from current user's received requests
   this.connectionRequestsReceived = this.connectionRequestsReceived.filter(
     (id) => id.toString() !== userId.toString(),
   );
   await this.save();
 
-  // Remove from requester's sent requests
   const requester = await User.findById(userId);
   if (requester) {
     requester.connectionRequestsSent = requester.connectionRequestsSent.filter(
@@ -424,19 +511,16 @@ userSchema.methods.rejectConnectionRequest = async function (userId) {
 userSchema.methods.removeConnection = async function (userId) {
   const User = mongoose.model("User");
 
-  // Verify connection exists
   if (!this.isConnectedWith(userId)) {
     throw new Error("Not connected with this user");
   }
 
-  // Remove from current user's connections
   this.connections = this.connections.filter(
     (id) => id.toString() !== userId.toString(),
   );
   this.connectionCount = this.connections.length;
   await this.save();
 
-  // Remove from other user's connections
   const otherUser = await User.findById(userId);
   if (otherUser) {
     otherUser.connections = otherUser.connections.filter(
@@ -467,9 +551,6 @@ userSchema.methods.getMutualConnections = async function (userId) {
 // CONTENT MANAGEMENT METHODS
 // ============================================
 
-/**
- * Save a post
- */
 userSchema.methods.savePost = async function (postId) {
   if (!this.savedPosts.includes(postId)) {
     this.savedPosts.push(postId);
@@ -483,9 +564,6 @@ userSchema.methods.savePost = async function (postId) {
   return { saved: false, message: "Post already saved" };
 };
 
-/**
- * Unsave a post
- */
 userSchema.methods.unsavePost = async function (postId) {
   const wasSaved = this.savedPosts.includes(postId);
   this.savedPosts = this.savedPosts.filter(
@@ -501,16 +579,10 @@ userSchema.methods.unsavePost = async function (postId) {
   };
 };
 
-/**
- * Check if post is saved
- */
 userSchema.methods.isPostSaved = function (postId) {
   return this.savedPosts.some((id) => id.toString() === postId.toString());
 };
 
-/**
- * Hide a post
- */
 userSchema.methods.hidePost = async function (postId) {
   if (!this.hiddenPosts.includes(postId)) {
     this.hiddenPosts.push(postId);
@@ -520,9 +592,6 @@ userSchema.methods.hidePost = async function (postId) {
   return { hidden: false, message: "Post already hidden" };
 };
 
-/**
- * Unhide a post
- */
 userSchema.methods.unhidePost = async function (postId) {
   const wasHidden = this.hiddenPosts.includes(postId);
   this.hiddenPosts = this.hiddenPosts.filter(
@@ -535,16 +604,10 @@ userSchema.methods.unhidePost = async function (postId) {
   };
 };
 
-/**
- * Check if post is hidden
- */
 userSchema.methods.isPostHidden = function (postId) {
   return this.hiddenPosts.some((id) => id.toString() === postId.toString());
 };
 
-/**
- * Mute a user
- */
 userSchema.methods.muteUser = async function (userIdToMute) {
   if (userIdToMute.toString() === this._id.toString()) {
     throw new Error("You cannot mute yourself");
@@ -560,13 +623,9 @@ userSchema.methods.muteUser = async function (userIdToMute) {
     return { muted: true, message: "User muted successfully" };
   }
 
-  // If already muted, unmute
   return await this.unmuteUser(userIdToMute);
 };
 
-/**
- * Unmute a user
- */
 userSchema.methods.unmuteUser = async function (userIdToUnmute) {
   const wasMuted = this.mutedUsers.includes(userIdToUnmute);
   this.mutedUsers = this.mutedUsers.filter(
@@ -582,20 +641,14 @@ userSchema.methods.unmuteUser = async function (userIdToUnmute) {
   };
 };
 
-/**
- * Check if user is muted
- */
 userSchema.methods.isUserMuted = function (userId) {
   return this.mutedUsers.some((id) => id.toString() === userId.toString());
 };
 
 // ============================================
-// BLOCK MANAGEMENT METHODS (VIA SEPARATE COLLECTION)
+// BLOCK MANAGEMENT METHODS
 // ============================================
 
-/**
- * Check if a user is blocked (delegates to Block model)
- */
 userSchema.methods.isUserBlocked = async function (userId) {
   const Block = mongoose.model("Block");
   const block = await Block.findOne({
@@ -607,9 +660,6 @@ userSchema.methods.isUserBlocked = async function (userId) {
   return !!block;
 };
 
-/**
- * Check if current user has blocked another user
- */
 userSchema.methods.hasBlocked = async function (userId) {
   const Block = mongoose.model("Block");
   const block = await Block.findOne({
@@ -619,9 +669,6 @@ userSchema.methods.hasBlocked = async function (userId) {
   return !!block;
 };
 
-/**
- * Check if current user is blocked by another user
- */
 userSchema.methods.isBlockedBy = async function (userId) {
   const Block = mongoose.model("Block");
   const block = await Block.findOne({
@@ -632,26 +679,17 @@ userSchema.methods.isBlockedBy = async function (userId) {
 };
 
 // ============================================
-// HELPER METHODS FOR QUERY BUILDING
+// HELPER METHODS
 // ============================================
 
-/**
- * Get all muted user IDs
- */
 userSchema.methods.getMutedUserIds = function () {
   return this.mutedUsers.map((id) => id.toString());
 };
 
-/**
- * Get all hidden post IDs
- */
 userSchema.methods.getHiddenPostIds = function () {
   return this.hiddenPosts.map((id) => id.toString());
 };
 
-/**
- * Get all saved post IDs
- */
 userSchema.methods.getSavedPostIds = function () {
   return this.savedPosts.map((id) => id.toString());
 };
@@ -686,20 +724,13 @@ userSchema.methods.canResendVerification = function () {
 };
 
 // ============================================
-// PASSWORD RESET METHODS (via OTP)
+// PASSWORD RESET METHODS
 // ============================================
 
-/**
- * Reset user's password and invalidate all existing tokens
- * This is called after OTP verification
- */
 userSchema.methods.resetPassword = async function (newPassword) {
   this.password = newPassword;
-  this.tokenVersion = (this.tokenVersion || 0) + 1; // Invalidate all existing login tokens
+  this.tokenVersion = (this.tokenVersion || 0) + 1;
   await this.save();
-  console.log(
-    `🔐 Password reset for user: ${this.email} (tokenVersion: ${this.tokenVersion})`,
-  );
   return true;
 };
 
@@ -707,9 +738,6 @@ userSchema.methods.resetPassword = async function (newPassword) {
 // ONLINE STATUS METHODS
 // ============================================
 
-/**
- * Update user's online status
- */
 userSchema.methods.updateOnlineStatus = async function (
   isOnline,
   socketId = null,
@@ -722,10 +750,6 @@ userSchema.methods.updateOnlineStatus = async function (
   return this;
 };
 
-/**
- * Get user's online status
- * Respects block - blocked users can't see online status
- */
 userSchema.methods.getOnlineStatus = function (requesterId) {
   return {
     isOnline: this.isOnline,
@@ -737,9 +761,6 @@ userSchema.methods.getOnlineStatus = function (requesterId) {
 // STATIC METHODS
 // ============================================
 
-/**
- * Get blocked user IDs for a user (from Block collection)
- */
 userSchema.statics.getBlockedUserIds = async function (userId) {
   const Block = mongoose.model("Block");
   const blocks = await Block.find({
@@ -763,9 +784,6 @@ userSchema.statics.getBlockedUserIds = async function (userId) {
   return Array.from(blockedIds);
 };
 
-/**
- * Check if two users are blocked (either direction)
- */
 userSchema.statics.areUsersBlocked = async function (userId1, userId2) {
   const Block = mongoose.model("Block");
   const block = await Block.findOne({
@@ -778,9 +796,6 @@ userSchema.statics.areUsersBlocked = async function (userId1, userId2) {
   return !!block;
 };
 
-/**
- * Get connection suggestions based on mutual connections
- */
 userSchema.statics.getConnectionSuggestions = async function (
   userId,
   limit = 10,
@@ -844,9 +859,6 @@ userSchema.statics.getConnectionSuggestions = async function (
   return suggestions;
 };
 
-/**
- * Get all online friends (respecting blocks)
- */
 userSchema.statics.getOnlineFriends = async function (userId) {
   const user = await this.findById(userId);
   if (!user) return [];
@@ -865,9 +877,6 @@ userSchema.statics.getOnlineFriends = async function (userId) {
   return onlineFriends;
 };
 
-/**
- * Clean up old content management data (for housekeeping)
- */
 userSchema.statics.cleanupOldTimestamps = async function (daysToKeep = 90) {
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
@@ -895,6 +904,7 @@ userSchema.methods.toJSON = function () {
   delete user.emailVerificationToken;
   delete user.emailVerificationTokenExpires;
   delete user.emailVerificationSentAt;
+  delete user.refreshToken;
   return user;
 };
 

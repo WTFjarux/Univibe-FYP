@@ -50,6 +50,8 @@ interface PostCardProps {
   onUnblockUser?: (userId: string, userName?: string) => void;
   isBlocked?: boolean;
   onProfilePress?: (userId: string) => void;
+  onOptionsOpen?: () => void;
+  onOptionsClose?: () => void;
 }
 
 const PostCard: React.FC<PostCardProps> = ({
@@ -77,6 +79,8 @@ const PostCard: React.FC<PostCardProps> = ({
   onUnblockUser,
   isBlocked = false,
   onProfilePress,
+  onOptionsOpen,
+  onOptionsClose,
 }) => {
   const router = useRouter();
   const pathname = usePathname();
@@ -85,7 +89,7 @@ const PostCard: React.FC<PostCardProps> = ({
   // ===== State Management =====
   const [optionsVisible, setOptionsVisible] = useState(false);
   const [isSaved, setIsSaved] = useState(post.isSaved || false);
-  const [isReported, setIsReported] = useState(false);
+  const [isReported, setIsReported] = useState(post.isReported || false);
   const [localIsHidden, setLocalIsHidden] = useState(isHidden);
   const [localIsMuted, setLocalIsMuted] = useState(isMuted);
   const [localIsBlocked, setLocalIsBlocked] = useState(isBlocked);
@@ -133,6 +137,10 @@ const PostCard: React.FC<PostCardProps> = ({
   useEffect(() => {
     setLocalIsBlocked(isBlocked);
   }, [isBlocked]);
+
+  useEffect(() => {
+    setIsReported(post.isReported || false);
+  }, [post.isReported]);
 
   // ===== Event Listeners =====
   useEffect(() => {
@@ -284,78 +292,37 @@ const PostCard: React.FC<PostCardProps> = ({
   }, [post.visibility]);
 
   // ===== Action Handlers =====
-  const handleMorePress = useCallback(() => setOptionsVisible(true), []);
-
-  const handleSave = useCallback(() => {
-    setIsSaved((prev) => !prev);
-    if (onSave) onSave(post._id);
-  }, [onSave, post._id]);
-
-  const handleReport = useCallback(() => {
-    setIsReported(true);
-    if (onReport) onReport(post._id);
-  }, [onReport, post._id]);
-
-  const handleHide = useCallback(() => {
-    if (localIsHidden && onUnhide) {
-      setLocalIsHidden(false);
-      onUnhide(post._id);
-    } else if (onHide) {
-      setLocalIsHidden(true);
-      onHide(post._id);
+  const handleMorePress = useCallback(() => {
+    setOptionsVisible(true);
+    if (onOptionsOpen) {
+      onOptionsOpen();
     }
-  }, [localIsHidden, onHide, onUnhide, post._id]);
+  }, [onOptionsOpen]);
 
-  const handleMuteUser = useCallback(() => {
-    const userName = getUserNameForActions();
-    if (localIsMuted && onUnmuteUser && post.user?._id) {
-      setLocalIsMuted(false);
-      onUnmuteUser(post.user._id, userName);
-    } else if (onMuteUser && post.user?._id) {
-      setLocalIsMuted(true);
-      onMuteUser(post.user._id, userName);
+  const handleOptionsClose = useCallback(() => {
+    setOptionsVisible(false);
+    if (onOptionsClose) {
+      onOptionsClose();
     }
-  }, [
-    localIsMuted,
-    onMuteUser,
-    onUnmuteUser,
-    post.user?._id,
-    getUserNameForActions,
-  ]);
+  }, [onOptionsClose]);
 
-  const handleBlockUser = useCallback(() => {
-    const userName = getUserNameForActions();
-    if (localIsBlocked && onUnblockUser && post.user?._id) {
-      setLocalIsBlocked(false);
-      onUnblockUser(post.user._id, userName);
-    } else if (onBlockUser && post.user?._id) {
-      setLocalIsBlocked(true);
-      onBlockUser(post.user._id, userName);
-    }
-  }, [
-    localIsBlocked,
-    onBlockUser,
-    onUnblockUser,
-    post.user?._id,
-    getUserNameForActions,
-  ]);
+  // ===== Construct post data for modal =====
+  const postData = {
+    postId: post._id,
+    isOwnPost: ownPost,
+    isSaved,
+    isReported,
+    isHidden: localIsHidden,
+    isMuted: localIsMuted,
+    isBlocked: localIsBlocked,
+    userId: post.user?._id ?? undefined,
+    userName: getUserNameForActions(),
+  };
 
-  const handleCopyLink = useCallback(() => {
-    if (onCopyLink) onCopyLink(post._id);
-  }, [onCopyLink, post._id]);
+  const visibilityIconName = getVisibilityIconName();
+  const visibilityBadgeColor = getVisibilityBadgeColor();
 
-  // ===== Display Helpers =====
-  const getUserDisplayName = useCallback(() => {
-    if (post.isAnonymous) return "Anonymous";
-    return post.user?.name || "User";
-  }, [post.isAnonymous, post.user?.name]);
-
-  const getUserDisplayHandle = useCallback(() => {
-    if (post.isAnonymous) return "anonymous";
-    return post.user?.username || "user";
-  }, [post.isAnonymous, post.user?.username]);
-
-  // ===== Render Functions =====
+  // ===== Render Functions (unchanged from original) =====
   const renderIndicators = useCallback(() => {
     if (postImages.length <= 1) return null;
     return (
@@ -496,7 +463,6 @@ const PostCard: React.FC<PostCardProps> = ({
   const renderAvatar = useCallback(() => {
     const avatarSize = compact ? 28 : 40;
 
-    // Handle anonymous posts
     if (post.isAnonymous) {
       return (
         <View
@@ -519,9 +485,7 @@ const PostCard: React.FC<PostCardProps> = ({
       );
     }
 
-    // Handle posts with user data
     if (post.user) {
-      // If user has profile picture and no error loading it
       if (post.user.profilePicture && !avatarError) {
         return (
           <TouchableOpacity
@@ -547,7 +511,6 @@ const PostCard: React.FC<PostCardProps> = ({
         );
       }
 
-      // Fallback to colored circle with first letter
       return (
         <TouchableOpacity
           onPress={(e) => {
@@ -577,7 +540,6 @@ const PostCard: React.FC<PostCardProps> = ({
       );
     }
 
-    // Ultimate fallback when no user data exists
     return (
       <View
         style={[
@@ -596,9 +558,6 @@ const PostCard: React.FC<PostCardProps> = ({
       </View>
     );
   }, [post.isAnonymous, post.user, avatarError, compact, handleUserPress]);
-
-  const visibilityIconName = getVisibilityIconName();
-  const visibilityBadgeColor = getVisibilityBadgeColor();
 
   // ===== Main Render =====
   return (
@@ -630,7 +589,7 @@ const PostCard: React.FC<PostCardProps> = ({
               <Text
                 style={[styles.postUserName, compact && styles.compactUserName]}
               >
-                {getUserDisplayName()}
+                {getUserNameForActions()}
               </Text>
             </Pressable>
 
@@ -669,7 +628,7 @@ const PostCard: React.FC<PostCardProps> = ({
                 compact && styles.compactUserDetails,
               ]}
             >
-              @{getUserDisplayHandle()}
+              @{post.isAnonymous ? "anonymous" : post.user?.username || "user"}
               {!hideTime && ` • ${formatTimeAgo(post.createdAt)}`}
             </Text>
           </Pressable>
@@ -784,36 +743,28 @@ const PostCard: React.FC<PostCardProps> = ({
         </View>
       )}
 
-      {/* Post Options Modal */}
+      {/* Post Options Modal - Now pure presentational, no ReportModal inside */}
       {!compact && (
         <PostOptionsModal
           visible={optionsVisible}
-          onClose={() => setOptionsVisible(false)}
-          postId={post._id}
-          isOwnPost={ownPost}
-          isSaved={isSaved}
-          isReported={isReported}
-          isHidden={localIsHidden}
-          isMuted={localIsMuted}
-          isBlocked={localIsBlocked}
-          userId={post.user?._id ?? undefined}
-          userName={getUserNameForActions()}
-          onEdit={onEdit}
-          onDelete={onDelete}
-          onSave={handleSave}
-          onReport={handleReport}
-          onHide={handleHide}
+          onClose={handleOptionsClose}
+          postData={postData}
+          onEdit={onEdit || (() => {})}
+          onDelete={onDelete || (() => {})}
+          onSave={onSave || (() => {})}
+          onReport={onReport || (() => {})}
+          onHide={onHide || (() => {})}
           onShare={onSharePress}
-          onCopyLink={handleCopyLink}
-          onMuteUser={handleMuteUser}
-          onBlockUser={handleBlockUser}
+          onCopyLink={onCopyLink || (() => {})}
+          onMuteUser={onMuteUser || (() => {})}
+          onBlockUser={onBlockUser || (() => {})}
         />
       )}
     </View>
   );
 };
 
-// ===== Styles =====
+// ===== Styles (unchanged from original) =====
 const styles = StyleSheet.create({
   postCard: {
     backgroundColor: "white",

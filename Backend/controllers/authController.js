@@ -123,6 +123,34 @@ const login = async (req, res) => {
       });
     }
 
+    // 🆕 Check if banned FIRST (before password check for security)
+    if (user.isBanned) {
+      return res.status(403).json({
+        success: false,
+        message: `Your account has been permanently banned. Reason: ${user.banReason || "Violation of community guidelines"}`,
+        code: "ACCOUNT_BANNED",
+      });
+    }
+
+    // 🆕 Check if suspended
+    if (user.isSuspended) {
+      if (user.suspendedUntil && new Date() > new Date(user.suspendedUntil)) {
+        // Auto-lift suspension
+        user.isSuspended = false;
+        user.suspendReason = undefined;
+        user.suspendedAt = undefined;
+        user.suspendedUntil = undefined;
+        await user.save();
+      } else {
+        return res.status(403).json({
+          success: false,
+          message: `Your account is suspended until ${new Date(user.suspendedUntil).toLocaleString()}. Reason: ${user.suspendReason || "Violation of community guidelines"}`,
+          code: "ACCOUNT_SUSPENDED",
+          suspendedUntil: user.suspendedUntil,
+        });
+      }
+    }
+
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
       return res.status(401).json({
@@ -359,15 +387,47 @@ const resendVerification = async (req, res) => {
 /**
  * Get current authenticated user info
  */
+// backend/controllers/authController.js
+
 const getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
+    const user = await User.findById(req.user.id).select(
+      "+isBanned +isSuspended +suspendedUntil +banReason +suspendReason",
+    );
 
     if (!user) {
       return res.status(404).json({
         success: false,
         message: "User not found",
       });
+    }
+
+    // 🆕 Check if banned
+    if (user.isBanned) {
+      return res.status(403).json({
+        success: false,
+        message: `Your account has been permanently banned. Reason: ${user.banReason || "Violation of community guidelines"}`,
+        code: "ACCOUNT_BANNED",
+      });
+    }
+
+    // 🆕 Check if suspended
+    if (user.isSuspended) {
+      if (user.suspendedUntil && new Date() > new Date(user.suspendedUntil)) {
+        // Auto-lift suspension
+        user.isSuspended = false;
+        user.suspendReason = undefined;
+        user.suspendedAt = undefined;
+        user.suspendedUntil = undefined;
+        await user.save();
+      } else {
+        return res.status(403).json({
+          success: false,
+          message: `Your account is suspended until ${new Date(user.suspendedUntil).toLocaleString()}. Reason: ${user.suspendReason || "Violation of community guidelines"}`,
+          code: "ACCOUNT_SUSPENDED",
+          suspendedUntil: user.suspendedUntil,
+        });
+      }
     }
 
     res.json({

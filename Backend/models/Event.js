@@ -89,6 +89,29 @@ const eventSchema = new mongoose.Schema(
       enum: ["campus", "connections", "public"],
       default: "campus",
     },
+    // === APPROVAL FIELDS ===
+    approvalStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: function () {
+        // Auto-approve connections events
+        return this.visibility === "connections" ? "approved" : "pending";
+      },
+    },
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    approvedAt: Date,
+    rejectionReason: {
+      type: String,
+      default: null,
+    },
+    isFeatured: {
+      type: Boolean,
+      default: false,
+    },
     maxAttendees: { type: Number, default: null },
     isOnline: { type: Boolean, default: false },
     meetingLink: { type: String, default: "" },

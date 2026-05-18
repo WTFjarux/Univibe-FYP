@@ -297,6 +297,7 @@ export const useChatList = (token: string | null, currentUserId?: string) => {
     async (roomId: string) => {
       if (!token) return;
 
+      // Optimistic update
       setRooms((prev) =>
         prev.map((room) => {
           if (room.roomId === roomId && room.lastMessage && currentUserId) {
@@ -318,11 +319,21 @@ export const useChatList = (token: string | null, currentUserId?: string) => {
       await removeManualUnread(roomId);
 
       try {
-        const response = await chatApi.markRoomAsRead(token);
+        const response = await chatApi.markRoomAsRead(roomId);
         if (response.success && socketService.getConnectionStatus()) {
           socketService.emit("mark_read", { roomId });
         }
-      } catch {
+      } catch (err: any) {
+        // Suppress auth errors (handled by interceptor)
+        const data = err?.response?.data;
+        if (
+          data?.code === "ACCOUNT_BANNED" ||
+          data?.code === "ACCOUNT_SUSPENDED" ||
+          data?.code === "TOKEN_VERSION_MISMATCH"
+        ) {
+          return; // Already handled by interceptor
+        }
+        // For other errors, refresh the room
         refreshSingleRoom(roomId);
       }
     },

@@ -1,4 +1,5 @@
-// Backend/routes/authRoutes.js
+// backend/routes/authRoutes.js
+
 const express = require("express");
 const {
   register,
@@ -16,7 +17,10 @@ const {
   verifyOTP,
   resetPassword,
 } = require("../controllers/authController");
-const { protect } = require("../middleware/authmiddleware");
+const {
+  protect,
+  protectWithStatusCheck,x
+} = require("../middleware/authmiddleware");
 
 const router = express.Router();
 
@@ -27,25 +31,27 @@ router.post("/register", register);
 router.post("/login", login);
 router.post("/resend-verification", resendVerification);
 router.post("/check-verification-by-email", checkVerificationByEmail);
-
-// Password Reset Routes (Public)
-router.post("/forgot-password", forgotPassword); //  Step 1: Send OTP
-router.post("/verify-otp", verifyOTP); // Step 2: Verify OTP
-router.post("/reset-password", resetPassword); // Step 3: Set new password
+router.post("/forgot-password", forgotPassword);
+router.post("/verify-otp", verifyOTP);
+router.post("/reset-password", resetPassword);
 
 // ============================================
-// Email Verification Routes
+// Email Verification Routes (Public)
 // ============================================
 router.get("/verify-email/:token", verifyEmailPage);
 router.get("/verify-email-api/:token", verifyEmailAPI);
 
 // ============================================
-// Protected Routes (Require Authentication)
+// Protected Routes (Auth only - read operations)
 // ============================================
 router.get("/me", protect, getMe);
 router.get("/check-verification", protect, checkVerificationStatus);
 router.get("/refresh-token", protect, refreshToken);
 router.get("/verify-and-refresh", protect, verifyAndRefreshToken);
-router.post("/change-password", protect, changePassword);
+
+// ============================================
+// Protected Routes (Auth + Status Check - write operations)
+// ============================================
+router.post("/change-password", protectWithStatusCheck, changePassword);
 
 module.exports = router;

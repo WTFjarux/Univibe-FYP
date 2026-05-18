@@ -38,6 +38,7 @@ import ProfileSkeleton, {
   InitialPostsSkeleton,
 } from "../components/Profile/ProfileSkeleton";
 import { styles } from "../components/Profile/profileStyles";
+import ProfileOptionsModal from "../components/Profile/ProfileOptionsModal";
 
 type ConnectionStatus =
   | "connected"
@@ -114,6 +115,8 @@ export default function PublicProfileScreen() {
   const [isBlocked, setIsBlocked] = useState(false);
   const [isBlockedByOwner, setIsBlockedByOwner] = useState(false);
   const [profileBlocked, setProfileBlocked] = useState(false);
+  const [reportedUsers, setReportedUsers] = useState<Set<string>>(new Set());
+  const [showOptionsModal, setShowOptionsModal] = useState(false);
 
   const isOwnProfile = currentUser?.id === id;
 
@@ -164,6 +167,26 @@ export default function PublicProfileScreen() {
   );
 
   const goBack = useCallback(() => router.back(), [router]);
+  const loadUserStates = useCallback(async () => {
+    if (!token || isOwnProfile) return;
+
+    try {
+      // Load muted users
+      const mutedResponse = await profileService.getMutedUsers(1, 50);
+      if (mutedResponse.success && mutedResponse.data) {
+        const mutedIds = new Set<string>(
+          mutedResponse.data.users.map((u: any) =>
+            String(u._id || u.user?._id || ""),
+          ),
+        );
+        // Filter out empty strings
+        mutedIds.delete("");
+        setMutedUsers(mutedIds);
+      }
+    } catch (error) {
+      console.error("Error loading user states:", error);
+    }
+  }, [token, isOwnProfile]);
 
   const loadProfilePosts = useCallback(
     async (page = 1, shouldAppend = false) => {
@@ -262,11 +285,47 @@ export default function PublicProfileScreen() {
     try {
       const response = await profileService.getPublicProfile(id as string);
 
+      // CHECK: If blocked, show blocked state
       if (response.isBlocked || response.isBlockedByOwner) {
         setProfileBlocked(true);
         setIsBlocked(response.isBlocked || false);
         setIsBlockedByOwner(response.isBlockedByOwner || false);
+
+        // Still try to set basic profile info for the modal
+        if (response.data) {
+          const profileData = response.data.profile;
+          const userData = response.data.user;
+          if (profileData && userData) {
+            setProfile({
+              _id: profileData._id,
+              user: {
+                _id: userData._id,
+                username: userData.username || "",
+                email: userData.email || "",
+                profileComplete: userData.profileComplete || false,
+                name: userData.name || "",
+              },
+              fullName: userData.name || "User",
+              username: userData.username || "",
+              bio: "",
+              major: "",
+              year: "",
+              graduationYear: "",
+              pronouns: "",
+              profilePicture: profileData.profilePicture || "",
+              coverPhoto: profileData.coverPhoto || "",
+              socialLinks: {
+                instagram: "",
+                linkedin: "",
+                github: "",
+              },
+              stats: { posts: 0, connections: 0, groups: 0 },
+            });
+          }
+        }
+
         setLoading(false);
+        setInitialLoading(false);
         return;
       }
 
@@ -300,8 +359,10 @@ export default function PublicProfileScreen() {
           stats: profileData.stats || { posts: 0, connections: 0, groups: 0 },
         });
 
-        if (!isOwnProfile) await loadConnectionStatus();
-        else await loadProfilePosts(1, false);
+        if (!isOwnProfile) {
+          await loadConnectionStatus();
+          await loadUserStates();
+        } else await loadProfilePosts(1, false);
       } else {
         showInfoBar(response.message || "Failed to load profile", "error");
         goBack();
@@ -468,6 +529,9 @@ export default function PublicProfileScreen() {
 
   const handleReportPost = useCallback(
     (postId: string) => {
+      setPosts((prev) =>
+        prev.map((p) => (p._id === postId ? { ...p, isReported: true } : p)),
+      );
       showInfoBar("Thank you for reporting this post", "success");
     },
     [showInfoBar],
@@ -939,22 +1003,40 @@ export default function PublicProfileScreen() {
     handleConnectionAction,
   ]);
 
-  // NOW ALL CONDITIONAL RETURNS ARE SAFE
-  // All hooks and functions are defined above, so these returns won't break hook order
+  // ============================================
+  // HEADER RENDER HELPER
+  // ============================================
+  const renderHeader = useCallback(
+    (title: string, showOptions: boolean = true) => (
+      <View style={publicStyles.header}>
+        <TouchableOpacity onPress={goBack} style={publicStyles.backButton}>
+          <Ionicons name="arrow-back" size={24} color="#111827" />
+        </TouchableOpacity>
+        <Text style={publicStyles.headerTitle} numberOfLines={1}>
+          {title}
+        </Text>
+        {!isOwnProfile && showOptions ? (
+          <TouchableOpacity
+            onPress={() => setShowOptionsModal(true)}
+            style={{ width: 40, alignItems: "flex-end", padding: 8 }}
+          >
+            <Ionicons name="ellipsis-vertical" size={24} color="#111827" />
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 40 }} />
+        )}
+      </View>
+    ),
+    [goBack, isOwnProfile],
+  );
 
-  // Blocked state - Render blocked UI
+  // ============================================
+  // BLOCKED STATE - Render blocked UI
+  // ============================================
   if (profileBlocked) {
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
-        <View style={publicStyles.header}>
-          <TouchableOpacity onPress={goBack} style={publicStyles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#111827" />
-          </TouchableOpacity>
-          <Text style={publicStyles.headerTitle}>
-            {isBlockedByOwner ? "Blocked" : "Profile"}
-          </Text>
-          <View style={{ width: 40 }} />
-        </View>
+        {renderHeader(isBlockedByOwner ? "Blocked" : "Profile")}
 
         <View style={publicStyles.blockedContainer}>
           <Ionicons
@@ -974,11 +1056,59 @@ export default function PublicProfileScreen() {
             <Text style={publicStyles.blockedButtonText}>Go Back</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Show options modal even in blocked state */}
+        {!isOwnProfile && profile && (
+          <ProfileOptionsModal
+            visible={showOptionsModal}
+            onClose={() => setShowOptionsModal(false)}
+            userId={profile.user._id}
+            userName={profile.fullName}
+            isBlocked={isBlocked}
+            isMuted={mutedUsers.has(profile.user._id)}
+            onBlockUser={() => {
+              setIsBlocked(true);
+              setProfileBlocked(true);
+              setBlockedUsers((prev: Set<string>) => {
+                const newSet = new Set<string>(prev);
+                newSet.add(profile.user._id);
+                return newSet;
+              });
+              showInfoBar("User blocked successfully", "success");
+            }}
+            // Unblock user
+            onUnblockUser={() => {
+              setIsBlocked(false);
+              setProfileBlocked(false);
+              setBlockedUsers((prev: Set<string>) => {
+                const newSet = new Set<string>(prev);
+                newSet.delete(profile.user._id);
+                return newSet;
+              });
+              showInfoBar("User unblocked successfully", "success");
+              setTimeout(() => loadProfile(), 500);
+            }}
+            // Report success
+            onReportSuccess={() => {
+              setReportedUsers((prev: Set<string>) => {
+                const newSet = new Set<string>(prev);
+                newSet.add(profile.user._id);
+                return newSet;
+              });
+              showInfoBar(
+                "Report submitted. Thank you for your feedback.",
+                "success",
+              );
+            }}
+          />
+        )}
       </SafeAreaView>
     );
   }
 
-  // Initial loading state
+  // ============================================
+  // INITIAL LOADING STATE
+  // ============================================
   if (initialLoading) {
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
@@ -987,7 +1117,9 @@ export default function PublicProfileScreen() {
     );
   }
 
-  // Profile not found state
+  // ============================================
+  // PROFILE NOT FOUND STATE
+  // ============================================
   if (!profile) {
     return (
       <SafeAreaView style={styles.container}>
@@ -1006,18 +1138,12 @@ export default function PublicProfileScreen() {
     );
   }
 
-  // Main profile render
+  // ============================================
+  // MAIN PROFILE RENDER
+  // ============================================
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      <View style={publicStyles.header}>
-        <TouchableOpacity onPress={goBack} style={publicStyles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#111827" />
-        </TouchableOpacity>
-        <Text style={publicStyles.headerTitle} numberOfLines={1}>
-          {profile.fullName}
-        </Text>
-        <View style={{ width: 40 }} />
-      </View>
+      {renderHeader(profile.fullName)}
 
       <FlatList
         data={connectionStatus === "connected" || isOwnProfile ? posts : []}
@@ -1178,7 +1304,57 @@ export default function PublicProfileScreen() {
         onEndReached={loadMorePosts}
         onEndReachedThreshold={0.3}
       />
+
       {renderInfoBar()}
+
+      {/* Profile Options Modal */}
+      {!isOwnProfile && profile && (
+        <ProfileOptionsModal
+          visible={showOptionsModal}
+          onClose={() => setShowOptionsModal(false)}
+          userId={profile.user._id}
+          userName={profile.fullName}
+          isBlocked={isBlocked}
+          isMuted={mutedUsers.has(profile.user._id)}
+          isReported={reportedUsers.has(profile.user._id)}
+          onBlockUser={() => {
+            setIsBlocked(true);
+            setProfileBlocked(true);
+            setBlockedUsers((prev) => new Set(prev).add(profile.user._id));
+            showInfoBar("User blocked successfully", "success");
+          }}
+          onUnblockUser={() => {
+            setIsBlocked(false);
+            setProfileBlocked(false);
+            setBlockedUsers((prev) => {
+              const newSet = new Set(prev);
+              newSet.delete(profile.user._id);
+              return newSet;
+            });
+            showInfoBar("User unblocked successfully", "success");
+            // Reload profile after unblock
+            setTimeout(() => loadProfile(), 500);
+          }}
+          onMuteUser={() => {
+            setMutedUsers((prev) => new Set(prev).add(profile.user._id));
+            showInfoBar("User muted successfully", "info");
+          }}
+          onUnmuteUser={() => {
+            setMutedUsers((prev) => {
+              const newSet = new Set(prev);
+              newSet.delete(profile.user._id);
+              return newSet;
+            });
+            showInfoBar("User unmuted successfully", "info");
+          }}
+          onReportSuccess={() => {
+            showInfoBar(
+              "Report submitted. Thank you for your feedback.",
+              "success",
+            );
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }

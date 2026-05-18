@@ -15,6 +15,21 @@ interface UseChatReadReceiptsProps {
   messages: Message[];
 }
 
+/**
+ * Helper to check if an error is auth-related (already handled by API interceptor)
+ * These errors don't need to be logged or re-thrown
+ */
+const isAuthError = (err: any): boolean => {
+  const data = err?.response?.data;
+  return (
+    data?.code === "ACCOUNT_BANNED" ||
+    data?.code === "ACCOUNT_SUSPENDED" ||
+    data?.code === "TOKEN_VERSION_MISMATCH" ||
+    err?.response?.status === 403 ||
+    err?.response?.status === 401
+  );
+};
+
 export const useChatReadReceipts = ({
   token,
   roomId,
@@ -65,7 +80,11 @@ export const useChatReadReceipts = ({
           lastReadTimestampRef.current = Date.now();
         }
       })
-      .catch((err) => console.error("Error marking room as read:", err))
+      .catch((err) => {
+        // Suppress auth errors (already handled by API interceptor with Alert)
+        if (isAuthError(err)) return;
+        console.error("Error marking room as read:", err);
+      })
       .finally(() => {
         hasInitialMarkedRef.current = true;
       });
@@ -103,12 +122,17 @@ export const useChatReadReceipts = ({
       });
 
       if (hasNewUnread) {
-
         if (socketService.getConnectionStatus()) {
           socketService.emit("mark_read", { roomId });
         }
 
-        chatApi.markRoomAsRead(roomId).catch(() => {});
+        // Silent catch - auth errors handled by interceptor
+        chatApi.markRoomAsRead(roomId).catch((err) => {
+          if (!isAuthError(err)) {
+            console.error("Error marking new messages as read:", err);
+          }
+        });
+
         lastReadTimestampRef.current = Date.now();
       }
     }, 1000);

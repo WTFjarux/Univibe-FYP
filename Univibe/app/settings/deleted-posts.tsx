@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  Animated,
   Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -32,6 +33,36 @@ export default function DeletedPostsScreen() {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [infoType, setInfoType] = useState<"success" | "error" | "info">(
+    "info",
+  );
+  const slideAnim = useState(new Animated.Value(100))[0];
+
+  const showInfoBar = (
+    message: string,
+    type: "success" | "error" | "info" = "info",
+  ) => {
+    setInfoMessage(message);
+    setInfoType(type);
+    Animated.sequence([
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.delay(3000),
+      Animated.timing(slideAnim, {
+        toValue: 100,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setInfoMessage(null);
+      slideAnim.setValue(100);
+    });
+  };
 
   const loadDeletedPosts = useCallback(
     async (pageNum: number = 1, shouldAppend: boolean = false) => {
@@ -74,7 +105,7 @@ export default function DeletedPostsScreen() {
         }
       } catch (error) {
         console.error("Error loading deleted posts:", error);
-        Alert.alert("Error", "Failed to load deleted posts");
+        showInfoBar("Failed to load deleted posts", "error");
         setDeletedPosts([]);
       } finally {
         setLoading(false);
@@ -120,11 +151,13 @@ export default function DeletedPostsScreen() {
             );
 
             try {
-              await restorePost(postId);
-              Alert.alert("Success", "Post restored successfully");
+              const result = await restorePost(postId);
+              if (result.success) {
+                showInfoBar("Post restored successfully", "success");
+              }
             } catch (error: any) {
               await loadDeletedPosts(1, false);
-              Alert.alert("Error", error.message || "Failed to restore post");
+              showInfoBar(error.message || "Failed to restore post", "error");
             }
           },
         },
@@ -147,13 +180,15 @@ export default function DeletedPostsScreen() {
             );
 
             try {
-              await permanentlyDeletePost(postId);
-              Alert.alert("Success", "Post permanently deleted");
+              const result = await permanentlyDeletePost(postId);
+              if (result.success) {
+                showInfoBar("Post permanently deleted", "success");
+              }
             } catch (error: any) {
               await loadDeletedPosts(1, false);
-              Alert.alert(
-                "Error",
+              showInfoBar(
                 error.message || "Failed to permanently delete post",
+                "error",
               );
             }
           },
@@ -260,6 +295,29 @@ export default function DeletedPostsScreen() {
           />
         }
       />
+      {infoMessage && (
+        <Animated.View
+          style={[
+            styles.infoBar,
+            {
+              backgroundColor:
+                infoType === "success"
+                  ? "#10b981"
+                  : infoType === "error"
+                    ? "#ef4444"
+                    : "#8b5cf6",
+              transform: [{ translateY: slideAnim }],
+            },
+          ]}
+        >
+          <Ionicons
+            name={infoType === "success" ? "checkmark-circle" : "alert-circle"}
+            size={20}
+            color="#fff"
+          />
+          <Text style={styles.infoBarText}>{infoMessage}</Text>
+        </Animated.View>
+      )}
     </SafeAreaView>
   );
 }
@@ -384,5 +442,32 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#6b7280",
     fontFamily: "SofiaSans-Regular",
+  },
+  infoBar: {
+    position: "absolute",
+    bottom: 50,
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    gap: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+    zIndex: 1000,
+  },
+  infoBarText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "500",
+    flex: 1,
+    textAlign: "left",
+    lineHeight: 20,
+    fontFamily: "SofiaSans-Medium",
   },
 });

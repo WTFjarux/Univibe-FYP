@@ -9,7 +9,7 @@ import {
   Comment,
 } from "@/lib/services/postService";
 import { commentEvents, EVENTS } from "@/lib/utils/eventEmitter";
-
+import { reportContent } from "@/lib/services/contentService";
 // ===== Helper Functions =====
 const hasPopulatedReplies = (comment: Comment): boolean => {
   return (
@@ -320,12 +320,30 @@ export const useComments = (
     }
   };
 
-  const handleReport = (commentId: string) => {
-    Alert.alert(
-      "Report Submitted",
-      "Thank you for reporting this comment. Our team will review it.",
-    );
-  };
+  const handleReport = useCallback(
+    (commentId: string) => {
+      // This is called AFTER the ReportModal successfully submits
+      // Just mark the comment as reported in the tree
+      setComments((prev) => {
+        const reportInTree = (commentsList: Comment[]): Comment[] => {
+          return commentsList.map((comment) => {
+            if (comment._id === commentId) {
+              return { ...comment, isReported: true };
+            }
+            if (hasPopulatedReplies(comment)) {
+              return {
+                ...comment,
+                replies: reportInTree(getPopulatedReplies(comment)),
+              };
+            }
+            return comment;
+          });
+        };
+        return reportInTree(prev);
+      });
+    },
+    [setComments],
+  );
 
   const handleShare = async (commentId: string) => {
     try {

@@ -36,7 +36,6 @@ export default function EventCard({
     event.status,
   );
   const flatListRef = useRef<FlatList>(null);
-  // FIX: Use ReturnType<typeof setInterval> for cross-platform compatibility
   const statusIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Update status based on current time
@@ -47,61 +46,68 @@ export default function EventCard({
       const endDate = new Date(event.endDate);
 
       let newStatus = currentStatus;
-
       if (currentStatus !== "cancelled") {
-        if (endDate < now && currentStatus !== "completed") {
+        if (endDate < now && currentStatus !== "completed")
           newStatus = "completed";
-        } else if (
+        else if (
           startDate <= now &&
           endDate >= now &&
           currentStatus === "upcoming"
-        ) {
+        )
           newStatus = "ongoing";
-        }
       }
 
       if (newStatus !== currentStatus) {
         setCurrentStatus(newStatus);
-        // Refresh server status
-        eventService.refreshEventStatus(event._id).catch(() => {
-          // Silent fail - client-side update is sufficient
-        });
+        eventService.refreshEventStatus(event._id).catch(() => {});
       }
     };
 
-    // Check immediately
     checkAndUpdateStatus();
-
-    // Check every 30 seconds
     statusIntervalRef.current = setInterval(checkAndUpdateStatus, 30000);
 
     return () => {
-      if (statusIntervalRef.current) {
-        clearInterval(statusIntervalRef.current);
-      }
+      if (statusIntervalRef.current) clearInterval(statusIntervalRef.current);
     };
   }, [event._id, event.startDate, event.endDate]);
 
   // Check if current user is the organizer
   const isOrganizer = (() => {
     if (!currentUserId) return false;
-    if (typeof event.organizer === "string") {
+    if (typeof event.organizer === "string")
       return event.organizer === currentUserId;
-    }
-    if (event.organizer && typeof event.organizer === "object") {
+    if (event.organizer && typeof event.organizer === "object")
       return event.organizer._id === currentUserId;
-    }
     return false;
   })();
 
-  const formatDate = (dateString: string) => {
+  const formatDateFull = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  };
+
+  const formatDateShort = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
       hour: "numeric",
       minute: "2-digit",
+      hour12: true,
     });
+  };
+
+  const isSameDay = (d1: string, d2: string) => {
+    const date1 = new Date(d1);
+    const date2 = new Date(d2);
+    return date1.toDateString() === date2.toDateString();
   };
 
   const getCategoryColor = (category: string) => {
@@ -160,23 +166,16 @@ export default function EventCard({
     }
   };
 
-  // Get images array from event
   const getEventImages = () => {
-    if (event.imageUrls && event.imageUrls.length > 0) {
-      return event.imageUrls;
-    }
-    if (event.coverImage) {
-      return [event.coverImage];
-    }
+    if (event.imageUrls && event.imageUrls.length > 0) return event.imageUrls;
+    if (event.coverImage) return [event.coverImage];
     return [];
   };
 
   const images = getEventImages();
   const hasMultipleImages = images.length > 1;
-
-  // SAFE: Ensure rsvpCount and interestedCount are always numbers
   const safeRsvpCount = event.rsvpCount ?? 0;
-  const safeInterestedCount = event.interestedCount ?? 0;
+  const sameDay = isSameDay(event.startDate, event.endDate);
 
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
@@ -186,117 +185,12 @@ export default function EventCard({
     },
   ).current;
 
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 50,
-  }).current;
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
 
   const renderImageItem = ({ item: imageUrl }: { item: string }) => (
     <Image source={{ uri: imageUrl }} style={styles.coverImage} />
   );
 
-  const renderDot = () => {
-    if (!hasMultipleImages) return null;
-    return (
-      <View style={styles.dotsContainer}>
-        {images.map((_, index) => (
-          <View
-            key={index}
-            style={[
-              styles.dot,
-              currentImageIndex === index && styles.dotActive,
-            ]}
-          />
-        ))}
-      </View>
-    );
-  };
-
-  const renderNavigationButtons = () => {
-    if (!hasMultipleImages) return null;
-    return (
-      <>
-        {currentImageIndex > 0 && (
-          <TouchableOpacity
-            style={[styles.navButton, styles.navButtonLeft]}
-            onPress={() => {
-              flatListRef.current?.scrollToIndex({
-                index: currentImageIndex - 1,
-                animated: true,
-              });
-            }}
-          >
-            <Ionicons name="chevron-back" size={20} color="#fff" />
-          </TouchableOpacity>
-        )}
-        {currentImageIndex < images.length - 1 && (
-          <TouchableOpacity
-            style={[styles.navButton, styles.navButtonRight]}
-            onPress={() => {
-              flatListRef.current?.scrollToIndex({
-                index: currentImageIndex + 1,
-                animated: true,
-              });
-            }}
-          >
-            <Ionicons name="chevron-forward" size={20} color="#fff" />
-          </TouchableOpacity>
-        )}
-      </>
-    );
-  };
-
-  const renderImageCounter = () => {
-    if (!hasMultipleImages) return null;
-    return (
-      <View style={styles.imageCounter}>
-        <Ionicons name="images-outline" size={12} color="#fff" />
-        <Text style={styles.imageCounterText}>
-          {currentImageIndex + 1}/{images.length}
-        </Text>
-      </View>
-    );
-  };
-
-  const renderOrganizerBadge = () => {
-    if (!isOrganizer) return null;
-    return (
-      <View style={styles.organizerBadge}>
-        <Ionicons name="star" size={12} color="#f59e0b" />
-        <Text style={styles.organizerBadgeText}>You're the organizer</Text>
-      </View>
-    );
-  };
-
-  const renderOrganizerName = () => {
-    if (isOrganizer) return null;
-    const organizerDisplayName =
-      event.organizerName ||
-      (typeof event.organizer === "object"
-        ? event.organizer?.name
-        : "Organizer");
-    return (
-      <View style={styles.organizerInfo}>
-        <Ionicons name="person-outline" size={14} color="#6b7280" />
-        <Text style={styles.organizerText}>
-          Organized by {organizerDisplayName}
-        </Text>
-      </View>
-    );
-  };
-
-  const handleCardPress = useCallback(() => {
-    router.push(`/events/${event._id}`);
-  }, [event._id]);
-
-  const handleInterestPress = useCallback(() => {
-    onInterestPress?.(event._id);
-  }, [event._id, onInterestPress]);
-
-  const handleRsvpPress = useCallback(() => {
-    onRsvpPress?.(event._id);
-  }, [event._id, onRsvpPress]);
-
-  // Don't show interaction buttons for completed or cancelled events
   const isEventInteractable =
     currentStatus !== "completed" && currentStatus !== "cancelled";
 
@@ -307,7 +201,7 @@ export default function EventCard({
         currentStatus === "completed" && styles.cardCompleted,
         currentStatus === "cancelled" && styles.cardCancelled,
       ]}
-      onPress={handleCardPress}
+      onPress={() => router.push(`/events/${event._id}`)}
       activeOpacity={0.7}
     >
       {/* Image Carousel */}
@@ -326,19 +220,63 @@ export default function EventCard({
               viewabilityConfig={viewabilityConfig}
               style={styles.carousel}
             />
-            {renderImageCounter()}
-            {renderNavigationButtons()}
-            {renderDot()}
+            {hasMultipleImages && (
+              <>
+                <View style={styles.imageCounter}>
+                  <Ionicons name="images-outline" size={12} color="#fff" />
+                  <Text style={styles.imageCounterText}>
+                    {currentImageIndex + 1}/{images.length}
+                  </Text>
+                </View>
+                {currentImageIndex > 0 && (
+                  <TouchableOpacity
+                    style={[styles.navButton, styles.navButtonLeft]}
+                    onPress={() =>
+                      flatListRef.current?.scrollToIndex({
+                        index: currentImageIndex - 1,
+                        animated: true,
+                      })
+                    }
+                  >
+                    <Ionicons name="chevron-back" size={20} color="#fff" />
+                  </TouchableOpacity>
+                )}
+                {currentImageIndex < images.length - 1 && (
+                  <TouchableOpacity
+                    style={[styles.navButton, styles.navButtonRight]}
+                    onPress={() =>
+                      flatListRef.current?.scrollToIndex({
+                        index: currentImageIndex + 1,
+                        animated: true,
+                      })
+                    }
+                  >
+                    <Ionicons name="chevron-forward" size={20} color="#fff" />
+                  </TouchableOpacity>
+                )}
+                <View style={styles.dotsContainer}>
+                  {images.map((_, index) => (
+                    <View
+                      key={index}
+                      style={[
+                        styles.dot,
+                        currentImageIndex === index && styles.dotActive,
+                      ]}
+                    />
+                  ))}
+                </View>
+              </>
+            )}
             {currentStatus === "completed" && (
               <View style={styles.completedOverlay}>
                 <Ionicons name="checkmark-circle" size={48} color="#fff" />
-                <Text style={styles.completedOverlayText}>Completed</Text>
+                <Text style={styles.overlayText}>Completed</Text>
               </View>
             )}
             {currentStatus === "cancelled" && (
               <View style={styles.cancelledOverlay}>
                 <Ionicons name="close-circle" size={48} color="#fff" />
-                <Text style={styles.cancelledOverlayText}>Cancelled</Text>
+                <Text style={styles.overlayText}>Cancelled</Text>
               </View>
             )}
           </>
@@ -349,7 +287,7 @@ export default function EventCard({
         )}
       </View>
 
-      {/* Status Badge */}
+      {/* Status Badge - Top Right */}
       <View
         style={[
           styles.statusBadge,
@@ -358,6 +296,44 @@ export default function EventCard({
       >
         <Text style={styles.statusText}>{getStatusText(currentStatus)}</Text>
       </View>
+
+      {/* Approval Badge - Top Left (only for organizer) */}
+      {isOrganizer &&
+        event.approvalStatus &&
+        event.approvalStatus !== "approved" && (
+          <View
+            style={[
+              styles.approvalBadge,
+              {
+                backgroundColor:
+                  event.approvalStatus === "pending" ? "#fef3c7" : "#fee2e2",
+              },
+            ]}
+          >
+            <Ionicons
+              name={
+                event.approvalStatus === "pending"
+                  ? "time-outline"
+                  : "close-circle-outline"
+              }
+              size={12}
+              color={event.approvalStatus === "pending" ? "#92400e" : "#991b1b"}
+            />
+            <Text
+              style={[
+                styles.approvalBadgeText,
+                {
+                  color:
+                    event.approvalStatus === "pending" ? "#92400e" : "#991b1b",
+                },
+              ]}
+            >
+              {event.approvalStatus === "pending"
+                ? "Pending Approval"
+                : "Rejected"}
+            </Text>
+          </View>
+        )}
 
       {/* Content */}
       <View style={styles.content}>
@@ -387,10 +363,35 @@ export default function EventCard({
           {event.title}
         </Text>
 
+        {/* Date & Time Display */}
         <View style={styles.details}>
           <View style={styles.detail}>
             <Ionicons name="calendar-outline" size={16} color="#6b7280" />
-            <Text style={styles.detailText}>{formatDate(event.startDate)}</Text>
+            {sameDay ? (
+              <View style={styles.sameDayContainer}>
+                <Text style={styles.detailText}>
+                  {formatDateShort(event.startDate)}
+                </Text>
+                <Ionicons name="arrow-forward" size={14} color="#9ca3af" />
+                <Text style={styles.detailText}>
+                  {new Date(event.endDate).toLocaleTimeString("en-US", {
+                    hour: "numeric",
+                    minute: "2-digit",
+                    hour12: true,
+                  })}
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.multiDayContainer}>
+                <Text style={styles.detailText}>
+                  {formatDateShort(event.startDate)}
+                </Text>
+                <Text style={styles.detailTextSecondary}>to</Text>
+                <Text style={styles.detailText}>
+                  {formatDateShort(event.endDate)}
+                </Text>
+              </View>
+            )}
           </View>
           <View style={styles.detail}>
             <Ionicons name="location-outline" size={16} color="#6b7280" />
@@ -400,16 +401,34 @@ export default function EventCard({
           </View>
         </View>
 
-        {renderOrganizerBadge()}
-        {renderOrganizerName()}
-
-        {hasMultipleImages && (
-          <View style={styles.imageInfo}>
-            <Ionicons name="images-outline" size={14} color="#9ca3af" />
-            <Text style={styles.imageInfoText}>{images.length} photos</Text>
+        {/* Featured Badge */}
+        {event.isFeatured && (
+          <View style={styles.featuredBadge}>
+            <Ionicons name="star" size={14} color="#f59e0b" />
+            <Text style={styles.featuredText}>Featured Event</Text>
           </View>
         )}
 
+        {/* Organizer Info */}
+        {isOrganizer ? (
+          <View style={styles.organizerBadge}>
+            <Ionicons name="star" size={12} color="#f59e0b" />
+            <Text style={styles.organizerBadgeText}>You're the organizer</Text>
+          </View>
+        ) : (
+          <View style={styles.organizerInfo}>
+            <Ionicons name="person-outline" size={14} color="#6b7280" />
+            <Text style={styles.organizerText}>
+              Organized by{" "}
+              {event.organizerName ||
+                (typeof event.organizer === "object"
+                  ? event.organizer?.name
+                  : "Organizer")}
+            </Text>
+          </View>
+        )}
+
+        {/* Actions */}
         {showActions && !isOrganizer && isEventInteractable && (
           <View style={styles.actions}>
             <TouchableOpacity
@@ -417,7 +436,7 @@ export default function EventCard({
                 styles.interestedButton,
                 event.isInterested && styles.interestedButtonActive,
               ]}
-              onPress={handleInterestPress}
+              onPress={() => onInterestPress?.(event._id)}
             >
               <Ionicons
                 name={event.isInterested ? "heart" : "heart-outline"}
@@ -433,13 +452,12 @@ export default function EventCard({
                 {event.isInterested ? "Interested" : "Interested"}
               </Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               style={[
                 styles.rsvpButton,
                 event.isRsvpd && styles.rsvpButtonActive,
               ]}
-              onPress={handleRsvpPress}
+              onPress={() => onRsvpPress?.(event._id)}
             >
               <Text
                 style={[
@@ -452,7 +470,6 @@ export default function EventCard({
             </TouchableOpacity>
           </View>
         )}
-
         {showActions && !isOrganizer && !isEventInteractable && (
           <View style={styles.eventEndedMessage}>
             <Ionicons
@@ -494,42 +511,18 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
-  cardCompleted: {
-    opacity: 0.8,
-  },
-  cardCancelled: {
-    opacity: 0.7,
-  },
-  imageContainer: {
-    position: "relative",
-    width: width - 40,
-    height: 200,
-  },
-  carousel: {
-    flex: 1,
-  },
-  coverImage: {
-    width: width - 40,
-    height: 200,
-    backgroundColor: "#f3f4f6",
-  },
-  coverPlaceholder: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  cardCompleted: { opacity: 0.8 },
+  cardCancelled: { opacity: 0.7 },
+  imageContainer: { position: "relative", width: width - 40, height: 200 },
+  carousel: { flex: 1 },
+  coverImage: { width: width - 40, height: 200, backgroundColor: "#f3f4f6" },
+  coverPlaceholder: { justifyContent: "center", alignItems: "center" },
   completedOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
     justifyContent: "center",
     alignItems: "center",
     zIndex: 5,
-  },
-  completedOverlayText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-    marginTop: 8,
-    fontFamily: "SofiaSans-Regular",
   },
   cancelledOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -538,7 +531,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 5,
   },
-  cancelledOverlayText: {
+  overlayText: {
     color: "#fff",
     fontSize: 16,
     fontWeight: "600",
@@ -560,6 +553,23 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontFamily: "SofiaSans-Regular",
   },
+  approvalBadge: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    zIndex: 10,
+  },
+  approvalBadgeText: {
+    fontSize: 11,
+    fontWeight: "600",
+    fontFamily: "SofiaSans-Regular",
+  },
   navButton: {
     position: "absolute",
     top: "50%",
@@ -569,12 +579,8 @@ const styles = StyleSheet.create({
     padding: 8,
     zIndex: 10,
   },
-  navButtonLeft: {
-    left: 12,
-  },
-  navButtonRight: {
-    right: 12,
-  },
+  navButtonLeft: { left: 12 },
+  navButtonRight: { right: 12 },
   dotsContainer: {
     position: "absolute",
     bottom: 12,
@@ -592,12 +598,7 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: "rgba(255,255,255,0.5)",
   },
-  dotActive: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#fff",
-  },
+  dotActive: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#fff" },
   imageCounter: {
     position: "absolute",
     top: 12,
@@ -616,9 +617,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "SofiaSans-Regular",
   },
-  content: {
-    padding: 16,
-  },
+  content: { padding: 16 },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -635,11 +634,7 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
     fontWeight: "600",
   },
-  stats: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
+  stats: { flexDirection: "row", alignItems: "center", gap: 4 },
   statsText: {
     fontSize: 12,
     color: "#6b7280",
@@ -652,20 +647,47 @@ const styles = StyleSheet.create({
     color: "#111827",
     marginBottom: 12,
   },
-  details: {
-    gap: 8,
-    marginBottom: 12,
-  },
-  detail: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
+  details: { gap: 8, marginBottom: 12 },
+  detail: { flexDirection: "row", alignItems: "center", gap: 8 },
   detailText: {
     fontSize: 14,
     fontFamily: "SofiaSans-Regular",
     color: "#6b7280",
+  },
+  detailTextSecondary: {
+    fontSize: 13,
+    fontFamily: "SofiaSans-Regular",
+    color: "#9ca3af",
+  },
+  sameDayContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
     flex: 1,
+  },
+  multiDayContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    flex: 1,
+    flexWrap: "wrap",
+  },
+  featuredBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#fef3c7",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: "flex-start",
+    marginBottom: 10,
+  },
+  featuredText: {
+    fontSize: 12,
+    color: "#92400e",
+    fontFamily: "SofiaSans-Regular",
+    fontWeight: "500",
   },
   organizerBadge: {
     flexDirection: "row",
@@ -688,23 +710,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    marginBottom: 12,
+    marginBottom: 4,
   },
   organizerText: {
     fontSize: 12,
     color: "#6b7280",
-    fontFamily: "SofiaSans-Regular",
-  },
-  imageInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginBottom: 16,
-    paddingVertical: 4,
-  },
-  imageInfoText: {
-    fontSize: 12,
-    color: "#9ca3af",
     fontFamily: "SofiaSans-Regular",
   },
   actions: {
@@ -712,6 +722,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     gap: 12,
+    marginTop: 4,
   },
   interestedButton: {
     flexDirection: "row",
@@ -735,9 +746,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     fontFamily: "SofiaSans-Regular",
   },
-  interestedTextActive: {
-    color: "#ef4444",
-  },
+  interestedTextActive: { color: "#ef4444" },
   rsvpButton: {
     backgroundColor: "#8b5cf6",
     paddingHorizontal: 24,
@@ -747,18 +756,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     flex: 1,
   },
-  rsvpButtonActive: {
-    backgroundColor: "#10b981",
-  },
+  rsvpButtonActive: { backgroundColor: "#10b981" },
   rsvpText: {
     color: "white",
     fontWeight: "600",
     fontSize: 14,
     fontFamily: "SofiaSans-Bold",
   },
-  rsvpTextActive: {
-    color: "white",
-  },
+  rsvpTextActive: { color: "white" },
   eventEndedMessage: {
     flexDirection: "row",
     alignItems: "center",

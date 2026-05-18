@@ -1,4 +1,5 @@
-// app/(tabs)/feed/index.tsx
+// app/(tabs)/feed.tsx or wherever your FeedScreen lives
+
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
   View,
@@ -18,6 +19,7 @@ import CreatePostButton from "@/app/components/Feed/Post/CreatePostButton";
 import FilterTabs from "@/app/components/Feed/FilterTabs";
 import PostCard from "@/app/components/Feed/Post/PostCard";
 import SharePostModal from "@/app/components/Feed/Post/SharePostModal";
+import ReportModal from "@/app/components/ReportModal";
 import FeedSkeleton, {
   LoadMorePostsSkeleton,
 } from "@/app/components/Feed/FeedSkeleton";
@@ -36,6 +38,7 @@ import {
   hidePost,
   unhidePost,
   toggleMuteUser,
+  reportContent,
 } from "../../../lib/services/contentService";
 
 import { useFeed } from "../../../hooks/useFeed";
@@ -69,11 +72,20 @@ export default function FeedScreen() {
     invalidateAllFeeds,
   } = useFeed();
 
+  // ===========================================================================
+  // Share Modal State
+  // ===========================================================================
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [sharePost, setSharePost] = useState<Post | null>(null);
 
+  // ===========================================================================
+  // Loading State
+  // ===========================================================================
   const [loadingMorePosts, setLoadingMorePosts] = useState(false);
 
+  // ===========================================================================
+  // InfoBar State
+  // ===========================================================================
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [infoType, setInfoType] = useState<"success" | "error" | "info">(
     "info",
@@ -84,6 +96,35 @@ export default function FeedScreen() {
     undefined,
   );
 
+  // ===========================================================================
+  // Report Modal State - SINGLE SOURCE OF TRUTH
+  // ===========================================================================
+  const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [reportTargetId, setReportTargetId] = useState("");
+  const [reportTargetType, setReportTargetType] = useState<
+    "Post" | "Comment" | "User" | "Event"
+  >("Post");
+
+  // ===========================================================================
+  // Options Modal State - controlled by individual PostCards
+  // but we track if any is open for coordination
+  // ===========================================================================
+  const [isOptionsModalOpen, setIsOptionsModalOpen] = useState(false);
+
+  // ===========================================================================
+  // Cleanup
+  // ===========================================================================
+  useEffect(() => {
+    return () => {
+      if (undoTimeoutRef.current) {
+        clearTimeout(undoTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // ===========================================================================
+  // Filters
+  // ===========================================================================
   const filters = [
     { id: "campus", label: "Campus" },
     { id: "connections", label: "Connections" },
@@ -92,6 +133,9 @@ export default function FeedScreen() {
 
   const visiblePosts = currentFeed.posts;
 
+  // ===========================================================================
+  // Focus Effect
+  // ===========================================================================
   useFocusEffect(
     useCallback(() => {
       if (token) {
@@ -100,6 +144,9 @@ export default function FeedScreen() {
     }, [token, refreshOnFocus]),
   );
 
+  // ===========================================================================
+  // InfoBar Management
+  // ===========================================================================
   const showInfoBar = (
     message: string,
     type: "success" | "error" | "info" = "info",
@@ -158,6 +205,9 @@ export default function FeedScreen() {
     });
   };
 
+  // ===========================================================================
+  // Undo Handler
+  // ===========================================================================
   const handleUndo = async () => {
     if (!undoAction) return;
 
@@ -212,10 +262,16 @@ export default function FeedScreen() {
     hideInfoBar();
   };
 
+  // ===========================================================================
+  // Filter Change
+  // ===========================================================================
   const handleFilterChange = (filterId: string) => {
     if (token) switchFeed(filterId as "campus" | "connections" | "anonymous");
   };
 
+  // ===========================================================================
+  // Refresh & Load More
+  // ===========================================================================
   const onRefresh = useCallback(() => {
     if (token) refreshFeed();
   }, [token, refreshFeed]);
@@ -245,13 +301,16 @@ export default function FeedScreen() {
     ],
   );
 
+  // ===========================================================================
+  // Post Actions
+  // ===========================================================================
   const handleLike = async (postId: string) => {
     if (!token) {
       showInfoBar("Please login to like posts", "info");
       return;
     }
 
-    const post = visiblePosts.find((p) => p._id === postId);
+    const post = visiblePosts.find((p: Post) => p._id === postId);
     if (post) {
       updatePost(postId, {
         isLiked: !post.isLiked,
@@ -296,7 +355,7 @@ export default function FeedScreen() {
       showInfoBar("Please login to share posts", "info");
       return;
     }
-    const post = visiblePosts.find((p) => p._id === postId);
+    const post = visiblePosts.find((p: Post) => p._id === postId);
     if (post) {
       setSharePost(post);
       setShareModalVisible(true);
@@ -317,7 +376,7 @@ export default function FeedScreen() {
   };
 
   const handleDeletePost = async (postId: string) => {
-    const postToDelete = visiblePosts.find((p) => p._id === postId);
+    const postToDelete = visiblePosts.find((p: Post) => p._id === postId);
     if (!postToDelete) return;
 
     removePost(postId);
@@ -343,7 +402,7 @@ export default function FeedScreen() {
       return;
     }
 
-    const post = visiblePosts.find((p) => p._id === postId);
+    const post = visiblePosts.find((p: Post) => p._id === postId);
     const wasSaved = post?.isSaved;
 
     updatePost(postId, { isSaved: !wasSaved });
@@ -368,21 +427,83 @@ export default function FeedScreen() {
     }
   };
 
-  const handleReportPost = () => {
-    Alert.alert(
-      "Report Post",
-      "We'll review this post and take appropriate action.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Report",
-          style: "destructive",
-          onPress: () => showInfoBar("Thank you for reporting", "success"),
-        },
-      ],
-    );
-  };
+  // ===========================================================================
+  // REPORT FLOW - Centralized Modal Orchestration
+  // ===========================================================================
 
+  /**
+   * STEP 1: User taps "Report" in PostOptionsModal
+   * PostOptionsModal closes itself and calls this callback
+   */
+  const handleReportPost = useCallback(
+    (postId: string) => {
+      if (!token) {
+        showInfoBar("Please login to report posts", "info");
+        return;
+      }
+
+      const post = visiblePosts.find((p: Post) => p._id === postId);
+      if (post?.isReported) {
+        showInfoBar("You have already reported this post", "info");
+        return;
+      }
+
+      // Set the report target immediately
+      setReportTargetId(postId);
+      setReportTargetType("Post");
+
+      // Open ReportModal - PostOptionsModal should already be closing
+      // Small delay to ensure PostOptionsModal's close animation has started
+      setTimeout(() => {
+        setReportModalVisible(true);
+      }, 300); // Match PostOptionsModal slide animation duration
+    },
+    [token, visiblePosts],
+  );
+
+  /**
+   * Called when any PostOptionsModal closes
+   */
+  const handleOptionsModalClose = useCallback(() => {
+    setIsOptionsModalOpen(false);
+  }, []);
+
+  /**
+   * Called when PostOptionsModal opens (for tracking)
+   */
+  const handleOptionsModalOpen = useCallback(() => {
+    setIsOptionsModalOpen(true);
+  }, []);
+
+  /**
+   * Called when ReportModal closes
+   */
+  const handleReportModalClose = useCallback(() => {
+    setReportModalVisible(false);
+  }, []);
+
+  /**
+   * Called when report is successfully submitted
+   */
+  const handleReportSuccess = useCallback(() => {
+    if (reportTargetType === "Post" && reportTargetId) {
+      updatePost(reportTargetId, { isReported: true });
+    }
+  }, [reportTargetType, reportTargetId, updatePost]);
+
+  /**
+   * Report modal's showInfoBar callback
+   */
+  const handleReportShowInfoBar = useCallback(
+    (message: string, type: "success" | "error" | "info") => {
+      showInfoBar(message, type);
+    },
+    [showInfoBar],
+  );
+
+  // ===========================================================================
+  // Other Post Actions
+  // ===========================================================================
   const handleHidePost = async (postId: string) => {
     if (!token) {
       showInfoBar("Please login to hide posts", "info");
@@ -412,8 +533,10 @@ export default function FeedScreen() {
   const handleMuteUser = async (userId: string, userName?: string) => {
     if (!token || !userId) return;
 
-    const postsToRemove = visiblePosts.filter((p) => p.user?._id === userId);
-    postsToRemove.forEach((post) => removePost(post._id));
+    const postsToRemove = visiblePosts.filter(
+      (p: Post) => p.user?._id === userId,
+    );
+    postsToRemove.forEach((post: Post) => removePost(post._id));
     showInfoBar(
       `User ${userName || "muted"} muted`,
       "info",
@@ -437,8 +560,10 @@ export default function FeedScreen() {
   const handleBlockUser = async (userId: string, userName?: string) => {
     if (!token || !userId) return;
 
-    const postsToRemove = visiblePosts.filter((p) => p.user?._id === userId);
-    postsToRemove.forEach((post) => removePost(post._id));
+    const postsToRemove = visiblePosts.filter(
+      (p: Post) => p.user?._id === userId,
+    );
+    postsToRemove.forEach((post: Post) => removePost(post._id));
     showInfoBar(
       `User ${userName || "blocked"} blocked`,
       "info",
@@ -464,6 +589,9 @@ export default function FeedScreen() {
     router.push("/components/Feed/Post/create");
   };
 
+  // ===========================================================================
+  // Render Helpers
+  // ===========================================================================
   const renderInfoBar = () => {
     if (!infoMessage) return null;
     const bg =
@@ -512,6 +640,9 @@ export default function FeedScreen() {
       }
     : null;
 
+  // ===========================================================================
+  // Not Logged In State
+  // ===========================================================================
   if (!token) {
     return (
       <SafeAreaView style={styles.container}>
@@ -529,6 +660,9 @@ export default function FeedScreen() {
     );
   }
 
+  // ===========================================================================
+  // Loading State
+  // ===========================================================================
   if (currentFeed.loading && visiblePosts.length === 0) {
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
@@ -537,6 +671,9 @@ export default function FeedScreen() {
     );
   }
 
+  // ===========================================================================
+  // Main Render
+  // ===========================================================================
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <ScrollView
@@ -590,7 +727,7 @@ export default function FeedScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            visiblePosts.map((post) => (
+            visiblePosts.map((post: Post) => (
               <PostCard
                 key={post._id}
                 post={post}
@@ -603,16 +740,18 @@ export default function FeedScreen() {
                 onReport={handleReportPost}
                 onHide={handleHidePost}
                 onCopyLink={handleCopyLink}
-                onMuteUser={(userId) =>
+                onMuteUser={(userId: string) =>
                   handleMuteUser(userId, post.user?.name || post.user?.username)
                 }
-                onBlockUser={(userId) =>
+                onBlockUser={(userId: string) =>
                   handleBlockUser(
                     userId,
                     post.user?.name || post.user?.username,
                   )
                 }
                 onProfilePress={handleProfilePress}
+                onOptionsOpen={handleOptionsModalOpen}
+                onOptionsClose={handleOptionsModalClose}
               />
             ))
           )}
@@ -625,6 +764,7 @@ export default function FeedScreen() {
 
       {renderInfoBar()}
 
+      {/* Share Modal - at root level */}
       {sharePostData && (
         <SharePostModal
           visible={shareModalVisible}
@@ -636,6 +776,19 @@ export default function FeedScreen() {
           {...sharePostData}
         />
       )}
+
+      {/* Report Modal - at root level, controlled ONLY by FeedScreen */}
+      <ReportModal
+        visible={reportModalVisible}
+        onClose={handleReportModalClose}
+        targetType={reportTargetType}
+        targetId={reportTargetId}
+        onReportSuccess={handleReportSuccess}
+        onShowInfoBar={handleReportShowInfoBar}
+        reportFunction={(targetId: string, reason: string) =>
+          reportContent(reportTargetType, targetId, reason)
+        }
+      />
     </SafeAreaView>
   );
 }

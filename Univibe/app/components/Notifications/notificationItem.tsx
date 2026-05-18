@@ -14,7 +14,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { API_BASE_URL } from "../../../constants/ipConstants";
 
-// Import default avatar from assets
 const DEFAULT_AVATAR: ImageSourcePropType = require("../../../assets/images/default-avatar.png");
 
 interface NotificationItemProps {
@@ -32,7 +31,7 @@ interface NotificationItemProps {
       profilePicture?: string;
     };
     targetId?: string;
-    targetModel?: string; // ADD THIS
+    targetModel?: string;
     metadata?: {
       isGrouped?: boolean;
       count?: number;
@@ -48,6 +47,9 @@ interface NotificationItemProps {
   onDelete: (id: string) => void;
 }
 
+const isAdminNotification = (type: string) =>
+  ["post_removed", "event_approved", "event_rejected"].includes(type);
+
 export default function NotificationItem({
   notification,
   onMarkAsRead,
@@ -57,26 +59,19 @@ export default function NotificationItem({
   const [showOptions, setShowOptions] = useState(false);
   const [scaleAnim] = useState(new Animated.Value(1));
   const [imageError, setImageError] = useState(false);
+  const adminNotif = isAdminNotification(notification.type);
 
   const handlePress = () => {
-    // Only mark as read if it's unread
-    if (!notification.read) {
-      onMarkAsRead(notification._id);
-    }
+    if (!notification.read) onMarkAsRead(notification._id);
 
-    // For grouped like notifications
     if (notification.metadata?.isGrouped && notification.targetId) {
       router.push({
         pathname: "/post/[id]",
-        params: {
-          id: notification.targetId,
-          showLikes: "true",
-        },
+        params: { id: notification.targetId, showLikes: "true" },
       });
       return;
     }
 
-    // ADD THIS: Handle event notifications
     if (
       notification.type === "event_interest" ||
       notification.type === "event_rsvp"
@@ -87,10 +82,21 @@ export default function NotificationItem({
       }
     }
 
-    // ADD THIS: Handle event notifications with targetModel
     if (notification.targetModel === "Event" && notification.targetId) {
       router.push(`/events/${notification.targetId}`);
       return;
+    }
+
+    if (notification.type === "post_removed") return;
+
+    if (
+      notification.type === "event_approved" ||
+      notification.type === "event_rejected"
+    ) {
+      if (notification.targetId) {
+        router.push(`/events/${notification.targetId}`);
+        return;
+      }
     }
 
     switch (notification.type) {
@@ -98,26 +104,17 @@ export default function NotificationItem({
       case "connection_accepted":
         router.push(`/profile/${notification.sender._id}`);
         break;
-
       case "comment":
       case "like":
         if (notification.targetId) {
           router.push({
             pathname: "/post/[id]",
-            params: {
-              id: notification.targetId,
-              openComments: "true",
-            },
+            params: { id: notification.targetId, openComments: "true" },
           });
-        } else {
-          router.push("/(tabs)/feed");
-        }
+        } else router.push("/(tabs)/feed");
         break;
-
       default:
-        if (notification.targetId) {
-          router.push("/(tabs)/feed");
-        }
+        if (notification.targetId) router.push("/(tabs)/feed");
         break;
     }
   };
@@ -147,15 +144,11 @@ export default function NotificationItem({
   const getTimeAgo = (dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-
+    const diffMins = Math.floor((now.getTime() - date.getTime()) / 60000);
     if (diffMins < 1) return "Just now";
     if (diffMins < 60) return `${diffMins}m`;
-    if (diffHours < 24) return `${diffHours}h`;
-    if (diffDays < 7) return `${diffDays}d`;
+    if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h`;
+    if (diffMins < 10080) return `${Math.floor(diffMins / 1440)}d`;
     return date.toLocaleDateString();
   };
 
@@ -169,11 +162,16 @@ export default function NotificationItem({
         return { name: "chatbubble", color: "#fff", bg: "#8b5cf6" };
       case "like":
         return { name: "heart", color: "#fff", bg: "#ef4444" };
-      // ADD THESE EVENT TYPES
       case "event_interest":
         return { name: "heart", color: "#fff", bg: "#ef4444" };
       case "event_rsvp":
         return { name: "calendar", color: "#fff", bg: "#8b5cf6" };
+      case "post_removed":
+        return { name: "warning", color: "#fff", bg: "#ef4444" };
+      case "event_approved":
+        return { name: "checkmark-circle", color: "#fff", bg: "#10b981" };
+      case "event_rejected":
+        return { name: "close-circle", color: "#fff", bg: "#ef4444" };
       default:
         return { name: "notifications", color: "#fff", bg: "#6b7280" };
     }
@@ -181,10 +179,7 @@ export default function NotificationItem({
 
   const extractCommentContent = (message: string): string => {
     const match = message.match(/: "(.+)"$/);
-    if (match && match[1]) {
-      return match[1];
-    }
-    return message;
+    return match?.[1] || message;
   };
 
   const getFormattedMessage = () => {
@@ -193,60 +188,10 @@ export default function NotificationItem({
 
     switch (notification.type) {
       case "like":
-        // Check if it's a grouped notification
         if (notification.metadata?.isGrouped) {
           const likers = notification.metadata?.likers || [];
-
-          const renderLikeMessage = () => {
-            const message = notification.message;
-
-            if (likers.length === 1) {
-              return (
-                <Text style={styles.messageText}>
-                  <Text style={styles.boldName}>{likers[0].name}</Text>
-                  <Text style={!notification.read && styles.unreadText}>
-                    {" "}
-                    liked your post
-                  </Text>
-                </Text>
-              );
-            } else if (likers.length === 2) {
-              return (
-                <Text style={styles.messageText}>
-                  <Text style={styles.boldName}>{likers[0].name}</Text>
-                  <Text style={!notification.read && styles.unreadText}>
-                    {" "}
-                    and{" "}
-                  </Text>
-                  <Text style={styles.boldName}>{likers[1].name}</Text>
-                  <Text style={!notification.read && styles.unreadText}>
-                    {" "}
-                    liked your post
-                  </Text>
-                </Text>
-              );
-            } else {
-              const othersCount = likers.length - 2;
-              return (
-                <Text style={styles.messageText}>
-                  <Text style={styles.boldName}>{likers[0].name}</Text>
-                  <Text style={!notification.read && styles.unreadText}>
-                    {", "}
-                  </Text>
-                  <Text style={styles.boldName}>{likers[1].name}</Text>
-                  <Text style={!notification.read && styles.unreadText}>
-                    {" "}
-                    and {othersCount} other{othersCount > 1 ? "s" : ""} liked
-                    your post
-                  </Text>
-                </Text>
-              );
-            }
-          };
-
           return (
             <View style={styles.groupedLikeContent}>
-              {/* Stacked Avatars */}
               <View style={styles.stackedAvatarsContainer}>
                 <View style={styles.stackedAvatars}>
                   {likers.slice(0, 2).map((liker, index) => (
@@ -283,79 +228,78 @@ export default function NotificationItem({
                     </View>
                   )}
                 </View>
-
-                {/* Small Heart Icon Overlay */}
                 <View style={styles.likeIconOverlay}>
                   <Ionicons name="heart" size={10} color="#fff" />
                 </View>
               </View>
-
-              {/* Message */}
               <View style={styles.groupedLikeTextContainer}>
-                {renderLikeMessage()}
+                <Text style={styles.messageText}>
+                  {likers.length === 1 ? (
+                    <>
+                      <Text style={styles.boldName}>{likers[0].name}</Text>
+                      <Text> liked your post</Text>
+                    </>
+                  ) : likers.length === 2 ? (
+                    <>
+                      <Text style={styles.boldName}>{likers[0].name}</Text>
+                      <Text> and </Text>
+                      <Text style={styles.boldName}>{likers[1].name}</Text>
+                      <Text> liked your post</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.boldName}>{likers[0].name}</Text>
+                      <Text>, </Text>
+                      <Text style={styles.boldName}>{likers[1].name}</Text>
+                      <Text>
+                        {" "}
+                        and {likers.length - 2} others liked your post
+                      </Text>
+                    </>
+                  )}
+                </Text>
                 <Text style={styles.time}>
                   {getTimeAgo(notification.createdAt)}
                 </Text>
               </View>
-
-              {/* Unread indicator */}
               {!notification.read && <View style={styles.unreadIndicator} />}
             </View>
           );
         }
+        return (
+          <Text style={styles.messageText}>
+            <Text style={styles.boldName}>{senderName}</Text>
+            <Text> liked your post</Text>
+          </Text>
+        );
 
-        // Fallback for old individual notifications
-        return (
-          <Text style={styles.messageText}>
-            <Text style={styles.boldName}>{senderName}</Text>
-            <Text style={!notification.read && styles.unreadText}>
-              {" "}
-              liked your post
-            </Text>
-          </Text>
-        );
       case "comment":
-        if (isReply) {
-          const replyContent = extractCommentContent(notification.message);
-          return (
-            <Text style={styles.messageText}>
-              <Text style={styles.boldName}>{senderName}</Text>
-              <Text style={!notification.read && styles.unreadText}>
-                {" "}
-                replied to your comment:{" "}
-              </Text>
-              <Text style={styles.commentContent}>"{replyContent}"</Text>
-            </Text>
-          );
-        }
-        const commentContent = extractCommentContent(notification.message);
+        const c = extractCommentContent(notification.message);
         return (
           <Text style={styles.messageText}>
             <Text style={styles.boldName}>{senderName}</Text>
-            <Text style={!notification.read && styles.unreadText}>
-              {" "}
-              commented on your post:{" "}
+            <Text>
+              {isReply
+                ? " replied to your comment: "
+                : " commented on your post: "}
             </Text>
-            <Text style={styles.commentContent}>"{commentContent}"</Text>
+            <Text style={styles.commentContent}>"{c}"</Text>
           </Text>
         );
+
       case "connection_request":
         return (
           <Text style={styles.messageText}>
             <Text style={styles.boldName}>{senderName}</Text>
-            <Text style={!notification.read && styles.unreadText}>
-              {" "}
-              sent you a connection request
-            </Text>
+            <Text> sent you a connection request</Text>
           </Text>
         );
+
       case "connection_accepted":
         if (notification.message.includes("You are now connected with")) {
           return (
             <Text style={styles.messageText}>
-              <Text style={!notification.read && styles.unreadText}>
-                You are now connected with{" "}
-              </Text>
+              <Text>You are now connected with </Text>
               <Text style={styles.boldName}>{notification.sender.name}</Text>
             </Text>
           );
@@ -363,45 +307,48 @@ export default function NotificationItem({
         return (
           <Text style={styles.messageText}>
             <Text style={styles.boldName}>{senderName}</Text>
-            <Text style={!notification.read && styles.unreadText}>
-              {" "}
-              accepted your connection request
-            </Text>
+            <Text> accepted your connection request</Text>
           </Text>
         );
-      // ADD THESE EVENT TYPES
+
       case "event_interest":
-        return (
-          <Text style={styles.messageText}>
-            <Text style={styles.boldName}>{senderName}</Text>
-            <Text style={!notification.read && styles.unreadText}>
-              {" "}
-              {notification.message.includes("interested")
-                ? "is interested in your event"
-                : notification.message}
-            </Text>
-          </Text>
-        );
       case "event_rsvp":
         return (
           <Text style={styles.messageText}>
             <Text style={styles.boldName}>{senderName}</Text>
-            <Text style={!notification.read && styles.unreadText}>
-              {" "}
-              {notification.message.includes("RSVP")
-                ? "has RSVP'd for your event"
-                : notification.message}
-            </Text>
+            <Text> {notification.message}</Text>
           </Text>
         );
+
+      case "post_removed":
+      case "event_approved":
+      case "event_rejected":
+        return (
+          <View>
+            <Text
+              style={[
+                styles.removedTitle,
+                {
+                  color:
+                    notification.type === "event_approved"
+                      ? "#10b981"
+                      : "#ef4444",
+                },
+              ]}
+            >
+              {notification.title}
+            </Text>
+            <Text style={styles.messageText}>
+              <Text>{notification.message}</Text>
+            </Text>
+          </View>
+        );
+
       default:
         return (
           <Text style={styles.messageText}>
             <Text style={styles.boldName}>{senderName}</Text>
-            <Text style={!notification.read && styles.unreadText}>
-              {" "}
-              {notification.message}
-            </Text>
+            <Text> {notification.message}</Text>
           </Text>
         );
     }
@@ -461,20 +408,57 @@ export default function NotificationItem({
           style={[
             styles.container,
             !notification.read && styles.unreadContainer,
+            adminNotif && !notification.read && styles.removedContainer,
           ]}
         >
           {isGroupedLike ? (
             <View style={styles.contentContainer}>{formattedMessage}</View>
           ) : (
             <>
-              {/* Profile Photo with Small Icon Overlay */}
               <View style={styles.avatarWrapper}>
                 <TouchableOpacity
-                  onPress={() =>
-                    router.push(`/profile/${notification.sender._id}`)
-                  }
+                  onPress={() => {
+                    if (!adminNotif)
+                      router.push(`/profile/${notification.sender._id}`);
+                  }}
+                  disabled={adminNotif}
                 >
-                  {notification.sender.profilePicture && !imageError ? (
+                  {/* Admin notifications - show icon */}
+                  {notification.type === "post_removed" ? (
+                    <View
+                      style={[
+                        styles.avatar,
+                        styles.adminAvatar,
+                        { backgroundColor: "#fef2f2" },
+                      ]}
+                    >
+                      <Ionicons name="warning" size={26} color="#ef4444" />
+                    </View>
+                  ) : notification.type === "event_approved" ? (
+                    <View
+                      style={[
+                        styles.avatar,
+                        styles.adminAvatar,
+                        { backgroundColor: "#ecfdf5" },
+                      ]}
+                    >
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={26}
+                        color="#10b981"
+                      />
+                    </View>
+                  ) : notification.type === "event_rejected" ? (
+                    <View
+                      style={[
+                        styles.avatar,
+                        styles.adminAvatar,
+                        { backgroundColor: "#fef2f2" },
+                      ]}
+                    >
+                      <Ionicons name="close-circle" size={26} color="#ef4444" />
+                    </View>
+                  ) : notification.sender.profilePicture && !imageError ? (
                     <Image
                       source={{
                         uri: getFullImageUrl(
@@ -488,36 +472,31 @@ export default function NotificationItem({
                     <Image source={DEFAULT_AVATAR} style={styles.avatar} />
                   )}
                 </TouchableOpacity>
-
-                {/* Small Notification Icon Overlay */}
-                <View
-                  style={[
-                    styles.smallIconContainer,
-                    { backgroundColor: smallIcon.bg },
-                  ]}
-                >
-                  <Ionicons
-                    name={smallIcon.name as any}
-                    size={12}
-                    color={smallIcon.color}
-                  />
-                </View>
+                {/* Small badge - hidden for admin */}
+                {!adminNotif && (
+                  <View
+                    style={[
+                      styles.smallIconContainer,
+                      { backgroundColor: smallIcon.bg },
+                    ]}
+                  >
+                    <Ionicons
+                      name={smallIcon.name as any}
+                      size={12}
+                      color={smallIcon.color}
+                    />
+                  </View>
+                )}
               </View>
-
-              {/* Content */}
               <View style={styles.contentContainer}>
                 {formattedMessage}
                 <Text style={styles.time}>
                   {getTimeAgo(notification.createdAt)}
                 </Text>
               </View>
-
-              {/* Unread indicator */}
               {!notification.read && <View style={styles.unreadIndicator} />}
             </>
           )}
-
-          {/* Options button */}
           <TouchableOpacity
             style={styles.optionsButton}
             onPress={() => setShowOptions(!showOptions)}
@@ -525,15 +504,12 @@ export default function NotificationItem({
             <Ionicons name="ellipsis-vertical" size={18} color="#9ca3af" />
           </TouchableOpacity>
         </View>
-
-        {/* Options Menu */}
         {showOptions && <OptionsMenu />}
       </TouchableOpacity>
     </Animated.View>
   );
 }
 
-// ... styles remain the same ...
 const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
@@ -548,18 +524,15 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 1,
   },
-  unreadContainer: {
-    backgroundColor: "#faf5ff",
+  unreadContainer: { backgroundColor: "#faf5ff" },
+  removedContainer: {
+    backgroundColor: "#fef2f2",
+    borderWidth: 1,
+    borderColor: "#fecaca",
   },
-  avatarWrapper: {
-    position: "relative",
-    marginRight: 12,
-  },
-  avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-  },
+  avatarWrapper: { position: "relative", marginRight: 12 },
+  avatar: { width: 52, height: 52, borderRadius: 26 },
+  adminAvatar: { justifyContent: "center", alignItems: "center" },
   smallIconContainer: {
     position: "absolute",
     bottom: -2,
@@ -572,14 +545,13 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "white",
   },
-  contentContainer: {
-    flex: 1,
-  },
+  contentContainer: { flex: 1 },
   messageText: {
     fontSize: 14,
     fontFamily: "SofiaSans-Regular",
     lineHeight: 18,
     marginBottom: 4,
+    color: "#374151",
   },
   boldName: {
     fontWeight: "700",
@@ -592,10 +564,7 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
     fontStyle: "italic",
   },
-  unreadText: {
-    color: "#111827",
-    fontWeight: "500",
-  },
+  removedTitle: { fontSize: 15, fontFamily: "SofiaSans-Bold", marginBottom: 2 },
   time: {
     fontSize: 11,
     color: "#9ca3af",
@@ -609,10 +578,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#8b5cf6",
     marginLeft: 8,
   },
-  optionsButton: {
-    padding: 6,
-    marginLeft: 4,
-  },
+  optionsButton: { padding: 6, marginLeft: 4 },
   optionsMenu: {
     backgroundColor: "white",
     borderRadius: 12,
@@ -638,57 +604,26 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
     color: "#374151",
   },
-  deleteOption: {
-    borderTopWidth: 1,
-    borderTopColor: "#f3f4f6",
-  },
+  deleteOption: { borderTopWidth: 1, borderTopColor: "#f3f4f6" },
   deleteOptionText: {
     fontSize: 13,
     fontFamily: "SofiaSans-Regular",
     color: "#ef4444",
   },
-  groupedLikeContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-  },
-  stackedAvatarsContainer: {
-    position: "relative",
-    marginRight: 12,
-  },
-  stackedAvatars: {
-    width: 52,
-    height: 52,
-    position: "relative",
-  },
-  stackedAvatarWrapper: {
-    position: "absolute",
-  },
+  groupedLikeContent: { flexDirection: "row", alignItems: "center", flex: 1 },
+  stackedAvatarsContainer: { position: "relative", marginRight: 12 },
+  stackedAvatars: { width: 52, height: 52, position: "relative" },
+  stackedAvatarWrapper: { position: "absolute" },
   stackedAvatar: {
     width: 36,
     height: 36,
     borderRadius: 18,
     backgroundColor: "#f3f4f6",
   },
-  avatarBorder: {
-    borderWidth: 2,
-    borderColor: "white",
-  },
-  firstAvatar: {
-    top: 0,
-    left: 0,
-    zIndex: 2,
-  },
-  secondAvatar: {
-    top: 16,
-    left: 16,
-    zIndex: 1,
-  },
-  thirdAvatar: {
-    top: 16,
-    left: 16,
-    zIndex: 0,
-  },
+  avatarBorder: { borderWidth: 2, borderColor: "white" },
+  firstAvatar: { top: 0, left: 0, zIndex: 2 },
+  secondAvatar: { top: 16, left: 16, zIndex: 1 },
+  thirdAvatar: { top: 16, left: 16, zIndex: 0 },
   moreAvatar: {
     width: 36,
     height: 36,
@@ -713,7 +648,5 @@ const styles = StyleSheet.create({
     borderColor: "white",
     zIndex: 10,
   },
-  groupedLikeTextContainer: {
-    flex: 1,
-  },
+  groupedLikeTextContainer: { flex: 1 },
 });

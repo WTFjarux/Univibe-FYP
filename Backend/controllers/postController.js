@@ -6,6 +6,7 @@ const Profile = require("../models/Profile");
 const Notification = require("../models/Notification");
 const Block = require("../models/Block");
 const BlockService = require("../services/blockService");
+const { getAdminModel } = require("../config/database");
 const {
   getPostImageRelativePath,
   deletePostImages,
@@ -285,6 +286,7 @@ exports.getDeletedPosts = async (req, res) => {
     const posts = await Post.find({
       user: userId,
       isDeleted: true,
+      deletedByAdmin: { $ne: true }, // ✅ Exclude admin-deleted posts
     })
       .includeDeleted()
       .sort({ deletedAt: -1, createdAt: -1 })
@@ -296,6 +298,7 @@ exports.getDeletedPosts = async (req, res) => {
     const total = await Post.find({
       user: userId,
       isDeleted: true,
+      deletedByAdmin: { $ne: true }, // ✅ Exclude admin-deleted posts
     })
       .includeDeleted()
       .countDocuments();
@@ -586,6 +589,18 @@ exports.getProfilePosts = async (req, res) => {
       commentCountMap[item._id.toString()] = item.count;
     });
 
+    // ✅ Get report status for current user
+    const Report = getAdminModel("Report");
+    const userReports = await Report.find({
+      reportedBy: currentUserId,
+      targetType: "Post",
+      targetId: { $in: postIds },
+      status: { $in: ["pending", "reviewing"] },
+    }).lean();
+    const reportedPostIds = new Set(
+      userReports.map((r) => r.targetId.toString()),
+    );
+
     const processedPosts = posts.map((post) => ({
       ...post,
       user: {
@@ -597,6 +612,7 @@ exports.getProfilePosts = async (req, res) => {
         post.likes?.some(
           (like) => like._id.toString() === currentUserId.toString(),
         ) || false,
+      isReported: reportedPostIds.has(post._id.toString()), // ✅ ADDED
     }));
 
     res.status(200).json({
@@ -732,6 +748,16 @@ exports.getPostById = async (req, res) => {
         profilePicture: null,
       };
     }
+
+    // ✅ Check if current user reported this post
+    const Report = getAdminModel("Report");
+    const userReport = await Report.findOne({
+      reportedBy: currentUserId,
+      targetType: "Post",
+      targetId: postId,
+      status: { $in: ["pending", "reviewing"] },
+    });
+    post.isReported = !!userReport;
 
     post.isLiked = post.likes.some(
       (like) => like._id.toString() === currentUserId.toString(),

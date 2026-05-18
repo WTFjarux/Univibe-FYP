@@ -435,6 +435,36 @@ export const getBlockedUsers = async (
     throw error;
   }
 };
+
+// ============================================
+// REPORT CONTENT
+// ============================================
+
+export const reportContent = async (
+  targetType: string,
+  targetId: string,
+  reason: string,
+  description?: string,
+): Promise<{ success: boolean; message?: string }> => {
+  try {
+    const token = await SecureStore.getItemAsync("authToken");
+    if (!token) return { success: false, message: "No auth token" };
+
+    const response = await fetch(`${API_BASE_URL}/api/content/report`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ targetType, targetId, reason, description }),
+    });
+
+    return await response.json();
+  } catch (error) {
+    return { success: false, message: "Failed to report content" };
+  }
+};
+
 // ============================================
 // BULK/CLEANUP OPERATIONS
 // ============================================

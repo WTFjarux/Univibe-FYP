@@ -101,10 +101,23 @@ export default function CreateEventScreen() {
   const onEndDateConfirm = () => {
     const newDate = new Date(tempEndDate);
     newDate.setHours(endDate.getHours(), endDate.getMinutes());
-    if (newDate > startDate) {
+
+    // Compare dates only (ignore time)
+    const startDay = new Date(
+      startDate.getFullYear(),
+      startDate.getMonth(),
+      startDate.getDate(),
+    );
+    const endDay = new Date(
+      newDate.getFullYear(),
+      newDate.getMonth(),
+      newDate.getDate(),
+    );
+
+    if (endDay >= startDay) {
       setEndDate(newDate);
     } else {
-      Alert.alert("Invalid Date", "End date must be after start date");
+      Alert.alert("Invalid Date", "End date must be on or after start date");
     }
     setShowEndDate(false);
   };
@@ -198,283 +211,280 @@ export default function CreateEventScreen() {
   };
 
   return (
-      <SafeAreaView style={styles.container}>
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+    <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="close" size={28} color="#111827" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Create Event</Text>
+          <TouchableOpacity
+            style={[
+              styles.createButton,
+              (!title || !description || images.length === 0) &&
+                styles.createButtonDisabled,
+            ]}
+            onPress={handleSubmit}
+            disabled={loading || !title || !description || images.length === 0}
+          >
+            {loading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.createButtonText}>Create</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
         >
-          <View style={styles.header}>
-            <TouchableOpacity onPress={() => router.back()}>
-              <Ionicons name="close" size={28} color="#111827" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Create Event</Text>
-            <TouchableOpacity
-              style={[
-                styles.createButton,
-                (!title || !description || images.length === 0) &&
-                  styles.createButtonDisabled,
-              ]}
-              onPress={handleSubmit}
-              disabled={
-                loading || !title || !description || images.length === 0
-              }
-            >
-              {loading ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.createButtonText}>Create</Text>
-              )}
-            </TouchableOpacity>
+          <ImagePickerComponent
+            images={images}
+            onImagesChange={setImages}
+            maxImages={5}
+          />
+
+          {/* Form Fields */}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Event Title *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Enter event title"
+              value={title}
+              onChangeText={setTitle}
+            />
           </View>
 
-          <ScrollView
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
-          >
-            <ImagePickerComponent
-              images={images}
-              onImagesChange={setImages}
-              maxImages={5}
-            />
-
-            {/* Form Fields */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Event Title *</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter event title"
-                value={title}
-                onChangeText={setTitle}
-              />
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Category *</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <View style={styles.categoriesContainer}>
-                  {categories.map((cat) => (
-                    <TouchableOpacity
-                      key={cat}
-                      style={[
-                        styles.categoryChip,
-                        category === cat && styles.categoryChipActive,
-                      ]}
-                      onPress={() => setCategory(cat)}
-                    >
-                      <Text
-                        style={[
-                          styles.categoryChipText,
-                          category === cat && styles.categoryChipTextActive,
-                        ]}
-                      >
-                        {cat}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </ScrollView>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Start Date & Time *</Text>
-              <View style={styles.row}>
-                <TouchableOpacity
-                  style={[styles.halfButton, styles.dateButton]}
-                  onPress={() => setShowStartDate(true)}
-                >
-                  <Ionicons name="calendar-outline" size={20} color="#6b7280" />
-                  <Text style={styles.dateText}>{formatDate(startDate)}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.halfButton, styles.dateButton]}
-                  onPress={() => setShowStartTime(true)}
-                >
-                  <Ionicons name="time-outline" size={20} color="#6b7280" />
-                  <Text style={styles.dateText}>{formatTime(startDate)}</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>End Date & Time *</Text>
-              <View style={styles.row}>
-                <TouchableOpacity
-                  style={[styles.halfButton, styles.dateButton]}
-                  onPress={() => setShowEndDate(true)}
-                >
-                  <Ionicons name="calendar-outline" size={20} color="#6b7280" />
-                  <Text style={styles.dateText}>{formatDate(endDate)}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.halfButton, styles.dateButton]}
-                  onPress={() => setShowEndTime(true)}
-                >
-                  <Ionicons name="time-outline" size={20} color="#6b7280" />
-                  <Text style={styles.dateText}>{formatTime(endDate)}</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Location *</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Building, room, or address"
-                value={location}
-                onChangeText={setLocation}
-              />
-            </View>
-
-            <View style={styles.inputGroup}>
-              <View style={styles.switchContainer}>
-                <Text style={styles.label}>Online Event</Text>
-                <TouchableOpacity
-                  style={[styles.switch, isOnline && styles.switchActive]}
-                  onPress={() => setIsOnline(!isOnline)}
-                >
-                  <View
-                    style={[
-                      styles.switchKnob,
-                      isOnline && styles.switchKnobActive,
-                    ]}
-                  />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {isOnline && (
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Meeting Link</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="https://zoom.us/..."
-                  value={meetingLink}
-                  onChangeText={setMeetingLink}
-                  autoCapitalize="none"
-                />
-              </View>
-            )}
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Max Attendees (Optional)</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Unlimited"
-                value={maxAttendees}
-                onChangeText={setMaxAttendees}
-                keyboardType="numeric"
-              />
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Tags (comma-separated)</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g., Workshop, Networking"
-                value={tags}
-                onChangeText={setTags}
-              />
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Description *</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder="Describe your event..."
-                value={description}
-                onChangeText={setDescription}
-                multiline
-                textAlignVertical="top"
-              />
-              <Text style={styles.charCount}>{description.length}/2000</Text>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Visibility</Text>
-              <View style={styles.visibilityContainer}>
-                {[
-                  {
-                    value: "campus",
-                    label: "Campus",
-                    icon: "business-outline",
-                  },
-                  {
-                    value: "connections",
-                    label: "Connections",
-                    icon: "people-outline",
-                  },
-                  { value: "public", label: "Public", icon: "globe-outline" },
-                ].map((v) => (
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Category *</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={styles.categoriesContainer}>
+                {categories.map((cat) => (
                   <TouchableOpacity
-                    key={v.value}
+                    key={cat}
                     style={[
-                      styles.visibilityOption,
-                      visibility === v.value && styles.visibilityOptionActive,
+                      styles.categoryChip,
+                      category === cat && styles.categoryChipActive,
                     ]}
-                    onPress={() => setVisibility(v.value)}
+                    onPress={() => setCategory(cat)}
                   >
-                    <Ionicons
-                      name={v.icon as any}
-                      size={20}
-                      color={visibility === v.value ? "#fff" : "#6b7280"}
-                    />
                     <Text
                       style={[
-                        styles.visibilityText,
-                        visibility === v.value && styles.visibilityTextActive,
+                        styles.categoryChipText,
+                        category === cat && styles.categoryChipTextActive,
                       ]}
                     >
-                      {v.label}
+                      {cat}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
+            </ScrollView>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Start Date & Time *</Text>
+            <View style={styles.row}>
+              <TouchableOpacity
+                style={[styles.halfButton, styles.dateButton]}
+                onPress={() => setShowStartDate(true)}
+              >
+                <Ionicons name="calendar-outline" size={20} color="#6b7280" />
+                <Text style={styles.dateText}>{formatDate(startDate)}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.halfButton, styles.dateButton]}
+                onPress={() => setShowStartTime(true)}
+              >
+                <Ionicons name="time-outline" size={20} color="#6b7280" />
+                <Text style={styles.dateText}>{formatTime(startDate)}</Text>
+              </TouchableOpacity>
             </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
+          </View>
 
-        {/* Modals */}
-        <DatePickerModal
-          visible={showStartDate}
-          onClose={() => setShowStartDate(false)}
-          onConfirm={onStartDateConfirm}
-          title="Select Start Date"
-          date={tempStartDate}
-          setDate={setTempStartDate}
-        />
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>End Date & Time *</Text>
+            <View style={styles.row}>
+              <TouchableOpacity
+                style={[styles.halfButton, styles.dateButton]}
+                onPress={() => setShowEndDate(true)}
+              >
+                <Ionicons name="calendar-outline" size={20} color="#6b7280" />
+                <Text style={styles.dateText}>{formatDate(endDate)}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.halfButton, styles.dateButton]}
+                onPress={() => setShowEndTime(true)}
+              >
+                <Ionicons name="time-outline" size={20} color="#6b7280" />
+                <Text style={styles.dateText}>{formatTime(endDate)}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
 
-        <DatePickerModal
-          visible={showEndDate}
-          onClose={() => setShowEndDate(false)}
-          onConfirm={onEndDateConfirm}
-          title="Select End Date"
-          date={tempEndDate}
-          setDate={setTempEndDate}
-          minimumDate={startDate}
-        />
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Location *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Building, room, or address"
+              value={location}
+              onChangeText={setLocation}
+            />
+          </View>
 
-        <TimePickerModal
-          visible={showStartTime}
-          onClose={() => setShowStartTime(false)}
-          onConfirm={onStartTimeConfirm}
-          title="Select Start Time"
-          hour={tempStartHour}
-          minute={tempStartMinute}
-          setHour={setTempStartHour}
-          setMinute={setTempStartMinute}
-        />
+          <View style={styles.inputGroup}>
+            <View style={styles.switchContainer}>
+              <Text style={styles.label}>Online Event</Text>
+              <TouchableOpacity
+                style={[styles.switch, isOnline && styles.switchActive]}
+                onPress={() => setIsOnline(!isOnline)}
+              >
+                <View
+                  style={[
+                    styles.switchKnob,
+                    isOnline && styles.switchKnobActive,
+                  ]}
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
 
-        <TimePickerModal
-          visible={showEndTime}
-          onClose={() => setShowEndTime(false)}
-          onConfirm={onEndTimeConfirm}
-          title="Select End Time"
-          hour={tempEndHour}
-          minute={tempEndMinute}
-          setHour={setTempEndHour}
-          setMinute={setTempEndMinute}
-        />
-      </SafeAreaView>
+          {isOnline && (
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Meeting Link</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="https://zoom.us/..."
+                value={meetingLink}
+                onChangeText={setMeetingLink}
+                autoCapitalize="none"
+              />
+            </View>
+          )}
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Max Attendees (Optional)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Unlimited"
+              value={maxAttendees}
+              onChangeText={setMaxAttendees}
+              keyboardType="numeric"
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Tags (comma-separated)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., Workshop, Networking"
+              value={tags}
+              onChangeText={setTags}
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Description *</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              placeholder="Describe your event..."
+              value={description}
+              onChangeText={setDescription}
+              multiline
+              textAlignVertical="top"
+            />
+            <Text style={styles.charCount}>{description.length}/2000</Text>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Visibility</Text>
+            <View style={styles.visibilityContainer}>
+              {[
+                {
+                  value: "campus",
+                  label: "Campus",
+                  icon: "business-outline",
+                },
+                {
+                  value: "connections",
+                  label: "Connections",
+                  icon: "people-outline",
+                },
+                { value: "public", label: "Public", icon: "globe-outline" },
+              ].map((v) => (
+                <TouchableOpacity
+                  key={v.value}
+                  style={[
+                    styles.visibilityOption,
+                    visibility === v.value && styles.visibilityOptionActive,
+                  ]}
+                  onPress={() => setVisibility(v.value)}
+                >
+                  <Ionicons
+                    name={v.icon as any}
+                    size={20}
+                    color={visibility === v.value ? "#fff" : "#6b7280"}
+                  />
+                  <Text
+                    style={[
+                      styles.visibilityText,
+                      visibility === v.value && styles.visibilityTextActive,
+                    ]}
+                  >
+                    {v.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* Modals */}
+      <DatePickerModal
+        visible={showStartDate}
+        onClose={() => setShowStartDate(false)}
+        onConfirm={onStartDateConfirm}
+        title="Select Start Date"
+        date={tempStartDate}
+        setDate={setTempStartDate}
+      />
+
+      <DatePickerModal
+        visible={showEndDate}
+        onClose={() => setShowEndDate(false)}
+        onConfirm={onEndDateConfirm}
+        title="Select End Date"
+        date={tempEndDate}
+        setDate={setTempEndDate}
+      />
+
+      <TimePickerModal
+        visible={showStartTime}
+        onClose={() => setShowStartTime(false)}
+        onConfirm={onStartTimeConfirm}
+        title="Select Start Time"
+        hour={tempStartHour}
+        minute={tempStartMinute}
+        setHour={setTempStartHour}
+        setMinute={setTempStartMinute}
+      />
+
+      <TimePickerModal
+        visible={showEndTime}
+        onClose={() => setShowEndTime(false)}
+        onConfirm={onEndTimeConfirm}
+        title="Select End Time"
+        hour={tempEndHour}
+        minute={tempEndMinute}
+        setHour={setTempEndHour}
+        setMinute={setTempEndMinute}
+      />
+    </SafeAreaView>
   );
 }
 

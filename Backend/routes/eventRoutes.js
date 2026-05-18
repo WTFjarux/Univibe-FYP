@@ -1,7 +1,12 @@
+// backend/routes/eventRoutes.js
+
 const express = require("express");
 const router = express.Router();
 const eventController = require("../controllers/eventController");
-const { protect } = require("../middleware/authmiddleware");
+const {
+  protect,
+  protectWithStatusCheck,
+} = require("../middleware/authmiddleware");
 const {
   uploadAndOptimizeEventImages,
 } = require("../middleware/uploadMiddleware");
@@ -10,65 +15,54 @@ const {
 router.use(protect);
 
 // ============================================
-// EVENT QUERIES
+// READ OPERATIONS (Auth only - no status check)
 // ============================================
-
-// Get user's events - SPECIFIC routes first
 router.get("/my-events", eventController.getMyEvents);
 router.get("/attending", eventController.getAttendingEvents);
-
-// Get events with filters
 router.get("/", eventController.getEvents);
-
-// ============================================
-// EVENT CRUD OPERATIONS
-// ============================================
-
-// Create event with images
-router.post("/", uploadAndOptimizeEventImages, eventController.createEvent);
-
-// Get single event (dynamic route)
 router.get("/:eventId", eventController.getEventById);
 
-// Update event with images
+// ============================================
+// WRITE OPERATIONS (Auth + Status Check)
+// ============================================
+router.post(
+  "/",
+  protectWithStatusCheck,
+  uploadAndOptimizeEventImages,
+  eventController.createEvent,
+);
 router.put(
   "/:eventId",
+  protectWithStatusCheck,
   uploadAndOptimizeEventImages,
   eventController.updateEvent,
 );
-
-// Delete event
-router.delete("/:eventId", eventController.deleteEvent);
-
-// ============================================
-// EVENT STATUS
-// ============================================
-
-// Refresh event status manually
-router.put("/:eventId/refresh-status", eventController.refreshEventStatus);
-
-// ============================================
-// IMAGE MANAGEMENT
-// ============================================
-
-// Add more images to existing event
+router.delete("/:eventId", protectWithStatusCheck, eventController.deleteEvent);
+router.put(
+  "/:eventId/refresh-status",
+  protectWithStatusCheck,
+  eventController.refreshEventStatus,
+);
 router.post(
   "/:eventId/images",
+  protectWithStatusCheck,
   uploadAndOptimizeEventImages,
   eventController.addEventImages,
 );
-
-// Remove specific image
-router.delete("/:eventId/images/:imageIndex", eventController.removeEventImage);
-
-// ============================================
-// EVENT INTERACTIONS
-// ============================================
-
-// Toggle interest
-router.post("/:eventId/interested", eventController.markInterested);
-
-// Toggle RSVP
-router.post("/:eventId/rsvp", eventController.rsvpEvent);
+router.delete(
+  "/:eventId/images/:imageIndex",
+  protectWithStatusCheck,
+  eventController.removeEventImage,
+);
+router.post(
+  "/:eventId/interested",
+  protectWithStatusCheck,
+  eventController.markInterested,
+);
+router.post(
+  "/:eventId/rsvp",
+  protectWithStatusCheck,
+  eventController.rsvpEvent,
+);
 
 module.exports = router;
