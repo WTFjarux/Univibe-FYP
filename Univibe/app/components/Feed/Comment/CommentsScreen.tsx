@@ -33,6 +33,7 @@ import CommentItem from "./CommentItem";
 import CommentInput from "./CommentInput";
 import ImageModal from "./ImageModal";
 import ReportModal from "@/app/components/ReportModal";
+import CommentScreenSkeleton from "./CommentScreenSkeleton";
 
 // Hooks
 import useComments from "./useComments";
@@ -565,13 +566,7 @@ export default function CommentScreen() {
   // ===========================================================================
 
   if (loading && !post) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8b5cf6" />
-        </View>
-      </SafeAreaView>
-    );
+    return <CommentScreenSkeleton />;
   }
 
   // ===========================================================================

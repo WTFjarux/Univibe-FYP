@@ -7,6 +7,10 @@
  * - Block checks before forwarding
  * - Typing indicators blocked between blocked users
  * - Read receipts blocked between blocked users
+ *
+ * UNREAD COUNT INTEGRATION:
+ * - Emits real-time unread count updates via chat:unreadCount event
+ * - Uses centralized calculateUnreadCount from chatController
  */
 
 const Message = require("../../models/Message");
@@ -22,6 +26,12 @@ const {
   getUserSocketId,
   isUserOnline,
 } = require("../utils/roomManager");
+
+// Import helper from chatController for unread count
+const {
+  emitUnreadCountToUser,
+  calculateUnreadCount,
+} = require("../../controllers/chatController");
 
 const EVENTS = {
   JOIN_ROOM: "join_room",
@@ -71,7 +81,6 @@ const setupChatHandlers = (io, socket) => {
         (connId) => connId.toString() === userId2.toString(),
       );
     } catch (error) {
-      console.error("areUsersConnected error:", error.message);
       return false;
     }
   };
@@ -80,7 +89,6 @@ const setupChatHandlers = (io, socket) => {
     try {
       return await Block.areUsersBlocked(userId1, userId2);
     } catch (error) {
-      console.error("isUserBlocked error:", error);
       return true;
     }
   };
@@ -94,6 +102,25 @@ const setupChatHandlers = (io, socket) => {
       return user1 === currentUserId.toString() ? user2 : user1;
     }
     return null;
+  };
+
+  // ===========================================================================
+  // Helper: Emit unread count to a specific user
+  // ===========================================================================
+  const emitUnreadCount = async (targetUserId) => {
+    await emitUnreadCountToUser(io, targetUserId);
+  };
+
+  // ===========================================================================
+  // Helper: Emit unread count to room participants (except sender)
+  // ===========================================================================
+  const emitUnreadCountToRoomParticipants = async (room, senderId) => {
+    for (const participant of room.participants) {
+      const participantId = participant.userId.toString();
+      if (participantId !== senderId.toString()) {
+        await emitUnreadCount(participantId);
+      }
+    }
   };
 
   // ===========================================================================
@@ -130,6 +157,9 @@ const setupChatHandlers = (io, socket) => {
           blockedBy: userId,
         });
       }
+
+      // Update unread count after block change
+      await emitUnreadCount(userId);
     } catch (error) {
       console.error("Block status changed error:", error);
     }
@@ -149,7 +179,6 @@ const setupChatHandlers = (io, socket) => {
             (roomId.startsWith("event_") || roomId.startsWith("story_")))
         ) {
           socket.join(roomId);
-          console.log(`User ${userId} joined ${type} room: ${roomId}`);
           return;
         }
 
@@ -333,6 +362,9 @@ const setupChatHandlers = (io, socket) => {
       await room.save();
 
       socket.emit(EVENTS.CHAT_CLEARED, { roomId, success: true, clearedAt });
+
+      // Update unread count after clearing chat
+      await emitUnreadCount(userId);
     } catch (error) {
       console.error("Clear chat error:", error);
       socket.emit(EVENTS.ERROR, { message: "Failed to clear chat" });
@@ -396,7 +428,6 @@ const setupChatHandlers = (io, socket) => {
         if (!room) {
           if (roomId.startsWith("direct_")) {
             const otherUserId = getOtherUserIdFromRoomId(roomId, userId);
-
             if (!otherUserId || !otherUserId.match(/^[0-9a-fA-F]{24}$/)) {
               socket.emit(EVENTS.MESSAGE_ERROR, {
                 success: false,
@@ -467,6 +498,7 @@ const setupChatHandlers = (io, socket) => {
 
         const profile = await Profile.findOne({ user: userId });
 
+        // ─── BUILD MESSAGE DATA ──────────────────────────────
         const messageData = {
           sender: userId,
           senderName: user?.name || "Unknown",
@@ -478,6 +510,16 @@ const setupChatHandlers = (io, socket) => {
           deliveredTo: [{ user: userId, deliveredAt: new Date() }],
           status: "sent",
         };
+
+        // ─── ADD GROUP INFORMATION ──────────────────────────
+        if (room.type === "group") {
+          messageData.isGroup = true;
+          messageData.roomType = "group";
+          messageData.groupName = room.name || "Group Chat";
+          messageData.groupPhoto = room.icon || room.groupPhoto || "";
+          messageData.groupDescription = room.description || "";
+          messageData.participantCount = room.participants?.length || 0;
+        }
 
         if (story && type === "story_reply") {
           messageData.story = {
@@ -500,9 +542,15 @@ const setupChatHandlers = (io, socket) => {
           messageData.duration = duration || 0;
         }
 
+        // Add media URL for other media types
+        if (mediaUrl && type !== "audio") {
+          messageData.mediaUrl = mediaUrl;
+          if (duration) messageData.duration = duration;
+        }
+
         if (replyTo?.messageId) {
           const originalMsg = await Message.findById(replyTo.messageId)
-            .select("thumbnailUrl")
+            .select("thumbnailUrl mediaUrl type")
             .lean();
           messageData.replyTo = {
             messageId: replyTo.messageId,
@@ -517,6 +565,7 @@ const setupChatHandlers = (io, socket) => {
           };
         }
 
+        // ─── SAVE MESSAGE ────────────────────────────────────
         const savedMessage = new Message(messageData);
         await savedMessage.save();
 
@@ -526,11 +575,13 @@ const setupChatHandlers = (io, socket) => {
 
         if (tempId) populatedMessage.tempId = tempId;
 
+        // ─── UPDATE LAST MESSAGE ─────────────────────────────
         let lastMessageText;
         if (type === "audio") lastMessageText = "🎤 Voice message";
         else if (type === "image") lastMessageText = "📷 Photo";
         else if (type === "video") lastMessageText = "🎬 Video";
         else if (type === "location") lastMessageText = "📍 Location";
+        else if (type === "file") lastMessageText = "📎 File";
         else lastMessageText = message?.substring(0, 100) || "";
 
         await ChatRoom.findOneAndUpdate(
@@ -546,10 +597,10 @@ const setupChatHandlers = (io, socket) => {
             },
             updatedAt: new Date(),
             $inc: { messageCount: 1 },
-            $pull: { clearedBy: { user: userId } },
           },
         );
 
+        // ─── DELIVERY CONFIRMATION ───────────────────────────
         socket.emit(EVENTS.MESSAGE_DELIVERED, {
           success: true,
           messageId: savedMessage._id,
@@ -557,8 +608,21 @@ const setupChatHandlers = (io, socket) => {
           tempId,
         });
 
+        // ─── BROADCAST TO RECIPIENTS ─────────────────────────
         if (room.type === "group") {
-          io.to(roomId).emit(EVENTS.RECEIVE_MESSAGE, populatedMessage);
+          // Broadcast to all in room including group info
+          io.to(roomId).emit(EVENTS.RECEIVE_MESSAGE, {
+            ...populatedMessage,
+            isGroup: true,
+            roomType: "group",
+            groupName: room.name || "Group Chat",
+            groupPhoto: room.icon || room.groupPhoto || "",
+            groupDescription: room.description || "",
+            participantCount: room.participants?.length || 0,
+          });
+
+          // Emit unread count to each group participant (excluding sender)
+          await emitUnreadCountToRoomParticipants(room, userId);
 
           const onlineParticipants = room.participants.filter(
             (p) =>
@@ -583,7 +647,9 @@ const setupChatHandlers = (io, socket) => {
               });
             });
           }
-        } else {
+        }
+        // ─── DIRECT MESSAGE ────────────────────────────────
+        else {
           const otherParticipant = room.participants.find(
             (p) => p.userId.toString() !== userId.toString(),
           );
@@ -597,8 +663,10 @@ const setupChatHandlers = (io, socket) => {
                 populatedMessage,
               );
               socket.to(roomId).emit(EVENTS.RECEIVE_MESSAGE, populatedMessage);
-            }
 
+              // Emit unread count to the recipient
+              await emitUnreadCount(otherId);
+            }
             if (isUserOnline(otherId)) {
               await Message.findByIdAndUpdate(savedMessage._id, {
                 $addToSet: {
@@ -612,10 +680,6 @@ const setupChatHandlers = (io, socket) => {
             }
           }
         }
-
-        console.log(
-          `Message sent by ${userId} in ${room.type} chat ${roomId}: ${type === "audio" ? "Voice message" : message?.substring(0, 30)}`,
-        );
       } catch (error) {
         console.error("Send message error:", error);
         socket.emit(EVENTS.MESSAGE_ERROR, {
@@ -780,6 +844,18 @@ const setupChatHandlers = (io, socket) => {
             forwardedBy: userId,
             forwardedByName: userInfo?.name || "Unknown",
           });
+
+          // Emit unread count to all participants in target room
+          const targetRoom = await ChatRoom.findOne({
+            roomId: targetRoomId,
+          }).lean();
+          if (targetRoom) {
+            for (const participant of targetRoom.participants) {
+              if (participant.userId.toString() !== userId) {
+                await emitUnreadCount(participant.userId.toString());
+              }
+            }
+          }
         }),
       );
 
@@ -856,6 +932,9 @@ const setupChatHandlers = (io, socket) => {
       });
 
       socket.emit(EVENTS.MESSAGES_MARKED_READ, { roomId, modifiedCount });
+
+      // Update unread count after marking messages as read
+      await emitUnreadCount(userId);
     } catch (error) {
       console.error("Mark read error:", error);
     }
@@ -890,6 +969,9 @@ const setupChatHandlers = (io, socket) => {
           }
         }
         socket.emit("message_marked_read", { messageId });
+
+        // Update unread count after marking message as read
+        await emitUnreadCount(userId);
       }
     } catch (error) {
       console.error("Mark message read error:", error);
@@ -939,6 +1021,9 @@ const setupChatHandlers = (io, socket) => {
         deletedBy: userId,
         timestamp: new Date(),
       });
+
+      // Update unread count after deletion
+      await emitUnreadCount(userId);
     } catch (error) {
       console.error("Delete message error:", error);
     }

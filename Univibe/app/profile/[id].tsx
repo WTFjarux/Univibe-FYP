@@ -189,10 +189,16 @@ export default function PublicProfileScreen() {
   }, [token, isOwnProfile]);
 
   const loadProfilePosts = useCallback(
-    async (page = 1, shouldAppend = false) => {
+    async (
+      page = 1,
+      shouldAppend = false,
+      forceConnectionStatus?: ConnectionStatus,
+    ) => {
       if (!id || postsLoading) return;
 
-      if (!isOwnProfile && connectionStatus !== "connected") {
+      const effectiveStatus = forceConnectionStatus ?? connectionStatus;
+
+      if (!isOwnProfile && effectiveStatus !== "connected") {
         setInitialPostsLoading(false);
         return;
       }
@@ -269,7 +275,7 @@ export default function PublicProfileScreen() {
         setConnectionStatus(status);
 
         if (status === "connected") {
-          await loadProfilePosts(1, false);
+          await loadProfilePosts(1, false, "connected");
         } else {
           setInitialPostsLoading(false);
         }
@@ -362,7 +368,7 @@ export default function PublicProfileScreen() {
         if (!isOwnProfile) {
           await loadConnectionStatus();
           await loadUserStates();
-        } else await loadProfilePosts(1, false);
+        } else await loadProfilePosts(1, false, "connected");
       } else {
         showInfoBar(response.message || "Failed to load profile", "error");
         goBack();
@@ -705,7 +711,7 @@ export default function PublicProfileScreen() {
                   : null,
               );
               await refreshCurrentUserProfile();
-              await loadProfilePosts(1, false);
+              await loadProfilePosts(1, false, "connected");
               showInfoBar(`Connected with ${profile.fullName}!`, "success");
             } else {
               setConnectionStatus("pending_sent");
@@ -751,7 +757,7 @@ export default function PublicProfileScreen() {
                 : null,
             );
             await refreshCurrentUserProfile();
-            await loadProfilePosts(1, false);
+            await loadProfilePosts(1, false, "connected");
             showInfoBar(`Connected with ${profile.fullName}!`, "success");
           } else {
             showInfoBar(

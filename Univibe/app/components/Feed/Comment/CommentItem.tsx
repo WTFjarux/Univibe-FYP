@@ -10,7 +10,6 @@ import React, {
 import {
   View,
   Text,
-  Image,
   TouchableOpacity,
   TouchableWithoutFeedback,
   StyleSheet,
@@ -21,6 +20,7 @@ import {
   Keyboard,
   ImageSourcePropType,
 } from "react-native";
+import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { Comment, areRepliesPopulated } from "@/lib/services/postService";
@@ -31,6 +31,7 @@ import {
   formatCommentTimestamp,
 } from "@/lib/services/postService";
 import CommentOptionsModal from "./CommentOptionsModal";
+import BlurhashImage from "@/app/components/BlurhashImage";
 import { API_BASE_URL } from "@/constants/ipConstants";
 import { useAuth } from "@/lib/contexts/AuthContext";
 
@@ -354,28 +355,36 @@ const CommentItem: React.FC<CommentItemProps> = ({
       );
     }
 
-    const profileImageUrl = comment.user?.profilePicture || undefined;
-    const imageSource = getProfileImageSource(profileImageUrl);
+    const profileImageUrl = comment.user?.profilePicture;
 
-    if (imageSource === DEFAULT_AVATAR) {
+    if (!profileImageUrl) {
       return (
         <TouchableOpacity onPress={handleUserPress}>
-          <Image source={DEFAULT_AVATAR} style={styles.avatar} />
+          <Image
+            source={DEFAULT_AVATAR}
+            style={styles.avatar}
+            contentFit="cover"
+          />
         </TouchableOpacity>
       );
     }
 
+    // Build full URL (handles relative paths like "/uploads/...")
+    const fullUrl = profileImageUrl.startsWith("http")
+      ? profileImageUrl
+      : `${API_BASE_URL}${profileImageUrl}`;
+
     return (
       <TouchableOpacity onPress={handleUserPress}>
-        <Image
-          source={imageSource}
+        <BlurhashImage
+          uri={fullUrl}
           style={styles.avatar}
+          transition={200}
           onError={() => setAvatarError(true)}
         />
       </TouchableOpacity>
     );
   };
-
   const renderBadges = () => (
     <View style={styles.badgeContainer}>
       {isFromAuthor && (

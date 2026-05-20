@@ -153,7 +153,6 @@ export default function ProfilePosts({
 }
 
 const styles = StyleSheet.create({
-  
   loaderContainer: {
     flex: 1,
     justifyContent: "center",
@@ -194,7 +193,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   postCardWrapper: {
-    paddingHorizontal: 16,
     marginBottom: 12,
   },
   contentContainer: {

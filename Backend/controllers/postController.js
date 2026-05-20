@@ -894,6 +894,7 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
 
     const likerIdStr = likerId.toString();
 
+    // Find existing grouped notification
     let notification = await Notification.findOne({
       recipient: postOwnerId,
       type: "like",
@@ -903,17 +904,29 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
     });
 
     if (notification) {
-      let currentLikers = notification.metadata?.likers || [];
+      // Check if notification is older than 24 hours — if so, start fresh
+      const notificationAge =
+        Date.now() - new Date(notification.createdAt).getTime();
+      const isStale = notificationAge > 24 * 60 * 60 * 1000; // 24 hours
 
+      let currentLikers = isStale ? [] : notification.metadata?.likers || [];
+
+      // Remove existing entry for this liker (to re-add at top)
       currentLikers = currentLikers.filter(
         (l) => l.userId.toString() !== likerIdStr,
       );
 
+      // Add current liker at the front
       currentLikers.unshift({
         userId: likerIdStr,
         name: liker.name,
         profilePicture: profilePicture,
       });
+
+      // Keep max 10 recent likers
+      if (currentLikers.length > 10) {
+        currentLikers = currentLikers.slice(0, 10);
+      }
 
       notification.message = getLikeMessage(currentLikers);
       notification.read = false;
@@ -928,13 +941,7 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
       notification.markModified("metadata");
       await notification.save();
     } else {
-      await Notification.deleteMany({
-        recipient: postOwnerId,
-        type: "like",
-        targetId: postId,
-        targetModel: "Post",
-      });
-
+      // Create fresh notification
       notification = await Notification.create({
         recipient: postOwnerId,
         sender: likerId,
@@ -959,6 +966,7 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
       });
     }
 
+    // Emit socket event
     if (io && notification) {
       const populatedNotification = await Notification.findById(
         notification._id,

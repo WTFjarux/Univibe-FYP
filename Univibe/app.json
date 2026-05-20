@@ -27,6 +27,7 @@
     },
     "android": {
       "package": "com.anonymous.univibe",
+      "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",

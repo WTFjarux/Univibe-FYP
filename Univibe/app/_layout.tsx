@@ -1,3 +1,5 @@
+
+import { LogBox, Platform } from 'react-native';
 import { Stack } from "expo-router";
 import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
@@ -5,12 +7,46 @@ import { AuthProvider } from "../lib/contexts/AuthContext";
 import { ProfileProvider } from "../lib/contexts/ProfileContext";
 import { ChatProvider } from "../lib/contexts/ChatContext";
 import { ActiveRoomProvider } from "../lib/contexts/ActiveRoomContext";
-import { View, ActivityIndicator } from "react-native";
+import { InAppNotificationProvider } from "../lib/contexts/InAppNotificationContext";
+import { View, ActivityIndicator} from "react-native";
 import { useEffect } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import InAppToast from "./components/InAppToast";
+
+if (__DEV__) {
+  // Suppress expo-av warning
+  const originalWarn = console.warn;
+  console.warn = (...args) => {
+    if (
+      typeof args[0] === 'string' && 
+      args[0].includes('expo-av')
+    ) {
+      return;
+    }
+    originalWarn(...args);
+  };
+}
 
 SplashScreen.preventAutoHideAsync();
+
+// Inline listener component - avoids Expo Router treating it as a route
+function NotificationListener() {
+  const { useInAppNotifications } = require("../hooks/useInAppNotifications");
+  const { useAuth } = require("../lib/contexts/AuthContext");
+  const { isAuthenticated } = useAuth();
+
+  if (isAuthenticated) {
+    return <NotificationListenerInner />;
+  }
+  return null;
+}
+
+function NotificationListenerInner() {
+  const { useInAppNotifications } = require("../hooks/useInAppNotifications");
+  useInAppNotifications();
+  return null;
+}
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -42,76 +78,71 @@ export default function RootLayout() {
           <ProfileProvider>
             <ChatProvider>
               <ActiveRoomProvider>
-                <Stack screenOptions={{ headerShown: false }}>
-                  {/* Public routes */}
-                  <Stack.Screen name="index" />
-                  <Stack.Screen
-                    name="(auth)"
-                    options={{ gestureEnabled: false }}
-                  />
+                <InAppNotificationProvider>
+                  <NotificationListener />
 
-                  {/* Verification route */}
-                  <Stack.Screen
-                    name="verify"
-                    options={{
-                      presentation: "modal",
-                      animation: "slide_from_bottom",
-                    }}
-                  />
+                  <Stack screenOptions={{ headerShown: false }}>
+                    <Stack.Screen name="index" />
+                    <Stack.Screen
+                      name="(auth)"
+                      options={{ gestureEnabled: false }}
+                    />
+                    <Stack.Screen
+                      name="verify"
+                      options={{
+                        presentation: "modal",
+                        animation: "slide_from_bottom",
+                      }}
+                    />
+                    <Stack.Screen
+                      name="(tabs)"
+                      options={{ gestureEnabled: false }}
+                    />
+                    <Stack.Screen name="profile" />
+                    <Stack.Screen
+                      name="screens/CreateStoryScreen"
+                      options={{
+                        headerShown: false,
+                        presentation: "fullScreenModal",
+                        animation: "fade",
+                      }}
+                    />
+                    <Stack.Screen
+                      name="screens/StoryViewerScreen"
+                      options={{
+                        headerShown: false,
+                        presentation: "fullScreenModal",
+                        animation: "fade",
+                      }}
+                    />
+                    <Stack.Screen
+                      name="screens/ChatScreen"
+                      options={{ headerShown: false, presentation: "card" }}
+                    />
+                    <Stack.Screen
+                      name="screens/ChatListScreen"
+                      options={{ headerShown: false, presentation: "card" }}
+                    />
+                    <Stack.Screen
+                      name="screens/GroupInfoScreen"
+                      options={{
+                        headerShown: false,
+                        presentation: "card",
+                        animation: "slide_from_right",
+                      }}
+                    />
+                    <Stack.Screen
+                      name="screens/notifications"
+                      options={{
+                        headerShown: false,
+                        presentation: "card",
+                        animation: "slide_from_right",
+                      }}
+                    />
+                  </Stack>
 
-                  {/* Main tabs - prevent back swipe to auth */}
-                  <Stack.Screen
-                    name="(tabs)"
-                    options={{ gestureEnabled: false }}
-                  />
-                  <Stack.Screen name="profile" />
-
-                  {/* Story Screens */}
-                  <Stack.Screen
-                    name="screens/CreateStoryScreen"
-                    options={{
-                      headerShown: false,
-                      presentation: "fullScreenModal",
-                      animation: "fade",
-                    }}
-                  />
-                  <Stack.Screen
-                    name="screens/StoryViewerScreen"
-                    options={{
-                      headerShown: false,
-                      presentation: "fullScreenModal",
-                      animation: "fade",
-                    }}
-                  />
-
-                  {/* Chat Screens */}
-                  <Stack.Screen
-                    name="screens/ChatScreen"
-                    options={{ headerShown: false, presentation: "card" }}
-                  />
-                  <Stack.Screen
-                    name="screens/ChatListScreen"
-                    options={{ headerShown: false, presentation: "card" }}
-                  />
-                  <Stack.Screen
-                    name="screens/GroupInfoScreen"
-                    options={{
-                      headerShown: false,
-                      presentation: "modal",
-                      animation: "slide_from_bottom",
-                    }}
-                  />
-
-                  {/* Notifications Screen */}
-                  <Stack.Screen
-                    name="screens/notifications"
-                    options={{
-                      headerShown: false,
-                      presentation: "card",
-                      animation: "slide_from_right",
-                    }}
-                  />
-                </Stack>
+                  <InAppToast />
+                </InAppNotificationProvider>
               </ActiveRoomProvider>
             </ChatProvider>
           </ProfileProvider>

@@ -118,15 +118,20 @@ export default function HomeScreen() {
   const initialLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const isMountedRef = useRef(true);
+  const fetchInProgressRef = useRef(false);
 
   // Handle initial loading state
   useEffect(() => {
-    // Show skeleton for a minimum time to ensure smooth UX
+    isMountedRef.current = true;
     initialLoadTimerRef.current = setTimeout(() => {
-      setIsInitialLoading(false);
-    }, 1500); // 1.5 seconds minimum skeleton display
+      if (isMountedRef.current) {
+        setIsInitialLoading(false);
+      }
+    }, 1500);
 
     return () => {
+      isMountedRef.current = false;
       if (initialLoadTimerRef.current) {
         clearTimeout(initialLoadTimerRef.current);
       }
@@ -140,7 +145,9 @@ export default function HomeScreen() {
     const cleanup = listenForNotifications(
       () => {},
       (count: number) => {
-        setUnreadCount(count);
+        if (isMountedRef.current) {
+          setUnreadCount(count);
+        }
       },
     );
 
@@ -151,32 +158,58 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!token) return;
 
+    // Initial fetch with debounce protection
     const fetchUnreadChatCount = async () => {
+      if (fetchInProgressRef.current || !isMountedRef.current) return;
+
+      fetchInProgressRef.current = true;
       try {
         const data = await chatApi.getUnreadChatCount();
-        if (data.success && data.count !== undefined) {
+        if (isMountedRef.current && data.success && data.count !== undefined) {
           setUnreadChatCount(data.count);
         }
       } catch (error) {
-        console.error("Error fetching unread chat count:", error);
+        // Silent fail - don't log to avoid console noise
+      } finally {
+        fetchInProgressRef.current = false;
       }
     };
 
-    // Initial fetch
+    // Immediate fetch on mount
     fetchUnreadChatCount();
 
-    const debouncedFetch = () => {
-      setTimeout(fetchUnreadChatCount, 1000);
+    // Handle real-time unread count updates from server
+    const handleChatUnread = (data: { count: number }) => {
+      if (isMountedRef.current && data.count !== undefined) {
+        setUnreadChatCount(data.count);
+      }
     };
 
+    // Debounced refresh for events that don't provide exact count
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const debouncedFetch = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchUnreadChatCount();
+      }, 800);
+    };
+
+    // Socket event listeners
+    socketService.on("chat:unreadCount", handleChatUnread);
     socketService.on("receive_message", debouncedFetch);
     socketService.on("messages_read", debouncedFetch);
+    socketService.on("message_read", debouncedFetch);
     socketService.on("chat_cleared", debouncedFetch);
+    socketService.on("message_deleted", debouncedFetch);
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      socketService.off("chat:unreadCount", handleChatUnread);
       socketService.off("receive_message", debouncedFetch);
       socketService.off("messages_read", debouncedFetch);
+      socketService.off("message_read", debouncedFetch);
       socketService.off("chat_cleared", debouncedFetch);
+      socketService.off("message_deleted", debouncedFetch);
     };
   }, [token]);
 
@@ -186,37 +219,58 @@ export default function HomeScreen() {
       setRefreshing(true);
     }
 
-    // Trigger CampusMoments refresh by changing key (silent - no pull-down)
+    // Trigger CampusMoments refresh by changing key
     setRefreshTrigger((prev) => prev + 1);
 
-    // Refresh notification count silently
+    // Refresh notification count
     try {
       const response = await notificationService.getUnreadCount();
-      if (response.success && response.count !== undefined) {
+      if (
+        isMountedRef.current &&
+        response.success &&
+        response.count !== undefined
+      ) {
         setUnreadCount(response.count);
       }
     } catch (error) {
-      console.error("Error fetching notification count:", error);
+      // Silent fail
+    }
+
+    // Refresh chat unread count
+    try {
+      const chatData = await chatApi.getUnreadChatCount();
+      if (
+        isMountedRef.current &&
+        chatData.success &&
+        chatData.count !== undefined
+      ) {
+        setUnreadChatCount(chatData.count);
+      }
+    } catch (error) {
+      // Silent fail
     }
 
     if (showIndicator) {
-      // Add a small delay to ensure smooth refresh animation
       setTimeout(() => {
-        setRefreshing(false);
+        if (isMountedRef.current) {
+          setRefreshing(false);
+        }
       }, 800);
     }
   }, []);
 
-  // Refresh silently on screen focus -
+  // Refresh on screen focus
   useFocusEffect(
     useCallback(() => {
-      if (!isInitialLoading) {
+      if (!isInitialLoading && isMountedRef.current) {
         refreshAll(false);
       }
     }, [refreshAll, isInitialLoading]),
   );
 
+  // Handle chat button press - navigate and reset badge optimistically
   const handleChatPress = () => {
+    // Optimistically reset the badge count
     setUnreadChatCount(0);
     router.push("/screens/ChatListScreen");
   };

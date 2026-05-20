@@ -374,6 +374,11 @@ class SocketService {
       this.emitEvent("chat_restored", data);
     });
 
+    // Chat unread count
+    this.socket.on("chat:unreadCount", (data: { count: number }) => {
+      this.emitEvent("chat:unreadCount", data);
+    });
+
     // Typing indicators
     this.socket.on("typing", (data: TypingData) => {
       this.emitEvent("typing", data);

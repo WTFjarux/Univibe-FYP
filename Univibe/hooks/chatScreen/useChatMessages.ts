@@ -373,17 +373,12 @@ export const useChatMessages = ({
   // ---------------------------------------------------------------------------
 
   const addMessage = useCallback(
-    
     (message: Message) => {
-      
       if (!message._id) return;
 
       // Block duplicates synchronously
       if (processedIdsRef.current.has(message._id)) return;
       processedIdsRef.current.add(message._id);
-      console.log(
-        `📥 addMessage: id=${message._id}, status=${message.status}, sender=${typeof message.sender === "string" ? message.sender : message.sender?._id}`,
-      );
 
       // Prevent unbounded growth
       if (processedIdsRef.current.size > MAX_PROCESSED_IDS) {

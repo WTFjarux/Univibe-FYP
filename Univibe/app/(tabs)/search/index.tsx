@@ -416,8 +416,17 @@ export default function SearchScreen() {
       {/* Search Bar */}
       <SearchBar
         value={query}
-        onChangeText={setQuery}
-        onSubmit={handleSearchSubmit}
+        onChangeText={(text) => {
+          setQuery(text);
+          // Auto-search happens via debounced useEffect in useSearch
+        }}
+        onSubmit={() => {
+          // Optional: Immediate search on keyboard submit
+          if (query.trim().length >= 2) {
+            performSearch(activeCategory, query.trim());
+          }
+          Keyboard.dismiss();
+        }}
         loading={isSearching}
         onClear={handleClearSearch}
       />

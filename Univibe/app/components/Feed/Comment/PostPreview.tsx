@@ -1,149 +1,230 @@
 // app/components/Feed/Comment/PostPreview.tsx
-
-import React, { useState } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import {
   View,
   Text,
-  Image,
   TouchableOpacity,
   StyleSheet,
   Dimensions,
   ScrollView,
-  ImageSourcePropType,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router"; // ✅ Import useRouter
-import { Post } from "@/lib/services/postService";
+import { useRouter } from "expo-router";
+import { useAuth } from "@/lib/contexts/AuthContext";
+import {
+  Post,
+  getFullImageUrl,
+  formatUserDisplay,
+} from "@/lib/services/postService";
 import { formatTimeAgo } from "@/lib/utils/formatTime";
-import { getFullImageUrl, formatUserDisplay } from "@/lib/services/postService";
-import { API_BASE_URL } from "@/constants/ipConstants";
-import { useAuth } from "@/lib/contexts/AuthContext"; // ✅ Import useAuth
+import BlurhashImage from "@/app/components/BlurhashImage";
 import SharePostModal from "@/app/components/Feed/Post/SharePostModal";
 
 const { width: screenWidth } = Dimensions.get("window");
-const imageWidth = screenWidth - 32;
-const imageHeight = 400;
+const IMAGE_WIDTH = screenWidth - 32;
 
-// Local default avatar
-const DEFAULT_AVATAR: ImageSourcePropType = require("../../../../assets/images/default-avatar.png");
+type IconName = React.ComponentProps<typeof Ionicons>["name"];
 
 interface PostPreviewProps {
   post: Post;
-  isLiked?: boolean;
-  likesCount?: number;
-  onLikePress?: () => void;
+  isLiked: boolean;
+  likesCount: number;
+  onLikePress: () => void;
   onImagePress: (index: number) => void;
 }
 
-/**
- * Helper function to get profile image with local default fallback
- */
-const getProfileImageSource = (
-  imageUrl: string | undefined,
-): ImageSourcePropType => {
-  if (imageUrl && imageUrl.trim() !== "") {
-    let url = imageUrl;
-    if (url.startsWith("/")) {
-      url = `${API_BASE_URL}${url}`;
-    }
-    return { uri: url };
-  }
-  return DEFAULT_AVATAR;
-};
-
 const PostPreview: React.FC<PostPreviewProps> = ({
   post,
-  isLiked = false,
-  likesCount = 0,
+  isLiked,
+  likesCount,
   onLikePress,
   onImagePress,
 }) => {
-  const router = useRouter(); // ✅ Router for navigation
-  const { user: currentUser } = useAuth(); // ✅ Current user for profile check
-
-  const [avatarError, setAvatarError] = useState(false);
+  const router = useRouter();
+  const { user: currentUser } = useAuth();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [avatarError, setAvatarError] = useState(false);
+  const [postImageError, setPostImageError] = useState<boolean[]>([]);
+  const [containerWidth, setContainerWidth] = useState(IMAGE_WIDTH);
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  // ✅ Share modal state
   const [shareModalVisible, setShareModalVisible] = useState(false);
-  const isScrollingRef = React.useRef(false);
 
   const userDisplay = formatUserDisplay(post);
   const postImages = post.images?.map((img) => getFullImageUrl(img.url)) || [];
 
-  // ✅ Handle profile navigation
-  const handleProfilePress = () => {
-    // Don't navigate for anonymous posts
-    if (post.isAnonymous) return;
+  // Initialize image error array
+  React.useEffect(() => {
+    if (postImages.length > 0) {
+      setPostImageError(new Array(postImages.length).fill(false));
+    }
+  }, [postImages.length]);
 
+  // Handle profile navigation
+  const handleProfilePress = useCallback(() => {
+    if (post.isAnonymous) return;
     const userId = post.user?._id?.toString();
     if (!userId) return;
-
-    // Check if it's the current user's own profile
     if (userId === currentUser?.id?.toString()) {
       router.push("/(tabs)/profile");
     } else {
       router.push(`/profile/${userId}`);
     }
-  };
+  }, [post.isAnonymous, post.user?._id, currentUser?.id, router]);
 
-  const handleShareSuccess = (data: any) => {
+  // Handle image scroll
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const contentOffsetX = event.nativeEvent.contentOffset.x;
+      const index = Math.round(contentOffsetX / containerWidth);
+      setCurrentImageIndex(index);
+    },
+    [containerWidth],
+  );
+
+  // Handle image error
+  const handleImageError = useCallback((index: number) => {
+    setPostImageError((prev) => {
+      const newErrors = [...prev];
+      newErrors[index] = true;
+      return newErrors;
+    });
+  }, []);
+
+  // Go to specific image
+  const goToImage = useCallback(
+    (index: number) => {
+      setCurrentImageIndex(index);
+      if (scrollViewRef.current && containerWidth > 0) {
+        scrollViewRef.current.scrollTo({
+          x: index * containerWidth,
+          animated: true,
+        });
+      }
+    },
+    [containerWidth],
+  );
+
+  // ✅ Share handler
+  const handleSharePress = useCallback(() => {
+    setShareModalVisible(true);
+  }, []);
+
+  const handleShareClose = useCallback(() => {
+    setShareModalVisible(false);
+  }, []);
+
+  const handleShareSuccess = useCallback((data: any) => {
     Alert.alert("Shared", "Post shared successfully!");
-  };
+  }, []);
 
-  const renderPostAvatar = () => {
+  // ─── Visibility Badge Helpers (Same as PostCard) ───
+  const getVisibilityIconName = useCallback((): IconName => {
+    const icons: Record<string, IconName> = {
+      campus: "school-outline",
+      connections: "people-outline",
+    };
+    return icons[post.visibility] || "globe-outline";
+  }, [post.visibility]);
+
+  const getVisibilityDisplayName = useCallback((): string => {
+    const names: Record<string, string> = {
+      campus: "Campus",
+      connections: "Connections",
+    };
+    return names[post.visibility] || "Public";
+  }, [post.visibility]);
+
+  const getVisibilityBadgeColor = useCallback((): string => {
+    const colors: Record<string, string> = {
+      campus: "#3b82f6",
+      connections: "#8b5cf6",
+    };
+    return colors[post.visibility] || "#9ca3af";
+  }, [post.visibility]);
+
+  // Render avatar (same logic as PostCard)
+  const renderAvatar = () => {
+    const avatarSize = 40;
+
+    // Anonymous post
     if (post.isAnonymous) {
       return (
-        <View style={[styles.avatar, styles.anonymousAvatar]}>
+        <View
+          style={[
+            styles.avatar,
+            styles.anonymousAvatar,
+            {
+              width: avatarSize,
+              height: avatarSize,
+              borderRadius: avatarSize / 2,
+            },
+          ]}
+        >
           <Ionicons name="eye-off-outline" size={20} color="#9ca3af" />
         </View>
       );
     }
 
-    if (avatarError) {
+    // Has profile picture and no error
+    if (post.user?.profilePicture && !avatarError) {
       return (
         <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7}>
-          <View style={[styles.avatar, styles.fallbackAvatar]}>
-            <Text style={styles.fallbackAvatarText}>
-              {userDisplay.name.charAt(0).toUpperCase()}
-            </Text>
-          </View>
+          <BlurhashImage
+            uri={getFullImageUrl(post.user.profilePicture)}
+            style={[
+              styles.avatar,
+              {
+                width: avatarSize,
+                height: avatarSize,
+                borderRadius: avatarSize / 2,
+              },
+            ]}
+            transition={200}
+            onError={() => setAvatarError(true)}
+          />
         </TouchableOpacity>
       );
     }
 
-    const profileImageUrl = post.user?.profilePicture || undefined;
-    const imageSource = getProfileImageSource(profileImageUrl);
-
-    if (imageSource === DEFAULT_AVATAR) {
-      return (
-        <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7}>
-          <Image source={DEFAULT_AVATAR} style={styles.avatar} />
-        </TouchableOpacity>
-      );
-    }
-
+    // Fallback avatar with initials
     return (
       <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7}>
-        <Image
-          source={imageSource}
-          style={styles.avatar}
-          onError={() => setAvatarError(true)}
-        />
+        <View
+          style={[
+            styles.avatar,
+            styles.fallbackAvatar,
+            {
+              width: avatarSize,
+              height: avatarSize,
+              borderRadius: avatarSize / 2,
+            },
+          ]}
+        >
+          <Text style={styles.fallbackAvatarText}>
+            {userDisplay.name.charAt(0).toUpperCase()}
+          </Text>
+        </View>
       </TouchableOpacity>
     );
   };
 
-  const renderDots = () => {
+  // Render image indicators (dots)
+  const renderIndicators = () => {
     if (postImages.length <= 1) return null;
-
     return (
-      <View style={styles.dotContainer}>
-        {Array.from({ length: postImages.length }).map((_, index) => (
-          <View
+      <View style={styles.indicatorsContainer}>
+        {postImages.map((_, index) => (
+          <TouchableOpacity
             key={index}
+            onPress={() => goToImage(index)}
             style={[
-              styles.dot,
-              index === currentImageIndex && styles.activeDot,
+              styles.indicator,
+              index === currentImageIndex && styles.activeIndicator,
             ]}
           />
         ))}
@@ -151,27 +232,52 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     );
   };
 
+  // Render image counter
   const renderCounter = () => {
     if (postImages.length <= 1) return null;
-
     return (
-      <View style={styles.counterBadge}>
-        <Text style={styles.counterText}>
+      <View style={styles.imageCounter}>
+        <Ionicons name="images-outline" size={14} color="white" />
+        <Text style={styles.imageCounterText}>
           {currentImageIndex + 1}/{postImages.length}
         </Text>
       </View>
     );
   };
 
+  const visibilityIconName = getVisibilityIconName();
+  const visibilityBadgeColor = getVisibilityBadgeColor();
+
+  // ✅ Prepare share data
+  const sharePostData = {
+    postId: post._id,
+    postContent: post.content || "",
+    postImage: post.images?.[0]?.url
+      ? getFullImageUrl(post.images[0].url)
+      : undefined,
+    postAuthorName: post.isAnonymous
+      ? "Anonymous"
+      : post.user?.name || "Unknown",
+    postAuthorAvatar: post.user?.profilePicture
+      ? getFullImageUrl(post.user.profilePicture)
+      : undefined,
+    isAnonymous: post.isAnonymous || false,
+  };
+
   return (
     <>
-      <View style={styles.postCard}>
-        {/* User Info */}
-        <View style={styles.userRow}>
-          {renderPostAvatar()}
+      <View
+        style={styles.container}
+        onLayout={(event) => {
+          setContainerWidth(event.nativeEvent.layout.width);
+        }}
+      >
+        {/* Header - Same as PostCard with visibility badge */}
+        <View style={styles.header}>
+          {renderAvatar()}
+
           <View style={styles.userInfo}>
-            <View style={styles.nameContainer}>
-              {/* ✅ Name is now pressable for profile navigation */}
+            <View style={styles.nameRow}>
               <TouchableOpacity
                 onPress={handleProfilePress}
                 disabled={post.isAnonymous}
@@ -179,89 +285,164 @@ const PostPreview: React.FC<PostPreviewProps> = ({
               >
                 <Text style={styles.userName}>{userDisplay.name}</Text>
               </TouchableOpacity>
+
+              {/* ✅ VISIBILITY BADGE - Same as PostCard */}
+              <View
+                style={[
+                  styles.visibilityBadge,
+                  { backgroundColor: `${visibilityBadgeColor}15` },
+                ]}
+              >
+                <Ionicons
+                  name={visibilityIconName}
+                  size={12}
+                  color={visibilityBadgeColor}
+                />
+                <Text
+                  style={[
+                    styles.visibilityBadgeText,
+                    { color: visibilityBadgeColor },
+                  ]}
+                >
+                  {getVisibilityDisplayName()}
+                </Text>
+              </View>
             </View>
             <Text style={styles.timestamp}>
-              {formatTimeAgo(post.createdAt)}
+              @{post.isAnonymous ? "anonymous" : post.user?.username || "user"}{" "}
+              • {formatTimeAgo(post.createdAt)}
             </Text>
           </View>
         </View>
 
-        {/* Post Text */}
-        <Text style={styles.postText}>{post.content}</Text>
+        {/* Post Content - Same as PostCard */}
+        {post.content ? (
+          <Text style={styles.content}>{post.content}</Text>
+        ) : null}
 
-        {/* Images */}
+        {/* Post Images - Same as PostCard */}
         {postImages.length > 0 && (
           <View style={styles.imagesWrapper}>
-            <ScrollView
-              horizontal
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
-              onScrollBeginDrag={() => {
-                isScrollingRef.current = true;
-              }}
-              onScrollEndDrag={() => {
-                isScrollingRef.current = false;
-              }}
-              onMomentumScrollEnd={(e) => {
-                const index = Math.round(
-                  e.nativeEvent.contentOffset.x / imageWidth,
-                );
-                setCurrentImageIndex(index);
-                isScrollingRef.current = false;
-              }}
-              scrollEventThrottle={16}
-            >
-              {postImages.map((url, index) => (
-                <TouchableOpacity
-                  key={index}
-                  onPress={() => onImagePress(index)}
-                  activeOpacity={0.9}
-                >
-                  <Image
-                    source={{ uri: url }}
+            {postImages.length === 1 ? (
+              // Single image
+              <TouchableOpacity
+                activeOpacity={0.95}
+                onPress={() => onImagePress(0)}
+              >
+                {postImageError[0] ? (
+                  <View
                     style={[
-                      styles.image,
-                      { width: imageWidth, height: imageHeight },
+                      styles.imageErrorContainer,
+                      { width: containerWidth, height: 400 },
                     ]}
-                    resizeMode="cover"
+                  >
+                    <Ionicons name="image-outline" size={48} color="#9ca3af" />
+                    <Text style={styles.imageErrorText}>
+                      Image failed to load
+                    </Text>
+                  </View>
+                ) : (
+                  <BlurhashImage
+                    uri={postImages[0]}
+                    style={[
+                      styles.postImage,
+                      { width: containerWidth, height: 400 },
+                    ]}
+                    transition={300}
+                    recyclingKey={postImages[0]}
+                    onError={() => handleImageError(0)}
                   />
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            {renderDots()}
-            {renderCounter()}
+                )}
+              </TouchableOpacity>
+            ) : (
+              // Multiple images carousel
+              <View>
+                <ScrollView
+                  ref={scrollViewRef}
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  onScroll={handleScroll}
+                  scrollEventThrottle={16}
+                  decelerationRate="fast"
+                >
+                  {postImages.map((url, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      activeOpacity={0.95}
+                      onPress={() => onImagePress(index)}
+                    >
+                      {postImageError[index] ? (
+                        <View
+                          style={[
+                            styles.imageErrorContainer,
+                            { width: containerWidth, height: 400 },
+                          ]}
+                        >
+                          <Ionicons
+                            name="image-outline"
+                            size={48}
+                            color="#9ca3af"
+                          />
+                          <Text style={styles.imageErrorText}>
+                            Image failed to load
+                          </Text>
+                        </View>
+                      ) : (
+                        <BlurhashImage
+                          uri={url}
+                          style={[
+                            styles.postImage,
+                            { width: containerWidth, height: 400 },
+                          ]}
+                          transition={300}
+                          recyclingKey={url}
+                          onError={() => handleImageError(index)}
+                        />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+                {renderIndicators()}
+                {renderCounter()}
+              </View>
+            )}
           </View>
         )}
 
-        {/* Stats with Like, Comment, and Share Buttons */}
-        <View style={styles.stats}>
+        {/* Post Actions - Same as PostCard */}
+        <View style={styles.actions}>
+          {/* Like Button */}
           <TouchableOpacity
-            style={styles.stat}
+            style={styles.action}
             onPress={onLikePress}
             activeOpacity={0.7}
           >
             <Ionicons
               name={isLiked ? "heart" : "heart-outline"}
-              size={18}
+              size={20}
               color={isLiked ? "#ef4444" : "#6b7280"}
             />
-            <Text style={[styles.statText, isLiked && styles.statTextActive]}>
+            <Text
+              style={[styles.actionText, isLiked && styles.actionTextLiked]}
+            >
               {likesCount || 0}
             </Text>
           </TouchableOpacity>
 
-          <View style={styles.stat}>
-            <Ionicons name="chatbubble-outline" size={18} color="#6b7280" />
-            <Text style={styles.statText}>{post.commentCount || 0}</Text>
+          {/* Comment Button (display only in preview) */}
+          <View style={styles.action}>
+            <Ionicons name="chatbubble-outline" size={20} color="#6b7280" />
+            <Text style={styles.actionText}>{post.commentCount || 0}</Text>
           </View>
 
-          {/* Share button */}
+          {/* ✅ Share Button - Now Functional */}
           <TouchableOpacity
-            style={styles.stat}
-            onPress={() => setShareModalVisible(true)}
+            style={styles.action}
+            onPress={handleSharePress}
             activeOpacity={0.7}
           >
-            <Ionicons name="share-outline" size={18} color="#6b7280" />
+            <Ionicons name="share-outline" size={20} color="#6b7280" />
           </TouchableOpacity>
         </View>
 
@@ -271,51 +452,35 @@ const PostPreview: React.FC<PostPreviewProps> = ({
         </View>
       </View>
 
-      {/* Share Post Modal */}
+      {/* ✅ Share Modal */}
       <SharePostModal
         visible={shareModalVisible}
-        onClose={() => setShareModalVisible(false)}
+        onClose={handleShareClose}
         onSuccess={handleShareSuccess}
-        postId={post._id}
-        postContent={post.content}
-        postImage={
-          post.images?.[0]?.url
-            ? getFullImageUrl(post.images[0].url)
-            : undefined
-        }
-        postAuthorName={userDisplay.name}
-        postAuthorAvatar={
-          post.user?.profilePicture
-            ? getFullImageUrl(post.user.profilePicture)
-            : undefined
-        }
-        isAnonymous={post.isAnonymous}
+        {...sharePostData}
       />
     </>
   );
 };
 
 const styles = StyleSheet.create({
-  postCard: {
+  container: {
     backgroundColor: "#fff",
-    padding: 16,
+    paddingTop: 16,
     borderBottomWidth: 1,
     borderBottomColor: "#f3f4f6",
   },
-  userRow: {
+  header: {
     flexDirection: "row",
     alignItems: "center",
+    paddingHorizontal: 20,
     marginBottom: 12,
   },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
     marginRight: 12,
     backgroundColor: "#f3f4f6",
   },
   anonymousAvatar: {
-    backgroundColor: "#f3f4f6",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
@@ -329,44 +494,71 @@ const styles = StyleSheet.create({
   },
   fallbackAvatarText: {
     color: "#fff",
-    fontSize: 14,
-    fontWeight: "bold",
+    fontSize: 16,
+    fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
   },
   userInfo: {
     flex: 1,
   },
-  nameContainer: {
+  nameRow: {
     flexDirection: "row",
     alignItems: "center",
+    flexWrap: "wrap",
     gap: 4,
+    marginBottom: 2,
   },
   userName: {
     fontSize: 15,
     fontWeight: "600",
     color: "#111827",
+    fontFamily: "SofiaSans-Bold",
+  },
+  visibilityBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginLeft: 4,
+  },
+  visibilityBadgeText: {
+    fontSize: 10,
+    fontFamily: "SofiaSans-Regular",
   },
   timestamp: {
     fontSize: 13,
     color: "#6b7280",
-    marginTop: 2,
+    fontFamily: "SofiaSans-Regular",
   },
-  postText: {
+  content: {
     fontSize: 15,
     lineHeight: 20,
     color: "#374151",
-    marginBottom: 16,
+    marginBottom: 12,
+    paddingHorizontal: 20,
+    fontFamily: "SofiaSans-Regular",
   },
   imagesWrapper: {
-    position: "relative",
-    marginBottom: 16,
+    marginBottom: 12,
   },
-  image: {
+  postImage: {
     backgroundColor: "#f3f4f6",
-    borderRadius: 12,
   },
-  dotContainer: {
+  imageErrorContainer: {
+    backgroundColor: "#f3f4f6",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  imageErrorText: {
+    color: "#9ca3af",
+    fontSize: 14,
+    marginTop: 8,
+  },
+  indicatorsContainer: {
     position: "absolute",
-    bottom: 12,
+    bottom: 16,
     left: 0,
     right: 0,
     flexDirection: "row",
@@ -374,19 +566,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
   },
-  dot: {
+  indicator: {
     width: 6,
     height: 6,
     borderRadius: 3,
     backgroundColor: "rgba(255, 255, 255, 0.6)",
   },
-  activeDot: {
+  activeIndicator: {
     backgroundColor: "#fff",
     width: 8,
     height: 8,
     borderRadius: 4,
   },
-  counterBadge: {
+  imageCounter: {
     position: "absolute",
     top: 12,
     right: 12,
@@ -394,36 +586,43 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
   },
-  counterText: {
-    color: "#fff",
+  imageCounterText: {
+    color: "white",
     fontSize: 12,
-    fontFamily: "SofiaSans-Regular",
     fontWeight: "600",
   },
-  stats: {
+  actions: {
     flexDirection: "row",
-    gap: 16,
-    paddingTop: 12,
+    justifyContent: "space-around",
+    alignItems: "center",
+    paddingHorizontal: 0,
+    paddingVertical: 12,
     borderTopWidth: 1,
     borderTopColor: "#f3f4f6",
   },
-  stat: {
+  action: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
   },
-  statText: {
+  actionText: {
     fontSize: 14,
     fontFamily: "SofiaSans-Regular",
     color: "#6b7280",
   },
-  statTextActive: {
+  actionTextLiked: {
     color: "#ef4444",
   },
   commentsHeader: {
+    paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#f3f4f6",
   },
   commentsTitle: {
     fontSize: 16,
@@ -433,4 +632,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default PostPreview;
+export default React.memo(PostPreview);

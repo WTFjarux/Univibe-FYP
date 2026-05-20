@@ -70,7 +70,6 @@ const isUserBlocked = async (userId, targetUserId) => {
   try {
     return await Block.areUsersBlocked(userId, targetUserId);
   } catch (error) {
-    console.error("isUserBlocked error:", error);
     return true;
   }
 };
@@ -83,7 +82,6 @@ const areUsersConnected = async (userId1, userId2) => {
       (connId) => connId.toString() === userId2.toString(),
     );
   } catch (error) {
-    console.error("areUsersConnected error:", error.message);
     return false;
   }
 };
@@ -127,6 +125,73 @@ const ensureRoomExists = async (roomId, userId) => {
     }
   }
   return room;
+};
+
+/**
+ * Calculate total unread messages count for a user across all rooms.
+ * Used by both API endpoint and socket emission.
+ */
+const calculateUnreadCount = async (userId) => {
+  const blockedUserIds = await BlockService.getBlockedUserIds(userId);
+
+  const rooms = await ChatRoom.find({
+    "participants.userId": userId,
+    isActive: { $ne: false },
+  }).lean();
+
+  let totalUnread = 0;
+
+  for (const room of rooms) {
+    // Skip blocked user's direct chats
+    if (room.type === "direct") {
+      const otherParticipant = room.participants.find(
+        (p) => p.userId.toString() !== userId.toString(),
+      );
+      if (
+        otherParticipant &&
+        blockedUserIds.includes(otherParticipant.userId.toString())
+      ) {
+        continue;
+      }
+    }
+
+    // Get cleared timestamp for this user
+    const clearedEntry = (room.clearedBy || []).find(
+      (c) => c.user.toString() === userId.toString(),
+    );
+    const clearedAt = clearedEntry ? clearedEntry.clearedAt : null;
+
+    // Build query for unread messages
+    const unreadQuery = {
+      roomId: room.roomId,
+      sender: { $ne: userId },
+      "readBy.user": { $ne: userId },
+      isDeleted: { $ne: true },
+    };
+
+    // Apply clearedAt filter if exists
+    if (clearedAt) {
+      unreadQuery.createdAt = { $gt: clearedAt };
+    }
+
+    const count = await Message.countDocuments(unreadQuery);
+    totalUnread += count;
+  }
+
+  return totalUnread;
+};
+
+/**
+ * Emit updated unread count to a specific user via socket.
+ */
+const emitUnreadCountToUser = async (io, userId) => {
+  if (!io) return;
+  try {
+    const unreadCount = await calculateUnreadCount(userId);
+    io.to(`user_${userId}`).emit("chat:unreadCount", { count: unreadCount });
+  } catch (error) {
+    // Silent fail - don't break main flow
+  }
 };
 
 // -----------------------------------------------------------------------------
@@ -262,7 +327,6 @@ exports.getUserChatRooms = async (req, res) => {
         const messageQuery = {
           roomId: room.roomId,
           isDeleted: false,
-          deletedFor: { $ne: req.user.id },
         };
         if (clearedAt) messageQuery.createdAt = { $gt: clearedAt };
         const lastMsg = await Message.findOne(messageQuery)
@@ -297,7 +361,6 @@ exports.getUserChatRooms = async (req, res) => {
           sender: { $ne: req.user.id },
           "readBy.user": { $ne: req.user.id },
           isDeleted: false,
-          deletedFor: { $ne: req.user.id },
         };
         if (clearedAt) unreadQuery.createdAt = { $gt: clearedAt };
         const unreadCount = await Message.countDocuments(unreadQuery);
@@ -495,6 +558,11 @@ exports.deleteChatHistory = async (req, res) => {
       restoreOnNewMessage: true,
     });
     await room.save();
+
+    // Emit updated unread count after clearing chat
+    const io = req.app.get("io");
+    await emitUnreadCountToUser(io, userId);
+
     res.json({
       success: true,
       message: "Chat history deleted successfully",
@@ -651,8 +719,14 @@ exports.deleteMessage = async (req, res) => {
     if (msg.sender.toString() !== req.user.id)
       return res.status(403).json({ success: false, message: "Unauthorized" });
     msg.isDeleted = true;
+    msg.deletedFor = msg.deletedFor || [];
     msg.deletedFor.push(req.user.id);
     await msg.save();
+
+    // Emit updated unread count after deletion (might affect unread count)
+    const io = req.app.get("io");
+    await emitUnreadCountToUser(io, req.user.id);
+
     res.json({ success: true, message: "Deleted" });
   } catch (e) {
     console.error("deleteMessage error:", e);
@@ -668,6 +742,11 @@ exports.markMessageAsRead = async (req, res) => {
     );
     if (!msg)
       return res.status(404).json({ success: false, message: "Not found" });
+
+    // Emit updated unread count after marking as read
+    const io = req.app.get("io");
+    await emitUnreadCountToUser(io, req.user.id);
+
     res.json({ success: true, data: msg });
   } catch (e) {
     console.error("markMessageAsRead error:", e);
@@ -831,7 +910,6 @@ exports.forwardMessage = async (req, res) => {
             },
             updatedAt: new Date(),
             $inc: { messageCount: 1 },
-            $pull: { clearedBy: { user: userId } },
           },
         );
         if (io) {
@@ -842,6 +920,18 @@ exports.forwardMessage = async (req, res) => {
             "receive_message",
             formatMessage(populated, userId),
           );
+
+          // Emit unread count to all participants in the target room
+          const targetRoom = await ChatRoom.findOne({
+            roomId: targetRoomId,
+          }).lean();
+          if (targetRoom) {
+            for (const participant of targetRoom.participants) {
+              if (participant.userId.toString() !== userId) {
+                await emitUnreadCountToUser(io, participant.userId.toString());
+              }
+            }
+          }
         }
       }),
     );
@@ -893,6 +983,11 @@ exports.markRoomAsRead = async (req, res) => {
         { $addToSet: { "lastMessage.readBy": userId } },
       );
     const modifiedCount = await Message.markRoomAsRead(roomId, userId);
+
+    // Emit updated unread count after marking room as read
+    const io = req.app.get("io");
+    await emitUnreadCountToUser(io, userId);
+
     res.json({ success: true, message: "Marked as read", modifiedCount });
   } catch (error) {
     console.error("markRoomAsRead error:", error.message);
@@ -916,6 +1011,11 @@ exports.markRoomAsUnread = async (req, res) => {
       );
       await lastMsg.save();
     }
+
+    // Emit updated unread count after marking as unread
+    const io = req.app.get("io");
+    await emitUnreadCountToUser(io, req.user.id);
+
     res.json({ success: true });
   } catch (e) {
     console.error("markRoomAsUnread error:", e);
@@ -1058,7 +1158,6 @@ exports.sharePost = async (req, res) => {
             },
             updatedAt: new Date(),
             $inc: { messageCount: 1 },
-            $pull: { clearedBy: { user: userId } },
           },
         );
 
@@ -1070,6 +1169,18 @@ exports.sharePost = async (req, res) => {
             "receive_message",
             formatMessage(populated, userId),
           );
+
+          // Emit unread count to all participants
+          const targetRoom = await ChatRoom.findOne({
+            roomId: targetRoomId,
+          }).lean();
+          if (targetRoom) {
+            for (const participant of targetRoom.participants) {
+              if (participant.userId.toString() !== userId) {
+                await emitUnreadCountToUser(io, participant.userId.toString());
+              }
+            }
+          }
         }
       }),
     );
@@ -1158,8 +1269,25 @@ exports.uploadAudio = async (req, res) => {
       };
     const msg = await Message.create(data);
     const io = req.app.get("io");
-    if (io)
+    if (io) {
       io.to(roomId).emit("receive_message", formatMessage(msg, req.user.id));
+
+      // Emit unread count to other participants
+      if (room && room.type === "direct") {
+        const otherParticipant = room.participants.find(
+          (p) => p.userId.toString() !== req.user.id,
+        );
+        if (otherParticipant) {
+          await emitUnreadCountToUser(io, otherParticipant.userId.toString());
+        }
+      } else if (room && room.type === "group") {
+        for (const participant of room.participants) {
+          if (participant.userId.toString() !== req.user.id) {
+            await emitUnreadCountToUser(io, participant.userId.toString());
+          }
+        }
+      }
+    }
     await ChatRoom.findOneAndUpdate(
       { roomId },
       {
@@ -1173,7 +1301,6 @@ exports.uploadAudio = async (req, res) => {
         },
         updatedAt: new Date(),
         $inc: { messageCount: 1 },
-        $pull: { clearedBy: { user: req.user.id } },
       },
       { upsert: true },
     );
@@ -1239,8 +1366,25 @@ exports.uploadAttachments = async (req, res) => {
         deliveredTo: [{ user: req.user.id }],
       });
       const io = req.app.get("io");
-      if (io)
+      if (io) {
         io.to(roomId).emit("receive_message", formatMessage(msg, req.user.id));
+
+        // Emit unread count to other participants
+        if (room && room.type === "direct") {
+          const otherParticipant = room.participants.find(
+            (p) => p.userId.toString() !== req.user.id,
+          );
+          if (otherParticipant) {
+            await emitUnreadCountToUser(io, otherParticipant.userId.toString());
+          }
+        } else if (room && room.type === "group") {
+          for (const participant of room.participants) {
+            if (participant.userId.toString() !== req.user.id) {
+              await emitUnreadCountToUser(io, participant.userId.toString());
+            }
+          }
+        }
+      }
       await ChatRoom.findOneAndUpdate(
         { roomId },
         {
@@ -1254,7 +1398,6 @@ exports.uploadAttachments = async (req, res) => {
           },
           updatedAt: new Date(),
           $inc: { messageCount: 1 },
-          $pull: { clearedBy: { user: req.user.id } },
         },
         { upsert: true },
       );
@@ -1302,10 +1445,27 @@ exports.uploadAttachments = async (req, res) => {
     const formattedMessages = messages.map((m) =>
       formatMessage(m, req.user.id),
     );
-    if (io)
+    if (io) {
       formattedMessages.forEach((msg) =>
         io.to(roomId).emit("receive_message", msg),
       );
+
+      // Emit unread count to other participants
+      if (room && room.type === "direct") {
+        const otherParticipant = room.participants.find(
+          (p) => p.userId.toString() !== req.user.id,
+        );
+        if (otherParticipant) {
+          await emitUnreadCountToUser(io, otherParticipant.userId.toString());
+        }
+      } else if (room && room.type === "group") {
+        for (const participant of room.participants) {
+          if (participant.userId.toString() !== req.user.id) {
+            await emitUnreadCountToUser(io, participant.userId.toString());
+          }
+        }
+      }
+    }
     const lastMsg = messages[messages.length - 1];
     let lastMessageText = lastMsg.message;
     if (messages.length > 1) {
@@ -1335,7 +1495,6 @@ exports.uploadAttachments = async (req, res) => {
         },
         updatedAt: new Date(),
         $inc: { messageCount: messages.length },
-        $pull: { clearedBy: { user: req.user.id } },
       },
       { upsert: true },
     );
@@ -1421,56 +1580,24 @@ exports.getOtherUserProfile = async (req, res) => {
   }
 };
 
+/**
+ * Get total unread chat count for the authenticated user.
+ * Also emits the count via socket for real-time updates.
+ */
 exports.getUnreadChatCount = async (req, res) => {
   try {
     const userId = req.user._id || req.user.id;
+    const unreadCount = await calculateUnreadCount(userId);
 
-    const blockedUserIds = await BlockService.getBlockedUserIds(userId);
-
-    const rooms = await ChatRoom.find({
-      "participants.userId": userId,
-      isActive: { $ne: false },
-    }).select("roomId clearedBy participants type");
-
-    let totalUnread = 0;
-
-    for (const room of rooms) {
-      if (room.type === "direct") {
-        const otherParticipant = room.participants.find(
-          (p) => p.userId.toString() !== userId.toString(),
-        );
-        if (
-          otherParticipant &&
-          blockedUserIds.includes(otherParticipant.userId.toString())
-        ) {
-          continue;
-        }
-      }
-
-      const clearedEntry = (room.clearedBy || []).find(
-        (c) => c.user.toString() === userId.toString(),
-      );
-      const clearedAt = clearedEntry ? clearedEntry.clearedAt : null;
-
-      const unreadQuery = {
-        roomId: room.roomId,
-        sender: { $ne: userId },
-        "readBy.user": { $ne: userId },
-        isDeleted: false,
-        deletedFor: { $ne: userId },
-      };
-
-      if (clearedAt) {
-        unreadQuery.createdAt = { $gt: clearedAt };
-      }
-
-      const count = await Message.countDocuments(unreadQuery);
-      totalUnread += count;
+    // Also emit via socket for real-time sync
+    const io = req.app.get("io");
+    if (io) {
+      await emitUnreadCountToUser(io, userId);
     }
 
     res.json({
       success: true,
-      count: totalUnread,
+      count: unreadCount,
     });
   } catch (error) {
     console.error("Get unread chat count error:", error);
@@ -1480,3 +1607,7 @@ exports.getUnreadChatCount = async (req, res) => {
     });
   }
 };
+
+// Export the helper for use in other files (e.g., chatHandler)
+exports.emitUnreadCountToUser = emitUnreadCountToUser;
+exports.calculateUnreadCount = calculateUnreadCount;

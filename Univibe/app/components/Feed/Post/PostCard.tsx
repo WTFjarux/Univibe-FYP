@@ -4,7 +4,6 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   View,
   Text,
-  Image,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
@@ -15,6 +14,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, usePathname } from "expo-router";
+import BlurhashImage from "@/app/components/BlurhashImage";
 import { Post, getFullImageUrl } from "@/lib/services/postService";
 import { formatTimeAgo } from "@/lib/utils/formatTime";
 import PostOptionsModal from "./PostOptionsModal";
@@ -101,7 +101,6 @@ const PostCard: React.FC<PostCardProps> = ({
   const [displayCommentCount, setDisplayCommentCount] = useState(
     post.commentCount || 0,
   );
-
   const [isLiked, setIsLiked] = useState(post.isLiked || false);
   const [likesCount, setLikesCount] = useState(
     post.likeCount ?? post.likes?.length ?? 0,
@@ -119,25 +118,20 @@ const PostCard: React.FC<PostCardProps> = ({
   useEffect(() => {
     setDisplayCommentCount(post.commentCount || 0);
   }, [post.commentCount]);
-
   useEffect(() => {
     setIsLiked(post.isLiked || false);
     setLikesCount(post.likeCount ?? post.likes?.length ?? 0);
     setIsSaved(post.isSaved || false);
   }, [post.isLiked, post.likeCount, post.likes?.length, post.isSaved]);
-
   useEffect(() => {
     setLocalIsHidden(isHidden);
   }, [isHidden]);
-
   useEffect(() => {
     setLocalIsMuted(isMuted);
   }, [isMuted]);
-
   useEffect(() => {
     setLocalIsBlocked(isBlocked);
   }, [isBlocked]);
-
   useEffect(() => {
     setIsReported(post.isReported || false);
   }, [post.isReported]);
@@ -147,9 +141,7 @@ const PostCard: React.FC<PostCardProps> = ({
     const unsubComments = commentEvents.on(
       EVENTS.COMMENT_COUNT_CHANGED,
       (data: { postId: string; count: number }) => {
-        if (data.postId === post._id) {
-          setDisplayCommentCount(data.count);
-        }
+        if (data.postId === post._id) setDisplayCommentCount(data.count);
       },
     );
     return () => {
@@ -159,9 +151,8 @@ const PostCard: React.FC<PostCardProps> = ({
 
   // ===== Image Error Handling =====
   useEffect(() => {
-    if (post.images?.length > 0) {
+    if (post.images?.length > 0)
       setPostImageError(new Array(post.images.length).fill(false));
-    }
   }, [post.images?.length]);
 
   const handleImageError = useCallback((index: number) => {
@@ -179,16 +170,13 @@ const PostCard: React.FC<PostCardProps> = ({
     if (profile?._id) return profile._id.toString();
     return null;
   }, [user, profile]);
-
   const currentUserId = getCurrentUserId();
 
   const isOwnPost = useCallback((): boolean => {
-    if (post.isAnonymous && post.originalUser) {
+    if (post.isAnonymous && post.originalUser)
       return currentUserId === post.originalUser._id?.toString();
-    }
     return currentUserId === (post.user?._id ?? null)?.toString();
   }, [currentUserId, post.isAnonymous, post.originalUser, post.user]);
-
   const ownPost = isOwnPost();
 
   const getUserNameForActions = useCallback((): string => {
@@ -197,9 +185,8 @@ const PostCard: React.FC<PostCardProps> = ({
   }, [post.isAnonymous, post.user?.name]);
 
   const getUserIdForNavigation = useCallback((): string | null => {
-    if (post.isAnonymous && post.originalUser) {
+    if (post.isAnonymous && post.originalUser)
       return post.originalUser._id?.toString() ?? null;
-    }
     return post.user?._id ?? null;
   }, [post.isAnonymous, post.originalUser, post.user]);
 
@@ -211,32 +198,25 @@ const PostCard: React.FC<PostCardProps> = ({
       url: getFullImageUrl(image.url),
     }));
   }, [post.images]);
-
   const postImages = getPostImages();
 
-  // ===== Navigation Guard =====
+  // ===== Navigation =====
   const isAlreadyOnPostDetail = pathname === "/post/[id]";
-
   const handlePostNavigation = useCallback(() => {
-    if (disableNavigation) return;
-    if (isAlreadyOnPostDetail) return;
+    if (disableNavigation || isAlreadyOnPostDetail) return;
     router.push({ pathname: "/post/[id]", params: { id: post._id } });
   }, [disableNavigation, isAlreadyOnPostDetail, post._id, router]);
 
-  // ===== Profile Navigation =====
   const handleUserPress = useCallback(() => {
     try {
       const userId = getUserIdForNavigation();
       if (!userId) return;
-
       if (onProfilePress) {
         onProfilePress(userId);
+      } else if (userId === currentUserId) {
+        router.push("/(tabs)/profile");
       } else {
-        if (userId === currentUserId) {
-          router.push("/(tabs)/profile");
-        } else {
-          router.push(`/profile/${userId}`);
-        }
+        router.push(`/profile/${userId}`);
       }
     } catch (error) {
       console.error("Navigation error in PostCard:", error);
@@ -246,9 +226,9 @@ const PostCard: React.FC<PostCardProps> = ({
   // ===== Image Carousel =====
   const handleScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const scrollPosition = event.nativeEvent.contentOffset.x;
-      const index = Math.round(scrollPosition / containerWidth);
-      setCurrentImageIndex(index);
+      setCurrentImageIndex(
+        Math.round(event.nativeEvent.contentOffset.x / containerWidth),
+      );
     },
     [containerWidth],
   );
@@ -274,7 +254,6 @@ const PostCard: React.FC<PostCardProps> = ({
     };
     return icons[post.visibility] || "globe-outline";
   }, [post.visibility]);
-
   const getVisibilityDisplayName = useCallback((): string => {
     const names: Record<string, string> = {
       campus: "Campus",
@@ -282,7 +261,6 @@ const PostCard: React.FC<PostCardProps> = ({
     };
     return names[post.visibility] || "Public";
   }, [post.visibility]);
-
   const getVisibilityBadgeColor = useCallback((): string => {
     const colors: Record<string, string> = {
       campus: "#3b82f6",
@@ -294,19 +272,13 @@ const PostCard: React.FC<PostCardProps> = ({
   // ===== Action Handlers =====
   const handleMorePress = useCallback(() => {
     setOptionsVisible(true);
-    if (onOptionsOpen) {
-      onOptionsOpen();
-    }
+    onOptionsOpen?.();
   }, [onOptionsOpen]);
-
   const handleOptionsClose = useCallback(() => {
     setOptionsVisible(false);
-    if (onOptionsClose) {
-      onOptionsClose();
-    }
+    onOptionsClose?.();
   }, [onOptionsClose]);
 
-  // ===== Construct post data for modal =====
   const postData = {
     postId: post._id,
     isOwnPost: ownPost,
@@ -318,11 +290,10 @@ const PostCard: React.FC<PostCardProps> = ({
     userId: post.user?._id ?? undefined,
     userName: getUserNameForActions(),
   };
-
   const visibilityIconName = getVisibilityIconName();
   const visibilityBadgeColor = getVisibilityBadgeColor();
 
-  // ===== Render Functions (unchanged from original) =====
+  // ===== RENDER: Indicators =====
   const renderIndicators = useCallback(() => {
     if (postImages.length <= 1) return null;
     return (
@@ -344,6 +315,7 @@ const PostCard: React.FC<PostCardProps> = ({
     );
   }, [postImages, currentImageIndex, goToImage]);
 
+  // ===== RENDER: Single Image =====
   const renderSingleImage = useCallback(() => {
     if (containerWidth === 0) return null;
     const image = postImages[0];
@@ -368,13 +340,14 @@ const PostCard: React.FC<PostCardProps> = ({
 
     return (
       <TouchableOpacity activeOpacity={0.95} onPress={() => onImagePress?.(0)}>
-        <Image
-          source={{ uri: image.url }}
+        <BlurhashImage
+          uri={image.url}
           style={[
             styles.postImage,
             { width: containerWidth, height: imageHeight },
           ]}
-          resizeMode="cover"
+          transition={300}
+          recyclingKey={image.url}
           onError={() => handleImageError(0)}
         />
       </TouchableOpacity>
@@ -389,9 +362,9 @@ const PostCard: React.FC<PostCardProps> = ({
     onImagePress,
   ]);
 
+  // ===== RENDER: Multiple Images =====
   const renderMultipleImages = useCallback(() => {
     if (containerWidth === 0) return null;
-
     return (
       <View style={styles.multiImageContainer}>
         <ScrollView
@@ -432,13 +405,14 @@ const PostCard: React.FC<PostCardProps> = ({
                 activeOpacity={0.95}
                 onPress={() => onImagePress?.(index)}
               >
-                <Image
-                  source={{ uri: image.url }}
+                <BlurhashImage
+                  uri={image.url}
                   style={[
                     styles.postImage,
                     { width: containerWidth, height: imageHeight },
                   ]}
-                  resizeMode="cover"
+                  transition={300}
+                  recyclingKey={image.url}
                   onError={() => handleImageError(index)}
                 />
               </TouchableOpacity>
@@ -460,6 +434,7 @@ const PostCard: React.FC<PostCardProps> = ({
     onImagePress,
   ]);
 
+  // ===== RENDER: Avatar =====
   const renderAvatar = useCallback(() => {
     const avatarSize = compact ? 28 : 40;
 
@@ -495,8 +470,8 @@ const PostCard: React.FC<PostCardProps> = ({
             }}
             disabled={compact}
           >
-            <Image
-              source={{ uri: getFullImageUrl(post.user.profilePicture) }}
+            <BlurhashImage
+              uri={getFullImageUrl(post.user.profilePicture)}
               style={[
                 styles.postAvatar,
                 {
@@ -505,6 +480,7 @@ const PostCard: React.FC<PostCardProps> = ({
                   borderRadius: avatarSize / 2,
                 },
               ]}
+              transition={200}
               onError={() => setAvatarError(true)}
             />
           </TouchableOpacity>
@@ -559,7 +535,7 @@ const PostCard: React.FC<PostCardProps> = ({
     );
   }, [post.isAnonymous, post.user, avatarError, compact, handleUserPress]);
 
-  // ===== Main Render =====
+  // ===== MAIN RENDER =====
   return (
     <View
       style={[styles.postCard, compact && styles.compactPostCard]}
@@ -592,11 +568,9 @@ const PostCard: React.FC<PostCardProps> = ({
                 {getUserNameForActions()}
               </Text>
             </Pressable>
-
             {post.user?.verified && !compact && (
               <Ionicons name="checkmark-circle" size={16} color="#10b981" />
             )}
-
             {!compact && (
               <View
                 style={[
@@ -620,7 +594,6 @@ const PostCard: React.FC<PostCardProps> = ({
               </View>
             )}
           </View>
-
           <Pressable onPress={handlePostNavigation}>
             <Text
               style={[
@@ -704,7 +677,6 @@ const PostCard: React.FC<PostCardProps> = ({
               {likesCount}
             </Text>
           </TouchableOpacity>
-
           <TouchableOpacity
             style={styles.postAction}
             onPress={(e) => {
@@ -726,24 +698,21 @@ const PostCard: React.FC<PostCardProps> = ({
               {displayCommentCount}
             </Text>
           </TouchableOpacity>
-
           {!compact && (
-            <>
-              <TouchableOpacity
-                style={styles.postAction}
-                onPress={(e) => {
-                  e.stopPropagation();
-                  onSharePress(post._id);
-                }}
-              >
-                <Ionicons name="share-outline" size={20} color="#6b7280" />
-              </TouchableOpacity>
-            </>
+            <TouchableOpacity
+              style={styles.postAction}
+              onPress={(e) => {
+                e.stopPropagation();
+                onSharePress(post._id);
+              }}
+            >
+              <Ionicons name="share-outline" size={20} color="#6b7280" />
+            </TouchableOpacity>
           )}
         </View>
       )}
 
-      {/* Post Options Modal - Now pure presentational, no ReportModal inside */}
+      {/* Post Options Modal */}
       {!compact && (
         <PostOptionsModal
           visible={optionsVisible}
@@ -753,9 +722,9 @@ const PostCard: React.FC<PostCardProps> = ({
           onDelete={onDelete || (() => {})}
           onSave={onSave || (() => {})}
           onReport={onReport || (() => {})}
-          onHide={localIsHidden ? onUnhide || (() => {}) : onHide || (() => {})}
           onShare={onSharePress}
           onCopyLink={onCopyLink || (() => {})}
+          onHide={localIsHidden ? onUnhide || (() => {}) : onHide || (() => {})}
           onMuteUser={onMuteUser || (() => {})}
           onBlockUser={onBlockUser || (() => {})}
         />
@@ -764,18 +733,21 @@ const PostCard: React.FC<PostCardProps> = ({
   );
 };
 
-// ===== Styles (unchanged from original) =====
+// ===== Styles =====
 const styles = StyleSheet.create({
   postCard: {
     backgroundColor: "white",
-    marginBottom: 16,
-    borderRadius: 16,
+    marginBottom: 8, 
+    borderRadius: 0,
     overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
+    // Removed shadow for cleaner flat look
+    shadowColor: "transparent",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
+    borderBottomWidth: 1, 
+    borderBottomColor: "#f3f4f6", 
   },
   compactPostCard: {
     marginBottom: 0,
@@ -860,7 +832,7 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
   },
   imagesContainer: { position: "relative", marginBottom: 12 },
-  postImage: { backgroundColor: "#f3f4f6", borderRadius: 12 },
+  postImage: { backgroundColor: "#f3f4f6" },
   multiImageContainer: { position: "relative" },
   indicatorsContainer: {
     position: "absolute",
@@ -907,7 +879,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
+    paddingHorizontal: 50,
     paddingVertical: 12,
     borderTopWidth: 1,
     borderTopColor: "#f3f4f6",

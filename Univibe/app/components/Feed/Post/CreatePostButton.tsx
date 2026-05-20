@@ -55,10 +55,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "white",
-    marginHorizontal: 20,
     marginBottom: 20,
     padding: 16,
-    borderRadius: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -76,7 +74,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     color: "#9ca3af",
-    fontFamily:"SofiaSans-Regular",
+    fontFamily: "SofiaSans-Regular",
   },
 });
 

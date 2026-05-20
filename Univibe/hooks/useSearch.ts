@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react"; // Added useEffect
 import { useDebounce } from "./useDebounce";
 import { useRecentSearches } from "./useRecentSearches";
 import {
@@ -59,7 +59,7 @@ interface UseSearchReturn {
  * Main search hook that orchestrates all search functionality.
  *
  * Features:
- * - Debounced search (300ms)
+ * - Debounced auto-search (300ms)
  * - Category-based results (all/users/posts/events)
  * - Pagination per category
  * - Recent searches management
@@ -109,6 +109,15 @@ export function useSearch(): UseSearchReturn {
 
   // Track if a search is in progress to prevent duplicate requests
   const searchInProgress = useRef(false);
+
+  // ✅ AUTO-SEARCH: Trigger search when debounced query changes
+  useEffect(() => {
+    if (debouncedQuery.trim().length >= 2) {
+      performSearch(activeCategory, debouncedQuery);
+    } else if (debouncedQuery.trim().length === 0) {
+      clearResults();
+    }
+  }, [debouncedQuery]); // Re-run when debounced query changes
 
   /**
    * Perform search for the current active category

@@ -30,6 +30,7 @@ import socketService from "../../lib/services/socketService";
 import NotificationItem from "../components/Notifications/notificationItem";
 import PendingRequestItem from "../components/Notifications/pendingRequestItem";
 import DateSectionHeader from "../components/Notifications/dateSectionHeader";
+import NotificationsSkeleton from "../components/Notifications/NotificationsSkeleton";
 
 interface SectionData {
   title: string;
@@ -458,13 +459,7 @@ export default function NotificationsScreen() {
   };
 
   if (loading && notifications.length === 0 && pendingRequests.length === 0) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8b5cf6" />
-        </View>
-      </SafeAreaView>
-    );
+    return <NotificationsSkeleton />;
   }
 
   // Prepare data for FlatList

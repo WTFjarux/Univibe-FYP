@@ -1,5 +1,3 @@
-// hooks/chatList/useChatListSocket.ts
-
 import { useEffect, useRef, useCallback } from "react";
 import socketService from "../../lib/services/socketService";
 import type {
@@ -20,6 +18,7 @@ interface UseChatListSocketProps {
   onReactionUpdated: (data: ReactionData) => void;
   onChatCleared?: (data: { roomId: string }) => void;
   onChatRestored?: (data: { roomId: string }) => void;
+  onUnreadCountUpdate?: (data: { count: number }) => void;
 }
 
 // -----------------------------------------------------------------------------
@@ -33,9 +32,22 @@ export const useChatListSocket = ({
   onReactionUpdated,
   onChatCleared,
   onChatRestored,
+  onUnreadCountUpdate,
 }: UseChatListSocketProps) => {
   const isConnectedRef = useRef(false);
   const isListenersAttachedRef = useRef(false);
+
+  // Store the actual listener function references for cleanup
+  const listenerRefs = useRef<{
+    handleNewMessage?: (data: any) => void;
+    handleMessagesRead?: (data: any) => void;
+    handleDelete?: (data: any) => void;
+    handleReaction?: (data: any) => void;
+    handleChatCleared?: (data: any) => void;
+    handleChatRestored?: (data: any) => void;
+    handleGroupUpdated?: (data: any) => void;
+    handleUnreadCount?: (data: any) => void;
+  }>({});
 
   // Stores latest handler references; updated every render to prevent staleness
   const handlersRef = useRef({
@@ -45,6 +57,7 @@ export const useChatListSocket = ({
     onReactionUpdated,
     onChatCleared,
     onChatRestored,
+    onUnreadCountUpdate,
   });
 
   handlersRef.current = {
@@ -54,6 +67,7 @@ export const useChatListSocket = ({
     onReactionUpdated,
     onChatCleared,
     onChatRestored,
+    onUnreadCountUpdate,
   };
 
   // ---------------------------------------------------------------------------
@@ -66,7 +80,6 @@ export const useChatListSocket = ({
     }
   }, []);
 
-  // Store error handler in ref for cleanup access
   const handleErrorRef = useRef(handleError);
   handleErrorRef.current = handleError;
 
@@ -77,6 +90,7 @@ export const useChatListSocket = ({
   const attachListeners = useCallback(() => {
     if (isListenersAttachedRef.current) return;
 
+    // Create stable listener functions and store references for cleanup
     const handleNewMessage = (data: SocketMessageData) => {
       handlersRef.current.onNewMessage(data);
     };
@@ -101,17 +115,29 @@ export const useChatListSocket = ({
       handlersRef.current.onChatRestored?.(data);
     };
 
-    // ✅ Group updated handler - refreshes room to get new name/photo
     const handleGroupUpdated = (data: { roomId: string }) => {
       if (data.roomId) {
         handlersRef.current.onChatRestored?.({ roomId: data.roomId });
       }
     };
 
-    // Store group handler in ref for cleanup access
-    const groupHandlerRef = { current: handleGroupUpdated };
-    (attachListeners as any).__groupHandler = groupHandlerRef;
+    const handleUnreadCount = (data: { count: number }) => {
+      handlersRef.current.onUnreadCountUpdate?.(data);
+    };
 
+    // Store references for cleanup
+    listenerRefs.current = {
+      handleNewMessage,
+      handleMessagesRead,
+      handleDelete,
+      handleReaction,
+      handleChatCleared,
+      handleChatRestored,
+      handleGroupUpdated,
+      handleUnreadCount,
+    };
+
+    // Register listeners
     socketService.on("receive_message", handleNewMessage);
     socketService.on("messages_read", handleMessagesRead);
     socketService.on("message_deleted", handleDelete);
@@ -120,6 +146,7 @@ export const useChatListSocket = ({
     socketService.on("chat_cleared", handleChatCleared);
     socketService.on("chat_restored", handleChatRestored);
     socketService.on("group_updated", handleGroupUpdated);
+    socketService.on("chat:unreadCount", handleUnreadCount);
     socketService.on("error", handleErrorRef.current);
     socketService.on("socket_error", handleErrorRef.current);
 
@@ -163,22 +190,44 @@ export const useChatListSocket = ({
   }, [attachListeners]);
 
   // ---------------------------------------------------------------------------
-  // Cleanup
+  // Cleanup - ONLY remove listeners created by THIS hook
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
     return () => {
       if (isListenersAttachedRef.current) {
-        socketService.removeAllListeners("receive_message");
-        socketService.removeAllListeners("messages_read");
-        socketService.removeAllListeners("message_deleted");
-        socketService.removeAllListeners("reaction_added");
-        socketService.removeAllListeners("reaction_removed");
-        socketService.removeAllListeners("chat_cleared");
-        socketService.removeAllListeners("chat_restored");
-        socketService.removeAllListeners("group_updated");
+        const refs = listenerRefs.current;
+
+        // Use off() with exact function references instead of removeAllListeners
+        if (refs.handleNewMessage) {
+          socketService.off("receive_message", refs.handleNewMessage);
+        }
+        if (refs.handleMessagesRead) {
+          socketService.off("messages_read", refs.handleMessagesRead);
+        }
+        if (refs.handleDelete) {
+          socketService.off("message_deleted", refs.handleDelete);
+        }
+        if (refs.handleReaction) {
+          socketService.off("reaction_added", refs.handleReaction);
+          socketService.off("reaction_removed", refs.handleReaction);
+        }
+        if (refs.handleChatCleared) {
+          socketService.off("chat_cleared", refs.handleChatCleared);
+        }
+        if (refs.handleChatRestored) {
+          socketService.off("chat_restored", refs.handleChatRestored);
+        }
+        if (refs.handleGroupUpdated) {
+          socketService.off("group_updated", refs.handleGroupUpdated);
+        }
+        if (refs.handleUnreadCount) {
+          socketService.off("chat:unreadCount", refs.handleUnreadCount);
+        }
+
         socketService.off("error", handleErrorRef.current);
         socketService.off("socket_error", handleErrorRef.current);
+
         isListenersAttachedRef.current = false;
       }
     };

@@ -158,6 +158,183 @@ async function getAllChildCommentIds(commentId) {
   return ids;
 }
 
+// ===================== GROUPED COMMENT NOTIFICATION =====================
+
+const getCommentMessage = (commenters) => {
+  if (!commenters || commenters.length === 0) return "";
+  if (commenters.length === 1) {
+    return `${commenters[0].name} commented on your post`;
+  } else if (commenters.length === 2) {
+    return `${commenters[0].name} and ${commenters[1].name} commented on your post`;
+  } else {
+    return `${commenters[0].name}, ${commenters[1].name} and ${commenters.length - 2} others commented on your post`;
+  }
+};
+
+const handleCommentNotification = async (
+  postId,
+  postOwnerId,
+  commenterId,
+  commentPreview,
+  io,
+  isAnonymous = false,
+) => {
+  try {
+    // Don't notify if commenting on own post
+    if (postOwnerId.toString() === commenterId.toString()) return;
+
+    const isBlocked = await Block.areUsersBlocked(postOwnerId, commenterId);
+    if (isBlocked) return;
+
+    const commenter = await User.findById(commenterId).select("name");
+    if (!commenter) return;
+
+    // If anonymous, use "Someone" as the display name
+    const displayName = isAnonymous ? "Someone" : commenter.name;
+    const displayMessage = isAnonymous
+      ? "Someone commented anonymously on your post"
+      : `${commenter.name} commented on your post`;
+    const displayPreview = isAnonymous
+      ? "Someone commented anonymously on your post"
+      : commentPreview
+        ? commentPreview.substring(0, 50)
+        : "commented on your post";
+
+    const profile = await Profile.findOne({ user: commenterId })
+      .select("profilePicture")
+      .lean();
+    const profilePicture = profile?.profilePicture || null;
+
+    const commenterIdStr = commenterId.toString();
+
+    // Find existing grouped notification
+    let notification = await Notification.findOne({
+      recipient: postOwnerId,
+      type: "comment",
+      targetId: postId,
+      targetModel: "Post",
+      "metadata.isGrouped": true,
+    });
+
+    if (notification) {
+      const notificationAge =
+        Date.now() - new Date(notification.createdAt).getTime();
+      const isStale = notificationAge > 24 * 60 * 60 * 1000;
+
+      let currentCommenters = isStale
+        ? []
+        : notification.metadata?.commenters || [];
+
+      // Remove existing entry for this commenter
+      currentCommenters = currentCommenters.filter(
+        (c) => c.userId.toString() !== commenterIdStr,
+      );
+
+      // Add current commenter at the front
+      currentCommenters.unshift({
+        userId: commenterIdStr,
+        name: displayName,
+        profilePicture: isAnonymous ? null : profilePicture,
+        preview: displayPreview,
+      });
+
+      // Keep max 10 recent commenters
+      if (currentCommenters.length > 10) {
+        currentCommenters = currentCommenters.slice(0, 10);
+      }
+
+      notification.message = getCommentMessage(currentCommenters);
+      notification.read = false;
+      notification.lastInteractionAt = new Date();
+      notification.sender = commenterId;
+      notification.metadata = {
+        isGrouped: true,
+        count: currentCommenters.length,
+        commenters: currentCommenters,
+      };
+
+      notification.markModified("metadata");
+      await notification.save();
+    } else {
+      // Delete any old non-grouped comment notifications for this post
+      await Notification.deleteMany({
+        recipient: postOwnerId,
+        type: "comment",
+        targetId: postId,
+        targetModel: "Post",
+        "metadata.isGrouped": { $ne: true },
+      });
+
+      // Create fresh grouped notification
+      notification = await Notification.create({
+        recipient: postOwnerId,
+        sender: commenterId,
+        type: "comment",
+        title: "New Comment",
+        message: displayMessage,
+        targetId: postId,
+        targetModel: "Post",
+        read: false,
+        lastInteractionAt: new Date(),
+        metadata: {
+          isGrouped: true,
+          count: 1,
+          commenters: [
+            {
+              userId: commenterIdStr,
+              name: displayName,
+              profilePicture: isAnonymous ? null : profilePicture,
+              preview: displayPreview,
+            },
+          ],
+        },
+      });
+    }
+
+    // Emit socket event
+    if (io && notification) {
+      const populatedNotification = await Notification.findById(
+        notification._id,
+      )
+        .populate("sender", "name username email")
+        .lean();
+
+      if (populatedNotification) {
+        const senderProfile = await Profile.findOne({
+          user:
+            populatedNotification.sender._id || populatedNotification.sender,
+        })
+          .select("profilePicture fullName")
+          .lean();
+
+        if (senderProfile) {
+          populatedNotification.sender = {
+            ...populatedNotification.sender,
+            profilePicture: senderProfile.profilePicture || null,
+            fullName:
+              senderProfile.fullName || populatedNotification.sender.name,
+          };
+        }
+
+        const roomId = `user_${postOwnerId}`;
+        io.to(roomId).emit("notification:new", {
+          notification: populatedNotification,
+        });
+
+        const unreadCount = await Notification.countDocuments({
+          recipient: postOwnerId,
+          read: false,
+        });
+        io.to(roomId).emit("notification:unreadCount", {
+          count: unreadCount,
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Handle comment notification error:", error);
+  }
+};
+
 async function updatePostCommentCount(postId) {
   const actualCount = await Comment.countDocuments({
     post: postId,
@@ -249,48 +426,58 @@ exports.addComment = async (req, res) => {
       select: "name username email verified",
     });
 
+    // Use grouped comment notification
     if (post.user.toString() !== userId.toString() && !post.isAnonymous) {
-      const notification = await createCommentNotification(
-        post.user,
-        userId,
-        "comment",
-        "New Comment",
-        content,
-        postId,
-        "Post",
-      );
-
       const io = req.app.get("io");
-      if (io && notification) {
-        const populatedNotif = await Notification.findById(notification._id)
-          .populate("sender", "name username email")
-          .lean();
 
-        if (populatedNotif) {
-          const senderProfile = await Profile.findOne({ user: userId })
-            .select("profilePicture fullName")
+      if (isAnonymous) {
+        // Anonymous comments: create individual notification (not grouped)
+        const notification = await createCommentNotification(
+          post.user,
+          userId,
+          "comment",
+          "New Comment",
+          "Someone commented anonymously on your post",
+          postId,
+          "Post",
+        );
+
+        if (io && notification) {
+          const populatedNotif = await Notification.findById(notification._id)
+            .populate("sender", "name username email")
             .lean();
 
-          if (senderProfile) {
+          if (populatedNotif) {
+            // Hide sender info for anonymous
             populatedNotif.sender = {
               ...populatedNotif.sender,
-              profilePicture: senderProfile.profilePicture || null,
-              fullName: senderProfile.fullName || populatedNotif.sender.name,
+              name: "Someone",
+              profilePicture: null,
             };
+
+            io.to(`user_${post.user}`).emit("notification:new", {
+              notification: populatedNotif,
+            });
+
+            const unreadCount = await Notification.countDocuments({
+              recipient: post.user,
+              read: false,
+            });
+            io.to(`user_${post.user}`).emit("notification:unreadCount", {
+              count: unreadCount,
+            });
           }
-
-          io.to(`user_${post.user}`).emit("notification:new", {
-            notification: populatedNotif,
-          });
-
-          const unreadCount = await Notification.countDocuments({
-            recipient: post.user,
-            read: false,
-          });
-          io.to(`user_${post.user}`).emit("notification:unreadCount", {
-            count: unreadCount,
-          });
         }
+      } else {
+        // Regular comments: use grouped notification
+        await handleCommentNotification(
+          postId,
+          post.user,
+          userId,
+          content,
+          io,
+          false,
+        );
       }
     }
 
@@ -434,7 +621,7 @@ exports.addReply = async (req, res) => {
         userId,
         "comment",
         "New Reply",
-        content,
+        `${req.user.name || "Someone"} replied to your comment: "${content.substring(0, 50)}${content.length > 50 ? "..." : ""}"`,
         postId,
         "Post",
       );

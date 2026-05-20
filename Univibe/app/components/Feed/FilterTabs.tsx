@@ -58,6 +58,7 @@ const styles = StyleSheet.create({
     paddingRight: 20,
     paddingVertical: 4,
     alignItems: "center",
+    gap: 12,
   },
   filterButton: {
     paddingHorizontal: 16,

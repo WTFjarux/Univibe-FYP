@@ -23,6 +23,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/lib/contexts/AuthContext";
+import { Image } from "expo-image";
+import PostDetailSkeleton from "@/app/components/Feed/Post/PostDetailSkeleton";
 import {
   getPostById,
   getPostComments,
@@ -379,11 +381,7 @@ export default function PostDetailScreen() {
   }
 
   if (loading) {
-    return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#8b5cf6" />
-      </SafeAreaView>
-    );
+    return <PostDetailSkeleton />;
   }
 
   if (error) {

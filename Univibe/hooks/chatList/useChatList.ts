@@ -1,3 +1,5 @@
+// hooks/chatList/useChatList.ts
+
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import type { ChatRoom } from "../../lib/types/chat.types";
 import { useChatRoomsQuery } from "./useChatRoomsQuery";
@@ -11,23 +13,8 @@ import socketService from "../../lib/services/socketService";
 // Hook
 // -----------------------------------------------------------------------------
 
-/**
- * Central hook for the ChatList screen.
- *
- * Orchestrates:
- * - Room data fetching and caching
- * - Real-time socket updates for last messages, read receipts, and deletions
- * - Read/unread status management
- * - Room actions (pin, mute, delete, mark read/unread)
- * - Search filtering
- *
- * Uses ref-based socket handlers to prevent stale closures without
- * re-registering listeners on every render.
- */
 export const useChatList = (token: string | null, currentUserId?: string) => {
   const [searchQuery, setSearchQuery] = useState("");
-
-  // ─── Data fetching (API + cache) ──────────────────────────────────────────
 
   const {
     rooms,
@@ -42,31 +29,27 @@ export const useChatList = (token: string | null, currentUserId?: string) => {
     joinAllRooms,
   } = useChatRoomsQuery({ token });
 
-  // ─── Read/unread status ───────────────────────────────────────────────────
-
   const { isRoomUnread, addManualUnread, removeManualUnread } =
     useReadStatus(currentUserId);
 
-  // ─── Room actions (pin / mute / delete) ───────────────────────────────────
-
   const { pinChat, toggleMute, deleteChat } = useChatActions(token, setRooms);
-
-  // ─── Keep roomsRef in sync with state ─────────────────────────────────────
 
   useEffect(() => {
     roomsRef.current = rooms;
   }, [rooms, roomsRef]);
 
-  // ─── Room subscription management ─────────────────────────────────────────
+  const fetchRoomsRef = useRef(fetchRooms);
+  useEffect(() => {
+    fetchRoomsRef.current = fetchRooms;
+  }, [fetchRooms]);
 
-  /** Join all rooms when the list changes (new chats added or removed) */
+  // Room subscription management
   useEffect(() => {
     if (socketService.getConnectionStatus() && rooms.length > 0) {
       joinAllRooms(rooms);
     }
   }, [rooms.length, joinAllRooms]);
 
-  /** Rejoin all rooms when the socket reconnects */
   useEffect(() => {
     const handleConnected = () => {
       if (roomsRef.current.length > 0) {
@@ -84,74 +67,38 @@ export const useChatList = (token: string | null, currentUserId?: string) => {
   }, [joinAllRooms]);
 
   // ---------------------------------------------------------------------------
-  // Room List Update Helpers
+  // Handle Real-time Unread Count Updates
   // ---------------------------------------------------------------------------
 
-  /**
-   * Updates the last message for a room and re-sorts the list.
-   * Pinned rooms always appear first, then sorted by most recent.
-   */
-  const updateRoomLastMessage = useCallback(
-    (
-      roomId: string,
-      message: string,
-      sentAt: string,
-      senderId?: string,
-      senderName?: string,
-      type: string = "text",
-    ) => {
-      setRooms((prev) => {
-        const updated = prev.map((room) => {
-          if (room.roomId !== roomId) return room;
+  // Handle individual message received - increment unread count for the specific room
+  const handleNewMessage = useCallback(
+    (data: any) => {
+      if (!data?.roomId) return;
 
-          const isFromCurrentUser = senderId === currentUserId;
+      const roomId = data.roomId;
+      const senderId =
+        typeof data.sender === "string" ? data.sender : data.sender?._id;
 
-          return {
-            ...room,
-            lastMessage: {
-              message,
-              sentAt,
-              senderId: senderId || "",
-              senderName: senderName || "",
-              type: type as any,
-              readBy: isFromCurrentUser ? [currentUserId || ""] : [],
-            },
-            updatedAt: sentAt,
-          };
-        });
+      // Don't increment count for messages sent by current user
+      if (senderId === currentUserId) return;
 
-        return [...updated].sort((a, b) => {
-          if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
-          return (
-            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-          );
-        });
-      });
-    },
-    [currentUserId, setRooms],
-  );
-
-  /**
-   * Updates read receipts when another user reads messages in a room.
-   * Adds the user to the readBy array if not already present.
-   */
-  const handleMessagesRead = useCallback(
-    (roomId: string, userId: string) => {
-      if (userId === currentUserId) return;
-
-      setRooms((prev) =>
-        prev.map((room) => {
-          if (room.roomId === roomId && room.lastMessage) {
-            const readBy = room.lastMessage.readBy || [];
-            if (!readBy.includes(userId)) {
-              return {
-                ...room,
-                lastMessage: {
-                  ...room.lastMessage,
-                  readBy: [...readBy, userId],
-                },
-              };
-            }
+      setRooms((prevRooms) =>
+        prevRooms.map((room) => {
+          if (room.roomId === roomId) {
+            const currentUnread = room.unreadCount || 0;
+            return {
+              ...room,
+              unreadCount: currentUnread + 1,
+              lastMessage: {
+                message: data.message,
+                sentAt: data.createdAt || new Date().toISOString(),
+                senderId: senderId,
+                senderName: data.senderName,
+                type: data.type || "text",
+                readBy: [],
+              },
+              updatedAt: data.createdAt || new Date().toISOString(),
+            };
           }
           return room;
         }),
@@ -160,127 +107,92 @@ export const useChatList = (token: string | null, currentUserId?: string) => {
     [currentUserId, setRooms],
   );
 
-  // ---------------------------------------------------------------------------
-  // Chat Restored / Chat Cleared Handlers
-  // Declared BEFORE stableSocketHandlers to avoid "used before declaration"
-  // ---------------------------------------------------------------------------
+  // Handle messages read - reset unread count for the room
+  const handleMessagesRead = useCallback(
+    (data: { roomId: string; userId: string }) => {
+      if (data.userId === currentUserId) {
+        // Current user read messages in this room - reset unread count to 0
+        setRooms((prevRooms) =>
+          prevRooms.map((room) => {
+            if (room.roomId === data.roomId) {
+              return { ...room, unreadCount: 0 };
+            }
+            return room;
+          }),
+        );
+      }
+    },
+    [currentUserId, setRooms],
+  );
 
-  /**
-   * Handles chat restored event from socket.
-   * When the other user sends a message to a deleted chat, the room reappears
-   * in the list with only the new messages visible.
-   */
-  const handleChatRestored = useCallback(
+  // Handle message deleted - refresh the room
+  const handleMessageDeleted = useCallback(
     (data: { roomId: string }) => {
-      // ✅ Always refresh to get updated name/photo
-      refreshSingleRoom(data.roomId);
-
-      // Join the room on socket if not already joined
-      if (socketService.getConnectionStatus()) {
-        const exists = roomsRef.current.some((r) => r.roomId === data.roomId);
-        if (!exists) {
-          socketService.joinRoom(data.roomId);
-        }
+      if (data.roomId) {
+        refreshSingleRoom(data.roomId);
       }
     },
     [refreshSingleRoom],
   );
 
-  /**
-   * Handles chat cleared event from socket.
-   * Optional handler - most apps don't notify when the other user clears their chat.
-   */
-  const handleChatCleared = useCallback((data: { roomId: string }) => {
-    // Optional: refresh the room to update its state if needed
+  // Handle chat cleared - reset unread count
+  const handleChatCleared = useCallback(
+    (data: { roomId: string }) => {
+      setRooms((prevRooms) =>
+        prevRooms.map((room) => {
+          if (room.roomId === data.roomId) {
+            return { ...room, unreadCount: 0 };
+          }
+          return room;
+        }),
+      );
+    },
+    [setRooms],
+  );
+
+  // Handle unread count update from server (total count)
+  const handleUnreadCountUpdate = useCallback(() => {
+    // Refresh all rooms to get accurate per-room unread counts
+    if (roomsRef.current.length > 0) {
+      fetchRoomsRef.current();
+    }
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Socket Event Handlers (Ref-Based for Stale Closure Prevention)
+  // Socket Event Handlers (using refs for stability)
   // ---------------------------------------------------------------------------
 
-  /** Handles incoming real-time messages */
-  const handleNewMessageRef = useRef<(data: any) => void>(undefined);
+  const handleNewMessageRef = useRef(handleNewMessage);
+  const handleMessagesReadRef = useRef(handleMessagesRead);
+  const handleMessageDeletedRef = useRef(handleMessageDeleted);
+  const handleChatClearedRef = useRef(handleChatCleared);
+  const handleUnreadCountUpdateRef = useRef(handleUnreadCountUpdate);
 
-  handleNewMessageRef.current = (data: any) => {
-    if (!data.roomId) return;
+  useEffect(() => {
+    handleNewMessageRef.current = handleNewMessage;
+    handleMessagesReadRef.current = handleMessagesRead;
+    handleMessageDeletedRef.current = handleMessageDeleted;
+    handleChatClearedRef.current = handleChatCleared;
+    handleUnreadCountUpdateRef.current = handleUnreadCountUpdate;
+  }, [
+    handleNewMessage,
+    handleMessagesRead,
+    handleMessageDeleted,
+    handleChatCleared,
+    handleUnreadCountUpdate,
+  ]);
 
-    const senderId =
-      typeof data.sender === "string" ? data.sender : data.sender?._id;
-    const senderName =
-      typeof data.sender === "string" ? data.senderName : data.sender?.name;
-
-    const roomExists = roomsRef.current.some(
-      (room) => room.roomId === data.roomId,
-    );
-
-    if (!roomExists) {
-      fetchRooms();
-      return;
-    }
-
-    updateRoomLastMessage(
-      data.roomId,
-      data.message,
-      data.createdAt || new Date().toISOString(),
-      senderId,
-      senderName,
-      data.type,
-    );
-  };
-
-  /** Handles bulk read receipt events from the socket */
-  const handleMessagesReadRef = useRef<(data: any) => void>(undefined);
-
-  handleMessagesReadRef.current = (data: any) => {
-    if (data.roomId && data.userId && data.userId !== currentUserId) {
-      handleMessagesRead(data.roomId, data.userId);
-    }
-  };
-
-  /** Handles message deletion events by refreshing the affected room */
-  const handleMessageDeletedRef = useRef<(data: any) => void>(undefined);
-
-  handleMessageDeletedRef.current = (data: any) => {
-    if (data.roomId) {
-      refreshSingleRoom(data.roomId);
-    }
-  };
-
-  /** Handles reaction update events */
-  const handleReactionUpdatedRef = useRef<(data: any) => void>(undefined);
-
-  handleReactionUpdatedRef.current = (data: any) => {
-    if (data.messageId) {
-      // Room refresh could be triggered here if needed
-    }
-  };
-
-  /**
-   * Stable wrapper callbacks that delegate to the ref-based handlers.
-   * These references never change, so useChatListSocket registers listeners once.
-   */
   const stableSocketHandlers = useMemo(
     () => ({
-      onNewMessage: (data: any) => {
-        handleNewMessageRef.current?.(data);
-      },
-      onMessagesRead: (data: any) => {
-        handleMessagesReadRef.current?.(data);
-      },
-      onMessageDeleted: (data: any) => {
-        handleMessageDeletedRef.current?.(data);
-      },
-      onReactionUpdated: (data: any) => {
-        handleReactionUpdatedRef.current?.(data);
-      },
-      onChatRestored: (data: any) => {
-        handleChatRestored(data);
-      },
-      onChatCleared: (data: any) => {
-        handleChatCleared(data);
-      },
+      onNewMessage: (data: any) => handleNewMessageRef.current(data),
+      onMessagesRead: (data: any) => handleMessagesReadRef.current(data),
+      onMessageDeleted: (data: any) => handleMessageDeletedRef.current(data),
+      onReactionUpdated: () => {},
+      onChatRestored: () => fetchRoomsRef.current(),
+      onChatCleared: (data: any) => handleChatClearedRef.current(data),
+      onUnreadCountUpdate: () => handleUnreadCountUpdateRef.current(),
     }),
-    [handleChatRestored, handleChatCleared],
+    [],
   );
 
   useChatListSocket(stableSocketHandlers);
@@ -289,28 +201,15 @@ export const useChatList = (token: string | null, currentUserId?: string) => {
   // Mark Room as Read
   // ---------------------------------------------------------------------------
 
-  /**
-   * Marks all messages in a room as read.
-   * Applies optimistic update, removes manual unread flag, and syncs with server.
-   */
   const markRoomAsRead = useCallback(
     async (roomId: string) => {
       if (!token) return;
 
-      // Optimistic update
+      // Optimistically update UI - set unread count to 0
       setRooms((prev) =>
         prev.map((room) => {
-          if (room.roomId === roomId && room.lastMessage && currentUserId) {
-            const readBy = room.lastMessage.readBy || [];
-            if (!readBy.includes(currentUserId)) {
-              return {
-                ...room,
-                lastMessage: {
-                  ...room.lastMessage,
-                  readBy: [...readBy, currentUserId],
-                },
-              };
-            }
+          if (room.roomId === roomId) {
+            return { ...room, unreadCount: 0 };
           }
           return room;
         }),
@@ -324,30 +223,25 @@ export const useChatList = (token: string | null, currentUserId?: string) => {
           socketService.emit("mark_read", { roomId });
         }
       } catch (err: any) {
-        // Suppress auth errors (handled by interceptor)
         const data = err?.response?.data;
         if (
           data?.code === "ACCOUNT_BANNED" ||
           data?.code === "ACCOUNT_SUSPENDED" ||
           data?.code === "TOKEN_VERSION_MISMATCH"
         ) {
-          return; // Already handled by interceptor
+          return;
         }
-        // For other errors, refresh the room
+        // Revert optimistic update on error
         refreshSingleRoom(roomId);
       }
     },
-    [token, currentUserId, setRooms, removeManualUnread, refreshSingleRoom],
+    [token, setRooms, removeManualUnread, refreshSingleRoom],
   );
 
   // ---------------------------------------------------------------------------
   // Toggle Read / Unread
   // ---------------------------------------------------------------------------
 
-  /**
-   * Toggles the read/unread state of a room manually.
-   * If unread, marks as read. If read, marks as unread manually.
-   */
   const toggleRead = useCallback(
     async (room: ChatRoom | null) => {
       if (!room || !token) return;
@@ -359,17 +253,11 @@ export const useChatList = (token: string | null, currentUserId?: string) => {
       } else {
         await addManualUnread(room.roomId);
 
+        // Optimistically update UI - set unread count to 1
         setRooms((prev) =>
           prev.map((r) => {
-            if (r.roomId === room.roomId && r.lastMessage && currentUserId) {
-              const readBy = r.lastMessage.readBy || [];
-              return {
-                ...r,
-                lastMessage: {
-                  ...r.lastMessage,
-                  readBy: readBy.filter((id) => id !== currentUserId),
-                },
-              };
+            if (r.roomId === room.roomId) {
+              return { ...r, unreadCount: 1 };
             }
             return r;
           }),
@@ -389,17 +277,27 @@ export const useChatList = (token: string | null, currentUserId?: string) => {
       markRoomAsRead,
       addManualUnread,
       removeManualUnread,
-      currentUserId,
       setRooms,
       refreshSingleRoom,
     ],
   );
 
   // ---------------------------------------------------------------------------
+  // Delete Chat wrapper
+  // ---------------------------------------------------------------------------
+
+  const handleDeleteChat = useCallback(
+    async (room: ChatRoom | null, onClose?: () => void) => {
+      if (!room) return;
+      await deleteChat(room, onClose);
+    },
+    [deleteChat],
+  );
+
+  // ---------------------------------------------------------------------------
   // Search Filtering
   // ---------------------------------------------------------------------------
 
-  /** Filters rooms by the current search query (case-insensitive name match) */
   const filteredRooms = useMemo(() => {
     if (!searchQuery.trim()) return rooms;
     const query = searchQuery.toLowerCase();
@@ -421,13 +319,11 @@ export const useChatList = (token: string | null, currentUserId?: string) => {
     fetchRooms,
     onRefresh,
     refreshSingleRoom,
-    updateRoomLastMessage,
-    handleMessagesRead,
     markRoomAsRead,
     isRoomUnread,
     pinChat,
     toggleRead,
     toggleMute,
-    deleteChat,
+    deleteChat: handleDeleteChat, //
   };
 };

@@ -1,20 +1,20 @@
 // app/components/Notifications/notificationItem.tsx
+
 import React, { useState } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   Animated,
-  Image,
-  ImageSourcePropType,
 } from "react-native";
+import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { API_BASE_URL } from "../../../constants/ipConstants";
+import BlurhashImage from "@/app/components/BlurhashImage";
 
-const DEFAULT_AVATAR: ImageSourcePropType = require("../../../assets/images/default-avatar.png");
+const DEFAULT_AVATAR = require("../../../assets/images/default-avatar.png");
 
 interface NotificationItemProps {
   notification: {
@@ -40,6 +40,12 @@ interface NotificationItemProps {
         name: string;
         profilePicture?: string;
       }>;
+      commenters?: Array<{
+        userId: string;
+        name: string;
+        profilePicture?: string;
+        preview?: string;
+      }>;
     };
   };
   onMarkAsRead: (id: string) => void;
@@ -49,6 +55,12 @@ interface NotificationItemProps {
 
 const isAdminNotification = (type: string) =>
   ["post_removed", "event_approved", "event_rejected"].includes(type);
+
+const isAnonymousNotification = (
+  notification: NotificationItemProps["notification"],
+) =>
+  notification.type === "comment" &&
+  notification.message.includes("anonymously");
 
 export default function NotificationItem({
   notification,
@@ -60,6 +72,13 @@ export default function NotificationItem({
   const [scaleAnim] = useState(new Animated.Value(1));
   const [imageError, setImageError] = useState(false);
   const adminNotif = isAdminNotification(notification.type);
+  const isAnon = isAnonymousNotification(notification);
+
+  const isGroupedLike =
+    notification.type === "like" && notification.metadata?.isGrouped;
+  const isGroupedComment =
+    notification.type === "comment" && notification.metadata?.isGrouped;
+  const isGrouped = isGroupedLike || isGroupedComment;
 
   const handlePress = () => {
     if (!notification.read) onMarkAsRead(notification._id);
@@ -153,27 +172,33 @@ export default function NotificationItem({
   };
 
   const getSmallIconConfig = () => {
+    if (isAnon)
+      return { name: "eye-off-outline" as const, color: "#fff", bg: "#6b7280" };
     switch (notification.type) {
       case "connection_request":
-        return { name: "person-add", color: "#fff", bg: "#f59e0b" };
+        return { name: "person-add" as const, color: "#fff", bg: "#f59e0b" };
       case "connection_accepted":
-        return { name: "checkmark", color: "#fff", bg: "#10b981" };
+        return { name: "checkmark" as const, color: "#fff", bg: "#10b981" };
       case "comment":
-        return { name: "chatbubble", color: "#fff", bg: "#8b5cf6" };
+        return { name: "chatbubble" as const, color: "#fff", bg: "#8b5cf6" };
       case "like":
-        return { name: "heart", color: "#fff", bg: "#ef4444" };
+        return { name: "heart" as const, color: "#fff", bg: "#ef4444" };
       case "event_interest":
-        return { name: "heart", color: "#fff", bg: "#ef4444" };
+        return { name: "heart" as const, color: "#fff", bg: "#ef4444" };
       case "event_rsvp":
-        return { name: "calendar", color: "#fff", bg: "#8b5cf6" };
+        return { name: "calendar" as const, color: "#fff", bg: "#8b5cf6" };
       case "post_removed":
-        return { name: "warning", color: "#fff", bg: "#ef4444" };
+        return { name: "warning" as const, color: "#fff", bg: "#ef4444" };
       case "event_approved":
-        return { name: "checkmark-circle", color: "#fff", bg: "#10b981" };
+        return {
+          name: "checkmark-circle" as const,
+          color: "#fff",
+          bg: "#10b981",
+        };
       case "event_rejected":
-        return { name: "close-circle", color: "#fff", bg: "#ef4444" };
+        return { name: "close-circle" as const, color: "#fff", bg: "#ef4444" };
       default:
-        return { name: "notifications", color: "#fff", bg: "#6b7280" };
+        return { name: "notifications" as const, color: "#fff", bg: "#6b7280" };
     }
   };
 
@@ -182,57 +207,94 @@ export default function NotificationItem({
     return match?.[1] || message;
   };
 
+  // ============================================
+  // RENDER STACKED AVATARS
+  // ============================================
+
+  const renderStackedAvatars = (
+    people: Array<{ userId: string; name: string; profilePicture?: string }>,
+    count: number,
+    overlayIcon: string,
+    overlayBg: string,
+    moreBg: string,
+    isAnonList = false,
+  ) => (
+    <View style={styles.stackedAvatarsContainer}>
+      <View style={styles.stackedAvatars}>
+        {people.slice(0, 2).map((person, index) => (
+          <View
+            key={person.userId}
+            style={[
+              styles.stackedAvatarWrapper,
+              index === 0 && styles.firstAvatar,
+              index === 1 && styles.secondAvatar,
+            ]}
+          >
+            {isAnonList || !person.profilePicture ? (
+              isAnonList ? (
+                <View
+                  style={[
+                    styles.stackedAvatar,
+                    styles.avatarBorder,
+                    styles.anonymousMiniAvatar,
+                  ]}
+                >
+                  <Ionicons name="eye-off-outline" size={14} color="#9ca3af" />
+                </View>
+              ) : (
+                <Image
+                  source={DEFAULT_AVATAR}
+                  style={[styles.stackedAvatar, styles.avatarBorder]}
+                  contentFit="cover"
+                />
+              )
+            ) : (
+              <BlurhashImage
+                uri={getFullImageUrl(person.profilePicture) || ""}
+                style={[styles.stackedAvatar, styles.avatarBorder]}
+                transition={150}
+              />
+            )}
+          </View>
+        ))}
+        {count > 2 && (
+          <View style={[styles.stackedAvatarWrapper, styles.thirdAvatar]}>
+            <View
+              style={[styles.moreAvatarGeneric, { backgroundColor: moreBg }]}
+            >
+              <Ionicons name={overlayIcon as any} size={10} color="#fff" />
+            </View>
+          </View>
+        )}
+      </View>
+      <View style={[styles.iconOverlay, { backgroundColor: overlayBg }]}>
+        <Ionicons name={overlayIcon as any} size={10} color="#fff" />
+      </View>
+    </View>
+  );
+
+  // ============================================
+  // FORMATTED MESSAGE
+  // ============================================
+
   const getFormattedMessage = () => {
     const senderName = notification.sender.name;
     const isReply = notification.message.includes("replied to your comment");
 
     switch (notification.type) {
-      case "like":
+      case "like": {
         if (notification.metadata?.isGrouped) {
           const likers = notification.metadata?.likers || [];
           return (
-            <View style={styles.groupedLikeContent}>
-              <View style={styles.stackedAvatarsContainer}>
-                <View style={styles.stackedAvatars}>
-                  {likers.slice(0, 2).map((liker, index) => (
-                    <View
-                      key={liker.userId}
-                      style={[
-                        styles.stackedAvatarWrapper,
-                        index === 0 && styles.firstAvatar,
-                        index === 1 && styles.secondAvatar,
-                      ]}
-                    >
-                      {liker.profilePicture ? (
-                        <Image
-                          source={{
-                            uri: getFullImageUrl(liker.profilePicture),
-                          }}
-                          style={[styles.stackedAvatar, styles.avatarBorder]}
-                        />
-                      ) : (
-                        <Image
-                          source={DEFAULT_AVATAR}
-                          style={[styles.stackedAvatar, styles.avatarBorder]}
-                        />
-                      )}
-                    </View>
-                  ))}
-                  {likers.length > 2 && (
-                    <View
-                      style={[styles.stackedAvatarWrapper, styles.thirdAvatar]}
-                    >
-                      <View style={styles.moreAvatar}>
-                        <Ionicons name="heart" size={10} color="#ef4444" />
-                      </View>
-                    </View>
-                  )}
-                </View>
-                <View style={styles.likeIconOverlay}>
-                  <Ionicons name="heart" size={10} color="#fff" />
-                </View>
-              </View>
-              <View style={styles.groupedLikeTextContainer}>
+            <View style={styles.groupedContent}>
+              {renderStackedAvatars(
+                likers,
+                likers.length,
+                "heart",
+                "#ef4444",
+                "#fee2e2",
+              )}
+              <View style={styles.groupedTextContainer}>
                 <Text style={styles.messageText}>
                   {likers.length === 1 ? (
                     <>
@@ -272,20 +334,74 @@ export default function NotificationItem({
             <Text> liked your post</Text>
           </Text>
         );
+      }
 
-      case "comment":
+      case "comment": {
+        // Grouped comments
+        if (notification.metadata?.isGrouped) {
+          const commenters = notification.metadata?.commenters || [];
+          return (
+            <View style={styles.groupedContent}>
+              {renderStackedAvatars(
+                commenters,
+                commenters.length,
+                "chatbubble",
+                "#8b5cf6",
+                "#ede9fe",
+              )}
+              <View style={styles.groupedTextContainer}>
+                <Text style={styles.messageText}>
+                  {commenters.length === 1 ? (
+                    <>
+                      <Text style={styles.boldName}>{commenters[0].name}</Text>
+                      <Text> commented on your post</Text>
+                    </>
+                  ) : commenters.length === 2 ? (
+                    <>
+                      <Text style={styles.boldName}>{commenters[0].name}</Text>
+                      <Text> and </Text>
+                      <Text style={styles.boldName}>{commenters[1].name}</Text>
+                      <Text> commented on your post</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.boldName}>{commenters[0].name}</Text>
+                      <Text>, </Text>
+                      <Text style={styles.boldName}>{commenters[1].name}</Text>
+                      <Text>
+                        {" "}
+                        and {commenters.length - 2} others commented on your
+                        post
+                      </Text>
+                    </>
+                  )}
+                </Text>
+                <Text style={styles.time}>
+                  {getTimeAgo(notification.createdAt)}
+                </Text>
+              </View>
+              {!notification.read && <View style={styles.unreadIndicator} />}
+            </View>
+          );
+        }
+        // Single comment
         const c = extractCommentContent(notification.message);
         return (
           <Text style={styles.messageText}>
-            <Text style={styles.boldName}>{senderName}</Text>
+            <Text style={styles.boldName}>
+              {isAnon ? "Someone" : senderName}
+            </Text>
             <Text>
               {isReply
                 ? " replied to your comment: "
-                : " commented on your post: "}
+                : isAnon
+                  ? " commented anonymously on your post"
+                  : " commented on your post: "}
             </Text>
-            <Text style={styles.commentContent}>"{c}"</Text>
+            {!isAnon && <Text style={styles.commentContent}>"{c}"</Text>}
           </Text>
         );
+      }
 
       case "connection_request":
         return (
@@ -356,7 +472,6 @@ export default function NotificationItem({
 
   const smallIcon = getSmallIconConfig();
   const formattedMessage = getFormattedMessage();
-  const isGroupedLike = notification.metadata?.isGrouped;
 
   const OptionsMenu = () => (
     <View style={styles.optionsMenu}>
@@ -411,7 +526,7 @@ export default function NotificationItem({
             adminNotif && !notification.read && styles.removedContainer,
           ]}
         >
-          {isGroupedLike ? (
+          {isGrouped ? (
             <View style={styles.contentContainer}>{formattedMessage}</View>
           ) : (
             <>
@@ -421,9 +536,8 @@ export default function NotificationItem({
                     if (!adminNotif)
                       router.push(`/profile/${notification.sender._id}`);
                   }}
-                  disabled={adminNotif}
+                  disabled={adminNotif || isAnon}
                 >
-                  {/* Admin notifications - show icon */}
                   {notification.type === "post_removed" ? (
                     <View
                       style={[
@@ -458,21 +572,32 @@ export default function NotificationItem({
                     >
                       <Ionicons name="close-circle" size={26} color="#ef4444" />
                     </View>
+                  ) : isAnon ? (
+                    <View style={[styles.avatar, styles.anonymousAvatar]}>
+                      <Ionicons
+                        name="eye-off-outline"
+                        size={26}
+                        color="#9ca3af"
+                      />
+                    </View>
                   ) : notification.sender.profilePicture && !imageError ? (
-                    <Image
-                      source={{
-                        uri: getFullImageUrl(
-                          notification.sender.profilePicture,
-                        ),
-                      }}
+                    <BlurhashImage
+                      uri={
+                        getFullImageUrl(notification.sender.profilePicture) ||
+                        ""
+                      }
                       style={styles.avatar}
+                      transition={200}
                       onError={() => setImageError(true)}
                     />
                   ) : (
-                    <Image source={DEFAULT_AVATAR} style={styles.avatar} />
+                    <Image
+                      source={DEFAULT_AVATAR}
+                      style={styles.avatar}
+                      contentFit="cover"
+                    />
                   )}
                 </TouchableOpacity>
-                {/* Small badge - hidden for admin */}
                 {!adminNotif && (
                   <View
                     style={[
@@ -510,6 +635,10 @@ export default function NotificationItem({
   );
 }
 
+// ============================================
+// STYLES
+// ============================================
+
 const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
@@ -531,8 +660,29 @@ const styles = StyleSheet.create({
     borderColor: "#fecaca",
   },
   avatarWrapper: { position: "relative", marginRight: 12 },
-  avatar: { width: 52, height: 52, borderRadius: 26 },
+  avatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#f3f4f6",
+  },
   adminAvatar: { justifyContent: "center", alignItems: "center" },
+  anonymousAvatar: {
+    backgroundColor: "#f3f4f6",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderStyle: "dashed",
+  },
+  anonymousMiniAvatar: {
+    backgroundColor: "#f3f4f6",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderStyle: "dashed",
+  },
   smallIconContainer: {
     position: "absolute",
     bottom: -2,
@@ -610,7 +760,7 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
     color: "#ef4444",
   },
-  groupedLikeContent: { flexDirection: "row", alignItems: "center", flex: 1 },
+  groupedContent: { flexDirection: "row", alignItems: "center", flex: 1 },
   stackedAvatarsContainer: { position: "relative", marginRight: 12 },
   stackedAvatars: { width: 52, height: 52, position: "relative" },
   stackedAvatarWrapper: { position: "absolute" },
@@ -624,29 +774,27 @@ const styles = StyleSheet.create({
   firstAvatar: { top: 0, left: 0, zIndex: 2 },
   secondAvatar: { top: 16, left: 16, zIndex: 1 },
   thirdAvatar: { top: 16, left: 16, zIndex: 0 },
-  moreAvatar: {
+  moreAvatarGeneric: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "#fee2e2",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
     borderColor: "white",
   },
-  likeIconOverlay: {
+  iconOverlay: {
     position: "absolute",
     bottom: -2,
     right: -4,
     width: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: "#ef4444",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
     borderColor: "white",
     zIndex: 10,
   },
-  groupedLikeTextContainer: { flex: 1 },
+  groupedTextContainer: { flex: 1 },
 });

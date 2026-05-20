@@ -13,13 +13,14 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useAuth } from "../../lib/contexts/AuthContext";
+import { useActiveRoom } from "../../lib/contexts/ActiveRoomContext";
 import { useChatList } from "../../hooks/chatList/useChatList";
 import { useChatItemAnimations } from "../../hooks/chatList/useChatItemAnimation";
 import ChatListHeader from "../components/chat/ChatList/ChatListHeader";
 import SearchBar from "../components/chat/ChatList/SearchBar";
 import EmptyChatList from "../components/chat/ChatList/EmptyChatList";
 import NewChatModal from "../components/chat/ChatList/NewChatModal";
-import CreateGroupModal from "../components/chat/ChatList/CreateGroupModal"; // NEW
+import CreateGroupModal from "../components/chat/ChatList/CreateGroupModal";
 import ChatItem from "../components/chat/ChatList/ChatItem";
 import ChatListOptionsModal from "../components/chat/ChatList/ChatListOptionsModal";
 import type { ChatRoom, ItemLayout } from "../../lib/types/chat.types";
@@ -32,6 +33,14 @@ import { getDirectRoomId } from "../../lib/utils/chatUtils";
 export default function ChatListScreen() {
   const router = useRouter();
   const { token, user } = useAuth();
+  const { clearActiveRoom } = useActiveRoom();
+
+  // Clear active room when this screen gains focus
+  useFocusEffect(
+    useCallback(() => {
+      clearActiveRoom();
+    }, [clearActiveRoom]),
+  );
 
   // ─── Core chat list logic ────────────────────────────────────────────────
 
@@ -124,9 +133,9 @@ export default function ChatListScreen() {
           otherUserName: room.name,
           otherUserId: room.otherUserId ?? "",
           otherUserAvatar: room.otherUserAvatar ?? "",
-          isGroup: isGroup ? "true" : "false", // NEW: Pass group flag
+          isGroup: isGroup ? "true" : "false",
           participantCount: room.participantCount?.toString() || "0",
-          groupPhoto: room.groupPhoto || "", // NEW
+          groupPhoto: room.groupPhoto || "",
         },
       });
     },

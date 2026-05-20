@@ -40,6 +40,7 @@ import {
 } from "../../lib/utils/chatUtils";
 import { isTempId } from "../../lib/utils/messageIdGenerator";
 import type { Message } from "../../lib/types/chat.types";
+import { useActiveRoom } from "../../lib/contexts/ActiveRoomContext";
 
 // -----------------------------------------------------------------------------
 // Constants
@@ -84,6 +85,7 @@ export default function ChatScreen() {
   // ─── Navigation & Params ─────────────────────────────────────────────────
   const router = useRouter();
   const params = useLocalSearchParams();
+  const { setActiveRoomId, clearActiveRoom } = useActiveRoom();
 
   // ─── Forward Modal State ──────────────────────────────────────────────────
   const [forwardModalVisible, setForwardModalVisible] = useState(false);
@@ -151,7 +153,8 @@ export default function ChatScreen() {
   const handleGroupInfoPress = useCallback(() => {
     router.push({
       pathname: "/screens/GroupInfoScreen",
-      params: { roomId: roomId }, 
+      params: { roomId: roomId },
+      // Force full screen instead of modal
     });
   }, [router, roomId]);
   // ---------------------------------------------------------------------------
@@ -168,6 +171,15 @@ export default function ChatScreen() {
       AudioManager.stopAllSounds();
     };
   }, []);
+
+  useEffect(() => {
+    if (roomId) {
+      setActiveRoomId(roomId);
+    }
+    return () => {
+      clearActiveRoom();
+    };
+  }, [roomId, setActiveRoomId, clearActiveRoom]);
 
   /** Fetch latest messages on initial mount, bypassing cache */
   useEffect(() => {

@@ -19,7 +19,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   postsContainer: {
-    paddingHorizontal: 20,
+
     paddingBottom: 40,
   },
   loader: {
@@ -34,7 +34,6 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
     fontSize: 14,
   },
-  // New styles added below
   errorText: {
     fontSize: 16,
     color: "#ef4444",
@@ -122,7 +121,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 45, // Higher than tab bar's elevation (10)
+    elevation: 45, 
     zIndex: 9999,
   },
   infoBarText: {
