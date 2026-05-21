@@ -19,6 +19,15 @@ const {
 const rateLimit = require("express-rate-limit");
 
 // ============================================
+// HELPER: Safe IP extraction (IPv4 + IPv6)
+// ============================================
+const getSafeIP = (req) =>
+  req.ip ||
+  req.socket?.remoteAddress ||
+  req.connection?.remoteAddress ||
+  "127.0.0.1";
+
+// ============================================
 // ADDITIONAL SECURITY MIDDLEWARE
 // ============================================
 
@@ -32,9 +41,9 @@ const passwordChangeLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
+  keyGenerator: (req, res) => {
     // Rate limit by user ID (more accurate than IP)
-    return req.user?._id?.toString() || req.ip;
+    return req.user?._id?.toString() || getSafeIP(req);
   },
 });
 
@@ -48,8 +57,8 @@ const refreshTokenLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    return req.user?._id?.toString() || req.ip;
+  keyGenerator: (req, res) => {
+    return req.user?._id?.toString() || getSafeIP(req);
   },
 });
 

@@ -125,6 +125,26 @@ interface PendingSync {
   retries: number;
 }
 
+// =================== CALLBACK TYPES ===================
+
+/**
+ * Callback invoked when a story view sync completes
+ * Allows UI to update viewer counts after background sync
+ */
+export type OnViewSyncComplete = (
+  storyId: string,
+  uniqueViewerCount: number,
+) => void;
+
+/**
+ * Callback invoked when a new story is received via socket
+ * Allows UI to refresh stories in real-time
+ */
+export type OnNewStoryReceived = (data: {
+  userId: string;
+  story: Story;
+}) => void;
+
 // =================== STORY API SERVICE ===================
 
 class StoryApiService {
@@ -142,7 +162,11 @@ class StoryApiService {
   private syncQueue: PendingSync[] = [];
   private isSyncing = false;
 
-  private readonly STORIES_LIST_CACHE_DURATION = 60000;
+  // Callback registrations
+  private onViewSyncCallbacks: OnViewSyncComplete[] = [];
+  private onNewStoryCallbacks: OnNewStoryReceived[] = [];
+
+  private readonly STORIES_LIST_CACHE_DURATION = 30000; // Reduced: 30s for fresher data
   private readonly STORY_VIEWERS_CACHE_DURATION = 120000;
   private readonly INDIVIDUAL_STORY_CACHE_DURATION = 300000;
   private readonly MAX_CACHE_SIZE = 100;
@@ -150,12 +174,62 @@ class StoryApiService {
   private readonly MAX_RETRIES = 3;
   private readonly RETRY_DELAY = 1000;
   private readonly SYNC_INTERVAL = 5000;
+  private readonly MAX_QUEUE_SIZE = 100; // ✅ NEW: Prevent unbounded queue growth
 
   private syncIntervalRef: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     this.startBackgroundSync();
   }
+
+  // =================== CALLBACK REGISTRATION ===================
+
+  /**
+   * Register a callback for when a story view sync completes
+   * Used by StoryViewerScreen to update viewer counts in real-time
+   */
+  onViewSyncComplete(callback: OnViewSyncComplete): () => void {
+    this.onViewSyncCallbacks.push(callback);
+    // Return unsubscribe function
+    return () => {
+      this.onViewSyncCallbacks = this.onViewSyncCallbacks.filter(
+        (cb) => cb !== callback,
+      );
+    };
+  }
+
+  /**
+   * Register a callback for when a new story is received via socket
+   * Used by HomeScreen to auto-refresh stories
+   */
+  onNewStoryReceived(callback: OnNewStoryReceived): () => void {
+    this.onNewStoryCallbacks.push(callback);
+    return () => {
+      this.onNewStoryCallbacks = this.onNewStoryCallbacks.filter(
+        (cb) => cb !== callback,
+      );
+    };
+  }
+
+  /**
+   * Called by socketService when new_story event is received
+   * Invalidates cache and notifies registered callbacks
+   */
+  handleNewStoryEvent(data: { userId: string; story: Story }): void {
+    console.log("📢 New story received, invalidating cache");
+    this.invalidateStoriesListCache();
+
+    // Notify all registered callbacks
+    this.onNewStoryCallbacks.forEach((cb) => {
+      try {
+        cb(data);
+      } catch (err) {
+        console.error("Error in onNewStory callback:", err);
+      }
+    });
+  }
+
+  // =================== BACKGROUND SYNC ===================
 
   private startBackgroundSync(): void {
     if (this.syncIntervalRef) clearInterval(this.syncIntervalRef);
@@ -165,6 +239,10 @@ class StoryApiService {
     }, this.SYNC_INTERVAL);
   }
 
+  /**
+   * Processes the sync queue, sending pending view events to the server
+   * Handles retries with backoff, respects max retries and queue size
+   */
   private async processSyncQueue(): Promise<void> {
     if (this.isSyncing || this.syncQueue.length === 0) return;
 
@@ -174,17 +252,28 @@ class StoryApiService {
       const pending = this.syncQueue[0];
 
       try {
-        await this.viewStoryInternal(pending.storyId);
+        const response = await this.viewStoryInternal(pending.storyId);
 
         const tracked = this.viewedStoriesLocal.get(pending.storyId);
         if (tracked) {
           tracked.synced = true;
         }
 
+        // Remove from queue on success
         this.syncQueue.shift();
         console.log(`✅ Synced view for story: ${pending.storyId}`);
+
+        // ✅ NEW: Notify callbacks with actual viewer count
+        if (response.data?.uniqueViewerCount !== undefined) {
+          this.notifyViewSyncComplete(
+            pending.storyId,
+            response.data.uniqueViewerCount,
+          );
+        }
       } catch (err) {
         const error = err as any;
+
+        // If blocked, remove from queue permanently
         if (error?.isBlocked) {
           console.log(`🚫 Story view blocked, removing from sync queue`);
           this.syncQueue.shift();
@@ -199,15 +288,53 @@ class StoryApiService {
           );
           this.syncQueue.shift();
         } else {
-          pending.timestamp = Date.now();
           console.log(`🔄 Will retry story sync (attempt ${pending.retries})`);
-          break;
+          break; // Wait for next interval to retry
         }
       }
     }
 
     this.isSyncing = false;
   }
+
+  /**
+   * Notifies all registered callbacks that a view sync completed
+   * AND pushes fresh statistics directly into the local in-memory cache layers
+   */
+  private notifyViewSyncComplete(
+    storyId: string,
+    uniqueViewerCount: number,
+  ): void {
+    // 1. Manually surgically update the primary stories list cache if it exists
+    if (this.storiesListCache?.data?.data) {
+      const groups = this.storiesListCache.data.data;
+      for (const group of groups) {
+        const story = group.stories.find((s) => s._id === storyId);
+        if (story) {
+          story.uniqueViewersCount = uniqueViewerCount;
+          story.hasCurrentUserViewed = true;
+
+          // Also ensure the visual seen/unseen state for the group updates immediately
+          group.hasUnseen = group.stories.some((s) => !s.hasCurrentUserViewed);
+          console.log(
+            `🎯 In-memory Cache updated directly for story ${storyId}. New count: ${uniqueViewerCount}`,
+          );
+          break;
+        }
+      }
+    }
+
+    // 2. Notify all registered UI callbacks
+    this.onViewSyncCallbacks.forEach((cb) => {
+      try {
+        cb(storyId, uniqueViewerCount);
+      } catch (err) {
+        console.error("Error in onViewSync callback:", err);
+      }
+    });
+  }
+
+  // =================== REQUEST HANDLER ===================
 
   private async handleRequest<T>(
     request: () => Promise<T>,
@@ -317,6 +444,8 @@ class StoryApiService {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  // =================== CACHE MANAGEMENT ===================
+
   cancelRequests(): void {
     if (this.abortController) {
       this.abortController.abort();
@@ -324,7 +453,11 @@ class StoryApiService {
     }
   }
 
-  private invalidateStoriesListCache(): void {
+  /**
+   * Public method to invalidate stories cache
+   * Called by socket event handlers to force fresh data on next fetch
+   */
+  invalidateStoriesListCache(): void {
     this.storiesListCache = undefined;
     console.log("📦 Invalidated stories list cache");
   }
@@ -365,6 +498,12 @@ class StoryApiService {
     return Date.now() - cache.timestamp < duration;
   }
 
+  // =================== API METHODS ===================
+
+  /**
+   * Fetches stories from the current user and their connections
+   * Uses cache for performance, merges local view state
+   */
   async getStories(
     page: number = 1,
     limit: number = 20,
@@ -375,6 +514,7 @@ class StoryApiService {
       page === 1 &&
       this.isCacheValid(this.storiesListCache, this.STORIES_LIST_CACHE_DURATION)
     ) {
+      console.log("⚡ Returning cached stories");
       return this.updateCacheWithViewedStories(this.storiesListCache!.data);
     }
 
@@ -409,24 +549,48 @@ class StoryApiService {
     }
   }
 
+  /**
+   * Merges locally tracked viewed stories with server response
+   * Ensures optimistic view state is reflected even before sync completes
+   */
   private updateCacheWithViewedStories(
     response: GetStoriesResponse,
   ): GetStoriesResponse {
-    const updated = JSON.parse(JSON.stringify(response));
+    // Deep clone to avoid mutating cache
+    const updated: GetStoriesResponse = JSON.parse(JSON.stringify(response));
 
     updated.data.forEach((group: StoryGroup) => {
       group.stories.forEach((story: Story) => {
+        // Check if we have a local view record for this story
         const viewed = this.viewedStoriesLocal.get(story._id);
+
         if (viewed) {
+          // Mark as viewed locally (optimistic)
           story.hasCurrentUserViewed = true;
-          story.uniqueViewersCount = (story.uniqueViewersCount || 0) + 1;
+        }
+
+        // If server says we've viewed, sync local state
+        if (story.hasCurrentUserViewed && !viewed) {
+          this.viewedStoriesLocal.set(story._id, {
+            storyId: story._id,
+            viewedAt: Date.now(),
+            synced: true, // Server confirms we've viewed
+          });
         }
       });
+
+      // Recalculate hasUnseen based on merged data
+      group.hasUnseen = group.stories.some(
+        (s: Story) => !s.hasCurrentUserViewed,
+      );
     });
 
     return updated;
   }
 
+  /**
+   * Creates a new story with media upload
+   */
   async createStory(
     formData: FormData,
     onUploadProgress?: (progress: AxiosProgressEvent) => void,
@@ -443,6 +607,7 @@ class StoryApiService {
         onUploadProgress,
       });
 
+      // Invalidate cache so next fetch gets the new story
       this.invalidateStoriesListCache();
 
       return response.data;
@@ -452,11 +617,17 @@ class StoryApiService {
     return result;
   }
 
+  /**
+   * Records a story view (optimistic)
+   * Returns immediately with optimistic response
+   * Actual sync happens in background via sync queue
+   */
   async viewStory(storyId: string): Promise<ViewStoryResponse> {
     if (!storyId) {
       throw new StoryApiError("Story ID is required", 400);
     }
 
+    // Track locally for optimistic UI updates
     const tracked = this.viewedStoriesLocal.get(storyId);
     if (!tracked) {
       this.viewedStoriesLocal.set(storyId, {
@@ -466,7 +637,16 @@ class StoryApiService {
       });
     }
 
+    // Add to sync queue if not already synced and queue has space
     if (!tracked?.synced) {
+      // ✅ NEW: Check queue capacity before adding
+      if (this.syncQueue.length >= this.MAX_QUEUE_SIZE) {
+        console.warn(
+          `⚠️ Sync queue full (${this.MAX_QUEUE_SIZE}), dropping oldest entry`,
+        );
+        this.syncQueue.shift(); // Remove oldest to make room
+      }
+
       this.syncQueue.push({
         storyId,
         timestamp: Date.now(),
@@ -474,15 +654,42 @@ class StoryApiService {
       });
     }
 
+    // Trigger sync processing
     this.processSyncQueue().catch(console.error);
+
+    // Return optimistic response immediately
+    // ✅ FIXED: Return current known count instead of hardcoded 0
+    const currentCount = this.getLocalViewerCount(storyId);
 
     return {
       success: true,
       message: "Story view recorded",
-      data: { uniqueViewerCount: 0 },
+      data: { uniqueViewerCount: currentCount },
     };
   }
 
+  /**
+   * Gets estimated viewer count from local cache
+   * Falls back to 1 (current user) if not cached
+   */
+  private getLocalViewerCount(storyId: string): number {
+    // Check if we have this story in the cached groups
+    if (this.storiesListCache) {
+      const groups: StoryGroup[] = this.storiesListCache.data.data;
+      for (const group of groups) {
+        const story = group.stories.find((s: Story) => s._id === storyId);
+        if (story) {
+          return story.uniqueViewersCount || 0;
+        }
+      }
+    }
+    // Fallback: at least 1 (current user just viewed)
+    return 1;
+  }
+
+  /**
+   * Internal method: sends view to server (called by sync queue)
+   */
   private async viewStoryInternal(storyId: string): Promise<ViewStoryResponse> {
     const request = async () => {
       const response = await api.post(`/stories/${storyId}/view`);
@@ -492,24 +699,50 @@ class StoryApiService {
     return this.handleRequest(request, `viewStory-${storyId}`);
   }
 
+  /**
+   * Views a story and waits for server confirmation
+   * Use when you need the actual viewer count (e.g., story owner)
+   */
   async viewStoryWithSync(storyId: string): Promise<ViewStoryResponse> {
+    // First record optimistically
     await this.viewStory(storyId);
 
+    // Wait for sync to complete with timeout
     return new Promise((resolve) => {
+      const startTime = Date.now();
+      const maxWait = 30000; // 30 second timeout
+
       const checkSync = setInterval(() => {
         const tracked = this.viewedStoriesLocal.get(storyId);
+
         if (tracked?.synced) {
           clearInterval(checkSync);
-          resolve({ success: true, message: "Story view synced" });
+          resolve({
+            success: true,
+            message: "Story view synced",
+            data: {
+              uniqueViewerCount: this.getLocalViewerCount(storyId),
+            },
+          });
         }
-        if (Date.now() - (tracked?.viewedAt || Date.now()) > 30000) {
+
+        if (Date.now() - startTime > maxWait) {
           clearInterval(checkSync);
-          resolve({ success: true, message: "Sync timeout, saved locally" });
+          resolve({
+            success: true,
+            message: "Sync timeout, saved locally",
+            data: {
+              uniqueViewerCount: this.getLocalViewerCount(storyId),
+            },
+          });
         }
       }, 500);
     });
   }
 
+  /**
+   * Fetches viewers for a specific story
+   */
   async getStoryViewers(
     storyId: string,
     page: number = 1,
@@ -546,6 +779,9 @@ class StoryApiService {
     return result;
   }
 
+  /**
+   * Sends a reply to a story
+   */
   async replyToStory(
     storyId: string,
     message: string,
@@ -584,6 +820,9 @@ class StoryApiService {
     return result;
   }
 
+  /**
+   * Deletes a story (owner only)
+   */
   async deleteStory(storyId: string): Promise<DeleteStoryResponse> {
     if (!storyId) {
       throw new StoryApiError("Story ID is required", 400);
@@ -602,6 +841,9 @@ class StoryApiService {
     return result;
   }
 
+  /**
+   * Triggers manual cleanup of expired stories
+   */
   async cleanupExpiredStories(): Promise<CleanupStoriesResponse> {
     const request = async () => {
       const response = await api.get("/stories/expired/cleanup");
@@ -613,11 +855,17 @@ class StoryApiService {
     return result;
   }
 
+  /**
+   * Force refreshes stories (bypasses cache)
+   */
   async refreshStories(): Promise<GetStoriesResponse> {
     this.invalidateStoriesListCache();
     return this.getStories(1, 20, true);
   }
 
+  /**
+   * Prefetches stories in background (non-blocking)
+   */
   async prefetchStories(count: number = 2): Promise<void> {
     if (
       !this.isCacheValid(
@@ -633,11 +881,19 @@ class StoryApiService {
     }
   }
 
+  // =================== UTILITY METHODS ===================
+
+  /**
+   * Checks if a user has viewed a specific story
+   */
   hasUserViewedStory(story: Story, userId: string): boolean {
     if (!story.viewers || !userId) return false;
     return story.viewers.some((viewer) => viewer.userId === userId);
   }
 
+  /**
+   * Gets unique viewer count from a story object
+   */
   getUniqueViewerCount(story: Story | undefined): number {
     if (!story || !story.viewers || !Array.isArray(story.viewers)) {
       return 0;
@@ -646,6 +902,9 @@ class StoryApiService {
     return uniqueUserIds.size;
   }
 
+  /**
+   * Formats story creation time relative to now
+   */
   formatStoryTime(createdAt: string): string {
     if (!createdAt) return "Just now";
 
@@ -663,6 +922,9 @@ class StoryApiService {
     }
   }
 
+  /**
+   * Gets current cache statistics (useful for debugging)
+   */
   getCacheStats() {
     return {
       hasStoriesListCache: !!this.storiesListCache,
@@ -671,9 +933,15 @@ class StoryApiService {
       viewedLocal: this.viewedStoriesLocal.size,
       syncQueue: this.syncQueue.length,
       isSyncing: this.isSyncing,
+      cacheAge: this.storiesListCache
+        ? Date.now() - this.storiesListCache.timestamp
+        : null,
     };
   }
 
+  /**
+   * Cleanup all resources (call on app unmount)
+   */
   destroy(): void {
     if (this.syncIntervalRef) {
       clearInterval(this.syncIntervalRef);

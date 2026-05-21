@@ -5,6 +5,7 @@ import type { Socket } from "socket.io-client";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import { API_BASE_URL } from "../../constants/ipConstants";
+import storyApi from "./storyApi";
 import type {
   Message,
   SocketMessageData,
@@ -460,17 +461,29 @@ class SocketService {
       this.emitEvent("notification:unreadCount", data);
     });
 
-    // Stories
-    this.socket.on("story_created", (data: any) => {
-      this.emitEvent("story_created", data);
+    // Stories - Real-time updates
+
+    this.socket.on("new_story", (data: { userId: string; story: any }) => {
+      console.log("📢 new_story event received:", data.userId);
+      // Forward to storyApi to invalidate cache and notify UI
+      storyApi.handleNewStoryEvent(data);
+      // Also emit for any other listeners
+      this.emitEvent("new_story", data);
     });
 
-    this.socket.on("story_viewed", (data: any) => {
-      this.emitEvent("story_viewed", data);
-    });
+    // Backend emits "story_deleted" - invalidate cache so UI refreshes
+    this.socket.on(
+      "story_deleted",
+      (data: { storyId: string; userId: string }) => {
+        console.log("🗑️ story_deleted event received:", data.storyId);
+        storyApi.invalidateStoriesListCache();
+        this.emitEvent("story_deleted", data);
+      },
+    );
 
-    this.socket.on("story_deleted", (data: any) => {
-      this.emitEvent("story_deleted", data);
+    // Backend emits "story_reply_received" to story owner
+    this.socket.on("story_reply_received", (data: any) => {
+      this.emitEvent("story_reply_received", data);
     });
 
     // Event updates

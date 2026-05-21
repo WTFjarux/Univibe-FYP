@@ -388,7 +388,7 @@ exports.getUserChatRooms = async (req, res) => {
                   lastMsg.type === "audio"
                     ? "Voice message"
                     : lastMsg.type === "story_reply"
-                      ? "📸 Story reply"
+                      ? "Story reply"
                       : lastMsg.message,
                 sentAt: lastMsg.createdAt,
                 senderId: lastMsg.sender?.toString(),

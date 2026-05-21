@@ -16,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Link, useFocusEffect, useRouter } from "expo-router";
 import { useAuth } from "../../lib/contexts/AuthContext";
 import chatApi from "../../lib/services/chatApi";
+import storyApi from "../../lib/services/storyApi";
 import {
   notificationService,
   listenForNotifications,
@@ -213,6 +214,23 @@ export default function HomeScreen() {
     };
   }, [token]);
 
+  // ===== REAL-TIME STORY REFRESH =====
+  // When a connected user posts a new story, refresh stories silently
+  useEffect(() => {
+    if (!token) return;
+
+    const unsubscribe = storyApi.onNewStoryReceived(() => {
+      // Refresh stories silently (no loading indicator)
+      if (isMountedRef.current) {
+        setRefreshTrigger((prev) => prev + 1);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [token]);
+
   // ===== REFRESH FUNCTIONS =====
   const refreshAll = useCallback(async (showIndicator = true) => {
     if (showIndicator) {
@@ -264,12 +282,22 @@ export default function HomeScreen() {
     useCallback(() => {
       if (!isInitialLoading && isMountedRef.current) {
         refreshAll(false);
+      } else if (!isInitialLoading && isMountedRef.current) {
+        // If badge was optimistically reset but not actually cleared,
+        // restore on back navigation
+        if (unreadChatCount === 0 && prevUnreadChatCount.current > 0) {
+          setUnreadChatCount(prevUnreadChatCount.current);
+          prevUnreadChatCount.current = 0;
+        }
       }
-    }, [refreshAll, isInitialLoading]),
+    }, [refreshAll, isInitialLoading, unreadChatCount]),
   );
 
+  const prevUnreadChatCount = useRef(0);
   // Handle chat button press - navigate and reset badge optimistically
   const handleChatPress = () => {
+    // Store current count before resetting
+    prevUnreadChatCount.current = unreadChatCount;
     // Optimistically reset the badge count
     setUnreadChatCount(0);
     router.push("/screens/ChatListScreen");

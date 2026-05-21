@@ -1,5 +1,3 @@
-// Backend/models/Story.js
-
 const mongoose = require("mongoose");
 
 const storySchema = new mongoose.Schema(
@@ -22,7 +20,7 @@ const storySchema = new mongoose.Schema(
     caption: {
       type: String,
       default: "",
-      maxlength: 500,
+      maxlength: 2200,
       trim: true,
     },
     viewers: [
@@ -53,5 +51,17 @@ storySchema.index({ user: 1, createdAt: -1 });
 
 // Optimize viewer lookups
 storySchema.index({ "viewers.userId": 1 });
+
+// Compound index for efficient "unseen stories since last view" queries
+storySchema.index({ user: 1, "viewers.userId": 1, createdAt: -1 });
+
+// Pre-save hook to enforce caption length server-side
+storySchema.pre("save", function (next) {
+  if (this.caption && this.caption.length > 2200) {
+    const err = new Error("Caption cannot exceed 2200 characters");
+    return next(err);
+  }
+  next();
+});
 
 module.exports = mongoose.model("Story", storySchema);

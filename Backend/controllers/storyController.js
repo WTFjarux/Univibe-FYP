@@ -1,5 +1,3 @@
-// backend/controllers/storyController.js
-
 const Story = require("../models/Story");
 const User = require("../models/User");
 const Message = require("../models/Message");
@@ -15,11 +13,18 @@ const MAX_FILE_SIZE = 100 * 1024 * 1024;
 
 // =================== HELPER FUNCTIONS ===================
 
+/**
+ * Generates a deterministic direct message room ID from two user IDs
+ * Sorts IDs to ensure same room ID regardless of order
+ */
 const getDirectRoomId = (id1, id2) => {
   const ids = [id1.toString(), id2.toString()].sort();
   return `direct_${ids[0]}_${ids[1]}`;
 };
 
+/**
+ * Checks if two users are connected (friends/following)
+ */
 const areUsersConnected = async (userId1, userId2) => {
   try {
     const user = await User.findById(userId1).select("connections").lean();
@@ -33,6 +38,10 @@ const areUsersConnected = async (userId1, userId2) => {
   }
 };
 
+/**
+ * Ensures a chat room exists between two users, creating one if needed
+ * Only creates room if users are connected
+ */
 const ensureRoomExists = async (roomId, userId) => {
   try {
     let room = await ChatRoom.findOne({ roomId });
@@ -73,6 +82,10 @@ const ensureRoomExists = async (roomId, userId) => {
   }
 };
 
+/**
+ * Deletes stories older than STORY_EXPIRY_HOURS
+ * MongoDB TTL index also handles this, but this allows manual cleanup
+ */
 const deleteExpiredStories = async () => {
   try {
     const expiryDate = new Date(
@@ -89,11 +102,17 @@ const deleteExpiredStories = async () => {
   }
 };
 
+/**
+ * Validates caption length against MAX_CAPTION_LENGTH
+ */
 const validateCaption = (caption) => {
   if (!caption) return true;
   return caption.length <= MAX_CAPTION_LENGTH;
 };
 
+/**
+ * Counts unique viewer IDs from viewers array
+ */
 const getUniqueViewersCount = (viewers) => {
   const uniqueUserIds = new Set();
   viewers.forEach((viewer) => {
@@ -104,13 +123,52 @@ const getUniqueViewersCount = (viewers) => {
   return uniqueUserIds.size;
 };
 
+/**
+ * Emits socket event to connected users when a new story is created
+ * Notifies all users who are connected to the story creator
+ */
+const emitNewStoryEvent = async (io, userId, story) => {
+  try {
+    // Get all users who have this user in their connections
+    const connectedUsers = await User.find({
+      connections: userId,
+    })
+      .select("_id")
+      .lean();
+
+    const connectedUserIds = connectedUsers.map((u) => u._id.toString());
+
+    // Emit to each connected user's socket room
+    connectedUserIds.forEach((connectedUserId) => {
+      io.to(`user_${connectedUserId}`).emit("new_story", {
+        userId: userId.toString(),
+        story: story,
+      });
+    });
+
+    console.log(
+      `📢 new_story event emitted to ${connectedUserIds.length} users`,
+    );
+  } catch (error) {
+    console.error("emitNewStoryEvent error:", error.message);
+    // Non-blocking - story creation succeeds even if notification fails
+  }
+};
+
 // =================== CONTROLLERS ===================
 
+/**
+ * POST /api/stories
+ * Creates a new story
+ * Body: { caption? }
+ * File: media (image/video)
+ */
 exports.createStory = async (req, res) => {
   try {
     const userId = req.user._id;
     const { caption } = req.body;
 
+    // Validate caption length
     if (caption && !validateCaption(caption)) {
       return res.status(400).json({
         success: false,
@@ -118,6 +176,7 @@ exports.createStory = async (req, res) => {
       });
     }
 
+    // Validate media presence
     if (!req.file && !req.storyMediaInfo) {
       return res.status(400).json({
         success: false,
@@ -125,6 +184,7 @@ exports.createStory = async (req, res) => {
       });
     }
 
+    // Validate file size
     if (req.file && req.file.size > MAX_FILE_SIZE) {
       return res.status(400).json({
         success: false,
@@ -132,12 +192,14 @@ exports.createStory = async (req, res) => {
       });
     }
 
+    // Determine media URL and type from upload middleware or multer
     const mediaUrl =
       req.storyMediaInfo?.url || `/uploads/stories/${req.file.filename}`;
     const type =
       req.storyMediaInfo?.type ||
       (req.file?.mimetype?.startsWith("video") ? "video" : "image");
 
+    // Create story document
     const story = await Story.create({
       user: userId,
       mediaUrl,
@@ -145,7 +207,16 @@ exports.createStory = async (req, res) => {
       caption: caption ? caption.trim() : "",
     });
 
+    // Populate user info for response
     await story.populate("user", "name username avatar");
+
+    // Emit real-time event to connected users (non-blocking)
+    const io = req.app?.get("io");
+    if (io) {
+      emitNewStoryEvent(io, userId, story.toObject()).catch((err) => {
+        console.error("Failed to emit new_story event:", err.message);
+      });
+    }
 
     res.status(201).json({
       success: true,
@@ -162,11 +233,18 @@ exports.createStory = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/stories
+ * Fetches stories from the current user and their connections
+ * Query: { page?, limit? }
+ * Returns stories grouped by user with seen/unseen status
+ */
 exports.getStories = async (req, res) => {
   try {
     const userId = req.user._id;
     const { page = 1, limit = 20 } = req.query;
 
+    // Get user's connections and blocked/muted users in parallel
     const [user, blockedUserIds] = await Promise.all([
       User.findById(userId).select("connections mutedUsers").lean(),
       BlockService.getBlockedUserIds(userId),
@@ -174,12 +252,16 @@ exports.getStories = async (req, res) => {
 
     const connectionIds = user?.connections || [];
     const mutedUserIds = user?.mutedUsers?.map((id) => id.toString()) || [];
+
+    // Combine blocked and muted users into exclusion list
     const excludedUserIds = [...new Set([...blockedUserIds, ...mutedUserIds])];
 
+    // Filter out blocked/muted users from connections
     const validConnectionIds = connectionIds.filter(
       (id) => !excludedUserIds.includes(id.toString()),
     );
 
+    // Include current user's own stories + valid connections' stories
     const userIdsToFetch = [userId, ...validConnectionIds];
 
     const twentyFourHoursAgo = new Date(
@@ -188,16 +270,20 @@ exports.getStories = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
+    // Aggregate pipeline: fetch, enrich, group, and sort stories
     const stories = await Story.aggregate([
+      // Step 1: Filter stories by user and expiry
       {
         $match: {
           user: { $in: userIdsToFetch },
           createdAt: { $gte: twentyFourHoursAgo },
         },
       },
+      // Step 2: Sort newest first before grouping
       {
         $sort: { createdAt: -1 },
       },
+      // Step 3: Join with users collection for user info
       {
         $lookup: {
           from: "users",
@@ -209,6 +295,7 @@ exports.getStories = async (req, res) => {
       {
         $unwind: "$userInfo",
       },
+      // Step 4: Join with profiles collection for avatar
       {
         $lookup: {
           from: "profiles",
@@ -223,28 +310,30 @@ exports.getStories = async (req, res) => {
           preserveNullAndEmptyArrays: true,
         },
       },
+      // Step 5: Compute per-story fields
       {
         $addFields: {
+          // FIXED: Use $setUnion for reliable deduplication of viewer IDs
           uniqueViewersCount: {
             $size: {
-              $reduce: {
-                input: "$viewers",
-                initialValue: [],
-                in: {
-                  $cond: {
-                    if: { $in: ["$$this.userId", "$$value"] },
-                    then: "$$value",
-                    else: { $concatArrays: ["$$value", ["$$this.userId"]] },
+              $setUnion: [
+                {
+                  $map: {
+                    input: "$viewers",
+                    as: "v",
+                    in: { $toString: "$$v.userId" },
                   },
                 },
-              },
+              ],
             },
           },
+          // Check if current user has viewed this story
           hasCurrentUserViewed: {
             $in: [userId, "$viewers.userId"],
           },
         },
       },
+      // Step 6: Group stories by user
       {
         $group: {
           _id: "$user",
@@ -266,8 +355,10 @@ exports.getStories = async (req, res) => {
           },
         },
       },
+      // Step 7: Compute group-level fields
       {
         $addFields: {
+          // Group has unseen stories if any story hasn't been viewed
           hasUnseen: {
             $gt: [
               {
@@ -286,12 +377,14 @@ exports.getStories = async (req, res) => {
           lastStoryTime: { $max: "$stories.createdAt" },
         },
       },
+      // Step 8: Sort groups: unseen first, then by most recent
       {
         $sort: {
           hasUnseen: -1,
           lastStoryTime: -1,
         },
       },
+      // Step 9: Paginate
       {
         $skip: skip,
       },
@@ -300,6 +393,7 @@ exports.getStories = async (req, res) => {
       },
     ]);
 
+    // Get total count for pagination metadata
     const totalStoriesCount = await Story.countDocuments({
       user: { $in: userIdsToFetch },
       createdAt: { $gte: twentyFourHoursAgo },
@@ -325,11 +419,17 @@ exports.getStories = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/stories/:storyId/view
+ * Marks a story as viewed by the current user
+ * Uses atomic operation to prevent race condition duplicates
+ */
 exports.viewStory = async (req, res) => {
   try {
     const { storyId } = req.params;
     const userId = req.user._id;
 
+    // Validate story ID format
     if (!mongoose.Types.ObjectId.isValid(storyId)) {
       return res.status(400).json({
         success: false,
@@ -337,6 +437,7 @@ exports.viewStory = async (req, res) => {
       });
     }
 
+    // Check if story exists and hasn't expired
     const story = await Story.findById(storyId);
     if (!story) {
       return res.status(404).json({
@@ -345,6 +446,7 @@ exports.viewStory = async (req, res) => {
       });
     }
 
+    // Check story expiry
     const storyAge = Date.now() - new Date(story.createdAt).getTime();
     const expiryMs = STORY_EXPIRY_HOURS * 60 * 60 * 1000;
     if (storyAge > expiryMs) {
@@ -354,30 +456,26 @@ exports.viewStory = async (req, res) => {
       });
     }
 
+    // Check block status (skip for own stories)
     if (story.user.toString() !== userId.toString()) {
       const isBlocked = await Block.areUsersBlocked(userId, story.user);
       if (isBlocked) {
         return res.status(403).json({
           success: false,
           message: "You cannot view this story",
+          isBlocked: true,
         });
       }
     }
 
-    const hasViewed = story.viewers.some(
-      (viewer) => viewer.userId.toString() === userId.toString(),
-    );
-
-    if (hasViewed) {
-      return res.status(200).json({
-        success: true,
-        message: "Story already viewed",
-        alreadyViewed: true,
-      });
-    }
-
-    const updatedStory = await Story.findByIdAndUpdate(
-      storyId,
+    // Atomic findOneAndUpdate with $ne condition
+    // This prevents race condition where concurrent requests could
+    // both pass the hasViewed check and push duplicate viewer entries
+    const updatedStory = await Story.findOneAndUpdate(
+      {
+        _id: storyId,
+        "viewers.userId": { $ne: userId }, // Only update if user hasn't viewed
+      },
       {
         $push: {
           viewers: {
@@ -389,11 +487,35 @@ exports.viewStory = async (req, res) => {
       { new: true },
     );
 
+    // If updatedStory is null, user already viewed OR story doesn't exist
+    if (!updatedStory) {
+      // Double-check: story might have been deleted
+      const stillExists = await Story.findById(storyId);
+      if (!stillExists) {
+        return res.status(404).json({
+          success: false,
+          message: "Moment not found",
+        });
+      }
+
+      // Story exists but user already viewed it
+      return res.status(200).json({
+        success: true,
+        message: "Story already viewed",
+        alreadyViewed: true,
+        data: {
+          uniqueViewerCount: getUniqueViewersCount(stillExists.viewers),
+        },
+      });
+    }
+
+    // Get accurate unique viewer count from updated document
     const uniqueViewerCount = getUniqueViewersCount(updatedStory.viewers);
 
     res.status(200).json({
       success: true,
       message: "Story marked as viewed",
+      alreadyViewed: false,
       data: {
         uniqueViewerCount,
       },
@@ -408,11 +530,18 @@ exports.viewStory = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/stories/:storyId/viewers
+ * Returns list of unique viewers for a story (owner only)
+ * Uses aggregation to avoid N+1 queries, supports pagination
+ */
 exports.getStoryViewers = async (req, res) => {
   try {
     const { storyId } = req.params;
     const userId = req.user._id;
+    const { page = 1, limit = 50 } = req.query; // FIXED: Added pagination
 
+    // Validate story ID
     if (!mongoose.Types.ObjectId.isValid(storyId)) {
       return res.status(400).json({
         success: false,
@@ -420,6 +549,7 @@ exports.getStoryViewers = async (req, res) => {
       });
     }
 
+    // Verify story exists and belongs to current user
     const story = await Story.findById(storyId);
     if (!story) {
       return res.status(404).json({
@@ -428,6 +558,7 @@ exports.getStoryViewers = async (req, res) => {
       });
     }
 
+    // Only story owner can view viewers list
     if (story.user.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
@@ -435,43 +566,79 @@ exports.getStoryViewers = async (req, res) => {
       });
     }
 
-    const uniqueViewersMap = new Map();
-    story.viewers.forEach((viewer) => {
-      const viewerId = viewer.userId.toString();
-      if (!uniqueViewersMap.has(viewerId)) {
-        uniqueViewersMap.set(viewerId, viewer);
-      }
-    });
+    // FIXED: Use aggregation to avoid N+1 queries
+    // Deduplicate viewers, join with user and profile, paginate
+    const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const uniqueViewers = Array.from(uniqueViewersMap.values());
-    uniqueViewers.sort((a, b) => new Date(b.viewedAt) - new Date(a.viewedAt));
+    const viewerDetails = await Story.aggregate([
+      // Match the specific story
+      { $match: { _id: new mongoose.Types.ObjectId(storyId) } },
+      // Unwind viewers array
+      { $unwind: "$viewers" },
+      // Group by viewer userId to deduplicate, keep latest viewedAt
+      {
+        $group: {
+          _id: "$viewers.userId",
+          viewedAt: { $max: "$viewers.viewedAt" },
+          viewerDocId: { $first: "$viewers._id" },
+        },
+      },
+      // Sort by most recent view
+      { $sort: { viewedAt: -1 } },
+      // Lookup user info
+      {
+        $lookup: {
+          from: "users",
+          localField: "_id",
+          foreignField: "_id",
+          as: "userInfo",
+        },
+      },
+      { $unwind: { path: "$userInfo", preserveNullAndEmptyArrays: true } },
+      // Lookup profile for avatar
+      {
+        $lookup: {
+          from: "profiles",
+          localField: "_id",
+          foreignField: "user",
+          as: "profileInfo",
+        },
+      },
+      {
+        $unwind: { path: "$profileInfo", preserveNullAndEmptyArrays: true },
+      },
+      // Shape the output
+      {
+        $project: {
+          _id: "$viewerDocId",
+          userId: "$_id",
+          userName: { $ifNull: ["$userInfo.name", "Unknown User"] },
+          userUsername: "$userInfo.username",
+          profilePicture: "$profileInfo.profilePicture",
+          viewedAt: "$viewedAt",
+        },
+      },
+      // Get total count before pagination
+      {
+        $facet: {
+          metadata: [{ $count: "total" }],
+          data: [{ $skip: skip }, { $limit: parseInt(limit) }],
+        },
+      },
+    ]);
 
-    const viewerDetails = await Promise.all(
-      uniqueViewers.map(async (viewer) => {
-        const user = await User.findById(viewer.userId)
-          .select("name username")
-          .lean();
-        const profile = await mongoose
-          .model("Profile")
-          .findOne({ user: viewer.userId })
-          .select("profilePicture")
-          .lean();
-
-        return {
-          _id: viewer._id,
-          userId: viewer.userId,
-          userName: user?.name || "Unknown User",
-          userUsername: user?.username,
-          profilePicture: profile?.profilePicture,
-          viewedAt: viewer.viewedAt,
-        };
-      }),
-    );
+    const total = viewerDetails[0]?.metadata[0]?.total || 0;
+    const data = viewerDetails[0]?.data || [];
 
     res.status(200).json({
       success: true,
-      data: viewerDetails,
-      total: viewerDetails.length,
+      data: data,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / parseInt(limit)),
+        totalViewers: total,
+        hasMore: skip + data.length < total,
+      },
     });
   } catch (error) {
     console.error("Error fetching story viewers:", error);
@@ -483,12 +650,18 @@ exports.getStoryViewers = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/stories/:storyId/reply
+ * Sends a reply to a story, creating a chat message with story_reply type
+ * Requires: connection between users, no block
+ */
 exports.replyToStory = async (req, res) => {
   try {
     const { storyId } = req.params;
     const { message, storyData } = req.body;
     const userId = req.user._id;
 
+    // Validate story ID
     if (!mongoose.Types.ObjectId.isValid(storyId)) {
       return res.status(400).json({
         success: false,
@@ -496,6 +669,7 @@ exports.replyToStory = async (req, res) => {
       });
     }
 
+    // Validate message
     if (!message || message.trim().length === 0) {
       return res.status(400).json({
         success: false,
@@ -510,6 +684,7 @@ exports.replyToStory = async (req, res) => {
       });
     }
 
+    // Find story with owner info
     const story = await Story.findById(storyId).populate("user", "name");
     if (!story) {
       return res.status(404).json({
@@ -518,6 +693,7 @@ exports.replyToStory = async (req, res) => {
       });
     }
 
+    // Check story expiry
     const storyAge = Date.now() - new Date(story.createdAt).getTime();
     const expiryMs = STORY_EXPIRY_HOURS * 60 * 60 * 1000;
     if (storyAge > expiryMs) {
@@ -527,6 +703,7 @@ exports.replyToStory = async (req, res) => {
       });
     }
 
+    // Prevent self-reply
     if (story.user._id.toString() === userId.toString()) {
       return res.status(403).json({
         success: false,
@@ -534,6 +711,7 @@ exports.replyToStory = async (req, res) => {
       });
     }
 
+    // Check block status
     const isBlocked = await Block.areUsersBlocked(userId, story.user._id);
     if (isBlocked) {
       return res.status(403).json({
@@ -542,6 +720,7 @@ exports.replyToStory = async (req, res) => {
       });
     }
 
+    // Check connection status
     const isConnected = await areUsersConnected(userId, story.user._id);
     if (!isConnected) {
       return res.status(403).json({
@@ -550,6 +729,7 @@ exports.replyToStory = async (req, res) => {
       });
     }
 
+    // Get or create chat room
     const roomId = getDirectRoomId(userId, story.user._id);
     const room = await ensureRoomExists(roomId, userId);
     if (!room) {
@@ -559,8 +739,10 @@ exports.replyToStory = async (req, res) => {
       });
     }
 
+    // Get sender info
     const sender = await User.findById(userId).select("name avatar");
 
+    // Create reply message with story metadata
     const reply = await Message.create({
       sender: userId,
       senderName: sender.name,
@@ -579,9 +761,12 @@ exports.replyToStory = async (req, res) => {
 
     await reply.populate("sender", "name avatar");
 
+    // Emit real-time events
     const io = req.app?.get("io");
     if (io) {
       const storyOwnerSocketRoom = `user_${story.user._id}`;
+
+      // Notify story owner about the reply
       io.to(storyOwnerSocketRoom).emit("story_reply_received", {
         storyId,
         message: reply,
@@ -589,6 +774,7 @@ exports.replyToStory = async (req, res) => {
         replierId: userId,
       });
 
+      // Send message to the chat room
       io.to(roomId).emit("receive_message", {
         _id: reply._id,
         roomId,
@@ -603,6 +789,7 @@ exports.replyToStory = async (req, res) => {
         createdAt: reply.createdAt,
       });
 
+      // Trigger unread count update for story owner
       io.to(storyOwnerSocketRoom).emit("unread_count_changed");
     }
 
@@ -621,11 +808,17 @@ exports.replyToStory = async (req, res) => {
   }
 };
 
+/**
+ * DELETE /api/stories/:storyId
+ * Deletes a story (owner only)
+ * Emits socket event to notify connected clients
+ */
 exports.deleteStory = async (req, res) => {
   try {
     const { storyId } = req.params;
     const userId = req.user._id;
 
+    // Validate story ID
     if (!mongoose.Types.ObjectId.isValid(storyId)) {
       return res.status(400).json({
         success: false,
@@ -633,6 +826,7 @@ exports.deleteStory = async (req, res) => {
       });
     }
 
+    // Find story
     const story = await Story.findById(storyId);
     if (!story) {
       return res.status(404).json({
@@ -641,10 +835,12 @@ exports.deleteStory = async (req, res) => {
       });
     }
 
+    // Check expiry status (for informative message only)
     const storyAge = Date.now() - new Date(story.createdAt).getTime();
     const expiryMs = STORY_EXPIRY_HOURS * 60 * 60 * 1000;
     const isExpired = storyAge > expiryMs;
 
+    // Only owner can delete
     if (story.user.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
@@ -652,8 +848,10 @@ exports.deleteStory = async (req, res) => {
       });
     }
 
+    // Delete the story
     await Story.findByIdAndDelete(storyId);
 
+    // Emit deletion event for real-time UI updates
     const io = req.app?.get("io");
     if (io) {
       io.emit("story_deleted", {
@@ -678,6 +876,10 @@ exports.deleteStory = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/stories/expired/cleanup (or called via cron)
+ * Manually triggers cleanup of expired stories
+ */
 exports.cleanupExpiredStories = async (req, res) => {
   try {
     const result = await deleteExpiredStories();
@@ -697,4 +899,5 @@ exports.cleanupExpiredStories = async (req, res) => {
   }
 };
 
+// Export for cron jobs or other modules
 exports.deleteExpiredStories = deleteExpiredStories;

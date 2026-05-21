@@ -6,13 +6,20 @@ const { preventBlockedInteractions } = require("../middleware/blockMiddleware");
 
 const ctrl = require("../controllers/storyController");
 
+// All story routes require authentication
 router.use(protect);
 
+// Story CRUD
 router.post("/", uploadStoryMedia, ctrl.createStory);
 router.get("/", ctrl.getStories);
-router.get("/:storyId/viewers", ctrl.getStoryViewers);
+router.delete("/:storyId", ctrl.deleteStory);
+
+// Story interactions (protected by block middleware)
 router.post("/:storyId/view", preventBlockedInteractions, ctrl.viewStory);
 router.post("/:storyId/reply", preventBlockedInteractions, ctrl.replyToStory);
-router.delete("/:storyId", ctrl.deleteStory);
+router.get("/:storyId/viewers", ctrl.getStoryViewers);
+
+// Story maintenance (admin/cron)
+router.get("/expired/cleanup", ctrl.cleanupExpiredStories);
 
 module.exports = router;

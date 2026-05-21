@@ -32,27 +32,46 @@ import {
 import { BlurView } from "expo-blur";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
+import { useIsFocused } from "@react-navigation/native";
 import storyApi from "../../lib/services/storyApi";
 
-const { width, height } = Dimensions.get("window");
+// =============================================================================
+// Constants
+// =============================================================================
 
-// Instagram-like constants (same as StoryMedia)
+const { width, height } = Dimensions.get("window");
 const STORY_ASPECT_RATIO = 9 / 16;
 const MAX_STORY_WIDTH = width;
 const MAX_STORY_HEIGHT = height * 0.95;
+const MAX_CAPTION_LENGTH = 2200;
+const MAX_VIDEO_DURATION = 60;
+
+// =============================================================================
+// Types
+// =============================================================================
 
 interface PickedMedia {
   uri: string;
   type: "image" | "video";
   name: string;
+  facing?: CameraType;
 }
+
+// =============================================================================
+// CreateStoryScreen Component
+// =============================================================================
 
 export default function CreateStoryScreen() {
   const router = useRouter();
+  const isFocused = useIsFocused();
   const cameraRef = useRef<CameraView>(null);
   const captionRef = useRef<TextInput>(null);
   const videoRef = useRef<Video>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ---------------------------------------------------------------------------
+  // State
+  // ---------------------------------------------------------------------------
 
   const [permission, requestPermission] = useCameraPermissions();
   const [cameraMode, setCameraMode] = useState<CameraMode>("picture");
@@ -67,7 +86,10 @@ export default function CreateStoryScreen() {
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [isPreviewLoading, setIsPreviewLoading] = useState(true);
 
-  // Instagram-like fixed dimensions
+  // ---------------------------------------------------------------------------
+  // Derived Values
+  // ---------------------------------------------------------------------------
+
   const storyDimensions = useMemo(() => {
     let storyWidth = MAX_STORY_WIDTH;
     let storyHeight = storyWidth / STORY_ASPECT_RATIO;
@@ -83,7 +105,10 @@ export default function CreateStoryScreen() {
     };
   }, []);
 
-  // ================= KEYBOARD LISTENERS =================
+  // ===========================================================================
+  // Keyboard Listeners
+  // ===========================================================================
+
   useEffect(() => {
     const showSub = Keyboard.addListener("keyboardWillShow", (e) => {
       setKeyboardHeight(e.endCoordinates.height);
@@ -100,28 +125,34 @@ export default function CreateStoryScreen() {
     };
   }, []);
 
-  // ================= PERMISSION =================
+  // ===========================================================================
+  // Permissions
+  // ===========================================================================
+
   useEffect(() => {
     if (!permission?.granted) {
       requestPermission();
     }
   }, [permission]);
 
-  // ================= RECORDING TIMER =================
-  const startRecordingTimer = () => {
+  // ===========================================================================
+  // Recording Timer
+  // ===========================================================================
+
+  const startRecordingTimer = useCallback(() => {
     setRecordingTime(0);
     recordingTimerRef.current = setInterval(() => {
       setRecordingTime((prev) => prev + 1);
     }, 1000);
-  };
+  }, []);
 
-  const stopRecordingTimer = () => {
+  const stopRecordingTimer = useCallback(() => {
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
     }
     setRecordingTime(0);
-  };
+  }, []);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -129,7 +160,10 @@ export default function CreateStoryScreen() {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // ================= MEDIA LOAD HANDLERS =================
+  // ===========================================================================
+  // Media Load Handlers
+  // ===========================================================================
+
   const handlePreviewImageLoad = useCallback(() => {
     setIsPreviewLoading(false);
   }, []);
@@ -140,18 +174,21 @@ export default function CreateStoryScreen() {
     }
   }, []);
 
-  // ================= CAMERA ACTIONS =================
-  const toggleCameraFacing = () => {
-    setFacing((current) => (current === "back" ? "front" : "back"));
-  };
+  // ===========================================================================
+  // Camera Actions
+  // ===========================================================================
 
-  const toggleFlash = () => {
+  const toggleCameraFacing = useCallback(() => {
+    setFacing((current) => (current === "back" ? "front" : "back"));
+  }, []);
+
+  const toggleFlash = useCallback(() => {
     setFlash((current) => {
       if (current === "off") return "on";
       if (current === "on") return "auto";
       return "off";
     });
-  };
+  }, []);
 
   const getFlashIcon = (): keyof typeof Ionicons.glyphMap => {
     switch (flash) {
@@ -177,6 +214,7 @@ export default function CreateStoryScreen() {
         uri: photo.uri,
         type: "image",
         name: `story-${Date.now()}.jpg`,
+        facing: facing, // Tracks current facing state
       });
       setIsPreviewLoading(true);
     } catch (error) {
@@ -201,13 +239,14 @@ export default function CreateStoryScreen() {
       startRecordingTimer();
       try {
         cameraRef.current
-          .recordAsync({ maxDuration: 60 })
+          .recordAsync({ maxDuration: MAX_VIDEO_DURATION })
           .then((video) => {
             if (video) {
               setCapturedMedia({
                 uri: video.uri,
                 type: "video",
                 name: `story-${Date.now()}.mp4`,
+                facing: facing,
               });
               setIsPreviewLoading(true);
             }
@@ -227,25 +266,42 @@ export default function CreateStoryScreen() {
     }
   };
 
-  const handleCapture = () => {
+  const handleCapture = useCallback(() => {
     if (cameraMode === "picture") {
       takePhoto();
     } else {
       toggleRecording();
     }
-  };
+  }, [cameraMode, isRecording, facing]);
 
-  // ================= GALLERY PICK =================
+  // ===========================================================================
+  // Gallery Picker
+  // ===========================================================================
+
   const pickFromGallery = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images", "videos"],
         quality: 0.9,
+        videoMaxDuration: MAX_VIDEO_DURATION,
       });
 
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
         const isVideo = asset.type === "video" || asset.uri.endsWith(".mp4");
+
+        if (
+          isVideo &&
+          asset.duration &&
+          asset.duration > MAX_VIDEO_DURATION * 1000
+        ) {
+          Alert.alert(
+            "Video too long",
+            `Videos must be ${MAX_VIDEO_DURATION} seconds or less`,
+          );
+          return;
+        }
+
         setCapturedMedia({
           uri: asset.uri,
           type: isVideo ? "video" : "image",
@@ -259,7 +315,10 @@ export default function CreateStoryScreen() {
     }
   };
 
-  // ================= UPLOAD =================
+  // ===========================================================================
+  // Upload
+  // ===========================================================================
+
   const handleUpload = async () => {
     if (!capturedMedia) return;
 
@@ -297,13 +356,26 @@ export default function CreateStoryScreen() {
     }
   };
 
-  const handleDiscard = () => {
+  const handleDiscard = useCallback(() => {
     setCapturedMedia(null);
     setCaption("");
     setIsPreviewLoading(true);
-  };
+  }, []);
 
-  // ================= PERMISSION DENIED =================
+  // ===========================================================================
+  // Navigation Guard / Keep Cache Clean
+  // ===========================================================================
+
+  // 👈 If screen loses navigation focus, kill component trees completely.
+  // Stale view layouts can't corrupt variables on components that aren't mounted.
+  if (!isFocused) {
+    return <View style={styles.cameraContainer} />;
+  }
+
+  // ===========================================================================
+  // Permission Denied State
+  // ===========================================================================
+
   if (!permission?.granted) {
     return (
       <View style={styles.permissionContainer}>
@@ -329,14 +401,56 @@ export default function CreateStoryScreen() {
     );
   }
 
-  // ================= IMAGE PREVIEW =================
+  // ===========================================================================
+  // Shared Caption Input
+  // ===========================================================================
+
+  const renderCaptionInput = () => (
+    <View
+      style={[
+        styles.captionContainer,
+        {
+          bottom: isKeyboardVisible
+            ? keyboardHeight + 16
+            : Platform.OS === "ios"
+              ? 40
+              : 24,
+        },
+      ]}
+    >
+      <TouchableOpacity
+        activeOpacity={1}
+        onPress={() => captionRef.current?.focus()}
+      >
+        <View style={styles.captionBox}>
+          <TextInput
+            ref={captionRef}
+            placeholder="Add a caption..."
+            placeholderTextColor="rgba(255,255,255,0.6)"
+            value={caption}
+            onChangeText={setCaption}
+            style={styles.previewCaptionInput}
+            multiline
+            maxLength={MAX_CAPTION_LENGTH}
+            returnKeyType="done"
+            onSubmitEditing={Keyboard.dismiss}
+          />
+        </View>
+      </TouchableOpacity>
+    </View>
+  );
+
+  // ===========================================================================
+  // Image Preview
+  // ===========================================================================
+
   if (capturedMedia && capturedMedia.type === "image") {
     return (
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
         <View style={styles.previewContainer}>
           <StatusBar barStyle="light-content" backgroundColor="#000" />
 
-          {/* Background Layer - Blurred effect */}
+          {/* Blurred background */}
           <View style={styles.backgroundContainer}>
             <Image
               source={{ uri: capturedMedia.uri }}
@@ -346,17 +460,21 @@ export default function CreateStoryScreen() {
             />
           </View>
 
-          {/* Foreground Image - Instagram-like fixed dimensions */}
+          {/* Foreground image */}
           <View style={styles.mediaContainer}>
             <View style={[styles.mediaWrapper, storyDimensions]}>
               <Image
                 source={{ uri: capturedMedia.uri }}
-                style={styles.mediaContent}
+                style={[
+                  styles.mediaContent,
+                  capturedMedia.facing === "front" && {
+                    transform: [{ scaleX: -1 }],
+                  },
+                ]}
                 resizeMode="cover"
                 onLoad={handlePreviewImageLoad}
               />
 
-              {/* Loading overlay */}
               {isPreviewLoading && (
                 <View style={styles.previewLoader}>
                   <ActivityIndicator
@@ -368,7 +486,7 @@ export default function CreateStoryScreen() {
             </View>
           </View>
 
-          {/* Top Bar */}
+          {/* Top bar */}
           <View style={styles.previewTopBar}>
             <TouchableOpacity
               onPress={handleDiscard}
@@ -386,73 +504,24 @@ export default function CreateStoryScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Right Side Tools - Hide when keyboard is visible */}
-          {!isKeyboardVisible && (
-            <View style={styles.previewRightTools}>
-              <TouchableOpacity style={styles.previewRightToolBtn}>
-                <Ionicons name="happy-outline" size={20} color="white" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.previewRightToolBtn}>
-                <Ionicons name="musical-notes" size={20} color="white" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.previewRightToolBtn}>
-                <Ionicons name="color-wand-outline" size={20} color="white" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.previewRightToolBtn, styles.deleteBtn]}
-                onPress={handleDiscard}
-              >
-                <Ionicons name="trash-outline" size={20} color="#ef4444" />
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Caption Box - moves just above keyboard */}
-          <View
-            style={[
-              styles.captionContainer,
-              {
-                bottom: isKeyboardVisible
-                  ? keyboardHeight + 16
-                  : Platform.OS === "ios"
-                    ? 40
-                    : 24,
-              },
-            ]}
-          >
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={() => captionRef.current?.focus()}
-            >
-              <View style={styles.captionBox}>
-                <TextInput
-                  ref={captionRef}
-                  placeholder="Add a caption..."
-                  placeholderTextColor="rgba(255,255,255,0.6)"
-                  value={caption}
-                  onChangeText={setCaption}
-                  style={styles.previewCaptionInput}
-                  multiline
-                  maxLength={500}
-                  returnKeyType="done"
-                  onSubmitEditing={Keyboard.dismiss}
-                />
-              </View>
-            </TouchableOpacity>
-          </View>
+          {/* Caption */}
+          {renderCaptionInput()}
         </View>
       </TouchableWithoutFeedback>
     );
   }
 
-  // ================= VIDEO PREVIEW =================
+  // ===========================================================================
+  // Video Preview
+  // ===========================================================================
+
   if (capturedMedia && capturedMedia.type === "video") {
     return (
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
         <View style={styles.previewContainer}>
           <StatusBar barStyle="light-content" backgroundColor="#000" />
 
-          {/* Background Layer - Blurred effect for video */}
+          {/* Blurred background */}
           <View style={styles.backgroundContainer}>
             <Video
               source={{ uri: capturedMedia.uri }}
@@ -469,13 +538,19 @@ export default function CreateStoryScreen() {
             />
           </View>
 
-          {/* Foreground Video - Instagram-like fixed dimensions */}
+          {/* Foreground video */}
           <View style={styles.mediaContainer}>
             <View style={[styles.mediaWrapper, storyDimensions]}>
               <Video
                 ref={videoRef}
                 source={{ uri: capturedMedia.uri }}
-                style={styles.mediaContent}
+                style={[
+                  styles.mediaContent,
+                  // 👇 Fixed: Mirroring added to front-facing video previews too!
+                  capturedMedia.facing === "front" && {
+                    transform: [{ scaleX: -1 }],
+                  },
+                ]}
                 resizeMode={ResizeMode.COVER}
                 shouldPlay={true}
                 isLooping={true}
@@ -483,7 +558,6 @@ export default function CreateStoryScreen() {
                 onLoad={handlePreviewVideoLoad}
               />
 
-              {/* Loading overlay */}
               {isPreviewLoading && (
                 <View style={styles.previewLoader}>
                   <ActivityIndicator
@@ -495,7 +569,7 @@ export default function CreateStoryScreen() {
             </View>
           </View>
 
-          {/* Top Bar */}
+          {/* Top bar */}
           <View style={styles.previewTopBar}>
             <TouchableOpacity
               onPress={handleDiscard}
@@ -513,71 +587,22 @@ export default function CreateStoryScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Right Side Tools - Hide when keyboard is visible */}
-          {!isKeyboardVisible && (
-            <View style={styles.previewRightTools}>
-              <TouchableOpacity style={styles.previewRightToolBtn}>
-                <Ionicons name="happy-outline" size={20} color="white" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.previewRightToolBtn}>
-                <Ionicons name="musical-notes" size={20} color="white" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.previewRightToolBtn}>
-                <Ionicons name="color-wand-outline" size={20} color="white" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.previewRightToolBtn, styles.deleteBtn]}
-                onPress={handleDiscard}
-              >
-                <Ionicons name="trash-outline" size={20} color="#ef4444" />
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Caption Box - moves just above keyboard for video */}
-          <View
-            style={[
-              styles.captionContainer,
-              {
-                bottom: isKeyboardVisible
-                  ? keyboardHeight + 16
-                  : Platform.OS === "ios"
-                    ? 40
-                    : 24,
-              },
-            ]}
-          >
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={() => captionRef.current?.focus()}
-            >
-              <View style={styles.captionBox}>
-                <TextInput
-                  ref={captionRef}
-                  placeholder="Add a caption..."
-                  placeholderTextColor="rgba(255,255,255,0.6)"
-                  value={caption}
-                  onChangeText={setCaption}
-                  style={styles.previewCaptionInput}
-                  multiline
-                  maxLength={500}
-                  returnKeyType="done"
-                  onSubmitEditing={Keyboard.dismiss}
-                />
-              </View>
-            </TouchableOpacity>
-          </View>
+          {/* Caption */}
+          {renderCaptionInput()}
         </View>
       </TouchableWithoutFeedback>
     );
   }
 
-  // ================= CAMERA UI =================
+  // ===========================================================================
+  // Camera UI
+  // ===========================================================================
+
   return (
     <View style={styles.cameraContainer}>
       <StatusBar barStyle="light-content" backgroundColor="#000" />
 
-      {/* Camera View */}
+      {/* Camera view */}
       <CameraView
         ref={cameraRef}
         style={styles.camera}
@@ -586,7 +611,7 @@ export default function CreateStoryScreen() {
         mode={cameraMode}
       />
 
-      {/* Top Bar */}
+      {/* Top bar */}
       <View style={styles.cameraTopBar}>
         <TouchableOpacity
           style={styles.cameraTopBtn}
@@ -595,7 +620,7 @@ export default function CreateStoryScreen() {
           <Ionicons name="close" size={28} color="white" />
         </TouchableOpacity>
 
-        {/* Timer Display */}
+        {/* Recording timer */}
         {isRecording && (
           <View style={styles.timerContainer}>
             <View style={styles.timerDot} />
@@ -605,28 +630,20 @@ export default function CreateStoryScreen() {
 
         <View style={styles.cameraTopRight}>
           {!isRecording && (
-            <>
-              <TouchableOpacity
-                style={styles.cameraTopBtn}
-                onPress={toggleFlash}
-              >
-                <Ionicons
-                  name={getFlashIcon()}
-                  size={22}
-                  color={flash !== "off" ? "#fbbf24" : "white"}
-                />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.cameraTopBtn}>
-                <Ionicons name="settings-outline" size={22} color="white" />
-              </TouchableOpacity>
-            </>
+            <TouchableOpacity style={styles.cameraTopBtn} onPress={toggleFlash}>
+              <Ionicons
+                name={getFlashIcon()}
+                size={22}
+                color={flash !== "off" ? "#fbbf24" : "white"}
+              />
+            </TouchableOpacity>
           )}
         </View>
       </View>
 
-      {/* Bottom Controls */}
+      {/* Bottom controls */}
       <View style={styles.cameraBottomBar}>
-        {/* Gallery Preview */}
+        {/* Gallery button */}
         {!isRecording && (
           <TouchableOpacity
             style={styles.galleryPreview}
@@ -636,9 +653,9 @@ export default function CreateStoryScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Capture Section */}
+        {/* Capture section */}
         <View style={styles.captureSection}>
-          {/* Mode Switcher */}
+          {/* Mode switcher */}
           {!isRecording && (
             <View style={styles.modeSwitcher}>
               <TouchableOpacity
@@ -676,7 +693,7 @@ export default function CreateStoryScreen() {
             </View>
           )}
 
-          {/* Capture Button */}
+          {/* Capture button */}
           <TouchableOpacity
             style={[
               styles.captureBtn,
@@ -696,7 +713,7 @@ export default function CreateStoryScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Flip Camera */}
+        {/* Flip camera */}
         {!isRecording && (
           <TouchableOpacity
             style={styles.flipCameraBtn}
@@ -710,7 +727,9 @@ export default function CreateStoryScreen() {
   );
 }
 
-// ================= STYLES =================
+// =============================================================================
+// Styles
+// =============================================================================
 
 const styles = StyleSheet.create({
   // Permission
@@ -838,7 +857,7 @@ const styles = StyleSheet.create({
   },
   modeOptionTextActive: { color: "#000" },
 
-  // Capture Button - PHOTO mode (white ring)
+  // Capture Button
   captureBtn: {
     width: 76,
     height: 76,
@@ -854,20 +873,13 @@ const styles = StyleSheet.create({
     borderRadius: 31,
     backgroundColor: "white",
   },
-
-  // Capture Button - VIDEO mode (red circle)
-  captureBtnVideo: {
-    borderColor: "white",
-    borderWidth: 5,
-  },
+  captureBtnVideo: { borderColor: "white", borderWidth: 5 },
   captureBtnInnerVideo: {
     width: 62,
     height: 62,
     borderRadius: 31,
     backgroundColor: "#ef4444",
   },
-
-  // Capture Button - RECORDING state
   captureBtnRecording: {
     borderColor: "#ef4444",
     borderWidth: 6,
@@ -893,33 +905,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  // ===== PREVIEW STYLES =====
-  previewContainer: {
-    flex: 1,
-    backgroundColor: "#000",
-  },
-
-  // Background blur layer
-  backgroundContainer: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  backgroundMediaFull: {
-    width: "100%",
-    height: "100%",
-  },
-
-  // Media container for centering - Same as StoryMedia
+  // Preview
+  previewContainer: { flex: 1, backgroundColor: "#000" },
+  backgroundContainer: { ...StyleSheet.absoluteFillObject },
+  backgroundMediaFull: { width: "100%", height: "100%" },
   mediaContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
   },
-
-  // Fixed Instagram-like wrapper - Same as StoryMedia
   mediaWrapper: {
     borderRadius: 12,
     overflow: "hidden",
-
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.1)",
     ...Platform.select({
@@ -929,26 +926,16 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.25,
         shadowRadius: 10,
       },
-      android: {
-        elevation: 5,
-      },
+      android: { elevation: 5 },
     }),
   },
-
-  // Media content fills wrapper completely - Same as StoryMedia
-  mediaContent: {
-    width: "100%",
-    height: "100%",
-  },
-
-  // Preview loader overlay
+  mediaContent: { width: "100%", height: "100%" },
   previewLoader: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "rgba(0,0,0,0.3)",
   },
-
   previewTopBar: {
     position: "absolute",
     top: Platform.OS === "ios" ? 56 : 44,
@@ -979,30 +966,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
 
-  // Right Side Tools for Preview
-  previewRightTools: {
-    position: "absolute",
-    right: 16,
-    top: "35%",
-    gap: 16,
-    zIndex: 10,
-  },
-  previewRightToolBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
-  },
-  deleteBtn: {
-    marginTop: 8,
-    borderColor: "#ef4444",
-  },
-
-  // Unified Caption Container - moves with keyboard
+  // Caption
   captionContainer: {
     position: "absolute",
     left: 0,
@@ -1018,7 +982,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.2)",
   },
-
   previewCaptionInput: {
     color: "white",
     fontSize: 16,

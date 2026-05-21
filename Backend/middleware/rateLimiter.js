@@ -3,8 +3,20 @@
 const rateLimit = require("express-rate-limit");
 
 /**
+ * Helper to safely get client IP
+ * Properly handles both IPv4 and IPv6
+ */
+const getSafeIP = (req) => {
+  return (
+    req.ip ||
+    req.socket?.remoteAddress ||
+    req.connection?.remoteAddress ||
+    "127.0.0.1"
+  );
+};
+
+/**
  * Admin login rate limiter
- * Prevents brute force attacks on admin login
  */
 const adminLoginLimiter = rateLimit({
   windowMs:
@@ -17,16 +29,16 @@ const adminLoginLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
+  keyGenerator: (req, res) => {
+    const ip = getSafeIP(req);
     const email = req.body?.email?.toLowerCase() || "unknown";
-    return `login:${req.ip}:${email}`;
+    return `${ip}:login:${email}`;
   },
   skipSuccessfulRequests: true,
 });
 
 /**
  * General admin API rate limiter
- * Applied to all protected admin routes
  */
 const adminApiLimiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
@@ -38,14 +50,14 @@ const adminApiLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    return `api:${req.user?._id?.toString() || req.ip}`;
+  keyGenerator: (req, res) => {
+    const ip = getSafeIP(req);
+    return req.user?._id ? `${ip}:api:user:${req.user._id}` : `${ip}:api`;
   },
 });
 
 /**
  * Content modification rate limiter
- * More restrictive for sensitive operations
  */
 const contentModificationLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -57,14 +69,14 @@ const contentModificationLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    return `modify:${req.user?._id?.toString() || req.ip}`;
+  keyGenerator: (req, res) => {
+    const ip = getSafeIP(req);
+    return req.user?._id ? `${ip}:modify:user:${req.user._id}` : `${ip}:modify`;
   },
 });
 
 /**
  * Bulk operation rate limiter
- * Very restrictive for bulk delete/update operations
  */
 const bulkOperationLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
@@ -76,8 +88,9 @@ const bulkOperationLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    return `bulk:${req.user?._id?.toString() || req.ip}`;
+  keyGenerator: (req, res) => {
+    const ip = getSafeIP(req);
+    return req.user?._id ? `${ip}:bulk:user:${req.user._id}` : `${ip}:bulk`;
   },
 });
 

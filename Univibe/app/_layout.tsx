@@ -1,27 +1,23 @@
-
-import { LogBox, Platform } from 'react-native';
+import { LogBox, Platform, View, ActivityIndicator } from "react-native";
 import { Stack } from "expo-router";
 import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
-import { AuthProvider } from "../lib/contexts/AuthContext";
+import { useEffect } from "react";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { AuthProvider, useAuth } from "../lib/contexts/AuthContext";
 import { ProfileProvider } from "../lib/contexts/ProfileContext";
 import { ChatProvider } from "../lib/contexts/ChatContext";
 import { ActiveRoomProvider } from "../lib/contexts/ActiveRoomContext";
 import { InAppNotificationProvider } from "../lib/contexts/InAppNotificationContext";
-import { View, ActivityIndicator} from "react-native";
-import { useEffect } from "react";
-import { SafeAreaProvider } from "react-native-safe-area-context";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { useInAppNotifications } from "../hooks/useInAppNotifications";
 import InAppToast from "./components/InAppToast";
 
 if (__DEV__) {
-  // Suppress expo-av warning
+  // Suppress specific library noise cleanly
   const originalWarn = console.warn;
   console.warn = (...args) => {
-    if (
-      typeof args[0] === 'string' && 
-      args[0].includes('expo-av')
-    ) {
+    if (typeof args[0] === "string" && args[0].includes("expo-av")) {
       return;
     }
     originalWarn(...args);
@@ -30,10 +26,8 @@ if (__DEV__) {
 
 SplashScreen.preventAutoHideAsync();
 
-// Inline listener component - avoids Expo Router treating it as a route
+// 2. Safe Global Event Tracker Lifecycle Hook
 function NotificationListener() {
-  const { useInAppNotifications } = require("../hooks/useInAppNotifications");
-  const { useAuth } = require("../lib/contexts/AuthContext");
   const { isAuthenticated } = useAuth();
 
   if (isAuthenticated) {
@@ -43,7 +37,7 @@ function NotificationListener() {
 }
 
 function NotificationListenerInner() {
-  const { useInAppNotifications } = require("../hooks/useInAppNotifications");
+  // Executes in its own isolated visual bubble safely without messing up Metro module trees
   useInAppNotifications();
   return null;
 }
@@ -79,8 +73,10 @@ export default function RootLayout() {
             <ChatProvider>
               <ActiveRoomProvider>
                 <InAppNotificationProvider>
+                  {/* Background Event Infrastructure Hooks */}
                   <NotificationListener />
 
+                  {/* Navigation Manifest */}
                   <Stack screenOptions={{ headerShown: false }}>
                     <Stack.Screen name="index" />
                     <Stack.Screen
@@ -141,6 +137,7 @@ export default function RootLayout() {
                     />
                   </Stack>
 
+                  {/* Global Overlays */}
                   <InAppToast />
                 </InAppNotificationProvider>
               </ActiveRoomProvider>
