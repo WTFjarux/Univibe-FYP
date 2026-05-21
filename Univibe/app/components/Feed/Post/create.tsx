@@ -21,6 +21,7 @@ import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { createPost } from "@/lib/services/postService";
 import { useAuth } from "@/lib/contexts/AuthContext";
+import { useTheme } from "@/lib/contexts/ThemeContext";
 import { API_BASE_URL } from "@/constants/ipConstants";
 
 // Local default avatar
@@ -34,6 +35,7 @@ type Visibility = "campus" | "connections";
 export default function CreatePostScreen() {
   const router = useRouter();
   const { profile, user } = useAuth();
+  const { colors } = useTheme();
   const [content, setContent] = useState("");
   const [images, setImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -216,29 +218,35 @@ export default function CreatePostScreen() {
     if (isAnonymous) {
       return ["campus"];
     }
-    return ["campus", "connections"]; // Removed "following" and "private"
+    return ["campus", "connections"];
   };
 
   const visibilityOptions = getVisibilityOptions();
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { borderBottomColor: colors.border }]}>
           <TouchableOpacity onPress={() => router.back()} disabled={loading}>
-            <Ionicons name="close" size={28} color="#000" />
+            <Ionicons name="close" size={28} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Create Post</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>
+            Create Post
+          </Text>
           <TouchableOpacity
             onPress={handleSubmit}
             disabled={loading || !hasContentToPost()}
             style={[
               styles.postButton,
-              (!hasContentToPost() || loading) && styles.postButtonDisabled,
+              { backgroundColor: colors.primary },
+              (!hasContentToPost() || loading) && [
+                styles.postButtonDisabled,
+                { backgroundColor: colors.textMuted },
+              ],
             ]}
           >
             {loading ? (
@@ -254,15 +262,37 @@ export default function CreatePostScreen() {
           {/* User Info */}
           <View style={styles.userInfo}>
             {isAnonymous ? (
-              <View style={[styles.avatar, styles.anonymousAvatar]}>
-                <Ionicons name="eye-off" size={20} color="#666" />
+              <View
+                style={[
+                  styles.avatar,
+                  styles.anonymousAvatar,
+                  {
+                    backgroundColor: colors.skeleton,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="eye-off"
+                  size={20}
+                  color={colors.textSecondary}
+                />
               </View>
             ) : (
-              <Image source={userAvatar} style={styles.avatar} />
+              <Image
+                source={userAvatar}
+                style={[styles.avatar, { backgroundColor: colors.skeleton }]}
+              />
             )}
             <View style={styles.userTextContainer}>
-              <Text style={styles.userName}>{getUserName()}</Text>
-              <Text style={styles.userHandle}>{getUserHandle()}</Text>
+              <Text style={[styles.userName, { color: colors.text }]}>
+                {getUserName()}
+              </Text>
+              <Text
+                style={[styles.userHandle, { color: colors.textSecondary }]}
+              >
+                {getUserHandle()}
+              </Text>
             </View>
 
             {/* Anonymous toggle */}
@@ -271,7 +301,12 @@ export default function CreatePostScreen() {
               onPress={() => setIsAnonymous(!isAnonymous)}
               disabled={loading}
             >
-              <View style={styles.toggleContainerRight}>
+              <View
+                style={[
+                  styles.toggleContainerRight,
+                  { backgroundColor: colors.textMuted },
+                ]}
+              >
                 <View
                   style={[
                     styles.toggleCircleRight,
@@ -282,7 +317,11 @@ export default function CreatePostScreen() {
               <Text
                 style={[
                   styles.toggleTextRight,
-                  isAnonymous && styles.toggleTextRightActive,
+                  { color: colors.textSecondary },
+                  isAnonymous && [
+                    styles.toggleTextRightActive,
+                    { color: colors.text },
+                  ],
                 ]}
               >
                 {isAnonymous ? "Anonymous ON" : "Post anonymously"}
@@ -306,23 +345,27 @@ export default function CreatePostScreen() {
 
           {/* Text Input */}
           <TextInput
-            style={styles.input}
+            style={[styles.input, { color: colors.text }]}
             placeholder="What's on your mind?"
             value={content}
             onChangeText={setContent}
             multiline
             maxLength={500}
             editable={!loading}
-            placeholderTextColor="#999"
+            placeholderTextColor={colors.textMuted}
           />
 
           {/* Character Count */}
-          <Text style={styles.charCount}>{content.length}/500</Text>
+          <Text style={[styles.charCount, { color: colors.textMuted }]}>
+            {content.length}/500
+          </Text>
 
           {/* Image Preview */}
           {images.length > 0 && (
             <View style={styles.imagesContainer}>
-              <Text style={styles.imagesTitle}>Photos ({images.length}/4)</Text>
+              <Text style={[styles.imagesTitle, { color: colors.text }]}>
+                Photos ({images.length}/4)
+              </Text>
               <View style={styles.imagesGrid}>
                 {images.map((image, index) => (
                   <View key={index} style={styles.imageWrapper}>
@@ -345,14 +388,17 @@ export default function CreatePostScreen() {
                 ))}
                 {images.length < 4 && (
                   <TouchableOpacity
-                    style={styles.addMoreButton}
+                    style={[
+                      styles.addMoreButton,
+                      { borderColor: colors.border },
+                    ]}
                     onPress={pickImage}
                     disabled={loading}
                   >
                     <Ionicons
                       name="add-circle-outline"
                       size={32}
-                      color="#8b5cf6"
+                      color={colors.primary}
                     />
                   </TouchableOpacity>
                 )}
@@ -362,10 +408,15 @@ export default function CreatePostScreen() {
 
           {/* Visibility Options */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>
               Who can see this?
               {isAnonymous && (
-                <Text style={styles.anonymousNote}>
+                <Text
+                  style={[
+                    styles.anonymousNote,
+                    { color: colors.textSecondary },
+                  ]}
+                >
                   {" "}
                   (Campus only for anonymous posts)
                 </Text>
@@ -377,8 +428,24 @@ export default function CreatePostScreen() {
                   key={option}
                   style={[
                     styles.visibilityOption,
-                    visibility === option && styles.visibilityOptionActive,
-                    isAnonymous && styles.visibilityOptionDisabled,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+                    visibility === option && [
+                      styles.visibilityOptionActive,
+                      {
+                        backgroundColor: colors.primary,
+                        borderColor: colors.primary,
+                      },
+                    ],
+                    isAnonymous && [
+                      styles.visibilityOptionDisabled,
+                      {
+                        backgroundColor: colors.primary,
+                        borderColor: colors.primary,
+                      },
+                    ],
                   ]}
                   onPress={() => !isAnonymous && setVisibility(option)}
                   disabled={loading || isAnonymous}
@@ -386,11 +453,14 @@ export default function CreatePostScreen() {
                   <Ionicons
                     name={getVisibilityIcon(option)}
                     size={18}
-                    color={visibility === option ? "#fff" : "#666"}
+                    color={
+                      visibility === option ? "#fff" : colors.textSecondary
+                    }
                   />
                   <Text
                     style={[
                       styles.visibilityText,
+                      { color: colors.textSecondary },
                       visibility === option && styles.visibilityTextActive,
                       isAnonymous && styles.visibilityTextDisabled,
                     ]}
@@ -400,7 +470,9 @@ export default function CreatePostScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-            <Text style={styles.visibilityDescription}>
+            <Text
+              style={[styles.visibilityDescription, { color: colors.primary }]}
+            >
               {isAnonymous
                 ? "Anonymous posts are always visible to everyone in your campus for maximum reach while protecting your identity."
                 : visibility === "campus"
@@ -416,8 +488,10 @@ export default function CreatePostScreen() {
               onPress={pickImage}
               disabled={loading}
             >
-              <Ionicons name="image-outline" size={24} color="#8b5cf6" />
-              <Text style={styles.addImageTextSimple}>Add Photo</Text>
+              <Ionicons name="image-outline" size={24} color={colors.primary} />
+              <Text style={[styles.addImageTextSimple, { color: colors.text }]}>
+                Add Photo
+              </Text>
             </TouchableOpacity>
           )}
         </ScrollView>

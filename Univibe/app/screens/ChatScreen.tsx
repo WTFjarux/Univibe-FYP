@@ -21,6 +21,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
+import { useTheme } from "../../lib/contexts/ThemeContext";
 import { useChatScreen } from "../../hooks/chatScreen/useChatScreen";
 import ChatHeader from "../components/chat/ChatMessage/ChatHeader";
 import ChatInput from "../components/chat/ChatMessage/ChatInput";
@@ -47,7 +48,6 @@ import { useActiveRoom } from "../../lib/contexts/ActiveRoomContext";
 // -----------------------------------------------------------------------------
 
 const DEFAULT_AVATAR = require("../../assets/images/default-avatar.png");
-const ACCENT_COLOR = "#8b5cf6";
 
 /** Maximum time gap between messages before showing a new timestamp */
 const MESSAGE_TIME_GAP_MINUTES = 5;
@@ -56,10 +56,6 @@ const MESSAGE_TIME_GAP_MINUTES = 5;
 // Memoized Components
 // -----------------------------------------------------------------------------
 
-/**
- * Memoized wrapper around MessageItem to prevent unnecessary re-renders.
- * Only re-renders when critical message properties change.
- */
 const MemoizedMessageItem = React.memo(MessageItem, (prev, next) => {
   return (
     prev.item._id === next.item._id &&
@@ -81,6 +77,7 @@ const MemoizedMessageItem = React.memo(MessageItem, (prev, next) => {
 export default function ChatScreen() {
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<any>(null);
+  const { colors, isDark } = useTheme();
 
   // ─── Navigation & Params ─────────────────────────────────────────────────
   const router = useRouter();
@@ -149,19 +146,17 @@ export default function ChatScreen() {
   // Group Info Handler
   // ---------------------------------------------------------------------------
 
-  /** Navigate to group info screen */
   const handleGroupInfoPress = useCallback(() => {
     router.push({
       pathname: "/screens/GroupInfoScreen",
       params: { roomId: roomId },
-      // Force full screen instead of modal
     });
   }, [router, roomId]);
+
   // ---------------------------------------------------------------------------
   // Lifecycle Effects
   // ---------------------------------------------------------------------------
 
-  /** Cleanup all resources on unmount */
   useEffect(() => {
     return () => {
       clearAllPending();
@@ -181,26 +176,22 @@ export default function ChatScreen() {
     };
   }, [roomId, setActiveRoomId, clearActiveRoom]);
 
-  /** Fetch latest messages on initial mount, bypassing cache */
   useEffect(() => {
     loadMessages(true);
   }, []);
 
-  /** Fetch latest messages every time the screen gains focus */
   useFocusEffect(
     useCallback(() => {
       loadMessages(true);
     }, [loadMessages]),
   );
 
-  /** Fetch latest messages when socket reconnects to catch missed messages */
   useEffect(() => {
     if (socketConnected) {
       loadMessages(true);
     }
   }, [socketConnected, loadMessages]);
 
-  /** Scroll to bottom once messages finish loading */
   useEffect(() => {
     if (!loading && messages.length > 0) {
       const timer = setTimeout(() => {
@@ -210,7 +201,6 @@ export default function ChatScreen() {
     }
   }, [loading, messages.length, initialScrollToBottom]);
 
-  /** Auto-focus the input field when replying to a message */
   useEffect(() => {
     if (replyToMessage) {
       const timer = setTimeout(() => {
@@ -224,7 +214,6 @@ export default function ChatScreen() {
   // Derived Data
   // ---------------------------------------------------------------------------
 
-  /** Reverse messages for inverted FlatList display (newest at bottom visually) */
   const reversedMessages = useMemo(() => {
     return [...messages].reverse();
   }, [messages]);
@@ -233,18 +222,12 @@ export default function ChatScreen() {
   // Forward Handler
   // ---------------------------------------------------------------------------
 
-  /**
-   * Opens the ForwardModal with the selected message data.
-   */
   const handleForward = useCallback((message: Message) => {
     if (!message._id) return;
     setForwardMessage(message);
     setForwardModalVisible(true);
   }, []);
 
-  /**
-   * Closes the ForwardModal and resets forward state.
-   */
   const handleForwardClose = useCallback(() => {
     setForwardModalVisible(false);
     setTimeout(() => {
@@ -252,9 +235,6 @@ export default function ChatScreen() {
     }, 300);
   }, []);
 
-  /**
-   * Called when forwarding is successful.
-   */
   const handleForwardSuccess = useCallback((data: any) => {
     console.log(`Message forwarded to ${data?.forwardedCount || 0} chat(s)`);
   }, []);
@@ -283,12 +263,10 @@ export default function ChatScreen() {
   // Callbacks
   // ---------------------------------------------------------------------------
 
-  /** Load older messages when user scrolls to the top (inverted: bottom) */
   const handleEndReached = useCallback(() => {
     if (hasMore && !loadingMore) loadOlderMessages();
   }, [hasMore, loadingMore, loadOlderMessages]);
 
-  /** Determine if a message was sent by the current user */
   const isOwnMessage = useCallback(
     (message: Message): boolean => {
       if (!user?.id) return false;
@@ -298,10 +276,6 @@ export default function ChatScreen() {
     [user?.id],
   );
 
-  /**
-   * Render a single message item within the FlatList.
-   * Handles date separators, avatar visibility, and timestamps.
-   */
   const renderItem = useCallback(
     ({ item, index }: { item: Message; index: number }) => {
       const actualIndex = messages.length - 1 - index;
@@ -368,53 +342,61 @@ export default function ChatScreen() {
     ],
   );
 
-  /** Extract a unique key for each message in the FlatList */
   const keyExtractor = useCallback((item: Message, index: number) => {
     if (item._id && !isTempId(item._id)) return item._id;
     if (item.tempId) return item.tempId;
     return `msg-${index}-${item.createdAt || Date.now()}`;
   }, []);
 
-  /** Loading indicator shown while fetching older messages */
   const ListFooterComponent = useCallback(() => {
     if (!loadingMore) return null;
     return (
       <View style={styles.loadingMore}>
-        <ActivityIndicator size="small" color={ACCENT_COLOR} />
+        <ActivityIndicator size="small" color={colors.primary} />
       </View>
     );
-  }, [loadingMore]);
+  }, [loadingMore, colors]);
 
-  /** Empty state shown when there are no messages */
   const ListEmptyComponent = useMemo(
     () => (
       <View style={styles.emptyView}>
-        <Ionicons name="chatbubbles-outline" size={60} color="#C7C7CC" />
-        <Text style={styles.emptyTitle}>No messages yet</Text>
-        <Text style={styles.emptySubtitle}>
+        <Ionicons
+          name="chatbubbles-outline"
+          size={60}
+          color={colors.textMuted}
+        />
+        <Text style={[styles.emptyTitle, { color: colors.text }]}>
+          No messages yet
+        </Text>
+        <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
           Send a message to start the conversation
         </Text>
       </View>
     ),
-    [],
+    [colors],
   );
 
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
 
-  /** Full-screen loading spinner while messages are being fetched */
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={ACCENT_COLOR} />
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top"]}>
-      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+    <SafeAreaView
+      style={[styles.safeArea, { backgroundColor: colors.background }]}
+      edges={["top"]}
+    >
+      <StatusBar
+        barStyle={isDark ? "light-content" : "dark-content"}
+        backgroundColor={colors.card}
+      />
       <ChatHeader
         otherUserName={otherUserName}
         otherUserId={otherUserId}
@@ -428,7 +410,7 @@ export default function ChatScreen() {
         groupPhoto={params.groupPhoto as string}
       />
       <KeyboardAvoidingView
-        style={styles.kav}
+        style={[styles.kav, { backgroundColor: colors.background }]}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         keyboardVerticalOffset={0}
       >
@@ -458,8 +440,9 @@ export default function ChatScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor={ACCENT_COLOR}
-              colors={[ACCENT_COLOR]}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+              progressBackgroundColor={colors.card}
             />
           }
           contentContainerStyle={
@@ -486,7 +469,6 @@ export default function ChatScreen() {
         />
       </KeyboardAvoidingView>
 
-      {/* Forward Modal */}
       {forwardMessageData && (
         <ForwardModal
           visible={forwardModalVisible}

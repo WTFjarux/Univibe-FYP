@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { View, Text, TouchableOpacity, Image, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { useTheme } from "../../../../lib/contexts/ThemeContext";
 import { API_BASE_URL } from "../../../../constants/ipConstants";
 
 interface ChatHeaderProps {
@@ -16,7 +17,7 @@ interface ChatHeaderProps {
   isGroup?: boolean;
   participantCount?: number;
   onGroupInfoPress?: () => void;
-  groupPhoto?: string | null; // ✅ Add this
+  groupPhoto?: string | null;
 }
 
 export default function ChatHeader({
@@ -29,11 +30,11 @@ export default function ChatHeader({
   isGroup = false,
   participantCount,
   onGroupInfoPress,
-  groupPhoto, // ✅ Add this
+  groupPhoto,
 }: ChatHeaderProps) {
   const router = useRouter();
+  const { colors } = useTheme();
 
-  // Build group image URL
   const getGroupImageSource = () => {
     if (!groupPhoto) return null;
     const url = groupPhoto.startsWith("http")
@@ -46,7 +47,6 @@ export default function ChatHeader({
 
   const groupImageSource = isGroup ? getGroupImageSource() : null;
 
-  // Avatar source for direct chats
   const getAvatarSource = () => {
     if (otherUserAvatar) {
       const fullUrl = getFullImageUrl(otherUserAvatar);
@@ -64,37 +64,61 @@ export default function ChatHeader({
   };
 
   return (
-    <View style={styles.header}>
+    <View
+      style={[
+        styles.header,
+        {
+          backgroundColor: colors.background,
+          borderBottomColor: colors.border,
+        },
+      ]}
+    >
       <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-        <Ionicons name="chevron-back" size={28} color="#007AFF" />
+        <Ionicons name="chevron-back" size={28} color={colors.primary} />
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.headerUserInfo} onPress={handleInfoPress}>
         <View style={styles.headerAvatar}>
           {isGroup ? (
             groupImageSource ? (
-              // ✅ Show group photo
               <Image
                 source={groupImageSource}
-                style={styles.headerAvatarImage}
+                style={[
+                  styles.headerAvatarImage,
+                  { backgroundColor: colors.skeleton },
+                ]}
               />
             ) : (
-              // ✅ Fallback to people icon
-              <View style={[styles.headerAvatarImage, styles.groupAvatar]}>
-                <Ionicons name="people" size={22} color="#007AFF" />
+              <View
+                style={[
+                  styles.headerAvatarImage,
+                  styles.groupAvatar,
+                  { backgroundColor: colors.skeleton },
+                ]}
+              >
+                <Ionicons name="people" size={22} color={colors.primary} />
               </View>
             )
           ) : (
             <Image
               source={getAvatarSource()}
-              style={styles.headerAvatarImage}
+              style={[
+                styles.headerAvatarImage,
+                { backgroundColor: colors.skeleton },
+              ]}
             />
           )}
-          {!isGroup && isOnline && <View style={styles.headerOnlineDot} />}
+          {!isGroup && isOnline && (
+            <View
+              style={[styles.headerOnlineDot, { borderColor: colors.card }]}
+            />
+          )}
         </View>
         <View>
-          <Text style={styles.headerName}>{otherUserName}</Text>
-          <Text style={styles.headerStatus}>
+          <Text style={[styles.headerName, { color: colors.text }]}>
+            {otherUserName}
+          </Text>
+          <Text style={[styles.headerStatus, { color: colors.textSecondary }]}>
             {isGroup
               ? participantCount
                 ? `${participantCount} member${participantCount !== 1 ? "s" : ""}`
@@ -109,23 +133,17 @@ export default function ChatHeader({
       <View style={styles.headerActions}>
         {isGroup ? (
           <TouchableOpacity
-            style={styles.headerAction}
             onPress={handleInfoPress}
           >
             <Ionicons
               name="information-circle-outline"
               size={24}
-              color="#007AFF"
+              color={colors.primary}
             />
           </TouchableOpacity>
         ) : (
           <>
-            <TouchableOpacity style={styles.headerAction}>
-              <Ionicons name="call-outline" size={24} color="#007AFF" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.headerAction}>
-              <Ionicons name="videocam-outline" size={24} color="#007AFF" />
-            </TouchableOpacity>
+           
           </>
         )}
       </View>
@@ -140,9 +158,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 12,
     paddingVertical: 12,
-    backgroundColor: "#eeeeee",
     borderBottomWidth: 1,
-    borderBottomColor: "#e5e5ea",
   },
   backButton: { padding: 4 },
   headerUserInfo: {
@@ -156,12 +172,10 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#f0f0f0",
   },
   groupAvatar: {
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#f0f0f0",
   },
   headerOnlineDot: {
     position: "absolute",
@@ -172,19 +186,16 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: "#34C759",
     borderWidth: 2,
-    borderColor: "#fff",
   },
   headerName: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#000",
     fontFamily: "SofiaSans-Bold",
   },
   headerStatus: {
     fontSize: 12,
-    color: "#8E8E93",
     fontFamily: "SofiaSans-Regular",
   },
   headerActions: { flexDirection: "row", gap: 12 },
-  headerAction: { padding: 4 },
+
 });

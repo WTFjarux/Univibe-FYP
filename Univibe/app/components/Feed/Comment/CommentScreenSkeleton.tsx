@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { View, Text, StyleSheet, Animated, Dimensions } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "@/lib/contexts/ThemeContext";
 
 const { width: screenWidth } = Dimensions.get("window");
 
@@ -23,6 +24,7 @@ const SkeletonBlock: React.FC<SkeletonBlockProps> = ({
   style,
 }) => {
   const shimmerAnim = useRef(new Animated.Value(0)).current;
+  const { colors } = useTheme();
 
   useEffect(() => {
     const animation = Animated.loop(
@@ -55,7 +57,7 @@ const SkeletonBlock: React.FC<SkeletonBlockProps> = ({
           width: width as any,
           height,
           borderRadius,
-          backgroundColor: "#E5E7EB",
+          backgroundColor: colors.skeleton,
           overflow: "hidden",
         },
         style,
@@ -72,7 +74,7 @@ const SkeletonBlock: React.FC<SkeletonBlockProps> = ({
           style={{
             width: "100%",
             height: "100%",
-            backgroundColor: "#F3F4F6",
+            backgroundColor: colors.skeletonHighlight,
             opacity: 0.6,
           }}
         />
@@ -86,12 +88,21 @@ const SkeletonBlock: React.FC<SkeletonBlockProps> = ({
 // ============================================
 
 const CommentScreenSkeleton: React.FC = () => {
+  const { colors } = useTheme();
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       {/* Header */}
-      <View style={styles.header}>
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: colors.card, borderBottomColor: colors.border },
+        ]}
+      >
         <View style={styles.headerBtn}>
-          <Ionicons name="arrow-back" size={24} color="#D1D5DB" />
+          <Ionicons name="arrow-back" size={24} color={colors.textMuted} />
         </View>
         <SkeletonBlock width={100} height={16} />
         <View style={styles.headerBtn} />
@@ -130,17 +141,21 @@ const CommentScreenSkeleton: React.FC = () => {
         />
 
         {/* ── Stats Row ── */}
-        <View style={styles.statsRow}>
+        <View style={[styles.statsRow, { borderTopColor: colors.border }]}>
           <View style={styles.stat}>
-            <Ionicons name="heart-outline" size={18} color="#D1D5DB" />
+            <Ionicons name="heart-outline" size={18} color={colors.textMuted} />
             <SkeletonBlock width={24} height={14} />
           </View>
           <View style={styles.stat}>
-            <Ionicons name="chatbubble-outline" size={18} color="#D1D5DB" />
+            <Ionicons
+              name="chatbubble-outline"
+              size={18}
+              color={colors.textMuted}
+            />
             <SkeletonBlock width={24} height={14} />
           </View>
           <View style={styles.stat}>
-            <Ionicons name="share-outline" size={18} color="#D1D5DB" />
+            <Ionicons name="share-outline" size={18} color={colors.textMuted} />
           </View>
         </View>
 
@@ -216,14 +231,19 @@ const CommentScreenSkeleton: React.FC = () => {
       </View>
 
       {/* ── Comment Input ── */}
-      <View style={styles.inputBar}>
+      <View
+        style={[
+          styles.inputBar,
+          { backgroundColor: colors.card, borderTopColor: colors.border },
+        ]}
+      >
         <SkeletonBlock
           width={32}
           height={32}
           borderRadius={16}
           style={{ marginRight: 10 }}
         />
-        <View style={styles.inputField}>
+        <View style={[styles.inputField, { backgroundColor: colors.skeleton }]}>
           <SkeletonBlock width="50%" height={14} />
         </View>
       </View>

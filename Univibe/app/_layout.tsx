@@ -10,6 +10,7 @@ import { ProfileProvider } from "../lib/contexts/ProfileContext";
 import { ChatProvider } from "../lib/contexts/ChatContext";
 import { ActiveRoomProvider } from "../lib/contexts/ActiveRoomContext";
 import { InAppNotificationProvider } from "../lib/contexts/InAppNotificationContext";
+import { ThemeProvider } from "../lib/contexts/ThemeContext";
 import { useInAppNotifications } from "../hooks/useInAppNotifications";
 import InAppToast from "./components/InAppToast";
 
@@ -68,82 +69,81 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <AuthProvider>
-          <ProfileProvider>
-            <ChatProvider>
-              <ActiveRoomProvider>
-                <InAppNotificationProvider>
-                  {/* Background Event Infrastructure Hooks */}
-                  <NotificationListener />
+        <ThemeProvider>
+          <AuthProvider>
+            <ProfileProvider>
+              <ChatProvider>
+                <ActiveRoomProvider>
+                  <InAppNotificationProvider>
+                    <NotificationListener />
 
-                  {/* Navigation Manifest */}
-                  <Stack screenOptions={{ headerShown: false }}>
-                    <Stack.Screen name="index" />
-                    <Stack.Screen
-                      name="(auth)"
-                      options={{ gestureEnabled: false }}
-                    />
-                    <Stack.Screen
-                      name="verify"
-                      options={{
-                        presentation: "modal",
-                        animation: "slide_from_bottom",
-                      }}
-                    />
-                    <Stack.Screen
-                      name="(tabs)"
-                      options={{ gestureEnabled: false }}
-                    />
-                    <Stack.Screen name="profile" />
-                    <Stack.Screen
-                      name="screens/CreateStoryScreen"
-                      options={{
-                        headerShown: false,
-                        presentation: "fullScreenModal",
-                        animation: "fade",
-                      }}
-                    />
-                    <Stack.Screen
-                      name="screens/StoryViewerScreen"
-                      options={{
-                        headerShown: false,
-                        presentation: "fullScreenModal",
-                        animation: "fade",
-                      }}
-                    />
-                    <Stack.Screen
-                      name="screens/ChatScreen"
-                      options={{ headerShown: false, presentation: "card" }}
-                    />
-                    <Stack.Screen
-                      name="screens/ChatListScreen"
-                      options={{ headerShown: false, presentation: "card" }}
-                    />
-                    <Stack.Screen
-                      name="screens/GroupInfoScreen"
-                      options={{
-                        headerShown: false,
-                        presentation: "card",
-                        animation: "slide_from_right",
-                      }}
-                    />
-                    <Stack.Screen
-                      name="screens/notifications"
-                      options={{
-                        headerShown: false,
-                        presentation: "card",
-                        animation: "slide_from_right",
-                      }}
-                    />
-                  </Stack>
+                    <Stack screenOptions={{ headerShown: false }}>
+                      <Stack.Screen name="index" />
+                      <Stack.Screen
+                        name="(auth)"
+                        options={{ gestureEnabled: false }}
+                      />
+                      <Stack.Screen
+                        name="verify"
+                        options={{
+                          presentation: "modal",
+                          animation: "slide_from_bottom",
+                        }}
+                      />
+                      <Stack.Screen
+                        name="(tabs)"
+                        options={{ gestureEnabled: false }}
+                      />
+                      <Stack.Screen name="profile" />
+                      <Stack.Screen
+                        name="screens/CreateStoryScreen"
+                        options={{
+                          headerShown: false,
+                          presentation: "fullScreenModal",
+                          animation: "fade",
+                        }}
+                      />
+                      <Stack.Screen
+                        name="screens/StoryViewerScreen"
+                        options={{
+                          headerShown: false,
+                          presentation: "fullScreenModal",
+                          animation: "fade",
+                        }}
+                      />
+                      <Stack.Screen
+                        name="screens/ChatScreen"
+                        options={{ headerShown: false, presentation: "card" }}
+                      />
+                      <Stack.Screen
+                        name="screens/ChatListScreen"
+                        options={{ headerShown: false, presentation: "card" }}
+                      />
+                      <Stack.Screen
+                        name="screens/GroupInfoScreen"
+                        options={{
+                          headerShown: false,
+                          presentation: "card",
+                          animation: "slide_from_right",
+                        }}
+                      />
+                      <Stack.Screen
+                        name="screens/notifications"
+                        options={{
+                          headerShown: false,
+                          presentation: "card",
+                          animation: "slide_from_right",
+                        }}
+                      />
+                    </Stack>
 
-                  {/* Global Overlays */}
-                  <InAppToast />
-                </InAppNotificationProvider>
-              </ActiveRoomProvider>
-            </ChatProvider>
-          </ProfileProvider>
-        </AuthProvider>
+                    <InAppToast />
+                  </InAppNotificationProvider>
+                </ActiveRoomProvider>
+              </ChatProvider>
+            </ProfileProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

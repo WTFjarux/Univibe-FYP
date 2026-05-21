@@ -1,6 +1,7 @@
 import React from "react";
 import { View, TextInput, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../../../../lib/contexts/ThemeContext";
 
 export default function SearchBar({
   value,
@@ -11,19 +12,30 @@ export default function SearchBar({
   onChangeText: (text: string) => void;
   placeholder?: string;
 }) {
+  const { colors } = useTheme();
+
   return (
-    <View style={styles.container}>
-      <Ionicons name="search" size={20} color="#8E8E93" style={styles.icon} />
+    <View style={[styles.container, { backgroundColor: colors.skeleton }]}>
+      <Ionicons
+        name="search"
+        size={20}
+        color={colors.textSecondary}
+        style={styles.icon}
+      />
       <TextInput
-        style={styles.input}
+        style={[styles.input, { color: colors.text }]}
         placeholder={placeholder}
         value={value}
         onChangeText={onChangeText}
-        placeholderTextColor="#8E8E93"
+        placeholderTextColor={colors.textMuted}
       />
       {value.length > 0 && (
         <TouchableOpacity onPress={() => onChangeText("")}>
-          <Ionicons name="close-circle" size={20} color="#8E8E93" />
+          <Ionicons
+            name="close-circle"
+            size={20}
+            color={colors.textSecondary}
+          />
         </TouchableOpacity>
       )}
     </View>
@@ -34,7 +46,6 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F2F3F7",
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,

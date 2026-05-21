@@ -8,6 +8,7 @@ import {
   StyleSheet,
 } from "react-native";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 
 // ==================== SCROLLABLE DROPDOWN ====================
 
@@ -39,10 +40,10 @@ export const ScrollableDropdown: React.FC<ScrollableDropdownProps> = ({
   error,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const { colors, isDark } = useTheme();
 
   const getDisplayValue = () => {
     if (!value) return placeholder;
-
     if (options.length > 0 && typeof options[0] === "object") {
       const option = (options as DropdownOption[]).find(
         (opt) => opt.value === value,
@@ -56,18 +57,26 @@ export const ScrollableDropdown: React.FC<ScrollableDropdownProps> = ({
     <View style={styles.inputGroup}>
       <View style={styles.labelContainer}>
         {icon}
-        <Text style={styles.label}>
+        <Text style={[styles.label, { color: colors.text }]}>
           {label} {required && <Text style={styles.requiredStar}>*</Text>}
         </Text>
       </View>
 
       <TouchableOpacity
-        style={[styles.dropdownButton, error && styles.dropdownButtonError]}
+        style={[
+          styles.dropdownButton,
+          { backgroundColor: colors.background, borderColor: colors.border },
+          error && styles.dropdownButtonError,
+        ]}
         onPress={() => setIsOpen(!isOpen)}
         activeOpacity={0.7}
       >
         <Text
-          style={[styles.dropdownText, !value && styles.dropdownPlaceholder]}
+          style={[
+            styles.dropdownText,
+            { color: colors.text },
+            !value && [styles.dropdownPlaceholder, { color: colors.textMuted }],
+          ]}
           numberOfLines={1}
         >
           {getDisplayValue()}
@@ -75,13 +84,22 @@ export const ScrollableDropdown: React.FC<ScrollableDropdownProps> = ({
         <Ionicons
           name={isOpen ? "chevron-up" : "chevron-down"}
           size={20}
-          color="#6b7280"
+          color={colors.textSecondary}
           style={styles.dropdownIcon}
         />
       </TouchableOpacity>
 
       {isOpen && (
-        <View style={styles.dropdownList}>
+        <View
+          style={[
+            styles.dropdownList,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              shadowColor: colors.shadow,
+            },
+          ]}
+        >
           <ScrollView
             nestedScrollEnabled={true}
             showsVerticalScrollIndicator={true}
@@ -99,7 +117,17 @@ export const ScrollableDropdown: React.FC<ScrollableDropdownProps> = ({
                   key={isObject ? (option as any).id : `option-${index}`}
                   style={[
                     styles.dropdownItem,
-                    isSelected && styles.dropdownItemSelected,
+                    { borderBottomColor: colors.border },
+                    isSelected && [
+                      isSelected && [
+                        styles.dropdownItemSelected,
+                        {
+                          backgroundColor: isDark
+                            ? "rgba(139, 92, 246, 0.15)"
+                            : "#f5f3ff",
+                        },
+                      ],
+                    ],
                     index === options.length - 1 && styles.dropdownItemLast,
                   ]}
                   onPress={() => {
@@ -110,14 +138,22 @@ export const ScrollableDropdown: React.FC<ScrollableDropdownProps> = ({
                   <Text
                     style={[
                       styles.dropdownItemText,
-                      isSelected && styles.dropdownItemTextSelected,
+                      { color: colors.text },
+                      isSelected && [
+                        styles.dropdownItemTextSelected,
+                        { color: colors.primary },
+                      ],
                     ]}
                     numberOfLines={2}
                   >
                     {optionLabel}
                   </Text>
                   {isSelected && (
-                    <Ionicons name="checkmark" size={18} color="#4f46e5" />
+                    <Ionicons
+                      name="checkmark"
+                      size={18}
+                      color={colors.primary}
+                    />
                   )}
                 </TouchableOpacity>
               );
@@ -150,11 +186,13 @@ export const YearSelector: React.FC<YearSelectorProps> = ({
   onSelect,
   required = false,
 }) => {
+  const { colors } = useTheme();
+
   return (
     <View style={styles.inputGroup}>
       <View style={styles.labelContainer}>
-        <MaterialIcons name="calendar-today" size={20} color="#8b5cf6" />
-        <Text style={styles.label}>
+        <MaterialIcons name="calendar-today" size={20} color={colors.primary} />
+        <Text style={[styles.label, { color: colors.text }]}>
           Current Year {required && <Text style={styles.requiredStar}>*</Text>}
         </Text>
       </View>
@@ -164,13 +202,21 @@ export const YearSelector: React.FC<YearSelectorProps> = ({
             key={year.id}
             style={[
               styles.yearCard,
-              value === year.value && styles.yearCardActive,
+              { backgroundColor: colors.card, borderColor: colors.border },
+              value === year.value && [
+                styles.yearCardActive,
+                {
+                  backgroundColor: colors.primary,
+                  borderColor: colors.primary,
+                },
+              ],
             ]}
             onPress={() => onSelect(year.value)}
           >
             <Text
               style={[
                 styles.yearCardText,
+                { color: colors.text },
                 value === year.value && styles.yearCardTextActive,
               ]}
             >
@@ -196,11 +242,13 @@ export const PronounsSelector: React.FC<PronounsSelectorProps> = ({
   value,
   onSelect,
 }) => {
+  const { colors } = useTheme();
+
   return (
     <View style={styles.inputGroup}>
       <View style={styles.labelContainer}>
-        <MaterialIcons name="badge" size={20} color="#8b5cf6" />
-        <Text style={styles.label}>Pronouns</Text>
+        <MaterialIcons name="badge" size={20} color={colors.primary} />
+        <Text style={[styles.label, { color: colors.text }]}>Pronouns</Text>
       </View>
       <View style={styles.pronounContainer}>
         {PRONOUNS.map((pronoun) => (
@@ -208,13 +256,21 @@ export const PronounsSelector: React.FC<PronounsSelectorProps> = ({
             key={pronoun}
             style={[
               styles.pronounButton,
-              value === pronoun && styles.pronounButtonActive,
+              { backgroundColor: colors.card, borderColor: colors.border },
+              value === pronoun && [
+                styles.pronounButtonActive,
+                {
+                  backgroundColor: colors.primary,
+                  borderColor: colors.primary,
+                },
+              ],
             ]}
             onPress={() => onSelect(pronoun)}
           >
             <Text
               style={[
                 styles.pronounButtonText,
+                { color: colors.text },
                 value === pronoun && styles.pronounButtonTextActive,
               ]}
             >
@@ -240,24 +296,39 @@ export const BioInput: React.FC<BioInputProps> = ({
   onChange,
   maxLength = 200,
 }) => {
+  const { colors } = useTheme();
+
   return (
     <View style={styles.inputGroup}>
       <View style={styles.labelContainer}>
-        <Ionicons name="document-text-outline" size={20} color="#8b5cf6" />
-        <Text style={styles.label}>Bio</Text>
+        <Ionicons
+          name="document-text-outline"
+          size={20}
+          color={colors.primary}
+        />
+        <Text style={[styles.label, { color: colors.text }]}>Bio</Text>
       </View>
       <TextInput
-        style={[styles.input, styles.bioInput]}
+        style={[
+          styles.input,
+          styles.bioInput,
+          {
+            backgroundColor: colors.background,
+            borderColor: colors.border,
+            color: colors.text,
+          },
+        ]}
         value={value}
         onChangeText={onChange}
         placeholder="Tell us about yourself..."
+        placeholderTextColor={colors.textMuted}
         multiline
         numberOfLines={4}
         maxLength={maxLength}
         textAlignVertical="top"
         returnKeyType="next"
       />
-      <Text style={styles.charCount}>
+      <Text style={[styles.charCount, { color: colors.textSecondary }]}>
         {maxLength - value.length} characters remaining
       </Text>
     </View>
@@ -283,16 +354,24 @@ export const SocialLinksInput: React.FC<SocialLinksInputProps> = ({
   onLinkedinChange,
   onGithubChange,
 }) => {
+  const { colors, isDark } = useTheme();
+
   return (
     <>
       <View style={styles.inputGroup}>
-        <View style={styles.socialInputContainer}>
-          <Ionicons name="logo-instagram" size={20} color="#8b5cf6" />
+        <View
+          style={[
+            styles.socialInputContainer,
+            { backgroundColor: colors.background, borderColor: colors.border },
+          ]}
+        >
+          <Ionicons name="logo-instagram" size={20} color={colors.primary} />
           <TextInput
-            style={styles.socialInput}
+            style={[styles.socialInput, { color: colors.text }]}
             value={instagram}
             onChangeText={onInstagramChange}
             placeholder="Instagram username"
+            placeholderTextColor={colors.textMuted}
             autoCapitalize="none"
             returnKeyType="next"
           />
@@ -300,13 +379,19 @@ export const SocialLinksInput: React.FC<SocialLinksInputProps> = ({
       </View>
 
       <View style={styles.inputGroup}>
-        <View style={styles.socialInputContainer}>
+        <View
+          style={[
+            styles.socialInputContainer,
+            { backgroundColor: colors.background, borderColor: colors.border },
+          ]}
+        >
           <Ionicons name="logo-linkedin" size={20} color="#3b82f6" />
           <TextInput
-            style={styles.socialInput}
+            style={[styles.socialInput, { color: colors.text }]}
             value={linkedin}
             onChangeText={onLinkedinChange}
             placeholder="LinkedIn username"
+            placeholderTextColor={colors.textMuted}
             autoCapitalize="none"
             returnKeyType="next"
           />
@@ -314,13 +399,23 @@ export const SocialLinksInput: React.FC<SocialLinksInputProps> = ({
       </View>
 
       <View style={styles.inputGroup}>
-        <View style={styles.socialInputContainer}>
-          <Ionicons name="logo-github" size={20} color="#000000ff" />
+        <View
+          style={[
+            styles.socialInputContainer,
+            { backgroundColor: colors.background, borderColor: colors.border },
+          ]}
+        >
+          <Ionicons
+            name="logo-github"
+            size={20}
+            color={isDark ? "#ffffff" : "#000000"}
+          />
           <TextInput
-            style={styles.socialInput}
+            style={[styles.socialInput, { color: colors.text }]}
             value={github}
             onChangeText={onGithubChange}
             placeholder="Github username"
+            placeholderTextColor={colors.textMuted}
             autoCapitalize="none"
             returnKeyType="done"
           />
@@ -477,7 +572,6 @@ const styles = StyleSheet.create({
   },
   yearCardTextActive: {
     color: "white",
-
     fontFamily: "SofiaSans-Bold",
   },
   pronounContainer: {

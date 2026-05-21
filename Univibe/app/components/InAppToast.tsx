@@ -25,6 +25,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Image } from "expo-image";
+import { useTheme } from "../../lib/contexts/ThemeContext";
 import {
   InAppNotification,
   ToastType,
@@ -96,6 +97,7 @@ const ToastContent: React.FC<ToastContentProps> = React.memo(
   ({ toast, onPress, onDismiss }) => {
     const iconConfig = TOAST_ICONS[toast.type];
     const isGroupMessage = toast.isGroupMessage || false;
+    const { colors } = useTheme();
 
     // Determine which avatar/icon to show
     const renderLeftContent = () => {
@@ -104,7 +106,7 @@ const ToastContent: React.FC<ToastContentProps> = React.memo(
         return (
           <Image
             source={{ uri: toast.senderAvatar }}
-            style={styles.avatar}
+            style={[styles.avatar, { backgroundColor: colors.skeleton }]}
             placeholder={{ blurhash: "L6PZfSi_.AyE_3t7t7R**0o#DgR4" }}
             contentFit="cover"
             transition={200}
@@ -116,12 +118,7 @@ const ToastContent: React.FC<ToastContentProps> = React.memo(
       // Case 2: Group message without photo - show group icon
       if (isGroupMessage) {
         return (
-          <View
-            style={[
-              styles.iconBadge,
-              { backgroundColor: "#8B5CF6" }, // Purple for groups
-            ]}
-          >
+          <View style={[styles.iconBadge, { backgroundColor: "#8B5CF6" }]}>
             <Ionicons name="people" size={22} color="#FFFFFF" />
           </View>
         );
@@ -156,7 +153,10 @@ const ToastContent: React.FC<ToastContentProps> = React.memo(
       <TouchableOpacity
         activeOpacity={0.85}
         onPress={onPress}
-        style={styles.toastContent}
+        style={[
+          styles.toastContent,
+          { backgroundColor: colors.card, shadowColor: colors.shadow },
+        ]}
       >
         {/* LEFT: Avatar or Icon */}
         <View style={styles.iconContainer}>{renderLeftContent()}</View>
@@ -164,7 +164,10 @@ const ToastContent: React.FC<ToastContentProps> = React.memo(
         {/* CENTER: Title & Body */}
         <View style={styles.textContainer}>
           <View style={styles.titleRow}>
-            <Text style={styles.title} numberOfLines={1}>
+            <Text
+              style={[styles.title, { color: colors.text }]}
+              numberOfLines={1}
+            >
               {toast.title}
             </Text>
             {isGroupMessage && (
@@ -173,7 +176,10 @@ const ToastContent: React.FC<ToastContentProps> = React.memo(
               </View>
             )}
           </View>
-          <Text style={styles.body} numberOfLines={2}>
+          <Text
+            style={[styles.body, { color: colors.textSecondary }]}
+            numberOfLines={2}
+          >
             {toast.body}
           </Text>
         </View>
@@ -184,7 +190,7 @@ const ToastContent: React.FC<ToastContentProps> = React.memo(
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           style={styles.closeButton}
         >
-          <Ionicons name="close" size={18} color="#9CA3AF" />
+          <Ionicons name="close" size={18} color={colors.textMuted} />
         </TouchableOpacity>
       </TouchableOpacity>
     );

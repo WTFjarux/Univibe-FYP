@@ -2,6 +2,7 @@
 import React from "react";
 import { View, Text, StyleSheet, Modal, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../../lib/contexts/ThemeContext";
 
 interface DiscardChangesModalProps {
   visible: boolean;
@@ -26,6 +27,8 @@ export default function DiscardChangesModal({
   keepEditingText = "Keep Editing",
   discardText = "Discard",
 }: DiscardChangesModalProps) {
+  const { colors } = useTheme();
+
   return (
     <Modal
       visible={visible}
@@ -38,18 +41,26 @@ export default function DiscardChangesModal({
         activeOpacity={1}
         onPress={onClose}
       >
-        <View style={styles.modalContent}>
+        <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
           <View style={styles.iconContainer}>
             <Ionicons name={iconName} size={48} color={iconColor} />
           </View>
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.message}>{message}</Text>
+          <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
+          <Text style={[styles.message, { color: colors.textSecondary }]}>
+            {message}
+          </Text>
           <View style={styles.buttonContainer}>
             <TouchableOpacity
-              style={[styles.button, styles.cancelButton]}
+              style={[
+                styles.button,
+                styles.cancelButton,
+                { backgroundColor: colors.skeleton },
+              ]}
               onPress={onClose}
             >
-              <Text style={styles.cancelButtonText}>{keepEditingText}</Text>
+              <Text style={[styles.cancelButtonText, { color: colors.text }]}>
+                {keepEditingText}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.button, styles.discardButton]}

@@ -27,6 +27,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 
 import { useAuth } from "../../../lib/contexts/AuthContext";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 import { useImageUpload } from "../../../hooks/useImageUpload";
 import { useCoverPhotoUpload } from "../../../hooks/useCoverPhotoUpload";
 import { connectionService } from "../../../lib/services/connectionService";
@@ -82,6 +83,7 @@ export default function ProfileScreen() {
     refreshUserProfile,
     token,
   } = useAuth();
+  const { colors } = useTheme();
   const [postCount, setPostCount] = useState(0);
   const [connectionCount, setConnectionCount] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -682,8 +684,10 @@ export default function ProfileScreen() {
       <View style={styles.aboutContent}>
         {isCached && (
           <View style={cacheStyles.cacheIndicator}>
-            <Ionicons name="cloud-outline" size={12} color="#9ca3af" />
-            <Text style={cacheStyles.cacheText}>Loaded from cache</Text>
+            <Ionicons name="cloud-outline" size={12} color={colors.textMuted} />
+            <Text style={[cacheStyles.cacheText, { color: colors.textMuted }]}>
+              Loaded from cache
+            </Text>
           </View>
         )}
         <ProfileInfo profile={profile} user={user} />
@@ -695,31 +699,52 @@ export default function ProfileScreen() {
           }}
           userId={user?.id || profile?.user?._id}
         />
-        <View style={menuStyles.menuSection}>
+        <View
+          style={[
+            menuStyles.menuSection,
+            { backgroundColor: colors.card, shadowColor: colors.shadow },
+          ]}
+        >
           <TouchableOpacity
             style={menuStyles.menuItem}
             onPress={() => router.push("/profile/edit")}
             activeOpacity={0.7}
           >
             <View style={menuStyles.menuItemContent}>
-              <Ionicons name="create-outline" size={22} color="#4b5563" />
-              <Text style={menuStyles.menuText}>Edit Profile</Text>
+              <Ionicons name="create-outline" size={22} color={colors.icon} />
+              <Text style={[menuStyles.menuText, { color: colors.text }]}>
+                Edit Profile
+              </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+            <Ionicons
+              name="chevron-forward"
+              size={20}
+              color={colors.textMuted}
+            />
           </TouchableOpacity>
-          <View style={menuStyles.divider} />
+          <View
+            style={[menuStyles.divider, { backgroundColor: colors.border }]}
+          />
           <TouchableOpacity
             style={menuStyles.menuItem}
             onPress={handleOpenSettings}
             activeOpacity={0.7}
           >
             <View style={menuStyles.menuItemContent}>
-              <Ionicons name="settings-outline" size={22} color="#4b5563" />
-              <Text style={menuStyles.menuText}>Settings</Text>
+              <Ionicons name="settings-outline" size={22} color={colors.icon} />
+              <Text style={[menuStyles.menuText, { color: colors.text }]}>
+                Settings
+              </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+            <Ionicons
+              name="chevron-forward"
+              size={20}
+              color={colors.textMuted}
+            />
           </TouchableOpacity>
-          <View style={menuStyles.divider} />
+          <View
+            style={[menuStyles.divider, { backgroundColor: colors.border }]}
+          />
           <TouchableOpacity
             style={menuStyles.menuItem}
             onPress={() =>
@@ -728,12 +753,24 @@ export default function ProfileScreen() {
             activeOpacity={0.7}
           >
             <View style={menuStyles.menuItemContent}>
-              <Ionicons name="help-circle-outline" size={22} color="#4b5563" />
-              <Text style={menuStyles.menuText}>Help & Support</Text>
+              <Ionicons
+                name="help-circle-outline"
+                size={22}
+                color={colors.icon}
+              />
+              <Text style={[menuStyles.menuText, { color: colors.text }]}>
+                Help & Support
+              </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+            <Ionicons
+              name="chevron-forward"
+              size={20}
+              color={colors.textMuted}
+            />
           </TouchableOpacity>
-          <View style={menuStyles.divider} />
+          <View
+            style={[menuStyles.divider, { backgroundColor: colors.border }]}
+          />
           <TouchableOpacity
             style={menuStyles.menuItem}
             onPress={handleLogoutConfirm}
@@ -750,14 +787,17 @@ export default function ProfileScreen() {
         </View>
       </View>
     ),
-    [profile, user, postCount, connectionCount, isCached],
+    [profile, user, postCount, connectionCount, isCached, colors],
   );
 
   // ============ RENDER ============
 
   if ((authLoading || initialLoading) && !profile) {
     return (
-      <SafeAreaView style={styles.container} edges={["top"]}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        edges={["top"]}
+      >
         <OwnProfilePageSkeleton />
       </SafeAreaView>
     );
@@ -765,15 +805,28 @@ export default function ProfileScreen() {
 
   if (!profile && !authLoading && !initialLoading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+      >
         <View style={styles.noProfileContainer}>
-          <Ionicons name="person-circle-outline" size={100} color="#d1d5db" />
-          <Text style={styles.noProfileTitle}>Complete Your Profile</Text>
-          <Text style={styles.noProfileDescription}>
+          <Ionicons
+            name="person-circle-outline"
+            size={100}
+            color={colors.textMuted}
+          />
+          <Text style={[styles.noProfileTitle, { color: colors.text }]}>
+            Complete Your Profile
+          </Text>
+          <Text
+            style={[
+              styles.noProfileDescription,
+              { color: colors.textSecondary },
+            ]}
+          >
             Setup your profile to connect with other students
           </Text>
           <TouchableOpacity
-            style={styles.setupButton}
+            style={[styles.setupButton, { backgroundColor: colors.primary }]}
             onPress={() => router.push("/(auth)/setup-profile")}
           >
             <Ionicons name="person-add-outline" size={20} color="white" />
@@ -787,7 +840,10 @@ export default function ProfileScreen() {
   // ✅ SINGLE RETURN - modals rendered ONCE outside tab conditions
   return (
     <>
-      <SafeAreaView style={styles.container} edges={["top"]}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        edges={["top"]}
+      >
         {activeTab === "about" ? (
           <ScrollView
             ref={mainScrollViewRef}
@@ -797,8 +853,9 @@ export default function ProfileScreen() {
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={onRefresh}
-                tintColor="#8b5cf6"
-                colors={["#8b5cf6"]}
+                tintColor={colors.primary}
+                colors={[colors.primary]}
+                progressBackgroundColor={colors.card}
               />
             }
           >
@@ -809,9 +866,26 @@ export default function ProfileScreen() {
         ) : (
           <>
             {isCached && (
-              <View style={cacheStyles.cacheHeader}>
-                <Ionicons name="cloud-outline" size={12} color="#9ca3af" />
-                <Text style={cacheStyles.cacheHeaderText}>
+              <View
+                style={[
+                  cacheStyles.cacheHeader,
+                  {
+                    backgroundColor: colors.background,
+                    borderBottomColor: colors.border,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="cloud-outline"
+                  size={12}
+                  color={colors.textMuted}
+                />
+                <Text
+                  style={[
+                    cacheStyles.cacheHeaderText,
+                    { color: colors.textMuted },
+                  ]}
+                >
                   Loaded from cache
                 </Text>
               </View>

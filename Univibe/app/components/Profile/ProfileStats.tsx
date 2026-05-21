@@ -4,6 +4,7 @@ import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 
 interface ProfileStatsProps {
   stats: {
@@ -22,6 +23,7 @@ const STAT_ICONS = {
 
 export default function ProfileStats({ stats, userId }: ProfileStatsProps) {
   const router = useRouter();
+  const { colors } = useTheme();
 
   const statItems = [
     {
@@ -47,8 +49,15 @@ export default function ProfileStats({ stats, userId }: ProfileStatsProps) {
   ];
 
   return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Activity</Text>
+    <View
+      style={[
+        styles.section,
+        { backgroundColor: colors.card, shadowColor: colors.shadow },
+      ]}
+    >
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>
+        Activity
+      </Text>
 
       <View style={styles.statsContainer}>
         {statItems.map((item) => (
@@ -73,13 +82,17 @@ interface StatItemProps {
 }
 
 function StatItem({ icon, label, value, onPress }: StatItemProps) {
+  const { colors } = useTheme();
+
   const content = (
     <>
       <View style={styles.statIcon}>
-        <Ionicons name={icon} size={26} color="#8b5cf6" />
+        <Ionicons name={icon} size={26} color={colors.primary} />
       </View>
-      <Text style={styles.statNumber}>{value}</Text>
-      <Text style={[styles.statLabel]}>{label}</Text>
+      <Text style={[styles.statNumber, { color: colors.text }]}>{value}</Text>
+      <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
+        {label}
+      </Text>
     </>
   );
 

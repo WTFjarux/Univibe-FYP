@@ -16,7 +16,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
-// ✅ Import centralized types
+import { useTheme } from "../../../../lib/contexts/ThemeContext";
 import type { ChatRoom, ItemLayout } from "../../../../lib/types/chat.types";
 import { ChatItem } from "./ChatItem";
 
@@ -24,8 +24,6 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 const PANEL_WIDTH = 260;
 const PANEL_GAP = 8;
-
-// ✅ ItemLayout is now imported from centralized types, no need to redefine
 
 interface Action {
   icon: keyof typeof Ionicons.glyphMap;
@@ -64,6 +62,7 @@ export default function ChatListOptionsModal({
   currentUserId,
 }: ChatListOptionsModalProps) {
   const [panelHeight, setPanelHeight] = useState(0);
+  const { colors, isDark } = useTheme();
 
   const getPositions = () => {
     let previewTop = SCREEN_HEIGHT / 2 - 50;
@@ -147,12 +146,30 @@ export default function ChatListOptionsModal({
           onClose();
         }}
       >
-        <BlurView intensity={20} tint="light" style={StyleSheet.absoluteFill} />
-        <View style={styles.dimOverlay} />
+        <BlurView
+          intensity={20}
+          tint={isDark ? "dark" : "light"}
+          style={StyleSheet.absoluteFill}
+        />
+        <View
+          style={[
+            styles.dimOverlay,
+            { backgroundColor: isDark ? "rgba(0,0,0,0.5)" : "rgba(0,0,0,0.2)" },
+          ]}
+        />
       </TouchableOpacity>
 
       {/* Preview Strip */}
-      <View style={[styles.previewStrip, { top: previewTop }]}>
+      <View
+        style={[
+          styles.previewStrip,
+          {
+            top: previewTop,
+            backgroundColor: colors.card,
+            shadowColor: colors.shadow,
+          },
+        ]}
+      >
         <View pointerEvents="none">
           <ChatItem
             item={item}
@@ -172,7 +189,15 @@ export default function ChatListOptionsModal({
 
       {/* Actions Panel */}
       <View
-        style={[styles.panel, { top: panelTop, left: panelLeft }]}
+        style={[
+          styles.panel,
+          {
+            top: panelTop,
+            left: panelLeft,
+            backgroundColor: colors.card,
+            shadowColor: colors.shadow,
+          },
+        ]}
         onLayout={(event) => {
           const { height } = event.nativeEvent.layout;
           if (height !== panelHeight) {
@@ -180,10 +205,14 @@ export default function ChatListOptionsModal({
           }
         }}
       >
-        <View style={styles.panelContent}>
+        <View style={[styles.panelContent, { backgroundColor: colors.card }]}>
           {actions.map((action, index) => (
             <React.Fragment key={action.label}>
-              {index > 0 && <View style={styles.separator} />}
+              {index > 0 && (
+                <View
+                  style={[styles.separator, { backgroundColor: colors.border }]}
+                />
+              )}
               <TouchableOpacity
                 style={styles.actionItem}
                 activeOpacity={0.65}
@@ -192,11 +221,12 @@ export default function ChatListOptionsModal({
                 <Ionicons
                   name={action.icon}
                   size={20}
-                  color={action.destructive ? "#FF3B30" : "#8B5CF6"}
+                  color={action.destructive ? "#FF3B30" : colors.primary}
                 />
                 <Text
                   style={[
                     styles.actionLabel,
+                    { color: colors.text },
                     action.destructive && styles.actionLabelDestructive,
                   ]}
                 >
@@ -211,21 +241,17 @@ export default function ChatListOptionsModal({
   );
 }
 
-// ✅ Styles remain unchanged
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
   },
   dimOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.2)",
   },
   previewStrip: {
     position: "absolute",
     left: 0,
     right: 0,
-    backgroundColor: "#fff",
-    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
@@ -235,10 +261,8 @@ const styles = StyleSheet.create({
   panel: {
     position: "absolute",
     width: PANEL_WIDTH,
-    backgroundColor: "#FFFFFF",
     borderRadius: 14,
     overflow: "hidden",
-    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 12,
@@ -246,7 +270,6 @@ const styles = StyleSheet.create({
     zIndex: 11,
   },
   panelContent: {
-    backgroundColor: "#ffffff",
     paddingVertical: 8,
   },
   actionItem: {
@@ -258,12 +281,10 @@ const styles = StyleSheet.create({
   },
   separator: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: "#E5E5EA",
     marginHorizontal: 16,
   },
   actionLabel: {
     fontSize: 15,
-    color: "#000000",
     fontWeight: "400",
     fontFamily: "SofiaSans-Regular",
   },

@@ -9,6 +9,7 @@ import {
   Dimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 
 const { width } = Dimensions.get("window");
 
@@ -18,12 +19,19 @@ interface EventImageCarouselProps {
 
 export const EventImageCarousel = ({ images }: EventImageCarouselProps) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const { colors } = useTheme();
   const hasMultipleImages = images.length > 1;
 
   if (images.length === 0) {
     return (
-      <View style={[styles.coverImage, styles.coverPlaceholder]}>
-        <Ionicons name="calendar" size={80} color="#cbd5e1" />
+      <View
+        style={[
+          styles.coverImage,
+          styles.coverPlaceholder,
+          { backgroundColor: colors.skeleton },
+        ]}
+      >
+        <Ionicons name="calendar" size={80} color={colors.textMuted} />
       </View>
     );
   }
@@ -43,7 +51,7 @@ export const EventImageCarousel = ({ images }: EventImageCarouselProps) => {
           <Image
             key={index}
             source={{ uri: image }}
-            style={styles.coverImage}
+            style={[styles.coverImage, { backgroundColor: colors.skeleton }]}
           />
         ))}
       </ScrollView>
@@ -83,7 +91,6 @@ const styles = StyleSheet.create({
   coverImage: {
     width: width,
     height: 300,
-    backgroundColor: "#f3f4f6",
   },
   coverPlaceholder: {
     justifyContent: "center",

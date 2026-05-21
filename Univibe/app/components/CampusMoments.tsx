@@ -13,6 +13,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useAuth } from "../../lib/contexts/AuthContext";
+import { useTheme } from "../../lib/contexts/ThemeContext";
 import storyApi from "../../lib/services/storyApi";
 import socketService from "../../lib/services/socketService";
 import { API_BASE_URL } from "../../constants/ipConstants";
@@ -26,6 +27,7 @@ interface CampusMomentsProps {
 // Skeleton component for story loading
 const StorySkeleton = () => {
   const shimmerValue = useRef(new Animated.Value(0)).current;
+  const { colors } = useTheme();
 
   useEffect(() => {
     const animation = Animated.loop(
@@ -57,13 +59,26 @@ const StorySkeleton = () => {
         style={[
           styles.storyRing,
           styles.skeletonRing,
-          { opacity: shimmerOpacity },
+          {
+            opacity: shimmerOpacity,
+            backgroundColor: colors.skeleton,
+            borderColor: colors.skeletonHighlight,
+          },
         ]}
       >
-        <View style={[styles.storyAvatar, styles.skeletonAvatar]} />
+        <View
+          style={[
+            styles.storyAvatar,
+            styles.skeletonAvatar,
+            { backgroundColor: colors.skeletonHighlight },
+          ]}
+        />
       </Animated.View>
       <Animated.View
-        style={[styles.skeletonText, { opacity: shimmerOpacity }]}
+        style={[
+          styles.skeletonText,
+          { opacity: shimmerOpacity, backgroundColor: colors.skeleton },
+        ]}
       />
     </View>
   );
@@ -89,6 +104,7 @@ export default function CampusMoments({
 }: CampusMomentsProps) {
   const router = useRouter();
   const { token, user, profile } = useAuth();
+  const { colors, isDark } = useTheme();
   const [stories, setStories] = useState<StoryGroup[]>([]);
   const [loadingStories, setLoadingStories] = useState(true);
   const [userStoryGroup, setUserStoryGroup] = useState<StoryGroup | null>(null);
@@ -278,9 +294,13 @@ export default function CampusMoments({
   return (
     <View style={styles.momentsSection}>
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Campus Moments</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          Campus Moments
+        </Text>
         <TouchableOpacity onPress={handleSeeAllPress}>
-          <Text style={styles.seeAllText}>See All</Text>
+          <Text style={[styles.seeAllText, { color: colors.primary }]}>
+            See All
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -291,7 +311,10 @@ export default function CampusMoments({
           <Ionicons name="alert-circle-outline" size={32} color="#ef4444" />
           <Text style={styles.errorText}>{error}</Text>
           <TouchableOpacity
-            style={styles.retryButton}
+            style={[
+              styles.retryButton,
+              { backgroundColor: isDark ? "#451a1a" : "#fee2e2" },
+            ]}
             onPress={() => fetchStories(true)}
           >
             <Text style={styles.retryText}>Retry</Text>
@@ -320,9 +343,10 @@ export default function CampusMoments({
               <View
                 style={[
                   styles.storyRing,
+                  { backgroundColor: colors.skeleton },
                   hasActiveStories()
-                    ? styles.unviewedRing
-                    : styles.addStoryRing,
+                    ? [styles.unviewedRing, { borderColor: colors.primary }]
+                    : [styles.addStoryRing, { borderColor: colors.border }],
                 ]}
               >
                 {getUserProfilePictureUrl() ? (
@@ -338,7 +362,7 @@ export default function CampusMoments({
               </View>
 
               <TouchableOpacity
-                style={styles.addButtonOverlay}
+                style={[styles.addButtonOverlay, { borderColor: colors.card }]}
                 onPress={handleCreateStoryPress}
                 activeOpacity={0.8}
               >
@@ -346,7 +370,10 @@ export default function CampusMoments({
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.storyName} numberOfLines={1}>
+            <Text
+              style={[styles.storyName, { color: colors.textSecondary }]}
+              numberOfLines={1}
+            >
               {userStoryGroup ? "Your Moment" : "Add Moment"}
             </Text>
           </TouchableOpacity>
@@ -369,7 +396,10 @@ export default function CampusMoments({
                 <View
                   style={[
                     styles.storyRing,
-                    hasUnseen ? styles.unviewedRing : styles.viewedRing,
+                    { backgroundColor: colors.skeleton },
+                    hasUnseen
+                      ? [styles.unviewedRing, { borderColor: colors.primary }]
+                      : [styles.viewedRing, { borderColor: colors.border }],
                   ]}
                 >
                   {profilePictureUrl ? (
@@ -385,7 +415,10 @@ export default function CampusMoments({
                     </View>
                   )}
                 </View>
-                <Text style={styles.storyName} numberOfLines={1}>
+                <Text
+                  style={[styles.storyName, { color: colors.textSecondary }]}
+                  numberOfLines={1}
+                >
                   {displayName}
                 </Text>
               </TouchableOpacity>

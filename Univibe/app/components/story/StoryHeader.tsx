@@ -8,6 +8,7 @@ import {
   Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 import { API_BASE_URL } from "../../../constants/ipConstants";
 
 interface StoryHeaderProps {
@@ -18,6 +19,7 @@ interface StoryHeaderProps {
 
 const StoryHeader = memo(
   ({ user, currentStory, onClose }: StoryHeaderProps) => {
+    const { colors } = useTheme();
     const profilePicture = user?.profilePicture?.startsWith("http")
       ? user.profilePicture
       : `${API_BASE_URL}${user?.profilePicture}`;
@@ -28,7 +30,12 @@ const StoryHeader = memo(
           {profilePicture ? (
             <Image source={{ uri: profilePicture }} style={styles.avatar} />
           ) : (
-            <View style={styles.avatarPlaceholder}>
+            <View
+              style={[
+                styles.avatarPlaceholder,
+                { backgroundColor: colors.primary },
+              ]}
+            >
               <Text style={styles.avatarText}>
                 {user?.userName?.[0]?.toUpperCase() || "U"}
               </Text>
@@ -85,7 +92,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#8b5cf6",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
@@ -111,7 +117,7 @@ const styles = StyleSheet.create({
     color: "rgba(209, 209, 209, 0.7)",
     fontSize: 12,
     marginTop: 2,
-    fontFamily:"SofiaSans-SemiBold"
+    fontFamily: "SofiaSans-SemiBold",
   },
 });
 

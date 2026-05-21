@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 import { profileService } from "../../../lib/services/profileService";
 import { toggleBlockUser } from "../../../lib/services/contentService";
 import ReportModal from "../../components/ReportModal";
@@ -49,6 +50,7 @@ const ProfileOptionsModal: React.FC<ProfileOptionsModalProps> = ({
   const [showReportModal, setShowReportModal] = useState(false);
   const [blocking, setBlocking] = useState(false);
   const [muting, setMuting] = useState(false);
+  const { colors } = useTheme();
 
   // Reset state when modal closes
   useEffect(() => {
@@ -56,7 +58,7 @@ const ProfileOptionsModal: React.FC<ProfileOptionsModalProps> = ({
       const timer = setTimeout(() => {
         setBlocking(false);
         setMuting(false);
-        setShowReportModal(false); // Reset report modal too
+        setShowReportModal(false);
       }, 300);
       return () => clearTimeout(timer);
     }
@@ -156,10 +158,9 @@ const ProfileOptionsModal: React.FC<ProfileOptionsModalProps> = ({
     setShowReportModal(true);
   };
 
-  // FIX: Close both modals when report modal closes
   const handleReportModalClose = () => {
     setShowReportModal(false);
-    onClose(); // Also close the options modal
+    onClose();
   };
 
   const handleClose = () => {
@@ -180,11 +181,20 @@ const ProfileOptionsModal: React.FC<ProfileOptionsModalProps> = ({
           activeOpacity={1}
           onPress={handleClose}
         >
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Profile Options</Text>
+          <View
+            style={[
+              styles.modalContent,
+              { backgroundColor: colors.card, shadowColor: colors.shadow },
+            ]}
+          >
+            <View
+              style={[styles.modalHeader, { borderBottomColor: colors.border }]}
+            >
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
+                Profile Options
+              </Text>
               <TouchableOpacity onPress={handleClose}>
-                <Ionicons name="close" size={24} color="#6b7280" />
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -197,10 +207,14 @@ const ProfileOptionsModal: React.FC<ProfileOptionsModalProps> = ({
               <Ionicons
                 name={isBlocked ? "checkmark-circle-outline" : "ban-outline"}
                 size={22}
-                color={isBlocked ? "#8b5cf6" : "#ef4444"}
+                color={isBlocked ? colors.primary : "#ef4444"}
               />
               <Text
-                style={[styles.optionText, !isBlocked && styles.dangerText]}
+                style={[
+                  styles.optionText,
+                  { color: colors.text },
+                  !isBlocked && styles.dangerText,
+                ]}
               >
                 {blocking
                   ? isBlocked
@@ -210,7 +224,9 @@ const ProfileOptionsModal: React.FC<ProfileOptionsModalProps> = ({
                     ? "Unblock User"
                     : "Block User"}
               </Text>
-              {blocking && <ActivityIndicator size="small" color="#8b5cf6" />}
+              {blocking && (
+                <ActivityIndicator size="small" color={colors.primary} />
+              )}
             </TouchableOpacity>
 
             {/* Mute User */}
@@ -222,9 +238,15 @@ const ProfileOptionsModal: React.FC<ProfileOptionsModalProps> = ({
               <Ionicons
                 name={isMuted ? "volume-high-outline" : "volume-mute-outline"}
                 size={22}
-                color={isMuted ? "#8b5cf6" : "#6b7280"}
+                color={isMuted ? colors.primary : colors.textSecondary}
               />
-              <Text style={[styles.optionText, isMuted && styles.activeText]}>
+              <Text
+                style={[
+                  styles.optionText,
+                  { color: colors.text },
+                  isMuted && [styles.activeText, { color: colors.primary }],
+                ]}
+              >
                 {muting
                   ? isMuted
                     ? "Unmuting..."
@@ -233,10 +255,14 @@ const ProfileOptionsModal: React.FC<ProfileOptionsModalProps> = ({
                     ? "Unmute User"
                     : "Mute User"}
               </Text>
-              {muting && <ActivityIndicator size="small" color="#8b5cf6" />}
+              {muting && (
+                <ActivityIndicator size="small" color={colors.primary} />
+              )}
             </TouchableOpacity>
 
-            <View style={styles.divider} />
+            <View
+              style={[styles.divider, { backgroundColor: colors.border }]}
+            />
 
             {/* Report User */}
             <TouchableOpacity
@@ -247,23 +273,36 @@ const ProfileOptionsModal: React.FC<ProfileOptionsModalProps> = ({
               <Ionicons
                 name={isReported ? "flag" : "flag-outline"}
                 size={22}
-                color={isReported ? "#d1d5db" : "#ef4444"}
+                color={isReported ? colors.textMuted : "#ef4444"}
               />
               <Text
                 style={[
                   styles.optionText,
-                  isReported ? styles.reportedText : styles.dangerText,
+                  { color: colors.text },
+                  isReported
+                    ? [styles.reportedText, { color: colors.textMuted }]
+                    : styles.dangerText,
                 ]}
               >
                 {isReported ? "Already Reported" : "Report User"}
               </Text>
             </TouchableOpacity>
 
-            <View style={styles.divider} />
+            <View
+              style={[styles.divider, { backgroundColor: colors.border }]}
+            />
 
             {/* Cancel */}
             <TouchableOpacity style={styles.optionItem} onPress={handleClose}>
-              <Text style={[styles.optionText, styles.cancelText]}>Cancel</Text>
+              <Text
+                style={[
+                  styles.optionText,
+                  styles.cancelText,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                Cancel
+              </Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -278,10 +317,8 @@ const ProfileOptionsModal: React.FC<ProfileOptionsModalProps> = ({
         targetName={userName}
         onReportSuccess={() => {
           if (onReportSuccess) onReportSuccess();
-          // Don't call onClose here - let showInfo handle it
         }}
         onShowInfoBar={(message, type) => {
-          // Override to ensure both modals close
           if (onShowInfoBar) {
             onShowInfoBar(message, type);
           }
@@ -298,7 +335,6 @@ const ProfileOptionsModal: React.FC<ProfileOptionsModalProps> = ({
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-
     justifyContent: "flex-end",
   },
   modalContent: {

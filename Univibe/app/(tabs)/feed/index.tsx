@@ -1,4 +1,4 @@
-// app/(tabs)/feed.tsx - COMPLETE WORKING VERSION
+// app/(tabs)/feed.tsx - COMPLETE WORKING VERSION WITH DARK MODE
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useAuth } from "../../../lib/contexts/AuthContext";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import FeedHeader from "@/app/components/Feed/FeedHeader";
 import CreatePostButton from "@/app/components/Feed/Post/CreatePostButton";
@@ -58,6 +59,7 @@ interface UndoAction {
 export default function FeedScreen() {
   const router = useRouter();
   const { token, user } = useAuth();
+  const { colors, isDark } = useTheme();
 
   const {
     activeFeed,
@@ -549,7 +551,7 @@ export default function FeedScreen() {
         ? "#10b981"
         : infoType === "error"
           ? "#ef4444"
-          : "#8b5cf6";
+          : colors.primary;
     const icon =
       infoType === "success"
         ? "checkmark-circle"
@@ -595,12 +597,16 @@ export default function FeedScreen() {
   // ===========================================================================
   if (!token) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+      >
         <View style={styles.centered}>
-          <Ionicons name="log-in-outline" size={64} color="#9ca3af" />
-          <Text style={styles.errorText}>Please login to view the feed</Text>
+          <Ionicons name="log-in-outline" size={64} color={colors.textMuted} />
+          <Text style={[styles.errorText, { color: colors.textSecondary }]}>
+            Please login to view the feed
+          </Text>
           <TouchableOpacity
-            style={styles.loginButton}
+            style={[styles.loginButton, { backgroundColor: colors.primary }]}
             onPress={() => router.replace("/(auth)/login")}
           >
             <Text style={styles.loginButtonText}>Login</Text>
@@ -615,7 +621,10 @@ export default function FeedScreen() {
   // ===========================================================================
   if (currentFeed.loading && visiblePosts.length === 0) {
     return (
-      <SafeAreaView style={styles.container} edges={["top"]}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        edges={["top"]}
+      >
         <FeedSkeleton />
       </SafeAreaView>
     );
@@ -625,15 +634,19 @@ export default function FeedScreen() {
   // Main Render
   // ===========================================================================
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      edges={["top"]}
+    >
       <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={currentFeed.refreshing}
             onRefresh={onRefresh}
-            colors={["#8b5cf6"]}
-            tintColor="#8b5cf6"
+            colors={[colors.primary]}
+            tintColor={colors.primary}
+            progressBackgroundColor={colors.card}
           />
         }
         onScroll={handleScroll}
@@ -649,9 +662,17 @@ export default function FeedScreen() {
         />
 
         {currentFeed.error && visiblePosts.length === 0 && (
-          <View style={styles.errorContainer}>
+          <View
+            style={[
+              styles.errorContainer,
+              { backgroundColor: isDark ? "#451a1a" : "#fee2e2" },
+            ]}
+          >
             <Text style={styles.errorText}>{currentFeed.error}</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={onRefresh}>
+            <TouchableOpacity
+              style={[styles.retryButton, { backgroundColor: colors.primary }]}
+              onPress={onRefresh}
+            >
               <Text style={styles.retryButtonText}>Retry</Text>
             </TouchableOpacity>
           </View>
@@ -660,15 +681,28 @@ export default function FeedScreen() {
         <View style={styles.postsContainer}>
           {visiblePosts.length === 0 && !currentFeed.loading ? (
             <View style={styles.emptyState}>
-              <Ionicons name="newspaper-outline" size={64} color="#9ca3af" />
-              <Text style={styles.emptyStateText}>No posts yet</Text>
-              <Text style={styles.emptyStateSubtext}>
+              <Ionicons
+                name="newspaper-outline"
+                size={64}
+                color={colors.textMuted}
+              />
+              <Text
+                style={[styles.emptyStateText, { color: colors.textSecondary }]}
+              >
+                No posts yet
+              </Text>
+              <Text
+                style={[styles.emptyStateSubtext, { color: colors.textMuted }]}
+              >
                 {activeFeed === "connections"
                   ? "Connect with more people to see their posts"
                   : "Be the first to share something on campus!"}
               </Text>
               <TouchableOpacity
-                style={styles.createFirstPostButton}
+                style={[
+                  styles.createFirstPostButton,
+                  { backgroundColor: colors.primary },
+                ]}
                 onPress={handleCreatePost}
               >
                 <Text style={styles.createFirstPostText}>

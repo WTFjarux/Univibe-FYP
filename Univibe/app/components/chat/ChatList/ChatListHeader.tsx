@@ -3,6 +3,7 @@
 import React from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../../../../lib/contexts/ThemeContext";
 
 // -----------------------------------------------------------------------------
 // Types
@@ -10,7 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 interface ChatListHeaderProps {
   onNewChat: () => void;
-  onNewGroup?: () => void; // NEW: Optional group creation handler
+  onNewGroup?: () => void;
 }
 
 // -----------------------------------------------------------------------------
@@ -21,10 +22,20 @@ export default function ChatListHeader({
   onNewChat,
   onNewGroup,
 }: ChatListHeaderProps) {
+  const { colors } = useTheme();
+
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        {
+          backgroundColor: colors.background,
+          borderBottomColor: colors.border,
+        },
+      ]}
+    >
       {/* Title */}
-      <Text style={styles.title}>Messages</Text>
+      <Text style={[styles.title, { color: colors.text }]}>Messages</Text>
 
       {/* Action Buttons */}
       <View style={styles.actions}>
@@ -35,7 +46,7 @@ export default function ChatListHeader({
             onPress={onNewGroup}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Ionicons name="people-outline" size={24} color="#007AFF" />
+            <Ionicons name="people-outline" size={24} color={colors.primary} />
           </TouchableOpacity>
         )}
 
@@ -45,7 +56,7 @@ export default function ChatListHeader({
           onPress={onNewChat}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Ionicons name="create-outline" size={24} color="#007AFF" />
+          <Ionicons name="create-outline" size={24} color={colors.primary} />
         </TouchableOpacity>
       </View>
     </View>
@@ -63,14 +74,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
   },
   title: {
     fontSize: 28,
     fontWeight: "700",
-    color: "#000000",
     fontFamily: "SofiaSans-Bold",
   },
   actions: {

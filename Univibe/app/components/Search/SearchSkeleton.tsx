@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { View, StyleSheet, Animated } from "react-native";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 
 /**
  * Individual shimmering placeholder line
@@ -10,6 +11,7 @@ const SkeletonLine: React.FC<{
   style?: object;
 }> = ({ width, height = 14, style }) => {
   const shimmerAnim = useRef(new Animated.Value(0)).current;
+  const { colors } = useTheme();
 
   useEffect(() => {
     const animation = Animated.loop(
@@ -42,7 +44,7 @@ const SkeletonLine: React.FC<{
           width: width as number,
           height,
           borderRadius: height / 2,
-          backgroundColor: "#e5e7eb",
+          backgroundColor: colors.skeleton,
           opacity,
         },
         style,
@@ -144,6 +146,8 @@ export const SearchSkeleton: React.FC<SearchSkeletonProps> = ({
   type = "mixed",
   count = 5,
 }) => {
+  const { colors } = useTheme();
+
   const renderSkeleton = (index: number) => {
     switch (type) {
       case "users":
@@ -171,36 +175,40 @@ export const SearchSkeleton: React.FC<SearchSkeletonProps> = ({
 /**
  * Initial search skeleton (shown on first load before user types)
  */
-export const InitialSearchSkeleton: React.FC = () => (
-  <View style={styles.container}>
-    {/* Search bar skeleton */}
-    <View style={styles.searchBarSkeleton}>
-      <SkeletonLine width="100%" height={44} style={{ borderRadius: 12 }} />
+export const InitialSearchSkeleton: React.FC = () => {
+  const { colors } = useTheme();
+
+  return (
+    <View style={styles.container}>
+      {/* Search bar skeleton */}
+      <View style={styles.searchBarSkeleton}>
+        <SkeletonLine width="100%" height={44} style={{ borderRadius: 12 }} />
+      </View>
+
+      {/* Category tabs skeleton */}
+      <View style={styles.categoriesSkeleton}>
+        {Array.from({ length: 4 }, (_, i) => (
+          <SkeletonLine
+            key={i}
+            width={80}
+            height={36}
+            style={{ borderRadius: 20, marginRight: 8 }}
+          />
+        ))}
+      </View>
+
+      {/* Section title */}
+      <SkeletonLine
+        width="40%"
+        height={18}
+        style={{ marginHorizontal: 16, marginTop: 20, marginBottom: 12 }}
+      />
+
+      {/* Result skeletons */}
+      <SearchSkeleton type="mixed" count={6} />
     </View>
-
-    {/* Category tabs skeleton */}
-    <View style={styles.categoriesSkeleton}>
-      {Array.from({ length: 4 }, (_, i) => (
-        <SkeletonLine
-          key={i}
-          width={80}
-          height={36}
-          style={{ borderRadius: 20, marginRight: 8 }}
-        />
-      ))}
-    </View>
-
-    {/* Section title */}
-    <SkeletonLine
-      width="40%"
-      height={18}
-      style={{ marginHorizontal: 16, marginTop: 20, marginBottom: 12 }}
-    />
-
-    {/* Result skeletons */}
-    <SearchSkeleton type="mixed" count={6} />
-  </View>
-);
+  );
+};
 
 const styles = StyleSheet.create({
   container: {

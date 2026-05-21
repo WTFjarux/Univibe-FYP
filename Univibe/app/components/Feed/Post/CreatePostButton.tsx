@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../../../lib/contexts/AuthContext";
+import { useTheme } from "../../../../lib/contexts/ThemeContext";
 import { API_BASE_URL } from "../../../../constants/ipConstants";
 
 const DEFAULT_AVATAR: ImageSourcePropType = require("../../../../assets/images/default-avatar.png");
@@ -24,6 +25,7 @@ const CreatePostButton: React.FC<CreatePostButtonProps> = ({
   placeholder = "What's happening on campus?",
 }) => {
   const { profile } = useAuth();
+  const { colors } = useTheme();
 
   const getProfilePictureSource = (): ImageSourcePropType => {
     const hasProfilePicture = profile?.profilePicture?.trim();
@@ -42,10 +44,24 @@ const CreatePostButton: React.FC<CreatePostButtonProps> = ({
   };
 
   return (
-    <TouchableOpacity style={styles.createPostButton} onPress={onPress}>
-      <Image source={getProfilePictureSource()} style={styles.userAvatar} />
-      <Text style={styles.createPostText}>{placeholder}</Text>
-      <Ionicons name="image-outline" size={20} color="#8b5cf6" />
+    <TouchableOpacity
+      style={[
+        styles.createPostButton,
+        {
+          backgroundColor: colors.card,
+          shadowColor: colors.shadow,
+        },
+      ]}
+      onPress={onPress}
+    >
+      <Image
+        source={getProfilePictureSource()}
+        style={[styles.userAvatar, { backgroundColor: colors.skeleton }]}
+      />
+      <Text style={[styles.createPostText, { color: colors.textMuted }]}>
+        {placeholder}
+      </Text>
+      <Ionicons name="image-outline" size={20} color={colors.primary} />
     </TouchableOpacity>
   );
 };

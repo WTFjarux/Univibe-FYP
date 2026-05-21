@@ -11,6 +11,7 @@ import {
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 import { API_BASE_URL } from "../../../constants/ipConstants";
 import BlurhashImage from "@/app/components/BlurhashImage";
 
@@ -71,6 +72,7 @@ export default function NotificationItem({
   const [showOptions, setShowOptions] = useState(false);
   const [scaleAnim] = useState(new Animated.Value(1));
   const [imageError, setImageError] = useState(false);
+  const { colors, isDark } = useTheme();
   const adminNotif = isAdminNotification(notification.type);
   const isAnon = isAnonymousNotification(notification);
 
@@ -82,7 +84,6 @@ export default function NotificationItem({
 
   const handlePress = () => {
     if (!notification.read) onMarkAsRead(notification._id);
-
     if (notification.metadata?.isGrouped && notification.targetId) {
       router.push({
         pathname: "/post/[id]",
@@ -90,7 +91,6 @@ export default function NotificationItem({
       });
       return;
     }
-
     if (
       notification.type === "event_interest" ||
       notification.type === "event_rsvp"
@@ -100,14 +100,11 @@ export default function NotificationItem({
         return;
       }
     }
-
     if (notification.targetModel === "Event" && notification.targetId) {
       router.push(`/events/${notification.targetId}`);
       return;
     }
-
     if (notification.type === "post_removed") return;
-
     if (
       notification.type === "event_approved" ||
       notification.type === "event_rejected"
@@ -117,7 +114,6 @@ export default function NotificationItem({
         return;
       }
     }
-
     switch (notification.type) {
       case "connection_request":
       case "connection_accepted":
@@ -207,10 +203,6 @@ export default function NotificationItem({
     return match?.[1] || message;
   };
 
-  // ============================================
-  // RENDER STACKED AVATARS
-  // ============================================
-
   const renderStackedAvatars = (
     people: Array<{ userId: string; name: string; profilePicture?: string }>,
     count: number,
@@ -237,6 +229,10 @@ export default function NotificationItem({
                     styles.stackedAvatar,
                     styles.avatarBorder,
                     styles.anonymousMiniAvatar,
+                    {
+                      borderColor: colors.card,
+                      backgroundColor: colors.skeleton,
+                    },
                   ]}
                 >
                   <Ionicons name="eye-off-outline" size={14} color="#9ca3af" />
@@ -244,14 +240,25 @@ export default function NotificationItem({
               ) : (
                 <Image
                   source={DEFAULT_AVATAR}
-                  style={[styles.stackedAvatar, styles.avatarBorder]}
+                  style={[
+                    styles.stackedAvatar,
+                    styles.avatarBorder,
+                    {
+                      borderColor: colors.card,
+                      backgroundColor: colors.skeleton,
+                    },
+                  ]}
                   contentFit="cover"
                 />
               )
             ) : (
               <BlurhashImage
                 uri={getFullImageUrl(person.profilePicture) || ""}
-                style={[styles.stackedAvatar, styles.avatarBorder]}
+                style={[
+                  styles.stackedAvatar,
+                  styles.avatarBorder,
+                  { borderColor: colors.card },
+                ]}
                 transition={150}
               />
             )}
@@ -260,27 +267,30 @@ export default function NotificationItem({
         {count > 2 && (
           <View style={[styles.stackedAvatarWrapper, styles.thirdAvatar]}>
             <View
-              style={[styles.moreAvatarGeneric, { backgroundColor: moreBg }]}
+              style={[
+                styles.moreAvatarGeneric,
+                { backgroundColor: moreBg, borderColor: colors.card },
+              ]}
             >
               <Ionicons name={overlayIcon as any} size={10} color="#fff" />
             </View>
           </View>
         )}
       </View>
-      <View style={[styles.iconOverlay, { backgroundColor: overlayBg }]}>
+      <View
+        style={[
+          styles.iconOverlay,
+          { backgroundColor: overlayBg, borderColor: colors.card },
+        ]}
+      >
         <Ionicons name={overlayIcon as any} size={10} color="#fff" />
       </View>
     </View>
   );
 
-  // ============================================
-  // FORMATTED MESSAGE
-  // ============================================
-
   const getFormattedMessage = () => {
     const senderName = notification.sender.name;
     const isReply = notification.message.includes("replied to your comment");
-
     switch (notification.type) {
       case "like": {
         if (notification.metadata?.isGrouped) {
@@ -295,24 +305,34 @@ export default function NotificationItem({
                 "#fee2e2",
               )}
               <View style={styles.groupedTextContainer}>
-                <Text style={styles.messageText}>
+                <Text style={[styles.messageText, { color: colors.text }]}>
                   {likers.length === 1 ? (
                     <>
-                      <Text style={styles.boldName}>{likers[0].name}</Text>
+                      <Text style={[styles.boldName, { color: colors.text }]}>
+                        {likers[0].name}
+                      </Text>
                       <Text> liked your post</Text>
                     </>
                   ) : likers.length === 2 ? (
                     <>
-                      <Text style={styles.boldName}>{likers[0].name}</Text>
+                      <Text style={[styles.boldName, { color: colors.text }]}>
+                        {likers[0].name}
+                      </Text>
                       <Text> and </Text>
-                      <Text style={styles.boldName}>{likers[1].name}</Text>
+                      <Text style={[styles.boldName, { color: colors.text }]}>
+                        {likers[1].name}
+                      </Text>
                       <Text> liked your post</Text>
                     </>
                   ) : (
                     <>
-                      <Text style={styles.boldName}>{likers[0].name}</Text>
+                      <Text style={[styles.boldName, { color: colors.text }]}>
+                        {likers[0].name}
+                      </Text>
                       <Text>, </Text>
-                      <Text style={styles.boldName}>{likers[1].name}</Text>
+                      <Text style={[styles.boldName, { color: colors.text }]}>
+                        {likers[1].name}
+                      </Text>
                       <Text>
                         {" "}
                         and {likers.length - 2} others liked your post
@@ -320,24 +340,31 @@ export default function NotificationItem({
                     </>
                   )}
                 </Text>
-                <Text style={styles.time}>
+                <Text style={[styles.time, { color: colors.textMuted }]}>
                   {getTimeAgo(notification.createdAt)}
                 </Text>
               </View>
-              {!notification.read && <View style={styles.unreadIndicator} />}
+              {!notification.read && (
+                <View
+                  style={[
+                    styles.unreadIndicator,
+                    { backgroundColor: colors.primary },
+                  ]}
+                />
+              )}
             </View>
           );
         }
         return (
-          <Text style={styles.messageText}>
-            <Text style={styles.boldName}>{senderName}</Text>
+          <Text style={[styles.messageText, { color: colors.text }]}>
+            <Text style={[styles.boldName, { color: colors.text }]}>
+              {senderName}
+            </Text>
             <Text> liked your post</Text>
           </Text>
         );
       }
-
       case "comment": {
-        // Grouped comments
         if (notification.metadata?.isGrouped) {
           const commenters = notification.metadata?.commenters || [];
           return (
@@ -350,24 +377,34 @@ export default function NotificationItem({
                 "#ede9fe",
               )}
               <View style={styles.groupedTextContainer}>
-                <Text style={styles.messageText}>
+                <Text style={[styles.messageText, { color: colors.text }]}>
                   {commenters.length === 1 ? (
                     <>
-                      <Text style={styles.boldName}>{commenters[0].name}</Text>
+                      <Text style={[styles.boldName, { color: colors.text }]}>
+                        {commenters[0].name}
+                      </Text>
                       <Text> commented on your post</Text>
                     </>
                   ) : commenters.length === 2 ? (
                     <>
-                      <Text style={styles.boldName}>{commenters[0].name}</Text>
+                      <Text style={[styles.boldName, { color: colors.text }]}>
+                        {commenters[0].name}
+                      </Text>
                       <Text> and </Text>
-                      <Text style={styles.boldName}>{commenters[1].name}</Text>
+                      <Text style={[styles.boldName, { color: colors.text }]}>
+                        {commenters[1].name}
+                      </Text>
                       <Text> commented on your post</Text>
                     </>
                   ) : (
                     <>
-                      <Text style={styles.boldName}>{commenters[0].name}</Text>
+                      <Text style={[styles.boldName, { color: colors.text }]}>
+                        {commenters[0].name}
+                      </Text>
                       <Text>, </Text>
-                      <Text style={styles.boldName}>{commenters[1].name}</Text>
+                      <Text style={[styles.boldName, { color: colors.text }]}>
+                        {commenters[1].name}
+                      </Text>
                       <Text>
                         {" "}
                         and {commenters.length - 2} others commented on your
@@ -376,19 +413,25 @@ export default function NotificationItem({
                     </>
                   )}
                 </Text>
-                <Text style={styles.time}>
+                <Text style={[styles.time, { color: colors.textMuted }]}>
                   {getTimeAgo(notification.createdAt)}
                 </Text>
               </View>
-              {!notification.read && <View style={styles.unreadIndicator} />}
+              {!notification.read && (
+                <View
+                  style={[
+                    styles.unreadIndicator,
+                    { backgroundColor: colors.primary },
+                  ]}
+                />
+              )}
             </View>
           );
         }
-        // Single comment
         const c = extractCommentContent(notification.message);
         return (
-          <Text style={styles.messageText}>
-            <Text style={styles.boldName}>
+          <Text style={[styles.messageText, { color: colors.text }]}>
+            <Text style={[styles.boldName, { color: colors.text }]}>
               {isAnon ? "Someone" : senderName}
             </Text>
             <Text>
@@ -398,44 +441,54 @@ export default function NotificationItem({
                   ? " commented anonymously on your post"
                   : " commented on your post: "}
             </Text>
-            {!isAnon && <Text style={styles.commentContent}>"{c}"</Text>}
+            {!isAnon && (
+              <Text
+                style={[styles.commentContent, { color: colors.textSecondary }]}
+              >
+                "{c}"
+              </Text>
+            )}
           </Text>
         );
       }
-
       case "connection_request":
         return (
-          <Text style={styles.messageText}>
-            <Text style={styles.boldName}>{senderName}</Text>
+          <Text style={[styles.messageText, { color: colors.text }]}>
+            <Text style={[styles.boldName, { color: colors.text }]}>
+              {senderName}
+            </Text>
             <Text> sent you a connection request</Text>
           </Text>
         );
-
       case "connection_accepted":
         if (notification.message.includes("You are now connected with")) {
           return (
-            <Text style={styles.messageText}>
+            <Text style={[styles.messageText, { color: colors.text }]}>
               <Text>You are now connected with </Text>
-              <Text style={styles.boldName}>{notification.sender.name}</Text>
+              <Text style={[styles.boldName, { color: colors.text }]}>
+                {notification.sender.name}
+              </Text>
             </Text>
           );
         }
         return (
-          <Text style={styles.messageText}>
-            <Text style={styles.boldName}>{senderName}</Text>
+          <Text style={[styles.messageText, { color: colors.text }]}>
+            <Text style={[styles.boldName, { color: colors.text }]}>
+              {senderName}
+            </Text>
             <Text> accepted your connection request</Text>
           </Text>
         );
-
       case "event_interest":
       case "event_rsvp":
         return (
-          <Text style={styles.messageText}>
-            <Text style={styles.boldName}>{senderName}</Text>
+          <Text style={[styles.messageText, { color: colors.text }]}>
+            <Text style={[styles.boldName, { color: colors.text }]}>
+              {senderName}
+            </Text>
             <Text> {notification.message}</Text>
           </Text>
         );
-
       case "post_removed":
       case "event_approved":
       case "event_rejected":
@@ -454,16 +507,17 @@ export default function NotificationItem({
             >
               {notification.title}
             </Text>
-            <Text style={styles.messageText}>
+            <Text style={[styles.messageText, { color: colors.text }]}>
               <Text>{notification.message}</Text>
             </Text>
           </View>
         );
-
       default:
         return (
-          <Text style={styles.messageText}>
-            <Text style={styles.boldName}>{senderName}</Text>
+          <Text style={[styles.messageText, { color: colors.text }]}>
+            <Text style={[styles.boldName, { color: colors.text }]}>
+              {senderName}
+            </Text>
             <Text> {notification.message}</Text>
           </Text>
         );
@@ -474,7 +528,12 @@ export default function NotificationItem({
   const formattedMessage = getFormattedMessage();
 
   const OptionsMenu = () => (
-    <View style={styles.optionsMenu}>
+    <View
+      style={[
+        styles.optionsMenu,
+        { backgroundColor: colors.card, shadowColor: colors.shadow },
+      ]}
+    >
       {!notification.read ? (
         <TouchableOpacity
           style={styles.optionItem}
@@ -483,8 +542,14 @@ export default function NotificationItem({
             setShowOptions(false);
           }}
         >
-          <Ionicons name="checkmark-done-outline" size={18} color="#8b5cf6" />
-          <Text style={styles.optionText}>Mark as read</Text>
+          <Ionicons
+            name="checkmark-done-outline"
+            size={18}
+            color={colors.primary}
+          />
+          <Text style={[styles.optionText, { color: colors.text }]}>
+            Mark as read
+          </Text>
         </TouchableOpacity>
       ) : (
         <TouchableOpacity
@@ -495,11 +560,17 @@ export default function NotificationItem({
           }}
         >
           <Ionicons name="mail-outline" size={18} color="#f59e0b" />
-          <Text style={styles.optionText}>Mark as unread</Text>
+          <Text style={[styles.optionText, { color: colors.text }]}>
+            Mark as unread
+          </Text>
         </TouchableOpacity>
       )}
       <TouchableOpacity
-        style={[styles.optionItem, styles.deleteOption]}
+        style={[
+          styles.optionItem,
+          styles.deleteOption,
+          { borderTopColor: colors.border },
+        ]}
         onPress={() => {
           onDelete(notification._id);
           setShowOptions(false);
@@ -511,6 +582,32 @@ export default function NotificationItem({
     </View>
   );
 
+  // Build container style dynamically
+  const baseContainerStyle = {
+    ...styles.container,
+    backgroundColor: colors.card,
+    shadowColor: colors.shadow,
+  };
+
+  let containerStyle;
+  if (adminNotif && !notification.read) {
+    containerStyle = [
+      baseContainerStyle,
+      {
+        backgroundColor: isDark ? "#451a1a" : "#fef2f2",
+        borderWidth: 1,
+        borderColor: "#fecaca",
+      },
+    ];
+  } else if (!notification.read) {
+    containerStyle = [
+      baseContainerStyle,
+      { backgroundColor: isDark ? "rgba(139, 92, 246, 0.1)" : "#faf5ff" },
+    ];
+  } else {
+    containerStyle = [baseContainerStyle];
+  }
+
   return (
     <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
       <TouchableOpacity
@@ -519,13 +616,7 @@ export default function NotificationItem({
         onLongPress={handleLongPress}
         delayLongPress={300}
       >
-        <View
-          style={[
-            styles.container,
-            !notification.read && styles.unreadContainer,
-            adminNotif && !notification.read && styles.removedContainer,
-          ]}
-        >
+        <View style={containerStyle}>
           {isGrouped ? (
             <View style={styles.contentContainer}>{formattedMessage}</View>
           ) : (
@@ -573,7 +664,16 @@ export default function NotificationItem({
                       <Ionicons name="close-circle" size={26} color="#ef4444" />
                     </View>
                   ) : isAnon ? (
-                    <View style={[styles.avatar, styles.anonymousAvatar]}>
+                    <View
+                      style={[
+                        styles.avatar,
+                        styles.anonymousAvatar,
+                        {
+                          backgroundColor: colors.skeleton,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
                       <Ionicons
                         name="eye-off-outline"
                         size={26}
@@ -586,14 +686,20 @@ export default function NotificationItem({
                         getFullImageUrl(notification.sender.profilePicture) ||
                         ""
                       }
-                      style={styles.avatar}
+                      style={[
+                        styles.avatar,
+                        { backgroundColor: colors.skeleton },
+                      ]}
                       transition={200}
                       onError={() => setImageError(true)}
                     />
                   ) : (
                     <Image
                       source={DEFAULT_AVATAR}
-                      style={styles.avatar}
+                      style={[
+                        styles.avatar,
+                        { backgroundColor: colors.skeleton },
+                      ]}
                       contentFit="cover"
                     />
                   )}
@@ -602,7 +708,10 @@ export default function NotificationItem({
                   <View
                     style={[
                       styles.smallIconContainer,
-                      { backgroundColor: smallIcon.bg },
+                      {
+                        backgroundColor: smallIcon.bg,
+                        borderColor: colors.card,
+                      },
                     ]}
                   >
                     <Ionicons
@@ -615,18 +724,29 @@ export default function NotificationItem({
               </View>
               <View style={styles.contentContainer}>
                 {formattedMessage}
-                <Text style={styles.time}>
+                <Text style={[styles.time, { color: colors.textMuted }]}>
                   {getTimeAgo(notification.createdAt)}
                 </Text>
               </View>
-              {!notification.read && <View style={styles.unreadIndicator} />}
+              {!notification.read && (
+                <View
+                  style={[
+                    styles.unreadIndicator,
+                    { backgroundColor: colors.primary },
+                  ]}
+                />
+              )}
             </>
           )}
           <TouchableOpacity
             style={styles.optionsButton}
             onPress={() => setShowOptions(!showOptions)}
           >
-            <Ionicons name="ellipsis-vertical" size={18} color="#9ca3af" />
+            <Ionicons
+              name="ellipsis-vertical"
+              size={18}
+              color={colors.textMuted}
+            />
           </TouchableOpacity>
         </View>
         {showOptions && <OptionsMenu />}
@@ -636,51 +756,38 @@ export default function NotificationItem({
 }
 
 // ============================================
-// STYLES
+// STYLES - No hardcoded background/foreground colors
 // ============================================
 
 const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "white",
     borderRadius: 16,
     padding: 14,
     marginBottom: 8,
-    shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 2,
     elevation: 1,
-  },
-  unreadContainer: { backgroundColor: "#faf5ff" },
-  removedContainer: {
-    backgroundColor: "#fef2f2",
-    borderWidth: 1,
-    borderColor: "#fecaca",
   },
   avatarWrapper: { position: "relative", marginRight: 12 },
   avatar: {
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: "#f3f4f6",
   },
   adminAvatar: { justifyContent: "center", alignItems: "center" },
   anonymousAvatar: {
-    backgroundColor: "#f3f4f6",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#e5e7eb",
     borderStyle: "dashed",
   },
   anonymousMiniAvatar: {
-    backgroundColor: "#f3f4f6",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#e5e7eb",
     borderStyle: "dashed",
   },
   smallIconContainer: {
@@ -693,7 +800,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
-    borderColor: "white",
   },
   contentContainer: { flex: 1 },
   messageText: {
@@ -701,23 +807,19 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
     lineHeight: 18,
     marginBottom: 4,
-    color: "#374151",
   },
   boldName: {
     fontWeight: "700",
     fontSize: 15,
     fontFamily: "SofiaSans-Bold",
-    color: "#111827",
   },
   commentContent: {
-    color: "#6b7280",
     fontFamily: "SofiaSans-Regular",
     fontStyle: "italic",
   },
   removedTitle: { fontSize: 15, fontFamily: "SofiaSans-Bold", marginBottom: 2 },
   time: {
     fontSize: 11,
-    color: "#9ca3af",
     fontFamily: "SofiaSans-Regular",
     marginTop: 2,
   },
@@ -725,17 +827,14 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "#8b5cf6",
     marginLeft: 8,
   },
   optionsButton: { padding: 6, marginLeft: 4 },
   optionsMenu: {
-    backgroundColor: "white",
     borderRadius: 12,
     marginTop: -4,
     marginBottom: 8,
     marginLeft: 60,
-    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
@@ -752,9 +851,8 @@ const styles = StyleSheet.create({
   optionText: {
     fontSize: 13,
     fontFamily: "SofiaSans-Regular",
-    color: "#374151",
   },
-  deleteOption: { borderTopWidth: 1, borderTopColor: "#f3f4f6" },
+  deleteOption: { borderTopWidth: 1 },
   deleteOptionText: {
     fontSize: 13,
     fontFamily: "SofiaSans-Regular",
@@ -768,9 +866,8 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "#f3f4f6",
   },
-  avatarBorder: { borderWidth: 2, borderColor: "white" },
+  avatarBorder: { borderWidth: 2 },
   firstAvatar: { top: 0, left: 0, zIndex: 2 },
   secondAvatar: { top: 16, left: 16, zIndex: 1 },
   thirdAvatar: { top: 16, left: 16, zIndex: 0 },
@@ -781,7 +878,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
-    borderColor: "white",
   },
   iconOverlay: {
     position: "absolute",
@@ -793,7 +889,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
-    borderColor: "white",
     zIndex: 10,
   },
   groupedTextContainer: { flex: 1 },

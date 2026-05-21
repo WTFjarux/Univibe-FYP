@@ -18,6 +18,7 @@ import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { useNavigation } from "@react-navigation/native";
 
 import { useAuth } from "../../lib/contexts/AuthContext";
+import { useTheme } from "../../lib/contexts/ThemeContext";
 import { profileService } from "../../lib/services/profileService";
 import { connectionService } from "../../lib/services/connectionService";
 import { toggleBlockUser } from "../../lib/services/contentService";
@@ -81,8 +82,8 @@ export default function PublicProfileScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const { user: currentUser, refreshUserProfile, token } = useAuth();
+  const { colors } = useTheme();
 
-  // ALL STATE DECLARATIONS - Must be at the top, before any conditional returns
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -120,7 +121,6 @@ export default function PublicProfileScreen() {
 
   const isOwnProfile = currentUser?.id === id;
 
-  // ALL HOOKS - Must be called unconditionally, before any conditional returns
   useEffect(() => {
     const parent = navigation.getParent();
     if (parent) {
@@ -133,19 +133,16 @@ export default function PublicProfileScreen() {
     };
   }, [navigation]);
 
-  // This hook MUST be called unconditionally, even if profile is blocked
   useFocusEffect(
     useCallback(() => {
       if (token) loadProfile();
     }, [id, token]),
   );
 
-  // ALL FUNCTION DECLARATIONS - Must be defined before any conditional returns
   const showInfoBar = useCallback(
     (message: string, type: "success" | "error" | "info" = "info") => {
       setInfoMessage(message);
       setInfoType(type);
-
       Animated.sequence([
         Animated.timing(slideAnim, {
           toValue: 0,
@@ -167,11 +164,10 @@ export default function PublicProfileScreen() {
   );
 
   const goBack = useCallback(() => router.back(), [router]);
+
   const loadUserStates = useCallback(async () => {
     if (!token || isOwnProfile) return;
-
     try {
-      // Load muted users
       const mutedResponse = await profileService.getMutedUsers(1, 50);
       if (mutedResponse.success && mutedResponse.data) {
         const mutedIds = new Set<string>(
@@ -179,7 +175,6 @@ export default function PublicProfileScreen() {
             String(u._id || u.user?._id || ""),
           ),
         );
-        // Filter out empty strings
         mutedIds.delete("");
         setMutedUsers(mutedIds);
       }
@@ -195,24 +190,19 @@ export default function PublicProfileScreen() {
       forceConnectionStatus?: ConnectionStatus,
     ) => {
       if (!id || postsLoading) return;
-
       const effectiveStatus = forceConnectionStatus ?? connectionStatus;
-
       if (!isOwnProfile && effectiveStatus !== "connected") {
         setInitialPostsLoading(false);
         return;
       }
-
       if (shouldAppend) {
         setLoadingMorePosts(true);
       } else {
         setInitialPostsLoading(true);
       }
       setPostsLoading(true);
-
       try {
         const response = await getProfilePosts(id as string, page, 10);
-
         if (response.success && response.data) {
           const filteredPosts = response.data.posts.filter(
             (post) =>
@@ -220,7 +210,6 @@ export default function PublicProfileScreen() {
               !mutedUsers.has(post.user?._id || "") &&
               !blockedUsers.has(post.user?._id || ""),
           );
-
           setPosts((prev) =>
             shouldAppend ? [...prev, ...filteredPosts] : filteredPosts,
           );
@@ -229,7 +218,6 @@ export default function PublicProfileScreen() {
           setPostsPage(page);
         }
       } catch (error) {
-        console.error("Error loading profile posts:", error);
         showInfoBar("Failed to load posts", "error");
       } finally {
         setPostsLoading(false);
@@ -251,7 +239,6 @@ export default function PublicProfileScreen() {
 
   const loadConnectionStatus = useCallback(async () => {
     if (!id || isOwnProfile) return;
-
     try {
       const response = await connectionService.getConnectionStatus(
         id as string,
@@ -259,7 +246,6 @@ export default function PublicProfileScreen() {
       if (response.success) {
         const backendStatus = response.data.status as string;
         let status: ConnectionStatus = "not_connected";
-
         if (backendStatus === "connected") status = "connected";
         else if (
           backendStatus === "pending_sent" ||
@@ -271,9 +257,7 @@ export default function PublicProfileScreen() {
           backendStatus === "request_received"
         )
           status = "pending_received";
-
         setConnectionStatus(status);
-
         if (status === "connected") {
           await loadProfilePosts(1, false, "connected");
         } else {
@@ -290,14 +274,10 @@ export default function PublicProfileScreen() {
     setLoading(true);
     try {
       const response = await profileService.getPublicProfile(id as string);
-
-      // CHECK: If blocked, show blocked state
       if (response.isBlocked || response.isBlockedByOwner) {
         setProfileBlocked(true);
         setIsBlocked(response.isBlocked || false);
         setIsBlockedByOwner(response.isBlockedByOwner || false);
-
-        // Still try to set basic profile info for the modal
         if (response.data) {
           const profileData = response.data.profile;
           const userData = response.data.user;
@@ -320,25 +300,18 @@ export default function PublicProfileScreen() {
               pronouns: "",
               profilePicture: profileData.profilePicture || "",
               coverPhoto: profileData.coverPhoto || "",
-              socialLinks: {
-                instagram: "",
-                linkedin: "",
-                github: "",
-              },
+              socialLinks: { instagram: "", linkedin: "", github: "" },
               stats: { posts: 0, connections: 0, groups: 0 },
             });
           }
         }
-
         setLoading(false);
         setInitialLoading(false);
         return;
       }
-
       if (response.success && response.data) {
         const profileData = response.data.profile;
         const userData = response.data.user;
-
         setProfile({
           _id: profileData._id,
           user: {
@@ -364,7 +337,6 @@ export default function PublicProfileScreen() {
           },
           stats: profileData.stats || { posts: 0, connections: 0, groups: 0 },
         });
-
         if (!isOwnProfile) {
           await loadConnectionStatus();
           await loadUserStates();
@@ -397,23 +369,20 @@ export default function PublicProfileScreen() {
 
   const startChat = useCallback(async () => {
     if (!profile) return;
-
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/chat/direct/${profile.user._id}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
       const data = await response.json();
-
       if (data.success) {
-        const avatarUrl = profile.profilePicture || "";
         router.push({
           pathname: "/screens/ChatScreen",
           params: {
             roomId: data.data.roomId,
             otherUserName: profile.fullName,
             otherUserId: profile.user._id,
-            otherUserAvatar: avatarUrl,
+            otherUserAvatar: profile.profilePicture || "",
             isGroup: "false",
           },
         });
@@ -421,7 +390,6 @@ export default function PublicProfileScreen() {
         showInfoBar(data.message || "Failed to start chat", "error");
       }
     } catch (error) {
-      console.error("Error starting chat:", error);
       showInfoBar("Failed to start chat", "error");
     }
   }, [profile, token, router, showInfoBar]);
@@ -432,13 +400,12 @@ export default function PublicProfileScreen() {
     await loadProfile();
     setRefreshing(false);
   }, [token, loadProfile]);
-
   const refreshCurrentUserProfile = useCallback(async () => {
     try {
       if (refreshUserProfile) await refreshUserProfile();
       if (isOwnProfile) await loadProfile();
     } catch (error) {
-      console.error("Error refreshing current user profile:", error);
+      console.error("Error refreshing:", error);
     }
   }, [refreshUserProfile, isOwnProfile, loadProfile]);
 
@@ -448,12 +415,10 @@ export default function PublicProfileScreen() {
         showInfoBar("Please login to like posts", "info");
         return;
       }
-
       try {
         const response = await toggleLike(postId);
-
-        setPosts((prevPosts) =>
-          prevPosts.map((post) =>
+        setPosts((prev) =>
+          prev.map((post) =>
             post._id === postId
               ? {
                   ...post,
@@ -464,7 +429,6 @@ export default function PublicProfileScreen() {
           ),
         );
       } catch (error: any) {
-        console.error("Error liking post:", error);
         showInfoBar(error.message || "Failed to like post", "error");
       }
     },
@@ -484,14 +448,9 @@ export default function PublicProfileScreen() {
     },
     [token, router, showInfoBar],
   );
-
-  const handleShare = useCallback(
-    (postId: string) => {
-      showInfoBar("Share feature coming soon!", "info");
-    },
-    [showInfoBar],
-  );
-
+  const handleShare = useCallback(() => {
+    showInfoBar("Share feature coming soon!", "info");
+  }, [showInfoBar]);
   const handleEditPost = useCallback(
     (postId: string) => {
       router.push({
@@ -501,7 +460,6 @@ export default function PublicProfileScreen() {
     },
     [router],
   );
-
   const handleDeletePost = useCallback(
     async (postId: string) => {
       try {
@@ -509,30 +467,25 @@ export default function PublicProfileScreen() {
         setPosts((prev) => prev.filter((post) => post._id !== postId));
         showInfoBar("Post deleted successfully", "success");
       } catch (error: any) {
-        console.error("Error deleting post:", error);
         showInfoBar(error.message || "Failed to delete post", "error");
       }
     },
     [showInfoBar],
   );
-
   const handleSavePost = useCallback(
     (postId: string) => {
       setSavedPosts((prev) => {
         const newSet = new Set(prev);
-        if (newSet.has(postId)) {
-          newSet.delete(postId);
-          showInfoBar("Post removed from your saved items", "info");
-        } else {
-          newSet.add(postId);
-          showInfoBar("Post added to your saved items", "success");
-        }
+        newSet.has(postId) ? newSet.delete(postId) : newSet.add(postId);
+        showInfoBar(
+          newSet.has(postId) ? "Post saved" : "Post removed from saved",
+          "info",
+        );
         return newSet;
       });
     },
     [showInfoBar],
   );
-
   const handleReportPost = useCallback(
     (postId: string) => {
       setPosts((prev) =>
@@ -542,43 +495,31 @@ export default function PublicProfileScreen() {
     },
     [showInfoBar],
   );
-
   const handleHidePost = useCallback(
     (postId: string) => {
       setHiddenPosts((prev) => new Set(prev).add(postId));
       setPosts((prev) => prev.filter((post) => post._id !== postId));
-      showInfoBar("Post hidden, you won't see this post anymore", "info");
+      showInfoBar("Post hidden", "info");
     },
     [showInfoBar],
   );
-
-  const handleCopyLink = useCallback(
-    (postId: string) => {
-      showInfoBar("Post link copied to clipboard", "success");
-    },
-    [showInfoBar],
-  );
-
+  const handleCopyLink = useCallback(() => {
+    showInfoBar("Link copied to clipboard", "success");
+  }, [showInfoBar]);
   const handleMuteUser = useCallback(
     (userId: string) => {
       setMutedUsers((prev) => new Set(prev).add(userId));
       setPosts((prev) => prev.filter((post) => post.user?._id !== userId));
-      showInfoBar(
-        "User muted, you won't see posts from this user anymore",
-        "info",
-      );
+      showInfoBar("User muted", "info");
     },
     [showInfoBar],
   );
-
   const handleBlockUser = useCallback(
     async (userId: string) => {
       if (!token || !userId) return;
-
       setBlockedUsers((prev) => new Set(prev).add(userId));
       setPosts((prev) => prev.filter((post) => post.user?._id !== userId));
       showInfoBar("User blocked successfully", "info");
-
       try {
         const response = await toggleBlockUser(userId);
         if (response.blocked) {
@@ -600,26 +541,18 @@ export default function PublicProfileScreen() {
   const handleCancelConnectionRequest = useCallback(async () => {
     if (!profile) return;
     setConnectionLoading(true);
-
     try {
       const cancelResponse = await connectionService.cancelConnectionRequest(
         profile.user._id,
       );
       if (cancelResponse.success) {
         setConnectionStatus("not_connected");
-        showInfoBar(
-          `Rejected connection request from ${profile.fullName}`,
-          "info",
-        );
+        showInfoBar(`Rejected request from ${profile.fullName}`, "info");
       } else {
-        showInfoBar(
-          cancelResponse.message || "Failed to cancel request",
-          "error",
-        );
+        showInfoBar(cancelResponse.message || "Failed", "error");
       }
     } catch (error: any) {
-      console.error("Error canceling request:", error);
-      showInfoBar(error.message || "Failed to cancel request", "error");
+      showInfoBar(error.message || "Failed", "error");
     } finally {
       setConnectionLoading(false);
     }
@@ -627,11 +560,10 @@ export default function PublicProfileScreen() {
 
   const handleConnectionAction = useCallback(async () => {
     if (!profile) return;
-
     if (connectionStatus === "connected") {
       Alert.alert(
         "Remove Connection",
-        `Are you sure you want to remove your connection with ${profile.fullName}?`,
+        `Remove connection with ${profile.fullName}?`,
         [
           { text: "Cancel", style: "cancel" },
           {
@@ -640,10 +572,10 @@ export default function PublicProfileScreen() {
             onPress: async () => {
               setConnectionLoading(true);
               try {
-                const removeResponse = await connectionService.removeConnection(
+                const res = await connectionService.removeConnection(
                   profile.user._id,
                 );
-                if (removeResponse.success) {
+                if (res.success) {
                   setConnectionStatus("not_connected");
                   setProfile((prev) =>
                     prev
@@ -666,16 +598,10 @@ export default function PublicProfileScreen() {
                     "info",
                   );
                 } else {
-                  showInfoBar(
-                    removeResponse.message || "Failed to remove connection",
-                    "error",
-                  );
+                  showInfoBar(res.message || "Failed", "error");
                 }
               } catch (error: any) {
-                showInfoBar(
-                  error.message || "Failed to remove connection",
-                  "error",
-                );
+                showInfoBar(error.message || "Failed", "error");
               } finally {
                 setConnectionLoading(false);
               }
@@ -685,19 +611,15 @@ export default function PublicProfileScreen() {
       );
       return;
     }
-
     setConnectionLoading(true);
     try {
       switch (connectionStatus) {
-        case "not_connected":
-          const sendResponse = await connectionService.sendConnectionRequest(
+        case "not_connected": {
+          const res = await connectionService.sendConnectionRequest(
             profile.user._id,
           );
-          if (sendResponse.success) {
-            if (
-              sendResponse.data?.autoAccepted ||
-              sendResponse.data?.status === "connected"
-            ) {
+          if (res.success) {
+            if (res.data?.autoAccepted || res.data?.status === "connected") {
               setConnectionStatus("connected");
               setProfile((prev) =>
                 prev
@@ -715,35 +637,30 @@ export default function PublicProfileScreen() {
               showInfoBar(`Connected with ${profile.fullName}!`, "success");
             } else {
               setConnectionStatus("pending_sent");
-              showInfoBar(
-                `Connection request sent to ${profile.fullName}`,
-                "success",
-              );
+              showInfoBar(`Request sent to ${profile.fullName}`, "success");
             }
           } else {
-            showInfoBar(
-              sendResponse.message || "Failed to send request",
-              "error",
-            );
+            showInfoBar(res.message || "Failed", "error");
           }
           break;
-        case "pending_sent":
-          const cancelResponse =
-            await connectionService.cancelConnectionRequest(profile.user._id);
-          if (cancelResponse.success) {
+        }
+        case "pending_sent": {
+          const res = await connectionService.cancelConnectionRequest(
+            profile.user._id,
+          );
+          if (res.success) {
             setConnectionStatus("not_connected");
-            showInfoBar("Connection request cancelled", "info");
+            showInfoBar("Request cancelled", "info");
           } else {
-            showInfoBar(
-              cancelResponse.message || "Failed to cancel request",
-              "error",
-            );
+            showInfoBar(res.message || "Failed", "error");
           }
           break;
-        case "pending_received":
-          const acceptResponse =
-            await connectionService.acceptConnectionRequest(profile.user._id);
-          if (acceptResponse.success) {
+        }
+        case "pending_received": {
+          const res = await connectionService.acceptConnectionRequest(
+            profile.user._id,
+          );
+          if (res.success) {
             setConnectionStatus("connected");
             setProfile((prev) =>
               prev
@@ -760,15 +677,13 @@ export default function PublicProfileScreen() {
             await loadProfilePosts(1, false, "connected");
             showInfoBar(`Connected with ${profile.fullName}!`, "success");
           } else {
-            showInfoBar(
-              acceptResponse.message || "Failed to accept request",
-              "error",
-            );
+            showInfoBar(res.message || "Failed", "error");
           }
           break;
+        }
       }
     } catch (error: any) {
-      showInfoBar(error.message || "Failed to process request", "error");
+      showInfoBar(error.message || "Failed", "error");
     } finally {
       setConnectionLoading(false);
     }
@@ -798,7 +713,6 @@ export default function PublicProfileScreen() {
     loadProfilePosts,
   ]);
 
-  // Derived values - safe to compute after all hooks
   const getConnectionButtonConfig = useCallback(() => {
     switch (connectionStatus) {
       case "connected":
@@ -829,7 +743,6 @@ export default function PublicProfileScreen() {
   }, [connectionStatus]);
 
   const buttonConfig = getConnectionButtonConfig();
-
   const getButtonStyle = useCallback(() => {
     switch (buttonConfig.style) {
       case "connected":
@@ -853,7 +766,8 @@ export default function PublicProfileScreen() {
       }
     : null;
 
-  // Render functions - safe to define after all hooks
+  // ============ RENDER HELPERS ============
+
   const renderInfoBar = useCallback(() => {
     if (!infoMessage) return null;
     const bg =
@@ -861,7 +775,7 @@ export default function PublicProfileScreen() {
         ? "#10b981"
         : infoType === "error"
           ? "#ef4444"
-          : "#8b5cf6";
+          : colors.primary;
     const icon =
       infoType === "success"
         ? "checkmark-circle"
@@ -879,7 +793,7 @@ export default function PublicProfileScreen() {
         <Text style={publicStyles.infoBarText}>{infoMessage}</Text>
       </Animated.View>
     );
-  }, [infoMessage, infoType, slideAnim]);
+  }, [infoMessage, infoType, slideAnim, colors]);
 
   const renderPost = useCallback(
     ({ item }: { item: Post }) => (
@@ -917,11 +831,8 @@ export default function PublicProfileScreen() {
 
   const renderPostsSection = useCallback(() => {
     if (!profile) return null;
-
     if (isOwnProfile) {
-      if (initialPostsLoading) {
-        return <InitialPostsSkeleton />;
-      }
+      if (initialPostsLoading) return <InitialPostsSkeleton />;
       return (
         <>
           <ProfileInfo profile={profile} user={profile.user} />
@@ -933,16 +844,15 @@ export default function PublicProfileScreen() {
             }}
           />
           <View style={publicStyles.postsHeader}>
-            <Text style={publicStyles.postsTitle}>Posts</Text>
+            <Text style={[publicStyles.postsTitle, { color: colors.text }]}>
+              Posts
+            </Text>
           </View>
         </>
       );
     }
-
     if (connectionStatus === "connected") {
-      if (initialPostsLoading) {
-        return <InitialPostsSkeleton />;
-      }
+      if (initialPostsLoading) return <InitialPostsSkeleton />;
       return (
         <>
           <ProfileInfo profile={profile} user={profile.user} />
@@ -954,52 +864,68 @@ export default function PublicProfileScreen() {
             }}
           />
           <View style={publicStyles.postsHeader}>
-            <Text style={publicStyles.postsTitle}>Posts</Text>
-          </View>
-        </>
-      );
-    } else {
-      return (
-        <>
-          <ProfileInfo profile={profile} user={profile.user} />
-          <ProfileStats
-            stats={{
-              posts: profile.stats?.posts || 0,
-              connections: profile.stats?.connections || 0,
-              groups: profile.stats?.groups || 0,
-            }}
-          />
-          <View style={publicStyles.privatePostsContainer}>
-            <Text style={publicStyles.privatePostsTitle}>
-              Posts are private
+            <Text style={[publicStyles.postsTitle, { color: colors.text }]}>
+              Posts
             </Text>
-            <Text style={publicStyles.privatePostsText}>
-              Connect with {profile.fullName} to see their posts and updates.
-            </Text>
-            <TouchableOpacity
-              style={publicStyles.connectPromptButton}
-              onPress={handleConnectionAction}
-              disabled={connectionLoading}
-            >
-              {connectionLoading ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <Ionicons name="person-add" size={20} color="#fff" />
-                  <Text style={publicStyles.connectPromptButtonText}>
-                    {connectionStatus === "pending_sent"
-                      ? "Request Sent"
-                      : connectionStatus === "pending_received"
-                        ? "Accept Request"
-                        : "Connect to View Posts"}
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
           </View>
         </>
       );
     }
+    return (
+      <>
+        <ProfileInfo profile={profile} user={profile.user} />
+        <ProfileStats
+          stats={{
+            posts: profile.stats?.posts || 0,
+            connections: profile.stats?.connections || 0,
+            groups: profile.stats?.groups || 0,
+          }}
+        />
+        <View
+          style={[
+            publicStyles.privatePostsContainer,
+            { backgroundColor: colors.skeleton },
+          ]}
+        >
+          <Text
+            style={[publicStyles.privatePostsTitle, { color: colors.text }]}
+          >
+            Posts are private
+          </Text>
+          <Text
+            style={[
+              publicStyles.privatePostsText,
+              { color: colors.textSecondary },
+            ]}
+          >
+            Connect with {profile.fullName} to see their posts and updates.
+          </Text>
+          <TouchableOpacity
+            style={[
+              publicStyles.connectPromptButton,
+              { backgroundColor: colors.primary },
+            ]}
+            onPress={handleConnectionAction}
+            disabled={connectionLoading}
+          >
+            {connectionLoading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="person-add" size={20} color="#fff" />
+                <Text style={publicStyles.connectPromptButtonText}>
+                  {connectionStatus === "pending_sent"
+                    ? "Request Sent"
+                    : connectionStatus === "pending_received"
+                      ? "Accept Request"
+                      : "Connect to View Posts"}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      </>
+    );
   }, [
     profile,
     isOwnProfile,
@@ -1007,18 +933,24 @@ export default function PublicProfileScreen() {
     initialPostsLoading,
     connectionLoading,
     handleConnectionAction,
+    colors,
   ]);
 
-  // ============================================
-  // HEADER RENDER HELPER
-  // ============================================
   const renderHeader = useCallback(
     (title: string, showOptions: boolean = true) => (
-      <View style={publicStyles.header}>
+      <View
+        style={[
+          publicStyles.header,
+          { backgroundColor: colors.card, borderBottomColor: colors.border },
+        ]}
+      >
         <TouchableOpacity onPress={goBack} style={publicStyles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#111827" />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={publicStyles.headerTitle} numberOfLines={1}>
+        <Text
+          style={[publicStyles.headerTitle, { color: colors.text }]}
+          numberOfLines={1}
+        >
           {title}
         </Text>
         {!isOwnProfile && showOptions ? (
@@ -1026,44 +958,50 @@ export default function PublicProfileScreen() {
             onPress={() => setShowOptionsModal(true)}
             style={{ width: 40, alignItems: "flex-end", padding: 8 }}
           >
-            <Ionicons name="ellipsis-vertical" size={24} color="#111827" />
+            <Ionicons name="ellipsis-vertical" size={24} color={colors.text} />
           </TouchableOpacity>
         ) : (
           <View style={{ width: 40 }} />
         )}
       </View>
     ),
-    [goBack, isOwnProfile],
+    [goBack, isOwnProfile, colors],
   );
 
-  // ============================================
-  // BLOCKED STATE - Render blocked UI
-  // ============================================
+  // ============ BLOCKED STATE ============
   if (profileBlocked) {
     return (
-      <SafeAreaView style={styles.container} edges={["top"]}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        edges={["top"]}
+      >
         {renderHeader(isBlockedByOwner ? "Blocked" : "Profile")}
-
         <View style={publicStyles.blockedContainer}>
           <Ionicons
             name={isBlockedByOwner ? "ban-outline" : "person-remove-outline"}
             size={80}
             color="#ef4444"
           />
-          <Text style={publicStyles.blockedTitle}>
+          <Text style={[publicStyles.blockedTitle, { color: colors.text }]}>
             {isBlockedByOwner ? "You've been blocked" : "Profile not available"}
           </Text>
-          <Text style={publicStyles.blockedText}>
+          <Text
+            style={[publicStyles.blockedText, { color: colors.textSecondary }]}
+          >
             {isBlockedByOwner
-              ? "This user has blocked you. You cannot view their profile or interact with them."
-              : "You have blocked this user. Unblock them to view their profile."}
+              ? "This user has blocked you."
+              : "You have blocked this user."}
           </Text>
-          <TouchableOpacity style={publicStyles.blockedButton} onPress={goBack}>
+          <TouchableOpacity
+            style={[
+              publicStyles.blockedButton,
+              { backgroundColor: colors.primary },
+            ]}
+            onPress={goBack}
+          >
             <Text style={publicStyles.blockedButtonText}>Go Back</Text>
           </TouchableOpacity>
         </View>
-
-        {/* Show options modal even in blocked state */}
         {!isOwnProfile && profile && (
           <ProfileOptionsModal
             visible={showOptionsModal}
@@ -1075,36 +1013,23 @@ export default function PublicProfileScreen() {
             onBlockUser={() => {
               setIsBlocked(true);
               setProfileBlocked(true);
-              setBlockedUsers((prev: Set<string>) => {
-                const newSet = new Set<string>(prev);
-                newSet.add(profile.user._id);
-                return newSet;
-              });
-              showInfoBar("User blocked successfully", "success");
+              setBlockedUsers((prev) => new Set(prev).add(profile.user._id));
+              showInfoBar("User blocked", "success");
             }}
-            // Unblock user
             onUnblockUser={() => {
               setIsBlocked(false);
               setProfileBlocked(false);
-              setBlockedUsers((prev: Set<string>) => {
-                const newSet = new Set<string>(prev);
-                newSet.delete(profile.user._id);
-                return newSet;
+              setBlockedUsers((prev) => {
+                const ns = new Set(prev);
+                ns.delete(profile.user._id);
+                return ns;
               });
-              showInfoBar("User unblocked successfully", "success");
+              showInfoBar("User unblocked", "success");
               setTimeout(() => loadProfile(), 500);
             }}
-            // Report success
             onReportSuccess={() => {
-              setReportedUsers((prev: Set<string>) => {
-                const newSet = new Set<string>(prev);
-                newSet.add(profile.user._id);
-                return newSet;
-              });
-              showInfoBar(
-                "Report submitted. Thank you for your feedback.",
-                "success",
-              );
+              setReportedUsers((prev) => new Set(prev).add(profile.user._id));
+              showInfoBar("Report submitted", "success");
             }}
           />
         )}
@@ -1112,30 +1037,45 @@ export default function PublicProfileScreen() {
     );
   }
 
-  // ============================================
-  // INITIAL LOADING STATE
-  // ============================================
+  // ============ INITIAL LOADING ============
   if (initialLoading) {
     return (
-      <SafeAreaView style={styles.container} edges={["top"]}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        edges={["top"]}
+      >
         <ProfileSkeleton isOwnProfile={isOwnProfile} />
       </SafeAreaView>
     );
   }
 
-  // ============================================
-  // PROFILE NOT FOUND STATE
-  // ============================================
+  // ============ NOT FOUND ============
   if (!profile) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+      >
         <View style={styles.noProfileContainer}>
-          <Ionicons name="person-circle-outline" size={100} color="#d1d5db" />
-          <Text style={styles.noProfileTitle}>Profile Not Found</Text>
-          <Text style={styles.noProfileDescription}>
-            The profile you're looking for doesn't exist or has been removed.
+          <Ionicons
+            name="person-circle-outline"
+            size={100}
+            color={colors.textMuted}
+          />
+          <Text style={[styles.noProfileTitle, { color: colors.text }]}>
+            Profile Not Found
           </Text>
-          <TouchableOpacity style={styles.setupButton} onPress={goBack}>
+          <Text
+            style={[
+              styles.noProfileDescription,
+              { color: colors.textSecondary },
+            ]}
+          >
+            The profile you're looking for doesn't exist.
+          </Text>
+          <TouchableOpacity
+            style={[styles.setupButton, { backgroundColor: colors.primary }]}
+            onPress={goBack}
+          >
             <Ionicons name="arrow-back" size={20} color="white" />
             <Text style={styles.setupButtonText}>Go Back</Text>
           </TouchableOpacity>
@@ -1144,13 +1084,13 @@ export default function PublicProfileScreen() {
     );
   }
 
-  // ============================================
-  // MAIN PROFILE RENDER
-  // ============================================
+  // ============ MAIN RENDER ============
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      edges={["top"]}
+    >
       {renderHeader(profile.fullName)}
-
       <FlatList
         data={connectionStatus === "connected" || isOwnProfile ? posts : []}
         renderItem={renderPost}
@@ -1161,8 +1101,9 @@ export default function PublicProfileScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor="#8b5cf6"
-            colors={["#8b5cf6"]}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+            progressBackgroundColor={colors.card}
           />
         }
         ListHeaderComponent={
@@ -1275,7 +1216,6 @@ export default function PublicProfileScreen() {
                   )}
                 </View>
               )}
-
               {renderPostsSection()}
             </View>
           </>
@@ -1296,10 +1236,19 @@ export default function PublicProfileScreen() {
               <Ionicons
                 name="document-text-outline"
                 size={48}
-                color="#d1d5db"
+                color={colors.textMuted}
               />
-              <Text style={publicStyles.emptyPostsTitle}>No posts yet</Text>
-              <Text style={publicStyles.emptyPostsText}>
+              <Text
+                style={[publicStyles.emptyPostsTitle, { color: colors.text }]}
+              >
+                No posts yet
+              </Text>
+              <Text
+                style={[
+                  publicStyles.emptyPostsText,
+                  { color: colors.textSecondary },
+                ]}
+              >
                 {viewerStatus.isConnected
                   ? "This user hasn't posted anything yet."
                   : "Be the first to connect and see their posts!"}
@@ -1310,10 +1259,7 @@ export default function PublicProfileScreen() {
         onEndReached={loadMorePosts}
         onEndReachedThreshold={0.3}
       />
-
       {renderInfoBar()}
-
-      {/* Profile Options Modal */}
       {!isOwnProfile && profile && (
         <ProfileOptionsModal
           visible={showOptionsModal}
@@ -1327,37 +1273,33 @@ export default function PublicProfileScreen() {
             setIsBlocked(true);
             setProfileBlocked(true);
             setBlockedUsers((prev) => new Set(prev).add(profile.user._id));
-            showInfoBar("User blocked successfully", "success");
+            showInfoBar("User blocked", "success");
           }}
           onUnblockUser={() => {
             setIsBlocked(false);
             setProfileBlocked(false);
             setBlockedUsers((prev) => {
-              const newSet = new Set(prev);
-              newSet.delete(profile.user._id);
-              return newSet;
+              const ns = new Set(prev);
+              ns.delete(profile.user._id);
+              return ns;
             });
-            showInfoBar("User unblocked successfully", "success");
-            // Reload profile after unblock
+            showInfoBar("User unblocked", "success");
             setTimeout(() => loadProfile(), 500);
           }}
           onMuteUser={() => {
             setMutedUsers((prev) => new Set(prev).add(profile.user._id));
-            showInfoBar("User muted successfully", "info");
+            showInfoBar("User muted", "info");
           }}
           onUnmuteUser={() => {
             setMutedUsers((prev) => {
-              const newSet = new Set(prev);
-              newSet.delete(profile.user._id);
-              return newSet;
+              const ns = new Set(prev);
+              ns.delete(profile.user._id);
+              return ns;
             });
-            showInfoBar("User unmuted successfully", "info");
+            showInfoBar("User unmuted", "info");
           }}
           onReportSuccess={() => {
-            showInfoBar(
-              "Report submitted. Thank you for your feedback.",
-              "success",
-            );
+            showInfoBar("Report submitted", "success");
           }}
         />
       )}
@@ -1365,7 +1307,6 @@ export default function PublicProfileScreen() {
   );
 }
 
-// Keep all existing style definitions exactly as they were
 const publicStyles = StyleSheet.create({
   header: {
     flexDirection: "row",
@@ -1412,17 +1353,9 @@ const publicStyles = StyleSheet.create({
     textAlign: "left",
     lineHeight: 20,
   },
-  connectionButtonContainer: {
-    paddingHorizontal: 20,
-    marginBottom: 16,
-  },
-  buttonsRow: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  flexButton: {
-    flex: 1,
-  },
+  connectionButtonContainer: { paddingHorizontal: 20, marginBottom: 16 },
+  buttonsRow: { flexDirection: "row", gap: 12 },
+  flexButton: { flex: 1 },
   connectionButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -1431,15 +1364,9 @@ const publicStyles = StyleSheet.create({
     borderRadius: 25,
     gap: 8,
   },
-  connectionButton_connect: {
-    backgroundColor: "#8b5cf6",
-  },
-  connectionButton_pending: {
-    backgroundColor: "#f59e0b",
-  },
-  connectionButton_accept: {
-    backgroundColor: "#10b981",
-  },
+  connectionButton_connect: { backgroundColor: "#8b5cf6" },
+  connectionButton_pending: { backgroundColor: "#f59e0b" },
+  connectionButton_accept: { backgroundColor: "#10b981" },
   connectionButton_connected: {
     backgroundColor: "#f3f4f6",
     borderWidth: 1,
@@ -1451,12 +1378,8 @@ const publicStyles = StyleSheet.create({
     fontFamily: "SofiaSans-Bold",
     fontWeight: "600",
   },
-  connectedButtonText: {
-    color: "#10b981",
-  },
-  messageButton: {
-    backgroundColor: "#3b82f6",
-  },
+  connectedButtonText: { color: "#10b981" },
+  messageButton: { backgroundColor: "#3b82f6" },
   acceptCancelContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -1472,14 +1395,8 @@ const publicStyles = StyleSheet.create({
     borderRadius: 25,
     gap: 8,
   },
-  cancelButton: {
-    padding: 4,
-    borderRadius: 20,
-  },
-  postsHeader: {
-    marginTop: 16,
-    paddingHorizontal: 20,
-  },
+  cancelButton: { padding: 4, borderRadius: 20 },
+  postsHeader: { marginTop: 16, paddingHorizontal: 20 },
   postsTitle: {
     fontSize: 24,
     fontWeight: "bold",
@@ -1503,20 +1420,10 @@ const publicStyles = StyleSheet.create({
     textAlign: "center",
     marginTop: 4,
   },
-  footerLoader: {
-    paddingVertical: 20,
-  },
-  flatListContent: {
-    paddingBottom: 20,
-  },
-  postCardContainer: {
-    padding: 16,
-    marginBottom: 8,
-  },
-  loadingMoreContainer: {
-    paddingHorizontal: 0,
-    paddingTop: 0,
-  },
+  footerLoader: { paddingVertical: 20 },
+  flatListContent: { paddingBottom: 20 },
+  postCardContainer: { padding: 16, marginBottom: 8 },
+  loadingMoreContainer: { paddingHorizontal: 0, paddingTop: 0 },
   privatePostsContainer: {
     alignItems: "center",
     paddingVertical: 40,

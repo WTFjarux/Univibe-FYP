@@ -17,6 +17,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "@/lib/contexts/ThemeContext";
 import { eventService } from "@/lib/services/eventService";
 import {
   DatePickerModal,
@@ -39,6 +40,7 @@ const categories = [
 
 export default function CreateEventScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
   const [loading, setLoading] = useState(false);
 
   // Form State
@@ -101,8 +103,6 @@ export default function CreateEventScreen() {
   const onEndDateConfirm = () => {
     const newDate = new Date(tempEndDate);
     newDate.setHours(endDate.getHours(), endDate.getMinutes());
-
-    // Compare dates only (ignore time)
     const startDay = new Date(
       startDate.getFullYear(),
       startDate.getMonth(),
@@ -113,7 +113,6 @@ export default function CreateEventScreen() {
       newDate.getMonth(),
       newDate.getDate(),
     );
-
     if (endDay >= startDay) {
       setEndDate(newDate);
     } else {
@@ -148,7 +147,6 @@ export default function CreateEventScreen() {
 
   const handleSubmit = async () => {
     Keyboard.dismiss();
-
     if (!title.trim()) {
       Alert.alert("Error", "Please enter event title");
       return;
@@ -169,9 +167,7 @@ export default function CreateEventScreen() {
       Alert.alert("Error", "Please add at least one image for your event");
       return;
     }
-
     setLoading(true);
-
     try {
       const formData = new FormData();
       formData.append("title", title.trim());
@@ -185,7 +181,6 @@ export default function CreateEventScreen() {
       formData.append("isOnline", String(isOnline));
       if (meetingLink) formData.append("meetingLink", meetingLink);
       if (tags) formData.append("tags", tags);
-
       images.forEach((image) => {
         formData.append("images", {
           uri: image.uri,
@@ -193,7 +188,6 @@ export default function CreateEventScreen() {
           type: image.type,
         } as any);
       });
-
       const response = await eventService.createEvent(formData);
       if (response.success) {
         Alert.alert("Success!", "Event created successfully", [
@@ -203,7 +197,6 @@ export default function CreateEventScreen() {
         Alert.alert("Error", response.message || "Failed to create event");
       }
     } catch (error) {
-      console.error("Create event error:", error);
       Alert.alert("Error", "Failed to create event");
     } finally {
       setLoading(false);
@@ -211,21 +204,28 @@ export default function CreateEventScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <View style={styles.header}>
+        <View style={[styles.header, { borderBottomColor: colors.border }]}>
           <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="close" size={28} color="#111827" />
+            <Ionicons name="close" size={28} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Create Event</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>
+            Create Event
+          </Text>
           <TouchableOpacity
             style={[
               styles.createButton,
-              (!title || !description || images.length === 0) &&
+              { backgroundColor: colors.primary },
+              (!title || !description || images.length === 0) && [
                 styles.createButtonDisabled,
+                { backgroundColor: colors.textMuted },
+              ],
             ]}
             onPress={handleSubmit}
             disabled={loading || !title || !description || images.length === 0}
@@ -248,19 +248,30 @@ export default function CreateEventScreen() {
             maxImages={5}
           />
 
-          {/* Form Fields */}
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Event Title *</Text>
+            <Text style={[styles.label, { color: colors.text }]}>
+              Event Title *
+            </Text>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
               placeholder="Enter event title"
+              placeholderTextColor={colors.textMuted}
               value={title}
               onChangeText={setTitle}
             />
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Category *</Text>
+            <Text style={[styles.label, { color: colors.text }]}>
+              Category *
+            </Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={styles.categoriesContainer}>
                 {categories.map((cat) => (
@@ -268,13 +279,18 @@ export default function CreateEventScreen() {
                     key={cat}
                     style={[
                       styles.categoryChip,
-                      category === cat && styles.categoryChipActive,
+                      { backgroundColor: colors.skeleton },
+                      category === cat && [
+                        styles.categoryChipActive,
+                        { backgroundColor: colors.primary },
+                      ],
                     ]}
                     onPress={() => setCategory(cat)}
                   >
                     <Text
                       style={[
                         styles.categoryChipText,
+                        { color: colors.textSecondary },
                         category === cat && styles.categoryChipTextActive,
                       ]}
                     >
@@ -287,50 +303,104 @@ export default function CreateEventScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Start Date & Time *</Text>
+            <Text style={[styles.label, { color: colors.text }]}>
+              Start Date & Time *
+            </Text>
             <View style={styles.row}>
               <TouchableOpacity
-                style={[styles.halfButton, styles.dateButton]}
+                style={[
+                  styles.halfButton,
+                  styles.dateButton,
+                  { borderColor: colors.border },
+                ]}
                 onPress={() => setShowStartDate(true)}
               >
-                <Ionicons name="calendar-outline" size={20} color="#6b7280" />
-                <Text style={styles.dateText}>{formatDate(startDate)}</Text>
+                <Ionicons
+                  name="calendar-outline"
+                  size={20}
+                  color={colors.textSecondary}
+                />
+                <Text style={[styles.dateText, { color: colors.text }]}>
+                  {formatDate(startDate)}
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.halfButton, styles.dateButton]}
+                style={[
+                  styles.halfButton,
+                  styles.dateButton,
+                  { borderColor: colors.border },
+                ]}
                 onPress={() => setShowStartTime(true)}
               >
-                <Ionicons name="time-outline" size={20} color="#6b7280" />
-                <Text style={styles.dateText}>{formatTime(startDate)}</Text>
+                <Ionicons
+                  name="time-outline"
+                  size={20}
+                  color={colors.textSecondary}
+                />
+                <Text style={[styles.dateText, { color: colors.text }]}>
+                  {formatTime(startDate)}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>End Date & Time *</Text>
+            <Text style={[styles.label, { color: colors.text }]}>
+              End Date & Time *
+            </Text>
             <View style={styles.row}>
               <TouchableOpacity
-                style={[styles.halfButton, styles.dateButton]}
+                style={[
+                  styles.halfButton,
+                  styles.dateButton,
+                  { borderColor: colors.border },
+                ]}
                 onPress={() => setShowEndDate(true)}
               >
-                <Ionicons name="calendar-outline" size={20} color="#6b7280" />
-                <Text style={styles.dateText}>{formatDate(endDate)}</Text>
+                <Ionicons
+                  name="calendar-outline"
+                  size={20}
+                  color={colors.textSecondary}
+                />
+                <Text style={[styles.dateText, { color: colors.text }]}>
+                  {formatDate(endDate)}
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.halfButton, styles.dateButton]}
+                style={[
+                  styles.halfButton,
+                  styles.dateButton,
+                  { borderColor: colors.border },
+                ]}
                 onPress={() => setShowEndTime(true)}
               >
-                <Ionicons name="time-outline" size={20} color="#6b7280" />
-                <Text style={styles.dateText}>{formatTime(endDate)}</Text>
+                <Ionicons
+                  name="time-outline"
+                  size={20}
+                  color={colors.textSecondary}
+                />
+                <Text style={[styles.dateText, { color: colors.text }]}>
+                  {formatTime(endDate)}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Location *</Text>
+            <Text style={[styles.label, { color: colors.text }]}>
+              Location *
+            </Text>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
               placeholder="Building, room, or address"
+              placeholderTextColor={colors.textMuted}
               value={location}
               onChangeText={setLocation}
             />
@@ -338,9 +408,18 @@ export default function CreateEventScreen() {
 
           <View style={styles.inputGroup}>
             <View style={styles.switchContainer}>
-              <Text style={styles.label}>Online Event</Text>
+              <Text style={[styles.label, { color: colors.text }]}>
+                Online Event
+              </Text>
               <TouchableOpacity
-                style={[styles.switch, isOnline && styles.switchActive]}
+                style={[
+                  styles.switch,
+                  { backgroundColor: colors.textMuted },
+                  isOnline && [
+                    styles.switchActive,
+                    { backgroundColor: colors.primary },
+                  ],
+                ]}
                 onPress={() => setIsOnline(!isOnline)}
               >
                 <View
@@ -355,10 +434,20 @@ export default function CreateEventScreen() {
 
           {isOnline && (
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Meeting Link</Text>
+              <Text style={[styles.label, { color: colors.text }]}>
+                Meeting Link
+              </Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                ]}
                 placeholder="https://zoom.us/..."
+                placeholderTextColor={colors.textMuted}
                 value={meetingLink}
                 onChangeText={setMeetingLink}
                 autoCapitalize="none"
@@ -367,10 +456,20 @@ export default function CreateEventScreen() {
           )}
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Max Attendees (Optional)</Text>
+            <Text style={[styles.label, { color: colors.text }]}>
+              Max Attendees (Optional)
+            </Text>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
               placeholder="Unlimited"
+              placeholderTextColor={colors.textMuted}
               value={maxAttendees}
               onChangeText={setMaxAttendees}
               keyboardType="numeric"
@@ -378,37 +477,58 @@ export default function CreateEventScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Tags (comma-separated)</Text>
+            <Text style={[styles.label, { color: colors.text }]}>
+              Tags (comma-separated)
+            </Text>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
               placeholder="e.g., Workshop, Networking"
+              placeholderTextColor={colors.textMuted}
               value={tags}
               onChangeText={setTags}
             />
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Description *</Text>
+            <Text style={[styles.label, { color: colors.text }]}>
+              Description *
+            </Text>
             <TextInput
-              style={[styles.input, styles.textArea]}
+              style={[
+                styles.input,
+                styles.textArea,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
               placeholder="Describe your event..."
+              placeholderTextColor={colors.textMuted}
               value={description}
               onChangeText={setDescription}
               multiline
               textAlignVertical="top"
             />
-            <Text style={styles.charCount}>{description.length}/2000</Text>
+            <Text style={[styles.charCount, { color: colors.textMuted }]}>
+              {description.length}/2000
+            </Text>
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Visibility</Text>
+            <Text style={[styles.label, { color: colors.text }]}>
+              Visibility
+            </Text>
             <View style={styles.visibilityContainer}>
               {[
-                {
-                  value: "campus",
-                  label: "Campus",
-                  icon: "business-outline",
-                },
+                { value: "campus", label: "Campus", icon: "business-outline" },
                 {
                   value: "connections",
                   label: "Connections",
@@ -420,18 +540,28 @@ export default function CreateEventScreen() {
                   key={v.value}
                   style={[
                     styles.visibilityOption,
-                    visibility === v.value && styles.visibilityOptionActive,
+                    { borderColor: colors.border },
+                    visibility === v.value && [
+                      styles.visibilityOptionActive,
+                      {
+                        backgroundColor: colors.primary,
+                        borderColor: colors.primary,
+                      },
+                    ],
                   ]}
                   onPress={() => setVisibility(v.value)}
                 >
                   <Ionicons
                     name={v.icon as any}
                     size={20}
-                    color={visibility === v.value ? "#fff" : "#6b7280"}
+                    color={
+                      visibility === v.value ? "#fff" : colors.textSecondary
+                    }
                   />
                   <Text
                     style={[
                       styles.visibilityText,
+                      { color: colors.textSecondary },
                       visibility === v.value && styles.visibilityTextActive,
                     ]}
                   >
@@ -444,7 +574,6 @@ export default function CreateEventScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Modals */}
       <DatePickerModal
         visible={showStartDate}
         onClose={() => setShowStartDate(false)}
@@ -453,7 +582,6 @@ export default function CreateEventScreen() {
         date={tempStartDate}
         setDate={setTempStartDate}
       />
-
       <DatePickerModal
         visible={showEndDate}
         onClose={() => setShowEndDate(false)}
@@ -462,7 +590,6 @@ export default function CreateEventScreen() {
         date={tempEndDate}
         setDate={setTempEndDate}
       />
-
       <TimePickerModal
         visible={showStartTime}
         onClose={() => setShowStartTime(false)}
@@ -473,7 +600,6 @@ export default function CreateEventScreen() {
         setHour={setTempStartHour}
         setMinute={setTempStartMinute}
       />
-
       <TimePickerModal
         visible={showEndTime}
         onClose={() => setShowEndTime(false)}
@@ -489,7 +615,7 @@ export default function CreateEventScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
+  container: { flex: 1 },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -497,21 +623,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#111827",
     fontFamily: "SofiaSans-Bold",
   },
-  createButton: {
-    backgroundColor: "#8b5cf6",
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  createButtonDisabled: { backgroundColor: "#d1d5db" },
+  createButton: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 20 },
+  createButtonDisabled: {},
   createButtonText: {
     color: "#fff",
     fontWeight: "600",
@@ -523,25 +642,20 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#374151",
     marginBottom: 8,
     fontFamily: "SofiaSans-Bold",
   },
   input: {
     borderWidth: 1,
-    borderColor: "#e5e7eb",
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
-    color: "#111827",
-    backgroundColor: "#fff",
     fontFamily: "SofiaSans-Regular",
   },
   textArea: { minHeight: 120 },
   charCount: {
     fontSize: 11,
-    color: "#9ca3af",
     marginTop: 4,
     textAlign: "right",
     fontFamily: "SofiaSans-Regular",
@@ -552,45 +666,24 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#e5e7eb",
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
     gap: 8,
   },
-  dateText: {
-    fontSize: 16,
-    color: "#111827",
-    flex: 1,
-    fontFamily: "SofiaSans-Regular",
-  },
+  dateText: { fontSize: 16, flex: 1, fontFamily: "SofiaSans-Regular" },
   categoriesContainer: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  categoryChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: "#f3f4f6",
-  },
-  categoryChipActive: { backgroundColor: "#8b5cf6" },
-  categoryChipText: {
-    fontSize: 14,
-    color: "#6b7280",
-    fontFamily: "SofiaSans-Regular",
-  },
+  categoryChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+  categoryChipActive: {},
+  categoryChipText: { fontSize: 14, fontFamily: "SofiaSans-Regular" },
   categoryChipTextActive: { color: "#fff", fontFamily: "SofiaSans-Bold" },
   switchContainer: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  switch: {
-    width: 50,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: "#d1d5db",
-    padding: 2,
-  },
-  switchActive: { backgroundColor: "#8b5cf6" },
+  switch: { width: 50, height: 26, borderRadius: 13, padding: 2 },
+  switchActive: {},
   switchKnob: {
     width: 22,
     height: 22,
@@ -604,20 +697,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#e5e7eb",
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "center",
     gap: 6,
   },
-  visibilityOptionActive: {
-    backgroundColor: "#8b5cf6",
-    borderColor: "#8b5cf6",
-  },
-  visibilityText: {
-    fontSize: 14,
-    color: "#6b7280",
-    fontFamily: "SofiaSans-Regular",
-  },
+  visibilityOptionActive: {},
+  visibilityText: { fontSize: 14, fontFamily: "SofiaSans-Regular" },
   visibilityTextActive: { color: "#fff", fontFamily: "SofiaSans-Bold" },
 });

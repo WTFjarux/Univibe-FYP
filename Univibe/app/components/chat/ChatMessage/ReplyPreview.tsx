@@ -11,6 +11,7 @@ import {
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { useTheme } from "../../../../lib/contexts/ThemeContext";
 import { getFullImageUrl } from "../../../../lib/utils/chatUtils";
 
 interface ReplyPreviewProps {
@@ -41,6 +42,7 @@ export default function ReplyPreview({
 }: ReplyPreviewProps) {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const { colors, isDark } = useTheme();
 
   const isValidReply = (): boolean => {
     return !!(
@@ -64,19 +66,16 @@ export default function ReplyPreview({
     if (replyTo.type === "audio") return "audio";
     if (replyTo.type === "image") return "image";
     if (replyTo.type === "video") return "video";
-
     const msgText = replyTo.message || "";
     if (msgText === "Voice message" || msgText.includes("Voice message"))
       return "audio";
     if (msgText === "Photo" || msgText.includes("Photo")) return "image";
     if (msgText === "Video" || msgText.includes("Video")) return "video";
-
     if (replyTo.mediaUrl) {
       if (replyTo.mediaUrl.includes("audio")) return "audio";
       if (replyTo.mediaUrl.includes("image")) return "image";
       if (replyTo.mediaUrl.includes("video")) return "video";
     }
-
     return "text";
   };
 
@@ -94,7 +93,6 @@ export default function ReplyPreview({
         currentUserId &&
         String(replyTo.senderId) === String(currentUserId)) ||
       repliedSenderName === "You";
-
     if (isOwnMessage && isOriginalFromCurrentUser)
       return "You replied to yourself";
     if (isOwnMessage && !isOriginalFromCurrentUser)
@@ -117,11 +115,20 @@ export default function ReplyPreview({
     isVideo?: boolean,
   ) => {
     const imageUrl = getImageUrl();
-
     return (
       <View style={styles.mediaPreviewContainer}>
         {imageUrl && !imageError ? (
-          <View style={styles.mediaThumbnailWrapper}>
+          <View
+            style={[
+              styles.mediaThumbnailWrapper,
+              {
+                backgroundColor: colors.skeleton,
+                borderColor: isDark
+                  ? "rgba(255,255,255,0.08)"
+                  : "rgba(0,0,0,0.08)",
+              },
+            ]}
+          >
             <Image
               source={{ uri: imageUrl }}
               style={styles.mediaThumbnail}
@@ -134,8 +141,17 @@ export default function ReplyPreview({
               recyclingKey={imageUrl}
             />
             {!imageLoaded && (
-              <View style={styles.mediaLoadingOverlay}>
-                <ActivityIndicator size="small" color="#8B5CF6" />
+              <View
+                style={[
+                  styles.mediaLoadingOverlay,
+                  {
+                    backgroundColor: isDark
+                      ? "rgba(30,30,30,0.5)"
+                      : "rgba(240,240,245,0.5)",
+                  },
+                ]}
+              >
+                <ActivityIndicator size="small" color={colors.primary} />
               </View>
             )}
             <View style={styles.mediaIconOverlay}>
@@ -148,16 +164,32 @@ export default function ReplyPreview({
             )}
           </View>
         ) : (
-          <View style={styles.mediaFallback}>
-            <Ionicons name={iconName} size={16} color="#8E8E93" />
+          <View
+            style={[
+              styles.mediaFallback,
+              {
+                backgroundColor: colors.skeleton,
+                borderColor: isDark
+                  ? "rgba(255,255,255,0.05)"
+                  : "rgba(0,0,0,0.05)",
+              },
+            ]}
+          >
+            <Ionicons name={iconName} size={16} color={colors.textSecondary} />
           </View>
         )}
         <View style={styles.mediaTextContainer}>
-          <Text style={styles.messagePreview} numberOfLines={1}>
+          <Text
+            style={[styles.messagePreview, { color: colors.textSecondary }]}
+            numberOfLines={1}
+          >
             {label}
           </Text>
           {isVideo && replyTo.videoDuration ? (
-            <Text style={styles.durationText} numberOfLines={1}>
+            <Text
+              style={[styles.durationText, { color: colors.textSecondary }]}
+              numberOfLines={1}
+            >
               {formatDuration(replyTo.videoDuration)}
             </Text>
           ) : null}
@@ -168,7 +200,6 @@ export default function ReplyPreview({
 
   const renderReplyContent = () => {
     const replyType = detectReplyType();
-
     if (replyType === "audio") {
       let duration = replyTo.duration || 0;
       if (duration === 0 && replyTo.message) {
@@ -176,14 +207,21 @@ export default function ReplyPreview({
         if (match) duration = parseInt(match[1]) * 60 + parseInt(match[2]);
       }
       if (duration === 0) duration = 15;
-
       const minutes = Math.floor(duration / 60);
       const seconds = duration % 60;
       const durationText = `${minutes}:${seconds.toString().padStart(2, "0")}`;
-
       return (
         <View style={styles.voicePreview}>
-          <View style={styles.voiceIconWrap}>
+          <View
+            style={[
+              styles.voiceIconWrap,
+              {
+                backgroundColor: isDark
+                  ? "rgba(139, 92, 246, 0.2)"
+                  : "rgba(139, 92, 246, 0.1)",
+              },
+            ]}
+          >
             <Ionicons name="mic" size={12} color="#8B5CF6" />
           </View>
           <View style={styles.voiceWaveform}>
@@ -197,23 +235,23 @@ export default function ReplyPreview({
               />
             ))}
           </View>
-          <Text style={styles.voiceDuration} numberOfLines={1}>
+          <Text
+            style={[styles.voiceDuration, { color: colors.textSecondary }]}
+            numberOfLines={1}
+          >
             Voice message • {durationText}
           </Text>
         </View>
       );
     }
-
-    if (replyType === "image") {
-      return renderMediaThumbnail("camera", "Photo");
-    }
-
-    if (replyType === "video") {
+    if (replyType === "image") return renderMediaThumbnail("camera", "Photo");
+    if (replyType === "video")
       return renderMediaThumbnail("videocam", "Video", true);
-    }
-
     return (
-      <Text style={styles.messagePreview} numberOfLines={1}>
+      <Text
+        style={[styles.messagePreview, { color: colors.textSecondary }]}
+        numberOfLines={1}
+      >
         {replyTo.message}
       </Text>
     );
@@ -228,10 +266,25 @@ export default function ReplyPreview({
       onPress={handlePress}
       activeOpacity={0.7}
     >
-      <View style={styles.replyPreviewContainer}>
-        <View style={styles.accentBar} />
+      <View
+        style={[
+          styles.replyPreviewContainer,
+          {
+            backgroundColor: isDark
+              ? "rgba(167, 139, 250, 0.1)"
+              : "rgba(124, 58, 237, 0.06)",
+            borderBottomColor: isDark
+              ? "rgba(255,255,255,0.1)"
+              : "rgba(0,0,0,0.1)",
+          },
+        ]}
+      >
+        <View style={[styles.accentBar, { backgroundColor: colors.primary }]} />
         <View style={styles.contentContainer}>
-          <Text style={styles.senderName} numberOfLines={1}>
+          <Text
+            style={[styles.senderName, { color: colors.primary }]}
+            numberOfLines={1}
+          >
             {getReplyPreviewText()}
           </Text>
           {renderReplyContent()}
@@ -247,46 +300,36 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     maxWidth: "100%",
   },
-  ownReplyPreviewWrapper: {
-    alignSelf: "flex-end",
-  },
+  ownReplyPreviewWrapper: { alignSelf: "flex-end" },
   replyPreviewContainer: {
     flexDirection: "row",
     paddingBottom: 6,
     paddingHorizontal: 15,
     paddingTop: 6,
-    backgroundColor: "rgba(124, 58, 237, 0.06)",
     borderRadius: 18,
     borderBottomWidth: 0.5,
-    borderBottomColor: "rgba(0,0,0,0.1)",
     alignSelf: "flex-start",
   },
   accentBar: {
     width: 3,
-    backgroundColor: "#8B5CF6",
     borderRadius: 2,
     marginRight: 8,
     alignSelf: "stretch",
   },
-  contentContainer: {
-    flexShrink: 1,
-  },
+  contentContainer: { flexShrink: 1 },
   senderName: {
     fontSize: 11,
     fontWeight: "600",
-    color: "#8B5CF6",
     fontFamily: "SofiaSans-Bold",
     marginBottom: 2,
     textAlign: "left",
   },
   messagePreview: {
     fontSize: 11,
-    color: "#8E8E93",
     fontFamily: "SofiaSans-Regular",
     lineHeight: 14,
     textAlign: "left",
   },
-  // Voice
   voicePreview: {
     flexDirection: "row",
     alignItems: "center",
@@ -297,26 +340,16 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: "rgba(139, 92, 246, 0.1)",
     justifyContent: "center",
     alignItems: "center",
   },
-  voiceWaveform: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-  },
-  waveBar: {
-    width: 2.5,
-    borderRadius: 1.25,
-  },
+  voiceWaveform: { flexDirection: "row", alignItems: "center", gap: 2 },
+  waveBar: { width: 2.5, borderRadius: 1.25 },
   voiceDuration: {
     fontSize: 10,
-    color: "#8E8E93",
     fontFamily: "SofiaSans-Regular",
     marginLeft: 2,
   },
-  // Shared media preview
   mediaPreviewContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -329,9 +362,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     overflow: "hidden",
     position: "relative",
-    backgroundColor: "#F0F0F5",
     borderWidth: 0.5,
-    borderColor: "rgba(0,0,0,0.08)",
   },
   mediaThumbnail: {
     width: IMAGE_PREVIEW_SIZE,
@@ -346,7 +377,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "rgba(240, 240, 245, 0.5)",
   },
   mediaIconOverlay: {
     position: "absolute",
@@ -370,19 +400,10 @@ const styles = StyleSheet.create({
     width: IMAGE_PREVIEW_SIZE,
     height: IMAGE_PREVIEW_SIZE,
     borderRadius: 6,
-    backgroundColor: "#F0F0F5",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 0.5,
-    borderColor: "rgba(0,0,0,0.05)",
   },
-  mediaTextContainer: {
-    flexShrink: 1,
-  },
-  durationText: {
-    fontSize: 10,
-    color: "#8E8E93",
-    fontFamily: "SofiaSans-Regular",
-    marginTop: 1,
-  },
+  mediaTextContainer: { flexShrink: 1 },
+  durationText: { fontSize: 10, fontFamily: "SofiaSans-Regular", marginTop: 1 },
 });

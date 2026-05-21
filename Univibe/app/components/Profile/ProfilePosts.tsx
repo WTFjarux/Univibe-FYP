@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 import PostCard from "../Feed/Post/PostCard";
 import { Post } from "../../../lib/services/postService";
 
@@ -59,16 +60,23 @@ export default function ProfilePosts({
   listFooterComponent,
 }: ProfilePostsProps) {
   const router = useRouter();
+  const { colors } = useTheme();
 
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
-      <Ionicons name="document-text-outline" size={64} color="#d1d5db" />
-      <Text style={styles.emptyTitle}>No posts yet</Text>
-      <Text style={styles.emptySubtitle}>
+      <Ionicons
+        name="document-text-outline"
+        size={64}
+        color={colors.textMuted}
+      />
+      <Text style={[styles.emptyTitle, { color: colors.text }]}>
+        No posts yet
+      </Text>
+      <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
         Share your first post to connect with the campus community!
       </Text>
       <TouchableOpacity
-        style={styles.createButton}
+        style={[styles.createButton, { backgroundColor: colors.primary }]}
         onPress={() => router.push("/components/Feed/Post/create")}
       >
         <Text style={styles.createButtonText}>Create Post</Text>
@@ -80,7 +88,7 @@ export default function ProfilePosts({
     if (!loading) return null;
     return (
       <View style={styles.footerLoader}>
-        <ActivityIndicator size="small" color="#8b5cf6" />
+        <ActivityIndicator size="small" color={colors.primary} />
       </View>
     );
   };
@@ -99,8 +107,9 @@ export default function ProfilePosts({
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor="#8b5cf6"
-            colors={["#8b5cf6"]}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+            progressBackgroundColor={colors.card}
           />
         }
         showsVerticalScrollIndicator={true}
@@ -140,8 +149,9 @@ export default function ProfilePosts({
         <RefreshControl
           refreshing={refreshing}
           onRefresh={onRefresh}
-          tintColor="#8b5cf6"
-          colors={["#8b5cf6"]}
+          tintColor={colors.primary}
+          colors={[colors.primary]}
+          progressBackgroundColor={colors.card}
         />
       }
       onEndReached={onLoadMore}

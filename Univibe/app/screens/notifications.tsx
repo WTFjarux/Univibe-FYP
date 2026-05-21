@@ -20,6 +20,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useAuth } from "../../lib/contexts/AuthContext";
+import { useTheme } from "../../lib/contexts/ThemeContext";
 import { connectionService } from "../../lib/services/connectionService";
 import {
   notificationService,
@@ -40,6 +41,7 @@ interface SectionData {
 export default function NotificationsScreen() {
   const router = useRouter();
   const { token } = useAuth();
+  const { colors } = useTheme();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [pendingRequests, setPendingRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,7 +53,6 @@ export default function NotificationsScreen() {
     null,
   );
 
-  // Info bar state
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [infoType, setInfoType] = useState<"success" | "error" | "info">(
     "info",
@@ -62,12 +63,8 @@ export default function NotificationsScreen() {
   } | null>(null);
   const slideAnim = useRef(new Animated.Value(100)).current;
 
-  // ===== REAL-TIME SOCKET LISTENER =====
   useEffect(() => {
-    if (!token) {
-      return;
-    }
-
+    if (!token) return;
     const cleanup = listenForNotifications(
       (newNotification: Notification) => {
         setNotifications((prev) => {
@@ -88,13 +85,11 @@ export default function NotificationsScreen() {
         setUnreadCount(count);
       },
     );
-
     return () => {
       cleanup();
     };
   }, [token]);
 
-  // Show info bar message from bottom
   const showInfoBar = (
     message: string,
     type: "success" | "error" | "info" = "info",
@@ -102,7 +97,6 @@ export default function NotificationsScreen() {
   ) => {
     setInfoMessage(message);
     setInfoType(type);
-
     Animated.sequence([
       Animated.timing(slideAnim, {
         toValue: 0,
@@ -127,7 +121,6 @@ export default function NotificationsScreen() {
     });
   };
 
-  // Hide info bar manually
   const hideInfoBar = () => {
     Animated.timing(slideAnim, {
       toValue: 100,
@@ -140,16 +133,13 @@ export default function NotificationsScreen() {
     });
   };
 
-  // Group notifications by date
   const groupedNotifications = useMemo(() => {
     const groups: { [key: string]: Notification[] } = {};
-
     notifications.forEach((notification) => {
       const date = new Date(notification.createdAt);
       const today = new Date();
       const yesterday = new Date(today);
       yesterday.setDate(yesterday.getDate() - 1);
-
       let groupKey = "";
       if (date.toDateString() === today.toDateString()) {
         groupKey = "Today";
@@ -162,20 +152,14 @@ export default function NotificationsScreen() {
           year: "numeric",
         });
       }
-
       if (!groups[groupKey]) {
         groups[groupKey] = [];
       }
       groups[groupKey].push(notification);
     });
-
-    return Object.entries(groups).map(([title, data]) => ({
-      title,
-      data,
-    }));
+    return Object.entries(groups).map(([title, data]) => ({ title, data }));
   }, [notifications]);
 
-  // Fetch pending connection requests
   const fetchPendingRequests = async () => {
     if (!token) return;
     try {
@@ -188,10 +172,8 @@ export default function NotificationsScreen() {
     }
   };
 
-  // Fetch notifications
   const fetchNotifications = async (pageNum = 1, shouldAppend = false) => {
     if (!token) return;
-
     try {
       const response = await notificationService.getNotifications(pageNum, 20);
       if (response.success && response.data) {
@@ -211,14 +193,12 @@ export default function NotificationsScreen() {
     }
   };
 
-  // Load more notifications
   const loadMore = () => {
     if (!loading && hasMore) {
       fetchNotifications(page + 1, true);
     }
   };
 
-  // Refresh all data
   const onRefresh = async () => {
     setRefreshing(true);
     setPage(1);
@@ -226,7 +206,6 @@ export default function NotificationsScreen() {
     setRefreshing(false);
   };
 
-  // Mark notification as read
   const handleMarkAsRead = async (notificationId: string) => {
     await notificationService.markAsRead(notificationId);
     setNotifications((prev) =>
@@ -235,7 +214,6 @@ export default function NotificationsScreen() {
     setUnreadCount((prev) => Math.max(0, prev - 1));
   };
 
-  // Mark notification as unread
   const handleMarkAsUnread = async (notificationId: string) => {
     await notificationService.markAsUnread(notificationId);
     setNotifications((prev) =>
@@ -244,37 +222,22 @@ export default function NotificationsScreen() {
     setUnreadCount((prev) => prev + 1);
   };
 
-  // Delete notification with undo
   const handleDeleteNotification = async (notificationId: string) => {
     const notificationToDelete = notifications.find(
       (n) => n._id === notificationId,
     );
     if (!notificationToDelete) return;
-
-    // Store the deleted notification for potential undo
-    setDeletedNotification({
-      id: notificationId,
-      data: notificationToDelete,
-    });
-
-    // Remove from UI immediately
+    setDeletedNotification({ id: notificationId, data: notificationToDelete });
     setNotifications((prev) => prev.filter((n) => n._id !== notificationId));
-
-    // Update unread count if needed
     const wasUnread = !notificationToDelete.read;
     if (wasUnread) {
       setUnreadCount((prev) => Math.max(0, prev - 1));
     }
-
-    // Show undo info bar
     showInfoBar("Notification deleted", "info", false);
-
-    // Perform actual deletion after a delay
     const timeoutId = setTimeout(async () => {
       const response =
         await notificationService.deleteNotification(notificationId);
       if (!response.success) {
-        // If deletion failed, restore the notification
         setNotifications((prev) => [...prev, notificationToDelete]);
         if (wasUnread) {
           setUnreadCount((prev) => prev + 1);
@@ -284,20 +247,14 @@ export default function NotificationsScreen() {
       setDeletedNotification(null);
       hideInfoBar();
     }, 5000);
-
-    // Store timeout ID for undo
-    (window as any).deleteTimeoutId = timeoutId;
+    (global as any).deleteTimeoutId = timeoutId;
   };
 
-  // Undo delete
   const handleUndoDelete = () => {
     if (deletedNotification) {
-      // Clear the timeout
-      if ((window as any).deleteTimeoutId) {
-        clearTimeout((window as any).deleteTimeoutId);
+      if ((global as any).deleteTimeoutId) {
+        clearTimeout((global as any).deleteTimeoutId);
       }
-
-      // Restore the notification
       setNotifications((prev) => [...prev, deletedNotification.data]);
       setNotifications((prev) =>
         prev.sort(
@@ -305,31 +262,23 @@ export default function NotificationsScreen() {
             new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
         ),
       );
-
-      // Restore unread count
       if (!deletedNotification.data.read) {
         setUnreadCount((prev) => prev + 1);
       }
-
-      // Hide info bar
       hideInfoBar();
       setDeletedNotification(null);
       showInfoBar("Notification restored", "success");
     }
   };
 
-  // Mark all as read
   const handleMarkAllAsRead = async () => {
     if (unreadCount === 0) {
       showInfoBar("No unread notifications", "info");
       return;
     }
-
     try {
       setRefreshing(true);
-
       const response = await notificationService.markAllAsRead();
-
       if (response.success) {
         setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
         setUnreadCount(0);
@@ -338,17 +287,14 @@ export default function NotificationsScreen() {
         showInfoBar(response.message || "Failed to mark all as read", "error");
       }
     } catch (error) {
-      console.error("Mark all as read error:", error);
       showInfoBar("Failed to mark all as read", "error");
     } finally {
       setRefreshing(false);
     }
   };
 
-  // Accept connection request
   const handleAcceptRequest = async (requestId: string, userName: string) => {
     if (processingRequestId) return;
-
     setProcessingRequestId(requestId);
     try {
       const response =
@@ -369,10 +315,8 @@ export default function NotificationsScreen() {
     }
   };
 
-  // Reject connection request
   const handleRejectRequest = async (requestId: string, userName: string) => {
     if (processingRequestId) return;
-
     setProcessingRequestId(requestId);
     try {
       const response =
@@ -393,32 +337,25 @@ export default function NotificationsScreen() {
     }
   };
 
-  // Render info bar
   const renderInfoBar = () => {
     if (!infoMessage) return null;
-
     const backgroundColor =
       infoType === "success"
         ? "#10b981"
         : infoType === "error"
           ? "#ef4444"
-          : "#8b5cf6";
-
+          : colors.primary;
     const iconName =
       infoType === "success"
         ? "checkmark-circle"
         : infoType === "error"
           ? "alert-circle"
           : "information-circle";
-
     return (
       <Animated.View
         style={[
           styles.infoBar,
-          {
-            backgroundColor,
-            transform: [{ translateY: slideAnim }],
-          },
+          { backgroundColor, transform: [{ translateY: slideAnim }] },
         ]}
       >
         <Ionicons name={iconName} size={20} color="#fff" />
@@ -444,14 +381,21 @@ export default function NotificationsScreen() {
     }, [token]),
   );
 
-  // Render empty state
   const renderEmptyState = () => {
     if (loading) return null;
     return (
       <View style={styles.emptyState}>
-        <Ionicons name="notifications-outline" size={64} color="#d1d5db" />
-        <Text style={styles.emptyStateText}>No notifications</Text>
-        <Text style={styles.emptyStateSubtext}>
+        <Ionicons
+          name="notifications-outline"
+          size={64}
+          color={colors.textMuted}
+        />
+        <Text style={[styles.emptyStateText, { color: colors.text }]}>
+          No notifications
+        </Text>
+        <Text
+          style={[styles.emptyStateSubtext, { color: colors.textSecondary }]}
+        >
           When someone interacts with you, you'll see it here
         </Text>
       </View>
@@ -462,10 +406,7 @@ export default function NotificationsScreen() {
     return <NotificationsSkeleton />;
   }
 
-  // Prepare data for FlatList
-  const flatListData = [];
-
-  // Add pending requests section
+  const flatListData: any[] = [];
   if (pendingRequests.length > 0) {
     flatListData.push({
       id: "pending-header",
@@ -478,8 +419,6 @@ export default function NotificationsScreen() {
       data: pendingRequests,
     });
   }
-
-  // Add notification sections
   groupedNotifications.forEach((group) => {
     flatListData.push({
       id: `header-${group.title}`,
@@ -531,31 +470,42 @@ export default function NotificationsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: colors.background,
+            borderBottomColor: colors.border,
+          },
+        ]}
+      >
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Ionicons name="arrow-back" size={24} color="#111827" />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-
-        <Text style={styles.headerTitle}>Notifications</Text>
-
+        <Text style={[styles.headerTitle, { color: colors.text }]}>
+          Notifications
+        </Text>
         {unreadCount > 0 ? (
           <TouchableOpacity
             onPress={handleMarkAllAsRead}
             style={styles.markAllButton}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Text style={styles.markAllText}>Mark all</Text>
+            <Text style={[styles.markAllText, { color: colors.primary }]}>
+              Mark all
+            </Text>
           </TouchableOpacity>
         ) : (
           <View style={styles.placeholderButton} />
         )}
       </View>
-
       <FlatList
         data={flatListData}
         keyExtractor={(item) => item.id}
@@ -563,29 +513,33 @@ export default function NotificationsScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+            progressBackgroundColor={colors.card}
+          />
         }
         onEndReached={loadMore}
         onEndReachedThreshold={0.3}
         ListFooterComponent={
           loading && notifications.length > 0 ? (
-            <ActivityIndicator style={styles.footerLoader} color="#8b5cf6" />
+            <ActivityIndicator
+              style={styles.footerLoader}
+              color={colors.primary}
+            />
           ) : null
         }
         ListEmptyComponent={renderEmptyState}
       />
-
-      {/* Info bar rendered at the bottom */}
       {renderInfoBar()}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f8fafc",
-  },
+  container: { flex: 1, backgroundColor: "#f8fafc" },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -596,10 +550,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#e5e7eb",
   },
-  backButton: {
-    padding: 4,
-    width: 40,
-  },
+  backButton: { padding: 4, width: 40 },
   headerTitle: {
     flex: 1,
     fontSize: 20,
@@ -608,31 +559,17 @@ const styles = StyleSheet.create({
     color: "#111827",
     textAlign: "center",
   },
-  markAllButton: {
-    width: 70,
-    alignItems: "flex-end",
-  },
+  markAllButton: { width: 70, alignItems: "flex-end" },
   markAllText: {
     fontSize: 14,
     color: "#8b5cf6",
     fontFamily: "SofiaSans-Regular",
     fontWeight: "500",
   },
-  placeholderButton: {
-    width: 70,
-  },
-  listContent: {
-    padding: 16,
-    flexGrow: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  footerLoader: {
-    paddingVertical: 20,
-  },
+  placeholderButton: { width: 70 },
+  listContent: { padding: 16, flexGrow: 1 },
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  footerLoader: { paddingVertical: 20 },
   emptyState: {
     alignItems: "center",
     justifyContent: "center",

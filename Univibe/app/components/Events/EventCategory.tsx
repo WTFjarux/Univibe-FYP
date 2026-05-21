@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 
 interface EventCategoryProps {
   id: string | number;
@@ -8,7 +9,7 @@ interface EventCategoryProps {
   icon: string;
   count: number;
   isSelected: boolean;
-  onPress: (categoryId: string) => void; 
+  onPress: (categoryId: string) => void;
 }
 
 export default function EventCategory({
@@ -19,41 +20,59 @@ export default function EventCategory({
   isSelected,
   onPress,
 }: EventCategoryProps) {
+  const { colors, isDark } = useTheme();
+
   return (
     <TouchableOpacity
-      style={styles.categoryCard}
-      onPress={() => onPress(id as string)} 
+      style={[
+        styles.categoryCard,
+        { backgroundColor: colors.card, shadowColor: colors.shadow },
+      ]}
+      onPress={() => onPress(id as string)}
       activeOpacity={0.7}
     >
       <View
-        style={[styles.categoryIcon, isSelected && styles.categoryIconActive]}
+        style={[
+          styles.categoryIcon,
+          { backgroundColor: colors.skeleton },
+          isSelected && [
+            styles.categoryIconActive,
+            {
+              backgroundColor: isDark ? "rgba(167, 139, 250, 0.2)" : "#f3e8ff",
+            },
+          ],
+        ]}
       >
         <Ionicons
           name={icon as any}
           size={24}
-          color={isSelected ? "#8b5cf6" : "#6b7280"}
+          color={isSelected ? colors.primary : colors.textSecondary}
         />
       </View>
       <Text
-        style={[styles.categoryName, isSelected && styles.categoryNameActive]}
+        style={[
+          styles.categoryName,
+          { color: colors.text },
+          isSelected && [styles.categoryNameActive, { color: colors.primary }],
+        ]}
       >
         {name}
       </Text>
-      <Text style={styles.categoryCount}>{count} events</Text>
+      <Text style={[styles.categoryCount, { color: colors.textSecondary }]}>
+        {count} events
+      </Text>
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
   categoryCard: {
-    backgroundColor: "white",
     padding: 16,
     borderRadius: 12,
     marginRight: 12,
     width: 120,
     height: 130,
     alignItems: "center",
-    shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 2,
@@ -63,26 +82,19 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: "#f3f4f6",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 12,
   },
-  categoryIconActive: {
-    backgroundColor: "#f3e8ff",
-  },
+  categoryIconActive: {},
   categoryName: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#111827",
     marginBottom: 4,
   },
-  categoryNameActive: {
-    color: "#8b5cf6",
-  },
+  categoryNameActive: {},
   categoryCount: {
     fontSize: 12,
-    color: "#6b7280",
     fontFamily: "SofiaSans-Regular",
   },
 });

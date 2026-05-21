@@ -11,6 +11,7 @@ import {
   Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "@/lib/contexts/ThemeContext";
 
 interface PostData {
   postId: string;
@@ -66,6 +67,8 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
   onMuteUser,
   onBlockUser,
 }) => {
+  const { colors } = useTheme();
+
   const {
     postId,
     isOwnPost,
@@ -215,8 +218,14 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
   const renderOwnerOptions = () => (
     <>
       <TouchableOpacity style={styles.optionItem} onPress={handleEdit}>
-        <Ionicons name="pencil-outline" size={22} color="#6b7280" />
-        <Text style={styles.optionText}>Edit Post</Text>
+        <Ionicons
+          name="pencil-outline"
+          size={22}
+          color={colors.textSecondary}
+        />
+        <Text style={[styles.optionText, { color: colors.text }]}>
+          Edit Post
+        </Text>
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.optionItem} onPress={handleDelete}>
@@ -224,7 +233,7 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
         <Text style={[styles.optionText, styles.deleteText]}>Delete Post</Text>
       </TouchableOpacity>
 
-      <View style={styles.divider} />
+      <View style={[styles.divider, { backgroundColor: colors.border }]} />
     </>
   );
 
@@ -234,9 +243,15 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
         <Ionicons
           name={isMuted ? "volume-high-outline" : "volume-mute-outline"}
           size={22}
-          color={isMuted ? "#8b5cf6" : "#6b7280"}
+          color={isMuted ? colors.primary : colors.textSecondary}
         />
-        <Text style={[styles.optionText, isMuted && styles.activeText]}>
+        <Text
+          style={[
+            styles.optionText,
+            { color: colors.text },
+            isMuted && styles.activeText,
+          ]}
+        >
           {isMuted ? "Unmute User" : "Mute User"}
         </Text>
       </TouchableOpacity>
@@ -245,11 +260,12 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
         <Ionicons
           name={isBlocked ? "person-add-outline" : "ban-outline"}
           size={22}
-          color={isBlocked ? "#8b5cf6" : "#ef4444"}
+          color={isBlocked ? colors.primary : "#ef4444"}
         />
         <Text
           style={[
             styles.optionText,
+            { color: colors.text },
             isBlocked && styles.activeText,
             !isBlocked && styles.deleteText,
           ]}
@@ -258,7 +274,7 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
         </Text>
       </TouchableOpacity>
 
-      <View style={styles.divider} />
+      <View style={[styles.divider, { backgroundColor: colors.border }]} />
     </>
   );
 
@@ -268,9 +284,15 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
         <Ionicons
           name={isSaved ? "bookmark" : "bookmark-outline"}
           size={22}
-          color={isSaved ? "#8b5cf6" : "#6b7280"}
+          color={isSaved ? colors.primary : colors.textSecondary}
         />
-        <Text style={[styles.optionText, isSaved && styles.activeText]}>
+        <Text
+          style={[
+            styles.optionText,
+            { color: colors.text },
+            isSaved && styles.activeText,
+          ]}
+        >
           {isSaved ? "Unsave Post" : "Save Post"}
         </Text>
       </TouchableOpacity>
@@ -279,35 +301,51 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
         <Ionicons
           name={isHidden ? "eye-outline" : "eye-off-outline"}
           size={22}
-          color={isHidden ? "#8b5cf6" : "#6b7280"}
+          color={isHidden ? colors.primary : colors.textSecondary}
         />
-        <Text style={[styles.optionText, isHidden && styles.activeText]}>
+        <Text
+          style={[
+            styles.optionText,
+            { color: colors.text },
+            isHidden && styles.activeText,
+          ]}
+        >
           {isHidden ? "Unhide Post" : "Hide Post"}
         </Text>
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.optionItem} onPress={handleShare}>
-        <Ionicons name="share-outline" size={22} color="#6b7280" />
-        <Text style={styles.optionText}>Share Post</Text>
+        <Ionicons name="share-outline" size={22} color={colors.textSecondary} />
+        <Text style={[styles.optionText, { color: colors.text }]}>
+          Share Post
+        </Text>
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.optionItem} onPress={handleCopyLink}>
-        <Ionicons name="link-outline" size={22} color="#6b7280" />
-        <Text style={styles.optionText}>Copy Link</Text>
+        <Ionicons name="link-outline" size={22} color={colors.textSecondary} />
+        <Text style={[styles.optionText, { color: colors.text }]}>
+          Copy Link
+        </Text>
       </TouchableOpacity>
     </>
   );
 
   const renderReportOption = () => (
     <>
-      <View style={styles.divider} />
+      <View style={[styles.divider, { backgroundColor: colors.border }]} />
       <TouchableOpacity style={styles.optionItem} onPress={handleReport}>
         <Ionicons
           name={isReported ? "flag" : "flag-outline"}
           size={24}
-          color={isReported ? "#ef4444" : "#374151"}
+          color={isReported ? "#ef4444" : colors.text}
         />
-        <Text style={[styles.optionText, isReported && styles.reportedText]}>
+        <Text
+          style={[
+            styles.optionText,
+            { color: colors.text },
+            isReported && styles.reportedText,
+          ]}
+        >
           {isReported ? "Reported" : "Report"}
         </Text>
       </TouchableOpacity>
@@ -328,11 +366,20 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
         activeOpacity={1}
         onPress={onClose}
       >
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Post Options</Text>
+        <View
+          style={[
+            styles.modalContent,
+            { backgroundColor: colors.card, shadowColor: colors.shadow },
+          ]}
+        >
+          <View
+            style={[styles.modalHeader, { borderBottomColor: colors.border }]}
+          >
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              Post Options
+            </Text>
             <TouchableOpacity onPress={onClose}>
-              <Ionicons name="close" size={24} color="#6b7280" />
+              <Ionicons name="close" size={24} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
 

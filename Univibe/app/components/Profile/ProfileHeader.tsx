@@ -10,6 +10,7 @@ import {
   ImageSourcePropType,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 import { API_BASE_URL } from "../../../constants/ipConstants";
 import ImageViewModal from "./ImageViewModal";
 
@@ -42,7 +43,7 @@ interface ProfileHeaderProps {
   coverUploading?: boolean;
   onImagePress: () => void;
   onCoverPhotoPress: () => void;
-  isPublicView?: boolean; // ✅ ADDED: Flag to indicate if this is a public profile view
+  isPublicView?: boolean;
 }
 
 // ============================================
@@ -92,10 +93,11 @@ export default function ProfileHeader({
   coverUploading = false,
   onImagePress,
   onCoverPhotoPress,
-  isPublicView = false, // ✅ ADDED: Default to false for own profile
+  isPublicView = false,
 }: ProfileHeaderProps) {
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const { colors } = useTheme();
 
   // Extract data from props
   const username = user?.username || profile?.username || "user";
@@ -111,7 +113,6 @@ export default function ProfileHeader({
 
   // Get profile picture source based on whether there's a valid picture
   const profilePictureSource = useMemo((): ImageSourcePropType => {
-    // If there's a valid profile picture and no image error, use it
     if (hasValidProfilePicture && !imageError) {
       let imageUrl = profile.profilePicture!;
       if (imageUrl.startsWith("/")) {
@@ -120,7 +121,6 @@ export default function ProfileHeader({
       return { uri: imageUrl };
     }
 
-    // Otherwise, use default avatar
     return DEFAULT_AVATAR;
   }, [hasValidProfilePicture, profile?.profilePicture, imageError]);
 
@@ -143,14 +143,12 @@ export default function ProfileHeader({
 
   // Handlers
   const handleProfilePicturePress = () => {
-    // ✅ Only allow editing if not in public view
     if (!uploading && !isPublicView) {
       onImagePress();
     }
   };
 
   const handleProfilePictureLongPress = () => {
-    // ✅ Allow viewing even in public view
     if (hasValidProfilePicture && !uploading) {
       setImageViewerVisible(true);
     }
@@ -167,7 +165,9 @@ export default function ProfileHeader({
 
   // Render functions
   const renderCoverPhotoSection = () => (
-    <View style={styles.coverPhotoContainer}>
+    <View
+      style={[styles.coverPhotoContainer, { backgroundColor: colors.skeleton }]}
+    >
       {coverPhotoUrl ? (
         <Image
           source={{ uri: coverPhotoUrl }}
@@ -175,7 +175,9 @@ export default function ProfileHeader({
           resizeMode="cover"
         />
       ) : (
-        <View style={styles.defaultCover}>
+        <View
+          style={[styles.defaultCover, { backgroundColor: colors.primary }]}
+        >
           <Ionicons
             name="image-outline"
             size={40}
@@ -184,7 +186,6 @@ export default function ProfileHeader({
         </View>
       )}
 
-      {/* ✅ Only show camera button for own profile (not public view) */}
       {!isPublicView && (
         <TouchableOpacity
           style={styles.coverCameraButton}
@@ -204,8 +205,6 @@ export default function ProfileHeader({
   );
 
   const renderProfilePicture = () => {
-    // Determine if we should show the camera overlay
-    // ✅ Only show camera overlay for own profile (not public view)
     const showCameraOverlay = !uploading && !isPublicView;
     const canLongPress = hasValidProfilePicture && !uploading;
 
@@ -214,19 +213,27 @@ export default function ProfileHeader({
         onPress={handleProfilePicturePress}
         onLongPress={canLongPress ? handleProfilePictureLongPress : undefined}
         activeOpacity={0.7}
-        disabled={uploading || isPublicView} // ✅ Disable editing for public view
+        disabled={uploading || isPublicView}
         style={styles.profileImageWrapper}
         delayLongPress={500}
       >
-        <View style={styles.imageContainer}>
+        <View style={[styles.imageContainer, { shadowColor: colors.shadow }]}>
           <Image
             source={profilePictureSource}
-            style={styles.profileImage}
+            style={[
+              styles.profileImage,
+              { borderColor: colors.card, backgroundColor: colors.skeleton },
+            ]}
             onError={handleImageError}
           />
 
           {showCameraOverlay && (
-            <View style={styles.profileCameraOverlay}>
+            <View
+              style={[
+                styles.profileCameraOverlay,
+                { borderColor: colors.card },
+              ]}
+            >
               <Ionicons name="camera" size={16} color="white" />
             </View>
           )}
@@ -243,13 +250,21 @@ export default function ProfileHeader({
 
   const renderNameSection = () => (
     <View style={styles.nameUsernameContainer}>
-      <Text style={styles.fullName} numberOfLines={2} ellipsizeMode="tail">
+      <Text
+        style={[styles.fullName, { color: colors.text }]}
+        numberOfLines={2}
+        ellipsizeMode="tail"
+      >
         {fullName}
       </Text>
       <View style={styles.usernameContainer}>
-        <Text style={styles.username}>@{username}</Text>
+        <Text style={[styles.username, { color: colors.textSecondary }]}>
+          @{username}
+        </Text>
         {showVerifiedBadge && (
-          <View style={styles.verifiedBadge}>
+          <View
+            style={[styles.verifiedBadge, { backgroundColor: colors.card }]}
+          >
             <Ionicons name="checkmark-circle" size={16} color="#10b981" />
           </View>
         )}
@@ -262,7 +277,7 @@ export default function ProfileHeader({
 
     return (
       <View style={styles.bioContainer}>
-        <Text style={styles.bio}>{profile.bio}</Text>
+        <Text style={[styles.bio, { color: colors.text }]}>{profile.bio}</Text>
       </View>
     );
   };

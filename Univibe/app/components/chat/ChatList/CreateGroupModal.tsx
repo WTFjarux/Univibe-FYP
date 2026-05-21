@@ -19,13 +19,13 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import { useTheme } from "../../../../lib/contexts/ThemeContext";
 import { API_BASE_URL } from "../../../../constants/ipConstants";
 
 // -----------------------------------------------------------------------------
 // Constants
 // -----------------------------------------------------------------------------
 
-const ACCENT_COLOR = "#8b5cf6";
 const MAX_GROUP_NAME_LENGTH = 50;
 const MIN_MEMBERS = 2;
 
@@ -68,15 +68,11 @@ export default function CreateGroupModal({
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
+  const { colors, isDark } = useTheme();
 
-  // Reset on open
   useEffect(() => {
-    if (visible) {
-      resetState();
-    }
+    if (visible) resetState();
   }, [visible]);
-
-  // Search users with debounce
   useEffect(() => {
     if (!visible || !searchQuery.trim()) {
       setUsers([]);
@@ -86,7 +82,6 @@ export default function CreateGroupModal({
     return () => clearTimeout(timer);
   }, [searchQuery, visible]);
 
-  // Pick image from gallery
   const handlePickImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
@@ -96,25 +91,21 @@ export default function CreateGroupModal({
       );
       return;
     }
-
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.8,
     });
-
     if (!result.canceled && result.assets[0]) {
       setGroupPhoto(result.assets[0].uri);
     }
   };
 
-  // Remove selected photo
   const handleRemovePhoto = () => {
     setGroupPhoto(null);
   };
 
-  // Fetch users from connections
   const fetchUsers = async (query: string) => {
     if (!query.trim() || !token) return;
     setLoading(true);
@@ -124,7 +115,6 @@ export default function CreateGroupModal({
         { headers: { Authorization: `Bearer ${token}` } },
       );
       const data = await res.json();
-
       if (data.success && data.data) {
         const profiles = Array.isArray(data.data) ? data.data : [];
         const filtered = profiles
@@ -151,33 +141,26 @@ export default function CreateGroupModal({
     }
   };
 
-  // Toggle user selection
   const handleToggleUser = (user: User) => {
     setSelectedUsers((prev) => {
       const exists = prev.some((u) => u._id === user._id);
-      if (exists) {
-        return prev.filter((u) => u._id !== user._id);
-      }
+      if (exists) return prev.filter((u) => u._id !== user._id);
       return [...prev, user];
     });
   };
 
-  // Upload group photo
   const uploadGroupPhoto = async (): Promise<string | null> => {
     if (!groupPhoto) return null;
-
     try {
       const formData = new FormData();
       const filename = groupPhoto.split("/").pop() || "photo.jpg";
       const match = /\.(\w+)$/.exec(filename);
       const type = match ? `image/${match[1]}` : "image/jpeg";
-
       formData.append("image", {
         uri: groupPhoto,
         name: filename,
         type,
       } as any);
-
       const res = await fetch(`${API_BASE_URL}/api/groups/upload-photo`, {
         method: "POST",
         headers: {
@@ -186,21 +169,14 @@ export default function CreateGroupModal({
         },
         body: formData,
       });
-
       const data = await res.json();
-
-
-      if (data.success && data.url) {
-        return data.url;
-      }
+      if (data.success && data.url) return data.url;
       return null;
     } catch (error) {
-      console.error("❌ Error uploading photo:", error);
       return null;
     }
   };
 
-  // Create group
   const handleCreateGroup = async () => {
     if (!groupName.trim()) {
       Alert.alert("Group Name Required", "Please enter a name for your group.");
@@ -213,21 +189,12 @@ export default function CreateGroupModal({
       );
       return;
     }
-
     setCreating(true);
     try {
-      // ✅ Upload photo first if selected
       let photoUrl = null;
       if (groupPhoto) {
         photoUrl = await uploadGroupPhoto();
-        if (!photoUrl) {
-          Alert.alert(
-            "Error",
-            "Failed to upload group photo. Creating group without photo.",
-          );
-        }
       }
-
       const response = await fetch(`${API_BASE_URL}/api/groups/create`, {
         method: "POST",
         headers: {
@@ -237,11 +204,10 @@ export default function CreateGroupModal({
         body: JSON.stringify({
           name: groupName.trim(),
           description: groupDescription.trim(),
-          icon: photoUrl, // ✅ Send the uploaded photo URL
+          icon: photoUrl,
           participantIds: selectedUsers.map((u) => u._id),
         }),
       });
-
       const data = await response.json();
       if (data.success) {
         onGroupCreated(data.data.roomId, groupName.trim());
@@ -266,7 +232,6 @@ export default function CreateGroupModal({
     setLoading(false);
     setCreating(false);
   };
-
   const handleClose = () => {
     resetState();
     onClose();
@@ -276,12 +241,8 @@ export default function CreateGroupModal({
     const count = selectedUsers.length;
     if (count >= MIN_MEMBERS) return "#34C759";
     if (count > 0) return "#FF9500";
-    return "#8E8E93";
+    return colors.textSecondary;
   };
-
-  // ---------------------------------------------------------------------------
-  // Main Render
-  // ---------------------------------------------------------------------------
 
   return (
     <Modal
@@ -291,16 +252,19 @@ export default function CreateGroupModal({
       onRequestClose={handleClose}
       statusBarTranslucent
     >
-      <SafeAreaView style={styles.container} edges={["top"]}>
-        {/* Header */}
-        <View style={styles.header}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        edges={["top"]}
+      >
+        <View style={[styles.header, { borderBottomColor: colors.border }]}>
           <TouchableOpacity onPress={handleClose} style={styles.headerBtn}>
-            <Ionicons name="close" size={24} color={ACCENT_COLOR} />
+            <Ionicons name="close" size={24} color={colors.primary} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>New Group</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>
+            New Group
+          </Text>
           <View style={styles.headerBtn} />
         </View>
-
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
           style={styles.flex}
@@ -311,7 +275,6 @@ export default function CreateGroupModal({
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            {/* ── Group Photo ──────────────────────────── */}
             <View style={styles.photoSection}>
               <TouchableOpacity
                 style={styles.photoContainer}
@@ -320,11 +283,35 @@ export default function CreateGroupModal({
                 {groupPhoto ? (
                   <Image source={{ uri: groupPhoto }} style={styles.photo} />
                 ) : (
-                  <View style={styles.photoPlaceholder}>
-                    <Ionicons name="camera" size={32} color="#8E8E93" />
+                  <View
+                    style={[
+                      styles.photoPlaceholder,
+                      {
+                        backgroundColor: isDark
+                          ? "rgba(167, 139, 250, 0.1)"
+                          : "#F5F3FF",
+                        borderColor: isDark
+                          ? "rgba(167, 139, 250, 0.3)"
+                          : "#EDE9FE",
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="camera"
+                      size={32}
+                      color={colors.textSecondary}
+                    />
                   </View>
                 )}
-                <View style={styles.cameraBadge}>
+                <View
+                  style={[
+                    styles.cameraBadge,
+                    {
+                      backgroundColor: colors.primary,
+                      borderColor: colors.card,
+                    },
+                  ]}
+                >
                   <Ionicons name="camera" size={12} color="#fff" />
                 </View>
               </TouchableOpacity>
@@ -340,25 +327,39 @@ export default function CreateGroupModal({
                   onPress={handlePickImage}
                   style={styles.addPhotoBtn}
                 >
-                  <Text style={styles.addPhotoText}>Add Group Photo</Text>
+                  <Text
+                    style={[styles.addPhotoText, { color: colors.primary }]}
+                  >
+                    Add Group Photo
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
-
-            {/* ── Group Name ───────────────────────────── */}
             <View style={styles.inputSection}>
-              <Text style={styles.sectionLabel}>GROUP NAME *</Text>
-              <View style={styles.inputWrapper}>
+              <Text
+                style={[styles.sectionLabel, { color: colors.textSecondary }]}
+              >
+                GROUP NAME *
+              </Text>
+              <View
+                style={[
+                  styles.inputWrapper,
+                  {
+                    backgroundColor: colors.skeleton,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
                 <Ionicons
                   name="chatbox-outline"
                   size={20}
-                  color="#8E8E93"
+                  color={colors.textSecondary}
                   style={styles.inputIcon}
                 />
                 <TextInput
-                  style={styles.textInput}
+                  style={[styles.textInput, { color: colors.text }]}
                   placeholder="Enter group name"
-                  placeholderTextColor="#C7C7CC"
+                  placeholderTextColor={colors.textMuted}
                   value={groupName}
                   onChangeText={(text) => {
                     if (text.length <= MAX_GROUP_NAME_LENGTH)
@@ -369,25 +370,36 @@ export default function CreateGroupModal({
                   autoCorrect={false}
                 />
               </View>
-              <Text style={styles.charCount}>
+              <Text style={[styles.charCount, { color: colors.textSecondary }]}>
                 {groupName.length}/{MAX_GROUP_NAME_LENGTH}
               </Text>
             </View>
-
-            {/* ── Description ──────────────────────────── */}
             <View style={styles.inputSection}>
-              <Text style={styles.sectionLabel}>DESCRIPTION (OPTIONAL)</Text>
-              <View style={[styles.inputWrapper, styles.descWrapper]}>
+              <Text
+                style={[styles.sectionLabel, { color: colors.textSecondary }]}
+              >
+                DESCRIPTION (OPTIONAL)
+              </Text>
+              <View
+                style={[
+                  styles.inputWrapper,
+                  styles.descWrapper,
+                  {
+                    backgroundColor: colors.skeleton,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
                 <Ionicons
                   name="document-text-outline"
                   size={20}
-                  color="#8E8E93"
+                  color={colors.textSecondary}
                   style={styles.descIcon}
                 />
                 <TextInput
-                  style={styles.descInput}
+                  style={[styles.descInput, { color: colors.text }]}
                   placeholder="What's this group about?"
-                  placeholderTextColor="#C7C7CC"
+                  placeholderTextColor={colors.textMuted}
                   value={groupDescription}
                   onChangeText={setGroupDescription}
                   multiline
@@ -395,12 +407,10 @@ export default function CreateGroupModal({
                   textAlignVertical="top"
                 />
               </View>
-              <Text style={styles.charCount}>
+              <Text style={[styles.charCount, { color: colors.textSecondary }]}>
                 {groupDescription.length}/200
               </Text>
             </View>
-
-            {/* ── Add Members ──────────────────────────── */}
             <View style={styles.membersSection}>
               <View style={styles.membersHeader}>
                 <View style={styles.membersHeaderLeft}>
@@ -419,10 +429,12 @@ export default function CreateGroupModal({
                     {selectedUsers.length !== 1 ? "s" : ""} selected
                   </Text>
                 </View>
-                <Text style={styles.minMembers}>Min. {MIN_MEMBERS}</Text>
+                <Text
+                  style={[styles.minMembers, { color: colors.textSecondary }]}
+                >
+                  Min. {MIN_MEMBERS}
+                </Text>
               </View>
-
-              {/* Selected members chips */}
               {selectedUsers.length > 0 && (
                 <View style={styles.chipsScroll}>
                   <ScrollView
@@ -433,10 +445,22 @@ export default function CreateGroupModal({
                     {selectedUsers.map((user) => (
                       <TouchableOpacity
                         key={user._id}
-                        style={styles.chip}
+                        style={[
+                          styles.chip,
+                          {
+                            backgroundColor: isDark
+                              ? "rgba(167, 139, 250, 0.15)"
+                              : "#F5F3FF",
+                          },
+                        ]}
                         onPress={() => handleToggleUser(user)}
                       >
-                        <View style={styles.chipAvatar}>
+                        <View
+                          style={[
+                            styles.chipAvatar,
+                            { backgroundColor: colors.primary },
+                          ]}
+                        >
                           {user.profilePicture ? (
                             <Image
                               source={{ uri: user.profilePicture }}
@@ -448,13 +472,16 @@ export default function CreateGroupModal({
                             </Text>
                           )}
                         </View>
-                        <Text style={styles.chipName} numberOfLines={1}>
+                        <Text
+                          style={[styles.chipName, { color: colors.text }]}
+                          numberOfLines={1}
+                        >
                           {user.name.split(" ")[0]}
                         </Text>
                         <Ionicons
                           name="close-circle"
                           size={18}
-                          color="#8E8E93"
+                          color={colors.textSecondary}
                         />
                       </TouchableOpacity>
                     ))}
@@ -462,16 +489,23 @@ export default function CreateGroupModal({
                 </View>
               )}
             </View>
-
-            {/* ── Search Users ─────────────────────────── */}
             <View style={styles.searchSection}>
-              <View style={styles.searchWrapper}>
-                <Ionicons name="search-outline" size={20} color="#8E8E93" />
+              <View
+                style={[
+                  styles.searchWrapper,
+                  { backgroundColor: colors.skeleton },
+                ]}
+              >
+                <Ionicons
+                  name="search-outline"
+                  size={20}
+                  color={colors.textSecondary}
+                />
                 <TextInput
                   ref={searchInputRef}
-                  style={styles.searchInput}
+                  style={[styles.searchInput, { color: colors.text }]}
                   placeholder="Search connections to add..."
-                  placeholderTextColor="#C7C7CC"
+                  placeholderTextColor={colors.textMuted}
                   value={searchQuery}
                   onChangeText={setSearchQuery}
                   autoCapitalize="none"
@@ -479,23 +513,33 @@ export default function CreateGroupModal({
                 />
                 {searchQuery.length > 0 && (
                   <TouchableOpacity onPress={() => setSearchQuery("")}>
-                    <Ionicons name="close-circle" size={20} color="#8E8E93" />
+                    <Ionicons
+                      name="close-circle"
+                      size={20}
+                      color={colors.textSecondary}
+                    />
                   </TouchableOpacity>
                 )}
               </View>
             </View>
-
-            {/* ── Users List ───────────────────────────── */}
             {loading ? (
               <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={ACCENT_COLOR} />
+                <ActivityIndicator size="large" color={colors.primary} />
               </View>
             ) : (
               <View>
                 {users.length === 0 && searchQuery.trim() ? (
                   <View style={styles.emptyState}>
-                    <Ionicons name="person-outline" size={40} color="#C7C7CC" />
-                    <Text style={styles.emptyTitle}>No connections found</Text>
+                    <Ionicons
+                      name="person-outline"
+                      size={40}
+                      color={colors.textMuted}
+                    />
+                    <Text
+                      style={[styles.emptyTitle, { color: colors.textMuted }]}
+                    >
+                      No connections found
+                    </Text>
                   </View>
                 ) : (
                   users.map((item) => {
@@ -507,35 +551,64 @@ export default function CreateGroupModal({
                         key={item._id}
                         style={[
                           styles.userItem,
-                          isSelected && styles.userItemSelected,
+                          isSelected && {
+                            backgroundColor: isDark
+                              ? "rgba(167, 139, 250, 0.08)"
+                              : "rgba(139, 92, 246, 0.06)",
+                          },
                         ]}
                         onPress={() => handleToggleUser(item)}
                       >
-                        <View style={styles.userAvatar}>
+                        <View
+                          style={[
+                            styles.userAvatar,
+                            { backgroundColor: colors.skeleton },
+                          ]}
+                        >
                           {item.profilePicture ? (
                             <Image
                               source={{ uri: item.profilePicture }}
                               style={styles.userAvatarImg}
                             />
                           ) : (
-                            <Text style={styles.userAvatarText}>
+                            <Text
+                              style={[
+                                styles.userAvatarText,
+                                { color: colors.textSecondary },
+                              ]}
+                            >
                               {item.name.charAt(0).toUpperCase()}
                             </Text>
                           )}
                         </View>
                         <View style={styles.userInfo}>
-                          <Text style={styles.userName} numberOfLines={1}>
+                          <Text
+                            style={[styles.userName, { color: colors.text }]}
+                            numberOfLines={1}
+                          >
                             {item.name}
                           </Text>
-                          <Text style={styles.userUsername} numberOfLines={1}>
+                          <Text
+                            style={[
+                              styles.userUsername,
+                              { color: colors.textSecondary },
+                            ]}
+                            numberOfLines={1}
+                          >
                             @{item.username}
                           </Text>
                         </View>
                         <View
                           style={
                             isSelected
-                              ? styles.checkboxSelected
-                              : styles.checkboxEmpty
+                              ? [
+                                  styles.checkboxSelected,
+                                  { backgroundColor: colors.primary },
+                                ]
+                              : [
+                                  styles.checkboxEmpty,
+                                  { borderColor: colors.textMuted },
+                                ]
                           }
                         >
                           {isSelected && (
@@ -549,12 +622,16 @@ export default function CreateGroupModal({
               </View>
             )}
           </ScrollView>
-
-          {/* ── Create Button ─────────────────────────── */}
-          <View style={styles.bottomBar}>
+          <View
+            style={[
+              styles.bottomBar,
+              { borderTopColor: colors.border, backgroundColor: colors.card },
+            ]}
+          >
             <TouchableOpacity
               style={[
                 styles.createBtn,
+                { backgroundColor: colors.primary },
                 (!groupName.trim() ||
                   selectedUsers.length < MIN_MEMBERS ||
                   creating) &&
@@ -585,16 +662,10 @@ export default function CreateGroupModal({
   );
 }
 
-// -----------------------------------------------------------------------------
-// Styles
-// -----------------------------------------------------------------------------
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
+  container: { flex: 1 },
   flex: { flex: 1 },
   scrollContent: { paddingBottom: 16 },
-
-  // Header
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -602,17 +673,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
   },
   headerBtn: { width: 40, alignItems: "center" },
   headerTitle: {
     fontSize: 17,
     fontWeight: "600",
-    color: "#000",
     fontFamily: "SofiaSans-Bold",
   },
-
-  // Photo
   photoSection: { alignItems: "center", paddingTop: 20, paddingBottom: 8 },
   photoContainer: { position: "relative", marginBottom: 12 },
   photo: { width: 90, height: 90, borderRadius: 45 },
@@ -620,30 +687,25 @@ const styles = StyleSheet.create({
     width: 90,
     height: 90,
     borderRadius: 45,
-    backgroundColor: "#F5F3FF",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
-    borderColor: "#EDE9FE",
     borderStyle: "dashed",
   },
   cameraBadge: {
     position: "absolute",
     bottom: 0,
     right: 0,
-    backgroundColor: ACCENT_COLOR,
     width: 28,
     height: 28,
     borderRadius: 14,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
-    borderColor: "#fff",
   },
   addPhotoBtn: { paddingVertical: 4 },
   addPhotoText: {
     fontSize: 14,
-    color: ACCENT_COLOR,
     fontWeight: "500",
     fontFamily: "SofiaSans-Medium",
   },
@@ -654,13 +716,10 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     fontFamily: "SofiaSans-Medium",
   },
-
-  // Inputs
   inputSection: { paddingHorizontal: 20, paddingTop: 16 },
   sectionLabel: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#8E8E93",
     marginBottom: 8,
     letterSpacing: 0.5,
     fontFamily: "SofiaSans-SemiBold",
@@ -668,10 +727,8 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F8F9FA",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#E5E5EA",
     paddingHorizontal: 14,
   },
   descWrapper: { alignItems: "flex-start", paddingVertical: 4 },
@@ -681,7 +738,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     paddingVertical: 14,
-    color: "#000",
     fontFamily: "SofiaSans-Regular",
   },
   descInput: {
@@ -689,18 +745,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     paddingVertical: 10,
     minHeight: 60,
-    color: "#000",
     fontFamily: "SofiaSans-Regular",
   },
   charCount: {
     fontSize: 12,
-    color: "#8E8E93",
     textAlign: "right",
     marginTop: 4,
     fontFamily: "SofiaSans-Regular",
   },
-
-  // Members
   membersSection: { paddingHorizontal: 20, paddingTop: 20 },
   membersHeader: {
     flexDirection: "row",
@@ -714,17 +766,12 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     fontFamily: "SofiaSans-Medium",
   },
-  minMembers: {
-    fontSize: 12,
-    color: "#8E8E93",
-    fontFamily: "SofiaSans-Regular",
-  },
+  minMembers: { fontSize: 12, fontFamily: "SofiaSans-Regular" },
   chipsScroll: { marginBottom: 4 },
   chipsList: { paddingVertical: 4, gap: 8 },
   chip: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F5F3FF",
     paddingLeft: 4,
     paddingRight: 8,
     paddingVertical: 4,
@@ -735,26 +782,17 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: ACCENT_COLOR,
     justifyContent: "center",
     alignItems: "center",
     overflow: "hidden",
   },
   chipAvatarImg: { width: "100%", height: "100%" },
   chipAvatarText: { color: "#fff", fontSize: 12, fontWeight: "600" },
-  chipName: {
-    fontSize: 13,
-    maxWidth: 80,
-    color: "#000",
-    fontFamily: "SofiaSans-Medium",
-  },
-
-  // Search
+  chipName: { fontSize: 13, maxWidth: 80, fontFamily: "SofiaSans-Medium" },
   searchSection: { paddingHorizontal: 16, paddingTop: 12 },
   searchWrapper: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F0F0F0",
     borderRadius: 12,
     paddingHorizontal: 12,
     height: 44,
@@ -763,11 +801,8 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 8,
     fontSize: 15,
-    color: "#000",
     fontFamily: "SofiaSans-Regular",
   },
-
-  // Users
   loadingContainer: { paddingVertical: 40, alignItems: "center" },
   userItem: {
     flexDirection: "row",
@@ -775,12 +810,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
   },
-  userItemSelected: { backgroundColor: "rgba(139, 92, 246, 0.06)" },
   userAvatar: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#F0F0F0",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 12,
@@ -790,57 +823,23 @@ const styles = StyleSheet.create({
   userAvatarText: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#8E8E93",
     fontFamily: "SofiaSans-SemiBold",
   },
   userInfo: { flex: 1 },
-  userName: {
-    fontSize: 16,
-    fontWeight: "500",
-    color: "#000",
-    fontFamily: "SofiaSans-Medium",
-  },
-  userUsername: {
-    fontSize: 13,
-    color: "#8E8E93",
-    marginTop: 2,
-    fontFamily: "SofiaSans-Regular",
-  },
+  userName: { fontSize: 16, fontWeight: "500", fontFamily: "SofiaSans-Medium" },
+  userUsername: { fontSize: 13, marginTop: 2, fontFamily: "SofiaSans-Regular" },
   checkboxSelected: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: ACCENT_COLOR,
     justifyContent: "center",
     alignItems: "center",
   },
-  checkboxEmpty: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: "#C7C7CC",
-  },
-
-  // Empty
+  checkboxEmpty: { width: 24, height: 24, borderRadius: 12, borderWidth: 2 },
   emptyState: { alignItems: "center", paddingVertical: 40 },
-  emptyTitle: {
-    fontSize: 14,
-    color: "#C7C7CC",
-    marginTop: 8,
-    fontFamily: "SofiaSans-Regular",
-  },
-
-  // Bottom
-  bottomBar: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#F0F0F0",
-    backgroundColor: "#fff",
-  },
+  emptyTitle: { fontSize: 14, marginTop: 8, fontFamily: "SofiaSans-Regular" },
+  bottomBar: { paddingHorizontal: 20, paddingVertical: 12, borderTopWidth: 1 },
   createBtn: {
-    backgroundColor: ACCENT_COLOR,
     paddingVertical: 16,
     borderRadius: 14,
     alignItems: "center",

@@ -16,14 +16,13 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
-  Share,
   Dimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/lib/contexts/AuthContext";
-import { Image } from "expo-image";
+import { useTheme } from "@/lib/contexts/ThemeContext"; 
 import PostDetailSkeleton from "@/app/components/Feed/Post/PostDetailSkeleton";
 import {
   getPostById,
@@ -48,7 +47,10 @@ export default function PostDetailScreen() {
     openComments?: string;
   }>();
   const router = useRouter();
-  const { token, user, profile } = useAuth();
+  const { token, user } = useAuth();
+
+  // ✅ Tap straight into your global context tokens
+  const { isDark, colors } = useTheme();
 
   // Post state
   const [post, setPost] = useState<Post | null>(null);
@@ -74,11 +76,9 @@ export default function PostDetailScreen() {
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<any>(null);
   const isFetchingRef = useRef(false);
-
-  // ✅ Ref to track if we're currently liking (prevent double taps and flickers)
   const isLikingRef = useRef(false);
 
-  // Use the existing useComments hook
+  // Comments Hook Integration
   const {
     submitting,
     replyingTo,
@@ -89,6 +89,15 @@ export default function PostDetailScreen() {
     handleReport: commentReportHandler,
     handleEdit: commentEditHandler,
   } = useComments(id, comments, setComments, setTotalComments, setPost, user);
+
+  // Dynamic context-based system overlays
+  const alertStyles = useMemo(
+    () => ({
+      errorBg: isDark ? "#2c1a1a" : "#fee2e2",
+      warningBg: isDark ? "#2d2214" : "#fef3c7",
+    }),
+    [isDark],
+  );
 
   // ===== Post Loading =====
   const loadPost = useCallback(async () => {
@@ -167,23 +176,18 @@ export default function PostDetailScreen() {
 
   // ===== Post Actions =====
   const handlePostLike = useCallback(async () => {
-    // ✅ Prevent multiple rapid taps
     if (isLikingRef.current || !token || !post) return;
 
     isLikingRef.current = true;
-
-    // ✅ Optimistic update
     const newLikedState = !isPostLiked;
     setIsPostLiked(newLikedState);
     setPostLikesCount((prev) => (newLikedState ? prev + 1 : prev - 1));
 
     try {
       const response = await toggleLike(id);
-      // ✅ Sync with server response
       setIsPostLiked(response.isLiked);
       setPostLikesCount(response.likes);
     } catch (error: any) {
-      // ✅ Revert on error
       setIsPostLiked(!newLikedState);
       setPostLikesCount((prev) => (newLikedState ? prev - 1 : prev + 1));
     } finally {
@@ -191,36 +195,6 @@ export default function PostDetailScreen() {
     }
   }, [token, post, isPostLiked, id]);
 
-  const handleEditPost = useCallback(() => {
-    router.push(`/post/edit/${post?._id}`);
-  }, [post?._id, router]);
-
-  const handleDeletePost = useCallback(async () => {
-    if (!post) return;
-
-    Alert.alert(
-      "Delete Post",
-      "Are you sure you want to delete this post? This action cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await deletePost(post._id);
-              Alert.alert("Success", "Post deleted successfully");
-              router.back();
-            } catch (error) {
-              Alert.alert("Error", "Failed to delete post");
-            }
-          },
-        },
-      ],
-    );
-  }, [post, router]);
-
-  // ===== Comment Actions =====
   const handleCommentReply = useCallback(
     (
       commentId: string,
@@ -257,7 +231,6 @@ export default function PostDetailScreen() {
     });
   }, [commentText, isAnonymous, submitComment, setReplyingTo]);
 
-  // ===== Image Handling =====
   const handleImagePress = useCallback((index: number) => {
     setSelectedImageIndex(index);
     setImageModalVisible(true);
@@ -322,7 +295,6 @@ export default function PostDetailScreen() {
     ],
   );
 
-  // ✅ Memoize PostPreview to prevent re-renders on like
   const renderPostHeader = useMemo(() => {
     if (!post) return null;
     return (
@@ -338,39 +310,66 @@ export default function PostDetailScreen() {
 
   const renderFooterLoader = useCallback(() => {
     if (!isLoadingMore) return null;
-    return <ActivityIndicator style={styles.footerLoader} color="#8b5cf6" />;
-  }, [isLoadingMore]);
+    return (
+      <ActivityIndicator style={styles.footerLoader} color={colors.primary} />
+    );
+  }, [isLoadingMore, colors.primary]);
 
   const renderEmptyComments = useCallback(() => {
     if (loading) return null;
     return (
       <View style={styles.emptyContainer}>
-        <Ionicons name="chatbubbles-outline" size={48} color="#9ca3af" />
-        <Text style={styles.emptyTitle}>No comments yet</Text>
-        <Text style={styles.emptyText}>Be the first to comment!</Text>
+        <Ionicons
+          name="chatbubbles-outline"
+          size={48}
+          color={colors.textMuted}
+        />
+        <Text style={[styles.emptyTitle, { color: colors.text }]}>
+          No comments yet
+        </Text>
+        <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+          Be the first to comment!
+        </Text>
       </View>
     );
-  }, [loading]);
+  }, [loading, colors]);
 
-  // ===== Error States =====
+  // ===== Error & Loading States =====
   if (
     error &&
     (error.includes("no longer exists") || error.includes("deleted"))
   ) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.errorContainer}>
-          <View style={styles.errorIconCircle}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        edges={["top", "left", "right"]}
+      >
+        <View
+          style={[
+            styles.errorContainer,
+            { backgroundColor: colors.background },
+          ]}
+        >
+          <View
+            style={[
+              styles.errorIconCircle,
+              { backgroundColor: alertStyles.errorBg },
+            ]}
+          >
             <Ionicons name="alert" size={60} color="#ef4444" />
           </View>
-          <Text style={styles.errorTitle}>Post Not Found</Text>
-          <Text style={styles.errorMessage}>{error}</Text>
-          <Text style={styles.errorSubtext}>
+          <Text style={[styles.errorTitle, { color: colors.text }]}>
+            Post Not Found
+          </Text>
+          <Text style={[styles.errorMessage, { color: colors.text }]}>
+            {error}
+          </Text>
+          <Text style={[styles.errorSubtext, { color: colors.textSecondary }]}>
             This post may have been deleted by the author or removed for
             violating our guidelines.
           </Text>
           <TouchableOpacity
-            style={styles.goBackButton}
+            style={[styles.goBackButton, { backgroundColor: colors.primary }]}
             onPress={() => router.back()}
           >
             <Text style={styles.goBackButtonText}>Go Back</Text>
@@ -384,17 +383,45 @@ export default function PostDetailScreen() {
     return <PostDetailSkeleton />;
   }
 
-  if (error) {
+  if (error || !post) {
+    const isNoContent = !post && !error;
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.errorContainer}>
-          <View style={[styles.errorIconCircle, styles.warningIconCircle]}>
-            <Ionicons name="alert-circle-outline" size={60} color="#f59e0b" />
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        edges={["top", "left", "right"]}
+      >
+        <View
+          style={[
+            styles.errorContainer,
+            { backgroundColor: colors.background },
+          ]}
+        >
+          <View
+            style={[
+              styles.errorIconCircle,
+              {
+                backgroundColor: isNoContent
+                  ? colors.border
+                  : alertStyles.warningBg,
+              },
+            ]}
+          >
+            <Ionicons
+              name={
+                isNoContent ? "document-text-outline" : "alert-circle-outline"
+              }
+              size={60}
+              color={isNoContent ? colors.textMuted : "#f59e0b"}
+            />
           </View>
-          <Text style={styles.errorTitle}>Something Went Wrong</Text>
-          <Text style={styles.errorMessage}>{error}</Text>
+          <Text style={[styles.errorTitle, { color: colors.text }]}>
+            {isNoContent ? "No Content" : "Something Went Wrong"}
+          </Text>
+          <Text style={[styles.errorMessage, { color: colors.text }]}>
+            {isNoContent ? "Unable to load post content" : error}
+          </Text>
           <TouchableOpacity
-            style={styles.goBackButton}
+            style={[styles.goBackButton, { backgroundColor: colors.primary }]}
             onPress={() => router.back()}
           >
             <Ionicons name="arrow-back-outline" size={20} color="#fff" />
@@ -405,54 +432,38 @@ export default function PostDetailScreen() {
     );
   }
 
-  if (!post) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.errorContainer}>
-          <View style={[styles.errorIconCircle, styles.warningIconCircle]}>
-            <Ionicons name="document-text-outline" size={60} color="#9ca3af" />
-          </View>
-          <Text style={styles.errorTitle}>No Content</Text>
-          <Text style={styles.errorMessage}>Unable to load post content</Text>
-          <TouchableOpacity
-            style={styles.goBackButton}
-            onPress={() => router.back()}
-          >
-            <Ionicons name="arrow-back-outline" size={20} color="#fff" />
-            <Text style={styles.goBackButtonText}>Go Back</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // ===== Prepare images for ImageModal =====
   const postImages =
-    post.images?.map((img) => ({
-      url: getFullImageUrl(img.url),
-    })) || [];
+    post.images?.map((img) => ({ url: getFullImageUrl(img.url) })) || [];
 
-  // ===== Main Render =====
+  // ===== Architectural Layout Engine =====
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        style={styles.keyboardView}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+    <KeyboardAvoidingView
+      style={[styles.keyboardView, { backgroundColor: colors.background }]}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+    >
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        edges={["top", "left", "right"]}
       >
         {/* Header */}
-        <View style={styles.header}>
+        <View
+          style={[
+            styles.header,
+            { backgroundColor: colors.background, borderBottomColor: colors.border },
+          ]}
+        >
           <TouchableOpacity
             onPress={() => router.back()}
             style={styles.backButton}
           >
-            <Ionicons name="arrow-back" size={24} color="#111827" />
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Post</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Post</Text>
           <View style={{ width: 40 }} />
         </View>
 
-        {/* Comments List with PostPreview as header */}
+        {/* Comments Stream */}
         <FlatList
           ref={flatListRef}
           data={comments}
@@ -467,11 +478,9 @@ export default function PostDetailScreen() {
           showsVerticalScrollIndicator={false}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="always"
-          // ✅ Remove extraData to prevent full list re-renders
-          // The PostPreview handles its own state updates
         />
 
-        {/* Comment Input */}
+        {/* Floating Input Controller */}
         {!isAnyCommentEditing && (
           <CommentInput
             ref={inputRef}
@@ -487,7 +496,7 @@ export default function PostDetailScreen() {
           />
         )}
 
-        {/* Image Modal */}
+        {/* Photo View Modals */}
         {imageModalVisible && postImages.length > 0 && (
           <ImageModal
             visible={imageModalVisible}
@@ -497,59 +506,44 @@ export default function PostDetailScreen() {
             onScroll={handleModalScroll}
           />
         )}
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#fff",
-  },
   keyboardView: {
     flex: 1,
   },
-  loadingContainer: {
+  container: {
     flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#fff",
   },
   errorContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     padding: 24,
-    backgroundColor: "#fff",
   },
   errorIconCircle: {
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: "#fee2e2",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 24,
   },
-  warningIconCircle: {
-    backgroundColor: "#fef3c7",
-  },
   errorTitle: {
     fontSize: 24,
     fontWeight: "700",
-    color: "#111827",
     marginBottom: 12,
   },
   errorMessage: {
     fontSize: 16,
-    color: "#3a3a3c",
     textAlign: "center",
     marginBottom: 12,
   },
   errorSubtext: {
     fontSize: 14,
-    color: "#929292",
     textAlign: "center",
     marginBottom: 32,
     lineHeight: 20,
@@ -557,7 +551,6 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
   },
   goBackButton: {
-    backgroundColor: "#8b5cf6",
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 12,
@@ -576,9 +569,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: "white",
     borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
   },
   backButton: {
     padding: 4,
@@ -587,7 +578,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "600",
     fontFamily: "SofiaSans-Bold",
-    color: "#111827",
   },
   listContent: {
     flexGrow: 1,
@@ -599,7 +589,6 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#111827",
     fontFamily: "SofiaSans-Bold",
     marginTop: 12,
     marginBottom: 4,
@@ -607,7 +596,6 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     fontFamily: "SofiaSans-Regular",
-    color: "#6b7280",
   },
   footerLoader: {
     paddingVertical: 20,

@@ -14,6 +14,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/lib/contexts/AuthContext";
+import { useTheme } from "@/lib/contexts/ThemeContext";
 import {
   Post,
   getFullImageUrl,
@@ -45,13 +46,14 @@ const PostPreview: React.FC<PostPreviewProps> = ({
 }) => {
   const router = useRouter();
   const { user: currentUser } = useAuth();
+  const { colors, isDark } = useTheme();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [avatarError, setAvatarError] = useState(false);
   const [postImageError, setPostImageError] = useState<boolean[]>([]);
   const [containerWidth, setContainerWidth] = useState(IMAGE_WIDTH);
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // ✅ Share modal state
+  // Share modal state
   const [shareModalVisible, setShareModalVisible] = useState(false);
 
   const userDisplay = formatUserDisplay(post);
@@ -109,7 +111,7 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     [containerWidth],
   );
 
-  // ✅ Share handler
+  // Share handler
   const handleSharePress = useCallback(() => {
     setShareModalVisible(true);
   }, []);
@@ -140,12 +142,12 @@ const PostPreview: React.FC<PostPreviewProps> = ({
   }, [post.visibility]);
 
   const getVisibilityBadgeColor = useCallback((): string => {
-    const colors: Record<string, string> = {
+    const customColors: Record<string, string> = {
       campus: "#3b82f6",
-      connections: "#8b5cf6",
+      connections: colors.primary,
     };
-    return colors[post.visibility] || "#9ca3af";
-  }, [post.visibility]);
+    return customColors[post.visibility] || colors.textMuted;
+  }, [post.visibility, colors.primary, colors.textMuted]);
 
   // Render avatar (same logic as PostCard)
   const renderAvatar = () => {
@@ -162,10 +164,12 @@ const PostPreview: React.FC<PostPreviewProps> = ({
               width: avatarSize,
               height: avatarSize,
               borderRadius: avatarSize / 2,
+              backgroundColor: colors.border,
+              borderColor: colors.textMuted,
             },
           ]}
         >
-          <Ionicons name="eye-off-outline" size={20} color="#9ca3af" />
+          <Ionicons name="eye-off-outline" size={20} color={colors.textMuted} />
         </View>
       );
     }
@@ -182,6 +186,7 @@ const PostPreview: React.FC<PostPreviewProps> = ({
                 width: avatarSize,
                 height: avatarSize,
                 borderRadius: avatarSize / 2,
+                backgroundColor: colors.border,
               },
             ]}
             transition={200}
@@ -202,6 +207,7 @@ const PostPreview: React.FC<PostPreviewProps> = ({
               width: avatarSize,
               height: avatarSize,
               borderRadius: avatarSize / 2,
+              backgroundColor: colors.primary,
             },
           ]}
         >
@@ -248,7 +254,7 @@ const PostPreview: React.FC<PostPreviewProps> = ({
   const visibilityIconName = getVisibilityIconName();
   const visibilityBadgeColor = getVisibilityBadgeColor();
 
-  // ✅ Prepare share data
+  // Prepare share data
   const sharePostData = {
     postId: post._id,
     postContent: post.content || "",
@@ -264,10 +270,48 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     isAnonymous: post.isAnonymous || false,
   };
 
+  // Dynamic Theme Mapping Matrix
+  const dynamicStyles = {
+    container: {
+      backgroundColor: colors.card,
+      borderBottomColor: colors.border,
+    },
+    userName: {
+      color: colors.text,
+    },
+    timestamp: {
+      color: colors.textSecondary,
+    },
+    content: {
+      color: colors.text,
+    },
+    imageErrorContainer: {
+      backgroundColor: colors.border,
+    },
+    imageErrorText: {
+      color: colors.textSecondary,
+    },
+    postImage: {
+      backgroundColor: colors.border,
+    },
+    actions: {
+      borderTopColor: colors.border,
+    },
+    actionText: {
+      color: colors.textSecondary,
+    },
+    commentsHeader: {
+      borderTopColor: colors.border,
+    },
+    commentsTitle: {
+      color: colors.text,
+    },
+  };
+
   return (
     <>
       <View
-        style={styles.container}
+        style={[styles.container, dynamicStyles.container]}
         onLayout={(event) => {
           setContainerWidth(event.nativeEvent.layout.width);
         }}
@@ -283,10 +327,12 @@ const PostPreview: React.FC<PostPreviewProps> = ({
                 disabled={post.isAnonymous}
                 activeOpacity={0.7}
               >
-                <Text style={styles.userName}>{userDisplay.name}</Text>
+                <Text style={[styles.userName, dynamicStyles.userName]}>
+                  {userDisplay.name}
+                </Text>
               </TouchableOpacity>
 
-              {/* ✅ VISIBILITY BADGE - Same as PostCard */}
+              {/* VISIBILITY BADGE */}
               <View
                 style={[
                   styles.visibilityBadge,
@@ -308,19 +354,21 @@ const PostPreview: React.FC<PostPreviewProps> = ({
                 </Text>
               </View>
             </View>
-            <Text style={styles.timestamp}>
+            <Text style={[styles.timestamp, dynamicStyles.timestamp]}>
               @{post.isAnonymous ? "anonymous" : post.user?.username || "user"}{" "}
               • {formatTimeAgo(post.createdAt)}
             </Text>
           </View>
         </View>
 
-        {/* Post Content - Same as PostCard */}
+        {/* Post Content */}
         {post.content ? (
-          <Text style={styles.content}>{post.content}</Text>
+          <Text style={[styles.content, dynamicStyles.content]}>
+            {post.content}
+          </Text>
         ) : null}
 
-        {/* Post Images - Same as PostCard */}
+        {/* Post Images */}
         {postImages.length > 0 && (
           <View style={styles.imagesWrapper}>
             {postImages.length === 1 ? (
@@ -333,11 +381,21 @@ const PostPreview: React.FC<PostPreviewProps> = ({
                   <View
                     style={[
                       styles.imageErrorContainer,
+                      dynamicStyles.imageErrorContainer,
                       { width: containerWidth, height: 400 },
                     ]}
                   >
-                    <Ionicons name="image-outline" size={48} color="#9ca3af" />
-                    <Text style={styles.imageErrorText}>
+                    <Ionicons
+                      name="image-outline"
+                      size={48}
+                      color={colors.textMuted}
+                    />
+                    <Text
+                      style={[
+                        styles.imageErrorText,
+                        dynamicStyles.imageErrorText,
+                      ]}
+                    >
                       Image failed to load
                     </Text>
                   </View>
@@ -346,6 +404,7 @@ const PostPreview: React.FC<PostPreviewProps> = ({
                     uri={postImages[0]}
                     style={[
                       styles.postImage,
+                      dynamicStyles.postImage,
                       { width: containerWidth, height: 400 },
                     ]}
                     transition={300}
@@ -376,15 +435,21 @@ const PostPreview: React.FC<PostPreviewProps> = ({
                         <View
                           style={[
                             styles.imageErrorContainer,
+                            dynamicStyles.imageErrorContainer,
                             { width: containerWidth, height: 400 },
                           ]}
                         >
                           <Ionicons
                             name="image-outline"
                             size={48}
-                            color="#9ca3af"
+                            color={colors.textMuted}
                           />
-                          <Text style={styles.imageErrorText}>
+                          <Text
+                            style={[
+                              styles.imageErrorText,
+                              dynamicStyles.imageErrorText,
+                            ]}
+                          >
                             Image failed to load
                           </Text>
                         </View>
@@ -393,6 +458,7 @@ const PostPreview: React.FC<PostPreviewProps> = ({
                           uri={url}
                           style={[
                             styles.postImage,
+                            dynamicStyles.postImage,
                             { width: containerWidth, height: 400 },
                           ]}
                           transition={300}
@@ -410,8 +476,8 @@ const PostPreview: React.FC<PostPreviewProps> = ({
           </View>
         )}
 
-        {/* Post Actions - Same as PostCard */}
-        <View style={styles.actions}>
+        {/* Post Actions */}
+        <View style={[styles.actions, dynamicStyles.actions]}>
           {/* Like Button */}
           <TouchableOpacity
             style={styles.action}
@@ -421,38 +487,54 @@ const PostPreview: React.FC<PostPreviewProps> = ({
             <Ionicons
               name={isLiked ? "heart" : "heart-outline"}
               size={20}
-              color={isLiked ? "#ef4444" : "#6b7280"}
+              color={isLiked ? "#ef4444" : colors.textSecondary}
             />
             <Text
-              style={[styles.actionText, isLiked && styles.actionTextLiked]}
+              style={[
+                styles.actionText,
+                dynamicStyles.actionText,
+                isLiked && styles.actionTextLiked,
+              ]}
             >
               {likesCount || 0}
             </Text>
           </TouchableOpacity>
 
-          {/* Comment Button (display only in preview) */}
+          {/* Comment Button */}
           <View style={styles.action}>
-            <Ionicons name="chatbubble-outline" size={20} color="#6b7280" />
-            <Text style={styles.actionText}>{post.commentCount || 0}</Text>
+            <Ionicons
+              name="chatbubble-outline"
+              size={20}
+              color={colors.textSecondary}
+            />
+            <Text style={[styles.actionText, dynamicStyles.actionText]}>
+              {post.commentCount || 0}
+            </Text>
           </View>
 
-          {/* ✅ Share Button - Now Functional */}
+          {/* Share Button */}
           <TouchableOpacity
             style={styles.action}
             onPress={handleSharePress}
             activeOpacity={0.7}
           >
-            <Ionicons name="share-outline" size={20} color="#6b7280" />
+            <Ionicons
+              name="share-outline"
+              size={20}
+              color={colors.textSecondary}
+            />
           </TouchableOpacity>
         </View>
 
         {/* Comments Header */}
-        <View style={styles.commentsHeader}>
-          <Text style={styles.commentsTitle}>Comments</Text>
+        <View style={[styles.commentsHeader, dynamicStyles.commentsHeader]}>
+          <Text style={[styles.commentsTitle, dynamicStyles.commentsTitle]}>
+            Comments
+          </Text>
         </View>
       </View>
 
-      {/* ✅ Share Modal */}
+      {/* Share Modal */}
       <SharePostModal
         visible={shareModalVisible}
         onClose={handleShareClose}
@@ -465,10 +547,8 @@ const PostPreview: React.FC<PostPreviewProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: "#fff",
     paddingTop: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
   },
   header: {
     flexDirection: "row",
@@ -478,17 +558,14 @@ const styles = StyleSheet.create({
   },
   avatar: {
     marginRight: 12,
-    backgroundColor: "#f3f4f6",
   },
   anonymousAvatar: {
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#e5e7eb",
     borderStyle: "dashed",
   },
   fallbackAvatar: {
-    backgroundColor: "#8b5cf6",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -511,7 +588,6 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 15,
     fontWeight: "600",
-    color: "#111827",
     fontFamily: "SofiaSans-Bold",
   },
   visibilityBadge: {
@@ -529,13 +605,11 @@ const styles = StyleSheet.create({
   },
   timestamp: {
     fontSize: 13,
-    color: "#6b7280",
     fontFamily: "SofiaSans-Regular",
   },
   content: {
     fontSize: 15,
     lineHeight: 20,
-    color: "#374151",
     marginBottom: 12,
     paddingHorizontal: 20,
     fontFamily: "SofiaSans-Regular",
@@ -543,16 +617,12 @@ const styles = StyleSheet.create({
   imagesWrapper: {
     marginBottom: 12,
   },
-  postImage: {
-    backgroundColor: "#f3f4f6",
-  },
+  postImage: {},
   imageErrorContainer: {
-    backgroundColor: "#f3f4f6",
     justifyContent: "center",
     alignItems: "center",
   },
   imageErrorText: {
-    color: "#9ca3af",
     fontSize: 14,
     marginTop: 8,
   },
@@ -602,7 +672,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     paddingVertical: 12,
     borderTopWidth: 1,
-    borderTopColor: "#f3f4f6",
   },
   action: {
     flexDirection: "row",
@@ -612,7 +681,6 @@ const styles = StyleSheet.create({
   actionText: {
     fontSize: 14,
     fontFamily: "SofiaSans-Regular",
-    color: "#6b7280",
   },
   actionTextLiked: {
     color: "#ef4444",
@@ -620,15 +688,13 @@ const styles = StyleSheet.create({
   commentsHeader: {
     paddingHorizontal: 20,
     paddingTop: 16,
-    paddingBottom: 8,
+    paddingBottom: 12,
     borderTopWidth: 1,
-    borderTopColor: "#f3f4f6",
   },
   commentsTitle: {
     fontSize: 16,
     fontWeight: "600",
     fontFamily: "SofiaSans-Bold",
-    color: "#111827",
   },
 });
 

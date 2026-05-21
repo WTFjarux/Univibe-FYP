@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { useTheme } from "@/lib/contexts/ThemeContext";
 import { Event, eventService } from "@/lib/services/eventService";
 
 const { width } = Dimensions.get("window");
@@ -37,14 +38,13 @@ export default function EventCard({
   );
   const flatListRef = useRef<FlatList>(null);
   const statusIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { colors } = useTheme();
 
-  // Update status based on current time
   useEffect(() => {
     const checkAndUpdateStatus = () => {
       const now = new Date();
       const startDate = new Date(event.startDate);
       const endDate = new Date(event.endDate);
-
       let newStatus = currentStatus;
       if (currentStatus !== "cancelled") {
         if (endDate < now && currentStatus !== "completed")
@@ -56,22 +56,18 @@ export default function EventCard({
         )
           newStatus = "ongoing";
       }
-
       if (newStatus !== currentStatus) {
         setCurrentStatus(newStatus);
         eventService.refreshEventStatus(event._id).catch(() => {});
       }
     };
-
     checkAndUpdateStatus();
     statusIntervalRef.current = setInterval(checkAndUpdateStatus, 30000);
-
     return () => {
       if (statusIntervalRef.current) clearInterval(statusIntervalRef.current);
     };
   }, [event._id, event.startDate, event.endDate]);
 
-  // Check if current user is the organizer
   const isOrganizer = (() => {
     if (!currentUserId) return false;
     if (typeof event.organizer === "string")
@@ -81,9 +77,8 @@ export default function EventCard({
     return false;
   })();
 
-  const formatDateFull = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString("en-US", {
+  const formatDateFull = (dateString: string) =>
+    new Date(dateString).toLocaleDateString("en-US", {
       weekday: "short",
       month: "short",
       day: "numeric",
@@ -91,27 +86,19 @@ export default function EventCard({
       minute: "2-digit",
       hour12: true,
     });
-  };
-
-  const formatDateShort = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString("en-US", {
+  const formatDateShort = (dateString: string) =>
+    new Date(dateString).toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
       hour: "numeric",
       minute: "2-digit",
       hour12: true,
     });
-  };
-
-  const isSameDay = (d1: string, d2: string) => {
-    const date1 = new Date(d1);
-    const date2 = new Date(d2);
-    return date1.toDateString() === date2.toDateString();
-  };
+  const isSameDay = (d1: string, d2: string) =>
+    new Date(d1).toDateString() === new Date(d2).toDateString();
 
   const getCategoryColor = (category: string) => {
-    const colors: Record<string, string> = {
+    const c: Record<string, string> = {
       Academic: "#dbeafe",
       Social: "#fce7f3",
       Sports: "#dcfce7",
@@ -120,11 +107,10 @@ export default function EventCard({
       Workshop: "#fed7aa",
       Other: "#f3f4f6",
     };
-    return colors[category] || "#f3f4f6";
+    return c[category] || "#f3f4f6";
   };
-
   const getCategoryTextColor = (category: string) => {
-    const colors: Record<string, string> = {
+    const c: Record<string, string> = {
       Academic: "#1d4ed8",
       Social: "#be185d",
       Sports: "#15803d",
@@ -133,9 +119,8 @@ export default function EventCard({
       Workshop: "#9a3412",
       Other: "#374151",
     };
-    return colors[category] || "#374151";
+    return c[category] || "#374151";
   };
-
   const getStatusColor = (status: string) => {
     switch (status) {
       case "upcoming":
@@ -150,7 +135,6 @@ export default function EventCard({
         return "#6b7280";
     }
   };
-
   const getStatusText = (status: string) => {
     switch (status) {
       case "upcoming":
@@ -171,7 +155,6 @@ export default function EventCard({
     if (event.coverImage) return [event.coverImage];
     return [];
   };
-
   const images = getEventImages();
   const hasMultipleImages = images.length > 1;
   const safeRsvpCount = event.rsvpCount ?? 0;
@@ -184,11 +167,12 @@ export default function EventCard({
       }
     },
   ).current;
-
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
-
   const renderImageItem = ({ item: imageUrl }: { item: string }) => (
-    <Image source={{ uri: imageUrl }} style={styles.coverImage} />
+    <Image
+      source={{ uri: imageUrl }}
+      style={[styles.coverImage, { backgroundColor: colors.skeleton }]}
+    />
   );
 
   const isEventInteractable =
@@ -198,13 +182,13 @@ export default function EventCard({
     <TouchableOpacity
       style={[
         styles.card,
+        { backgroundColor: colors.card, shadowColor: colors.shadow },
         currentStatus === "completed" && styles.cardCompleted,
         currentStatus === "cancelled" && styles.cardCancelled,
       ]}
       onPress={() => router.push(`/events/${event._id}`)}
       activeOpacity={0.7}
     >
-      {/* Image Carousel */}
       <View style={styles.imageContainer}>
         {images.length > 0 ? (
           <>
@@ -281,13 +265,18 @@ export default function EventCard({
             )}
           </>
         ) : (
-          <View style={[styles.coverImage, styles.coverPlaceholder]}>
-            <Ionicons name="calendar" size={48} color="#cbd5e1" />
+          <View
+            style={[
+              styles.coverImage,
+              styles.coverPlaceholder,
+              { backgroundColor: colors.skeleton },
+            ]}
+          >
+            <Ionicons name="calendar" size={48} color={colors.textMuted} />
           </View>
         )}
       </View>
 
-      {/* Status Badge - Top Right */}
       <View
         style={[
           styles.statusBadge,
@@ -297,7 +286,6 @@ export default function EventCard({
         <Text style={styles.statusText}>{getStatusText(currentStatus)}</Text>
       </View>
 
-      {/* Approval Badge - Top Left (only for organizer) */}
       {isOrganizer &&
         event.approvalStatus &&
         event.approvalStatus !== "approved" && (
@@ -335,7 +323,6 @@ export default function EventCard({
           </View>
         )}
 
-      {/* Content */}
       <View style={styles.content}>
         <View style={styles.header}>
           <View
@@ -354,26 +341,39 @@ export default function EventCard({
             </Text>
           </View>
           <View style={styles.stats}>
-            <Ionicons name="people" size={14} color="#6b7280" />
-            <Text style={styles.statsText}>{safeRsvpCount} going</Text>
+            <Ionicons name="people" size={14} color={colors.textSecondary} />
+            <Text style={[styles.statsText, { color: colors.textSecondary }]}>
+              {safeRsvpCount} going
+            </Text>
           </View>
         </View>
 
-        <Text style={styles.title} numberOfLines={2}>
+        <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>
           {event.title}
         </Text>
 
-        {/* Date & Time Display */}
         <View style={styles.details}>
           <View style={styles.detail}>
-            <Ionicons name="calendar-outline" size={16} color="#6b7280" />
+            <Ionicons
+              name="calendar-outline"
+              size={16}
+              color={colors.textSecondary}
+            />
             {sameDay ? (
               <View style={styles.sameDayContainer}>
-                <Text style={styles.detailText}>
+                <Text
+                  style={[styles.detailText, { color: colors.textSecondary }]}
+                >
                   {formatDateShort(event.startDate)}
                 </Text>
-                <Ionicons name="arrow-forward" size={14} color="#9ca3af" />
-                <Text style={styles.detailText}>
+                <Ionicons
+                  name="arrow-forward"
+                  size={14}
+                  color={colors.textMuted}
+                />
+                <Text
+                  style={[styles.detailText, { color: colors.textSecondary }]}
+                >
                   {new Date(event.endDate).toLocaleTimeString("en-US", {
                     hour: "numeric",
                     minute: "2-digit",
@@ -383,25 +383,42 @@ export default function EventCard({
               </View>
             ) : (
               <View style={styles.multiDayContainer}>
-                <Text style={styles.detailText}>
+                <Text
+                  style={[styles.detailText, { color: colors.textSecondary }]}
+                >
                   {formatDateShort(event.startDate)}
                 </Text>
-                <Text style={styles.detailTextSecondary}>to</Text>
-                <Text style={styles.detailText}>
+                <Text
+                  style={[
+                    styles.detailTextSecondary,
+                    { color: colors.textMuted },
+                  ]}
+                >
+                  to
+                </Text>
+                <Text
+                  style={[styles.detailText, { color: colors.textSecondary }]}
+                >
                   {formatDateShort(event.endDate)}
                 </Text>
               </View>
             )}
           </View>
           <View style={styles.detail}>
-            <Ionicons name="location-outline" size={16} color="#6b7280" />
-            <Text style={styles.detailText} numberOfLines={1}>
+            <Ionicons
+              name="location-outline"
+              size={16}
+              color={colors.textSecondary}
+            />
+            <Text
+              style={[styles.detailText, { color: colors.textSecondary }]}
+              numberOfLines={1}
+            >
               {event.location}
             </Text>
           </View>
         </View>
 
-        {/* Featured Badge */}
         {event.isFeatured && (
           <View style={styles.featuredBadge}>
             <Ionicons name="star" size={14} color="#f59e0b" />
@@ -409,7 +426,6 @@ export default function EventCard({
           </View>
         )}
 
-        {/* Organizer Info */}
         {isOrganizer ? (
           <View style={styles.organizerBadge}>
             <Ionicons name="star" size={12} color="#f59e0b" />
@@ -417,8 +433,14 @@ export default function EventCard({
           </View>
         ) : (
           <View style={styles.organizerInfo}>
-            <Ionicons name="person-outline" size={14} color="#6b7280" />
-            <Text style={styles.organizerText}>
+            <Ionicons
+              name="person-outline"
+              size={14}
+              color={colors.textSecondary}
+            />
+            <Text
+              style={[styles.organizerText, { color: colors.textSecondary }]}
+            >
               Organized by{" "}
               {event.organizerName ||
                 (typeof event.organizer === "object"
@@ -428,12 +450,12 @@ export default function EventCard({
           </View>
         )}
 
-        {/* Actions */}
         {showActions && !isOrganizer && isEventInteractable && (
           <View style={styles.actions}>
             <TouchableOpacity
               style={[
                 styles.interestedButton,
+                { borderColor: colors.border },
                 event.isInterested && styles.interestedButtonActive,
               ]}
               onPress={() => onInterestPress?.(event._id)}
@@ -441,20 +463,22 @@ export default function EventCard({
               <Ionicons
                 name={event.isInterested ? "heart" : "heart-outline"}
                 size={16}
-                color={event.isInterested ? "#ef4444" : "#8b5cf6"}
+                color={event.isInterested ? "#ef4444" : colors.primary}
               />
               <Text
                 style={[
                   styles.interestedText,
+                  { color: colors.primary },
                   event.isInterested && styles.interestedTextActive,
                 ]}
               >
-                {event.isInterested ? "Interested" : "Interested"}
+                Interested
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[
                 styles.rsvpButton,
+                { backgroundColor: colors.primary },
                 event.isRsvpd && styles.rsvpButtonActive,
               ]}
               onPress={() => onRsvpPress?.(event._id)}
@@ -471,7 +495,12 @@ export default function EventCard({
           </View>
         )}
         {showActions && !isOrganizer && !isEventInteractable && (
-          <View style={styles.eventEndedMessage}>
+          <View
+            style={[
+              styles.eventEndedMessage,
+              { backgroundColor: colors.skeleton },
+            ]}
+          >
             <Ionicons
               name={
                 currentStatus === "completed"
@@ -501,11 +530,9 @@ export default function EventCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: "white",
     borderRadius: 16,
     marginBottom: 16,
     overflow: "hidden",
-    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
@@ -515,7 +542,7 @@ const styles = StyleSheet.create({
   cardCancelled: { opacity: 0.7 },
   imageContainer: { position: "relative", width: width - 40, height: 200 },
   carousel: { flex: 1 },
-  coverImage: { width: width - 40, height: 200, backgroundColor: "#f3f4f6" },
+  coverImage: { width: width - 40, height: 200 },
   coverPlaceholder: { justifyContent: "center", alignItems: "center" },
   completedOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -635,30 +662,17 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   stats: { flexDirection: "row", alignItems: "center", gap: 4 },
-  statsText: {
-    fontSize: 12,
-    color: "#6b7280",
-    fontFamily: "SofiaSans-Regular",
-  },
+  statsText: { fontSize: 12, fontFamily: "SofiaSans-Regular" },
   title: {
     fontSize: 18,
     fontWeight: "bold",
     fontFamily: "SofiaSans-Bold",
-    color: "#111827",
     marginBottom: 12,
   },
   details: { gap: 8, marginBottom: 12 },
   detail: { flexDirection: "row", alignItems: "center", gap: 8 },
-  detailText: {
-    fontSize: 14,
-    fontFamily: "SofiaSans-Regular",
-    color: "#6b7280",
-  },
-  detailTextSecondary: {
-    fontSize: 13,
-    fontFamily: "SofiaSans-Regular",
-    color: "#9ca3af",
-  },
+  detailText: { fontSize: 14, fontFamily: "SofiaSans-Regular" },
+  detailTextSecondary: { fontSize: 13, fontFamily: "SofiaSans-Regular" },
   sameDayContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -712,11 +726,7 @@ const styles = StyleSheet.create({
     gap: 6,
     marginBottom: 4,
   },
-  organizerText: {
-    fontSize: 12,
-    color: "#6b7280",
-    fontFamily: "SofiaSans-Regular",
-  },
+  organizerText: { fontSize: 12, fontFamily: "SofiaSans-Regular" },
   actions: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -733,7 +743,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: "#e5e7eb",
     flex: 1,
   },
   interestedButtonActive: {
@@ -742,13 +751,11 @@ const styles = StyleSheet.create({
   },
   interestedText: {
     fontSize: 14,
-    color: "#8b5cf6",
     fontWeight: "500",
     fontFamily: "SofiaSans-Regular",
   },
   interestedTextActive: { color: "#ef4444" },
   rsvpButton: {
-    backgroundColor: "#8b5cf6",
     paddingHorizontal: 24,
     paddingVertical: 10,
     borderRadius: 20,
@@ -770,7 +777,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 6,
     paddingVertical: 10,
-    backgroundColor: "#f9fafb",
     borderRadius: 20,
   },
   eventEndedText: {

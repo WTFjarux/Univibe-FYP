@@ -3,10 +3,12 @@
 
 import React, { useEffect, useRef } from "react";
 import { View, StyleSheet, ScrollView, Animated } from "react-native";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 
 // Post Skeleton - Matches PostCard layout
 const PostSkeleton = () => {
   const shimmerValue = useRef(new Animated.Value(0)).current;
+  const { colors } = useTheme();
 
   useEffect(() => {
     const animation = Animated.loop(
@@ -33,15 +35,27 @@ const PostSkeleton = () => {
   });
 
   const SkeletonBlock = ({ style }: { style: any }) => (
-    <Animated.View style={[style, { opacity, backgroundColor: "#e5e7eb" }]} />
+    <Animated.View
+      style={[style, { opacity, backgroundColor: colors.skeleton }]}
+    />
   );
 
   return (
     <View style={styles.postCardWrapper}>
-      <View style={styles.postCard}>
+      <View
+        style={[
+          styles.postCard,
+          { backgroundColor: colors.card, shadowColor: colors.shadow },
+        ]}
+      >
         {/* Post Header */}
         <View style={styles.postHeader}>
-          <SkeletonBlock style={styles.postAvatar} />
+          <SkeletonBlock
+            style={[
+              styles.postAvatar,
+              { backgroundColor: colors.skeletonHighlight },
+            ]}
+          />
           <View style={styles.postUserInfo}>
             <SkeletonBlock style={styles.postUserName} />
             <SkeletonBlock style={styles.postUserHandle} />
@@ -59,7 +73,7 @@ const PostSkeleton = () => {
         <SkeletonBlock style={styles.postImage} />
 
         {/* Post Actions */}
-        <View style={styles.postActions}>
+        <View style={[styles.postActions, { borderTopColor: colors.border }]}>
           <SkeletonBlock style={styles.actionButton} />
           <SkeletonBlock style={styles.actionButton} />
           <SkeletonBlock style={styles.actionButton} />
@@ -72,6 +86,7 @@ const PostSkeleton = () => {
 // Full Own Profile Page Skeleton
 export default function OwnProfilePageSkeleton() {
   const shimmerValue = useRef(new Animated.Value(0)).current;
+  const { colors } = useTheme();
 
   useEffect(() => {
     const animation = Animated.loop(
@@ -98,11 +113,13 @@ export default function OwnProfilePageSkeleton() {
   });
 
   const SkeletonBlock = ({ style }: { style: any }) => (
-    <Animated.View style={[style, { opacity, backgroundColor: "#e5e7eb" }]} />
+    <Animated.View
+      style={[style, { opacity, backgroundColor: colors.skeleton }]}
+    />
   );
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Cover Photo - Camera button visible for own profile */}
         <View style={styles.coverPhotoContainer}>
@@ -113,9 +130,16 @@ export default function OwnProfilePageSkeleton() {
         {/* Profile Picture and Name Section */}
         <View style={styles.profileImageNameContainer}>
           <View style={styles.profileImageWrapper}>
-            <SkeletonBlock style={styles.profileImage} />
+            <SkeletonBlock
+              style={[styles.profileImage, { borderColor: colors.card }]}
+            />
             {/* Camera overlay on profile pic */}
-            <SkeletonBlock style={styles.profileCameraOverlay} />
+            <SkeletonBlock
+              style={[
+                styles.profileCameraOverlay,
+                { borderColor: colors.card },
+              ]}
+            />
           </View>
           <View style={styles.nameUsernameContainer}>
             <SkeletonBlock style={styles.fullNameSkeleton} />
@@ -130,15 +154,32 @@ export default function OwnProfilePageSkeleton() {
         </View>
 
         {/* Profile Tabs */}
-        <View style={styles.tabsContainer}>
-          <SkeletonBlock style={styles.tabButton} />
-          <SkeletonBlock style={styles.tabButton} />
+        <View
+          style={[styles.tabsContainer, { backgroundColor: colors.skeleton }]}
+        >
+          <SkeletonBlock
+            style={[
+              styles.tabButton,
+              { backgroundColor: colors.skeletonHighlight },
+            ]}
+          />
+          <SkeletonBlock
+            style={[
+              styles.tabButton,
+              { backgroundColor: colors.skeletonHighlight },
+            ]}
+          />
         </View>
 
         {/* Content Area (About tab by default) */}
         <View style={styles.contentContainer}>
           {/* About Card */}
-          <View style={styles.aboutSection}>
+          <View
+            style={[
+              styles.aboutSection,
+              { backgroundColor: colors.card, shadowColor: colors.shadow },
+            ]}
+          >
             <SkeletonBlock style={styles.sectionTitle} />
             <View style={styles.infoItem}>
               <SkeletonBlock style={styles.infoIcon} />
@@ -164,7 +205,12 @@ export default function OwnProfilePageSkeleton() {
           </View>
 
           {/* Stats Card */}
-          <View style={styles.statsSection}>
+          <View
+            style={[
+              styles.statsSection,
+              { backgroundColor: colors.card, shadowColor: colors.shadow },
+            ]}
+          >
             <SkeletonBlock style={styles.sectionTitle} />
             <View style={styles.statsContainer}>
               {[1, 2, 3].map((i) => (
@@ -178,7 +224,12 @@ export default function OwnProfilePageSkeleton() {
           </View>
 
           {/* Menu Items (Edit Profile, Settings, etc.) */}
-          <View style={styles.menuSection}>
+          <View
+            style={[
+              styles.menuSection,
+              { backgroundColor: colors.card, shadowColor: colors.shadow },
+            ]}
+          >
             {[
               { icon: "create-outline", text: "Edit Profile" },
               { icon: "settings-outline", text: "Settings" },
@@ -191,7 +242,14 @@ export default function OwnProfilePageSkeleton() {
                   <SkeletonBlock style={styles.menuText} />
                   <SkeletonBlock style={styles.menuArrow} />
                 </View>
-                {i < 3 && <View style={styles.menuDivider} />}
+                {i < 3 && (
+                  <View
+                    style={[
+                      styles.menuDivider,
+                      { backgroundColor: colors.border },
+                    ]}
+                  />
+                )}
               </View>
             ))}
           </View>

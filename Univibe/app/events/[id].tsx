@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "@/lib/contexts/ThemeContext";
 import { eventService, Event } from "@/lib/services/eventService";
 import { useAuth } from "@/lib/contexts/AuthContext";
 import { EventImageCarousel } from "@/app/components/Events/EventImageCarousel";
@@ -43,6 +44,7 @@ export default function EventDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { user } = useAuth();
+  const { colors } = useTheme();
   const [event, setEvent] = useState<ExtendedEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
@@ -52,16 +54,13 @@ export default function EventDetailScreen() {
   const [interestedUsers, setInterestedUsers] = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
 
-  // Track pending optimistic updates
   const pendingUpdate = useRef<{ type: string; timestamp: number } | null>(
     null,
   );
-  // Track if socket listener is set up
   const socketSetup = useRef(false);
 
   const isOrganizer = event?.organizer._id === user?.id;
 
-  // Clear cache when leaving this screen
   useEffect(() => {
     return () => {
       eventService.clearCache();
@@ -69,25 +68,16 @@ export default function EventDetailScreen() {
     };
   }, []);
 
-  // ===== REAL-TIME EVENT UPDATES VIA SOCKET =====
   useEffect(() => {
     if (!id || socketSetup.current) return;
-
     socketSetup.current = true;
-
     socketService.joinRoom(`event_${id}`, null, "event");
-
     const handleEventUpdate = (data: any) => {
       if (data.eventId !== id) return;
-
-      // Check if we have a pending optimistic update
       if (pendingUpdate.current) {
         const age = Date.now() - pendingUpdate.current.timestamp;
-        if (age < 2000) {
-          return;
-        }
+        if (age < 2000) return;
       }
-
       setEvent((prev) => {
         if (!prev) return prev;
         return {
@@ -98,37 +88,27 @@ export default function EventDetailScreen() {
         };
       });
     };
-
     socketService.on("event:updated", handleEventUpdate);
-
     return () => {
       socketService.off("event:updated", handleEventUpdate);
       socketService.leaveRoom(`event_${id}`);
       socketSetup.current = false;
     };
-  }, [id]); // ONLY depend on id - not isOrganizer or activeTab
-
-  // Fetch event on mount - SKIP CACHE
-  useEffect(() => {
-    if (id) {
-      fetchEvent();
-    }
   }, [id]);
 
-  // Fetch attendees/interested users when tab changes (for organizer)
+  useEffect(() => {
+    if (id) fetchEvent();
+  }, [id]);
+
   useEffect(() => {
     if (event && isOrganizer) {
-      if (activeTab === "attendees") {
-        fetchAttendees();
-      } else if (activeTab === "interested") {
-        fetchInterestedUsers();
-      }
+      if (activeTab === "attendees") fetchAttendees();
+      else if (activeTab === "interested") fetchInterestedUsers();
     }
   }, [activeTab]);
 
   const fetchEvent = async () => {
     try {
-      // SKIP CACHE to always get fresh data
       const response = await eventService.getEventById(id, true);
       if (response.success && response.event) {
         setEvent(response.event);
@@ -137,7 +117,6 @@ export default function EventDetailScreen() {
         router.back();
       }
     } catch (error) {
-      console.error("Error fetching event:", error);
       Alert.alert("Error", "Failed to load event");
       router.back();
     } finally {
@@ -149,7 +128,6 @@ export default function EventDetailScreen() {
     if (!event) return;
     setLoadingUsers(true);
     try {
-      // SKIP CACHE to get fresh attendee list
       const response = await eventService.getEventById(id, true);
       if (response.success && response.event) {
         setAttendees(response.event.rsvp || []);
@@ -160,12 +138,10 @@ export default function EventDetailScreen() {
       setLoadingUsers(false);
     }
   };
-
   const fetchInterestedUsers = async () => {
     if (!event) return;
     setLoadingUsers(true);
     try {
-      // SKIP CACHE to get fresh interested users list
       const response = await eventService.getEventById(id, true);
       if (response.success && response.event) {
         setInterestedUsers(response.event.interested || []);
@@ -180,11 +156,7 @@ export default function EventDetailScreen() {
   const handleInterest = async () => {
     if (!event) return;
     setProcessing(true);
-
-    // Track optimistic update
     pendingUpdate.current = { type: "interest", timestamp: Date.now() };
-
-    // Optimistic UI update
     setEvent((prev) => {
       if (!prev) return prev;
       const currentCount = prev.interestedCount ?? 0;
@@ -196,13 +168,10 @@ export default function EventDetailScreen() {
           : currentCount + 1,
       };
     });
-
     try {
       const response = await eventService.toggleInterest(event._id);
       pendingUpdate.current = null;
-
       if (response.success) {
-        // Server-confirmed update
         setEvent((prev) => {
           if (!prev) return prev;
           return {
@@ -213,7 +182,6 @@ export default function EventDetailScreen() {
           };
         });
       } else {
-        // Revert on failure
         revertOptimisticUpdate("interest");
       }
     } catch (error) {
@@ -227,7 +195,6 @@ export default function EventDetailScreen() {
 
   const handleRsvp = async () => {
     if (!event) return;
-
     if (event.isFull && !event.isRsvpd) {
       Alert.alert(
         "Event Full",
@@ -235,13 +202,8 @@ export default function EventDetailScreen() {
       );
       return;
     }
-
     setProcessing(true);
-
-    // Track optimistic update
     pendingUpdate.current = { type: "rsvp", timestamp: Date.now() };
-
-    // Optimistic UI update
     setEvent((prev) => {
       if (!prev) return prev;
       const currentCount = prev.rsvpCount ?? 0;
@@ -253,13 +215,10 @@ export default function EventDetailScreen() {
           : currentCount + 1,
       };
     });
-
     try {
       const response = await eventService.toggleRsvp(event._id);
       pendingUpdate.current = null;
-
       if (response.success) {
-        // Server-confirmed update
         setEvent((prev) => {
           if (!prev) return prev;
           return {
@@ -269,14 +228,11 @@ export default function EventDetailScreen() {
             isFull: response.isFull ?? prev.isFull,
           };
         });
-
-        // Refresh attendee/interested lists if organizer is viewing
         if (isOrganizer) {
           if (activeTab === "attendees") fetchAttendees();
           else if (activeTab === "interested") fetchInterestedUsers();
         }
       } else {
-        // Revert on failure
         revertOptimisticUpdate("rsvp");
       }
     } catch (error) {
@@ -288,7 +244,6 @@ export default function EventDetailScreen() {
     }
   };
 
-  // Helper to revert optimistic updates
   const revertOptimisticUpdate = (type: "interest" | "rsvp") => {
     setEvent((prev) => {
       if (!prev) return prev;
@@ -371,38 +326,30 @@ export default function EventDetailScreen() {
       Alert.alert("Coming Soon", "Save feature will be available soon!");
       setEvent((prev) => (prev ? { ...prev, isSaved: !prev.isSaved } : null));
     } catch (error) {
-      console.error("Error saving event:", error);
       Alert.alert("Error", "Failed to save event");
     }
   };
-
   const handleReportEvent = async (eventId: string) => {
     try {
       Alert.alert("Thank You", "Event has been reported. We'll review it.");
       setEvent((prev) => (prev ? { ...prev, isReported: true } : null));
     } catch (error) {
-      console.error("Error reporting event:", error);
       Alert.alert("Error", "Failed to report event");
     }
   };
-
   const handleShareEvent = async (eventId: string) => {
     await handleShare();
   };
-
   const handleAddToCalendar = async (eventId: string) => {
     Alert.alert("Coming Soon", "Calendar integration will be available soon!");
   };
-
   const handleMuteOrganizer = async (organizerId: string) => {
     try {
       Alert.alert("Success", "Organizer muted. You won't see their events.");
     } catch (error) {
-      console.error("Error muting organizer:", error);
       Alert.alert("Error", "Failed to mute organizer");
     }
   };
-
   const handleBlockOrganizer = async (organizerId: string) => {
     Alert.alert(
       "Block Organizer",
@@ -416,7 +363,6 @@ export default function EventDetailScreen() {
             try {
               Alert.alert("Success", "Organizer blocked.");
             } catch (error) {
-              console.error("Error blocking organizer:", error);
               Alert.alert("Error", "Failed to block organizer");
             }
           },
@@ -456,14 +402,12 @@ export default function EventDetailScreen() {
       router.push(`/profile/${organizerId}`);
     }
   };
-
   const handleTabChange = (tab: TabType) => {
     setActiveTab(tab);
   };
 
   const renderTabContent = () => {
     if (!event) return null;
-
     if (!isOrganizer) {
       return (
         <EventDetailsTab
@@ -472,7 +416,6 @@ export default function EventDetailScreen() {
         />
       );
     }
-
     switch (activeTab) {
       case "details":
         return (
@@ -485,8 +428,12 @@ export default function EventDetailScreen() {
         if (loadingUsers) {
           return (
             <View style={styles.tabLoadingContainer}>
-              <ActivityIndicator size="large" color="#8b5cf6" />
-              <Text style={styles.tabLoadingText}>Loading attendees...</Text>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text
+                style={[styles.tabLoadingText, { color: colors.textSecondary }]}
+              >
+                Loading attendees...
+              </Text>
             </View>
           );
         }
@@ -496,8 +443,10 @@ export default function EventDetailScreen() {
         if (loadingUsers) {
           return (
             <View style={styles.tabLoadingContainer}>
-              <ActivityIndicator size="large" color="#8b5cf6" />
-              <Text style={styles.tabLoadingText}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text
+                style={[styles.tabLoadingText, { color: colors.textSecondary }]}
+              >
                 Loading interested users...
               </Text>
             </View>
@@ -515,8 +464,13 @@ export default function EventDetailScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#8b5cf6" />
+      <SafeAreaView
+        style={[
+          styles.loadingContainer,
+          { backgroundColor: colors.background },
+        ]}
+      >
+        <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
@@ -524,39 +478,49 @@ export default function EventDetailScreen() {
   if (!event) return null;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
         <EventImageCarousel images={images} />
-
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => router.back()}
         >
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
-
         <TouchableOpacity
           style={styles.menuButton}
           onPress={() => setShowEventOptions(true)}
         >
           <Ionicons name="ellipsis-vertical" size={16} color="#fff" />
         </TouchableOpacity>
-
         <View style={styles.content}>
           <View style={styles.header}>
-            <View style={styles.categoryContainer}>
-              <Text style={styles.category}>{event.category}</Text>
+            <View
+              style={[
+                styles.categoryContainer,
+                { backgroundColor: colors.primaryLight },
+              ]}
+            >
+              <Text style={[styles.category, { color: colors.primary }]}>
+                {event.category}
+              </Text>
             </View>
             <TouchableOpacity onPress={handleShare} style={styles.shareButton}>
-              <Ionicons name="share-outline" size={22} color="#6b7280" />
+              <Ionicons
+                name="share-outline"
+                size={22}
+                color={colors.textSecondary}
+              />
             </TouchableOpacity>
           </View>
-
-          <Text style={styles.title}>{event.title}</Text>
-
+          <Text style={[styles.title, { color: colors.text }]}>
+            {event.title}
+          </Text>
           {isOrganizer && (
             <EventTabs
               activeTab={activeTab}
@@ -565,11 +529,9 @@ export default function EventDetailScreen() {
               interestedCount={event.interestedCount ?? 0}
             />
           )}
-
           <View style={styles.tabContent}>{renderTabContent()}</View>
         </View>
       </ScrollView>
-
       {!isOrganizer && (
         <EventActionBar
           isInterested={event.isInterested || false}
@@ -580,7 +542,6 @@ export default function EventDetailScreen() {
           onRsvp={handleRsvp}
         />
       )}
-
       <EventOptionsModal
         visible={showEventOptions}
         onClose={() => setShowEventOptions(false)}
@@ -608,13 +569,8 @@ export default function EventDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#fff",
-  },
+  container: { flex: 1 },
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   scrollContent: { paddingBottom: 20 },
   backButton: {
     position: "absolute",
@@ -648,22 +604,15 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   categoryContainer: {
-    backgroundColor: "#f3e8ff",
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 20,
   },
-  category: {
-    color: "#8b5cf6",
-    fontSize: 14,
-    fontWeight: "600",
-    fontFamily: "SofiaSans-Bold",
-  },
+  category: { fontSize: 14, fontWeight: "600", fontFamily: "SofiaSans-Bold" },
   shareButton: { padding: 8 },
   title: {
     fontSize: 26,
     fontWeight: "bold",
-    color: "#111827",
     marginBottom: 20,
     fontFamily: "SofiaSans-Bold",
     lineHeight: 34,
@@ -678,7 +627,6 @@ const styles = StyleSheet.create({
   tabLoadingText: {
     marginTop: 12,
     fontSize: 14,
-    color: "#6b7280",
     fontFamily: "SofiaSans-Regular",
   },
   usersList: { paddingVertical: 8 },

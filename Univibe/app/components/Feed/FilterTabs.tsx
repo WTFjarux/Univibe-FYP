@@ -1,6 +1,7 @@
 // app/components/Feed/FilterTabs.tsx
 import React from "react";
 import { ScrollView, TouchableOpacity, Text, StyleSheet } from "react-native";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 
 interface FilterTab {
   id: string;
@@ -18,6 +19,8 @@ const FilterTabs: React.FC<FilterTabsProps> = ({
   activeFilter,
   onFilterChange,
 }) => {
+  const { colors } = useTheme();
+
   return (
     <ScrollView
       horizontal
@@ -30,13 +33,24 @@ const FilterTabs: React.FC<FilterTabsProps> = ({
           key={filter.id}
           style={[
             styles.filterButton,
-            activeFilter === filter.id && styles.filterButtonActive,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+            activeFilter === filter.id && [
+              styles.filterButtonActive,
+              {
+                backgroundColor: colors.primary,
+                borderColor: colors.primary,
+              },
+            ],
           ]}
           onPress={() => onFilterChange(filter.id)}
         >
           <Text
             style={[
               styles.filterText,
+              { color: colors.textSecondary },
               activeFilter === filter.id && styles.filterTextActive,
             ]}
           >

@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useAuth } from "../../lib/contexts/AuthContext";
+import { useTheme } from "../../lib/contexts/ThemeContext";
 import { Post } from "../../lib/services/postService";
 import { getHiddenPosts, unhidePost } from "../../lib/services/contentService";
 import PostCard from "../components/Feed/Post/PostCard";
@@ -22,6 +23,7 @@ import PostCard from "../components/Feed/Post/PostCard";
 export default function HiddenPostsScreen() {
   const router = useRouter();
   const { token } = useAuth();
+  const { colors } = useTheme();
   const [hiddenPosts, setHiddenPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -42,9 +44,7 @@ export default function HiddenPostsScreen() {
   ) => {
     setInfoMessage(message);
     setInfoType(type);
-
     if (infoTimeoutRef.current) clearTimeout(infoTimeoutRef.current);
-
     Animated.sequence([
       Animated.timing(slideAnim, {
         toValue: 0,
@@ -61,7 +61,6 @@ export default function HiddenPostsScreen() {
       setInfoMessage(null);
       slideAnim.setValue(100);
     });
-
     infoTimeoutRef.current = setTimeout(() => {
       setInfoMessage(null);
       slideAnim.setValue(100);
@@ -71,25 +70,20 @@ export default function HiddenPostsScreen() {
   const loadHiddenPosts = useCallback(
     async (pageNum: number = 1, shouldAppend: boolean = false) => {
       if (!token) return;
-
       if (shouldAppend) {
         setLoadingMore(true);
       } else {
         setLoading(true);
       }
-
       try {
         const response = await getHiddenPosts(pageNum, 10);
-
         if (response.success && response.data) {
           const newPosts = response.data.posts;
-
           if (shouldAppend) {
             setHiddenPosts((prev) => [...prev, ...newPosts]);
           } else {
             setHiddenPosts(newPosts);
           }
-
           setHasMore(
             response.data.pagination.page < response.data.pagination.pages,
           );
@@ -98,7 +92,6 @@ export default function HiddenPostsScreen() {
           setHiddenPosts([]);
         }
       } catch (error) {
-        console.error("Error loading hidden posts:", error);
         showInfoBar("Failed to load hidden posts", "error");
         setHiddenPosts([]);
       } finally {
@@ -116,7 +109,6 @@ export default function HiddenPostsScreen() {
     setHasMore(true);
     await loadHiddenPosts(1, false);
   };
-
   const loadMore = () => {
     if (!loadingMore && hasMore && !loading) {
       loadHiddenPosts(page + 1, true);
@@ -132,21 +124,18 @@ export default function HiddenPostsScreen() {
   );
 
   const handleUnhide = async (postId: string) => {
-    // Optimistic update
     setHiddenPosts((prev) => prev.filter((post) => post._id !== postId));
     showInfoBar("Post restored to feed", "success");
-
     try {
       await unhidePost(postId);
     } catch (error: any) {
-      // Revert on error
       await loadHiddenPosts(1, false);
       showInfoBar(error.message || "Failed to unhide post", "error");
     }
   };
 
   const renderPost = ({ item }: { item: Post }) => (
-    <View style={styles.postCardContainer}>
+
       <PostCard
         post={item}
         compact={false}
@@ -162,16 +151,20 @@ export default function HiddenPostsScreen() {
         onMuteUser={() => {}}
         onBlockUser={() => {}}
       />
-    </View>
+
   );
 
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
-      <Ionicons name="eye-off-outline" size={64} color="#d1d5db" />
-      <Text style={styles.emptyTitle}>No hidden posts</Text>
-      <Text style={styles.emptyText}>Posts you hide will appear here</Text>
+      <Ionicons name="eye-off-outline" size={64} color={colors.textMuted} />
+      <Text style={[styles.emptyTitle, { color: colors.text }]}>
+        No hidden posts
+      </Text>
+      <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+        Posts you hide will appear here
+      </Text>
       <TouchableOpacity
-        style={styles.browseButton}
+        style={[styles.browseButton, { backgroundColor: colors.primary }]}
         onPress={() => router.push("/(tabs)/feed")}
       >
         <Text style={styles.browseButtonText}>Browse Feed</Text>
@@ -179,24 +172,34 @@ export default function HiddenPostsScreen() {
     </View>
   );
 
-  // ✅ Single return with header always present
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      <View style={styles.header}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      edges={["top"]}
+    >
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: colors.background, borderBottomColor: colors.border },
+        ]}
+      >
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
         >
-          <Ionicons name="arrow-back" size={24} color="#111827" />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Hidden Posts</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>
+          Hidden Posts
+        </Text>
         <View style={{ width: 40 }} />
       </View>
-
       {loading && !refreshing ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8b5cf6" />
-          <Text style={styles.loadingText}>Loading hidden posts...</Text>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+            Loading hidden posts...
+          </Text>
         </View>
       ) : (
         <FlatList
@@ -208,8 +211,15 @@ export default function HiddenPostsScreen() {
           ListFooterComponent={
             loadingMore ? (
               <View style={styles.footerLoader}>
-                <ActivityIndicator size="small" color="#8b5cf6" />
-                <Text style={styles.loadingMoreText}>Loading more...</Text>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text
+                  style={[
+                    styles.loadingMoreText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Loading more...
+                </Text>
               </View>
             ) : null
           }
@@ -219,14 +229,13 @@ export default function HiddenPostsScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor="#8b5cf6"
-              colors={["#8b5cf6"]}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+              progressBackgroundColor={colors.card}
             />
           }
         />
       )}
-
-      {/* Info Bar - like feed */}
       {infoMessage && (
         <Animated.View
           style={[
@@ -237,7 +246,7 @@ export default function HiddenPostsScreen() {
                   ? "#10b981"
                   : infoType === "error"
                     ? "#ef4444"
-                    : "#8b5cf6",
+                    : colors.primary,
               transform: [{ translateY: slideAnim }],
             },
           ]}
@@ -261,26 +270,23 @@ export default function HiddenPostsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f9fafb" },
+  container: { flex: 1 },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: "#ffffff",
     borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
+    
   },
   backButton: { padding: 8, marginLeft: -8 },
   headerTitle: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#111827",
-    fontFamily: "SofiaSans-SemiBold",
+    fontFamily: "SofiaSans-Bold",
   },
   listContent: { flexGrow: 1, paddingBottom: 20 },
-  postCardContainer: { marginBottom: 16, padding: 16 },
   emptyContainer: {
     flex: 1,
     alignItems: "center",
@@ -290,13 +296,11 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#374151",
     marginTop: 16,
     fontFamily: "SofiaSans-SemiBold",
   },
   emptyText: {
     fontSize: 14,
-    color: "#6b7280",
     marginTop: 8,
     fontFamily: "SofiaSans-Regular",
     textAlign: "center",
@@ -305,7 +309,6 @@ const styles = StyleSheet.create({
     marginTop: 20,
     paddingHorizontal: 20,
     paddingVertical: 10,
-    backgroundColor: "#8b5cf6",
     borderRadius: 20,
   },
   browseButtonText: {
@@ -315,12 +318,7 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Medium",
   },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: "#6b7280",
-    fontFamily: "SofiaSans-Regular",
-  },
+  loadingText: { marginTop: 12, fontSize: 14, fontFamily: "SofiaSans-Regular" },
   footerLoader: {
     flexDirection: "row",
     justifyContent: "center",
@@ -328,11 +326,7 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
     gap: 8,
   },
-  loadingMoreText: {
-    fontSize: 12,
-    color: "#6b7280",
-    fontFamily: "SofiaSans-Regular",
-  },
+  loadingMoreText: { fontSize: 12, fontFamily: "SofiaSans-Regular" },
   infoBar: {
     position: "absolute",
     bottom: 50,

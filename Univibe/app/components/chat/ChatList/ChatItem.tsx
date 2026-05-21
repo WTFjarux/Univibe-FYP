@@ -12,12 +12,12 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { useTheme } from "../../../../lib/contexts/ThemeContext";
 import { getAvatarUrl, formatTime } from "../../../../lib/utils/chatUtils";
 import type { ChatRoom } from "../../../../lib/types/chat.types";
 import { API_BASE_URL } from "../../../../constants/ipConstants";
 
 const DEFAULT_AVATAR = require("../../../../assets/images/default-avatar.png");
-const ACCENT_COLOR = "#8b5cf6";
 
 export interface ChatItemProps {
   item: ChatRoom;
@@ -50,6 +50,7 @@ const ChatItem: React.FC<ChatItemProps> = ({
   const rowRef = useRef<View>(null);
   const [avatarError, setAvatarError] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
+  const { colors, isDark } = useTheme();
 
   const isGroup = item.type === "group";
   const isMuted = item.isMuted === true;
@@ -93,10 +94,8 @@ const ChatItem: React.FC<ChatItemProps> = ({
 
   const getLastMessageText = (): string => {
     if (!item.lastMessage) return isGroup ? "Group created" : "No messages yet";
-
     const { type, message, senderName } = item.lastMessage;
     let displayMessage = message;
-
     switch (type) {
       case "audio":
         displayMessage = "🎤 Voice message";
@@ -117,10 +116,8 @@ const ChatItem: React.FC<ChatItemProps> = ({
         displayMessage = message || "Shared a post";
         break;
     }
-
-    if (isGroup && senderName && !isLastMessageFromMe) {
+    if (isGroup && senderName && !isLastMessageFromMe)
       return `${senderName.split(" ")[0]}: ${displayMessage}`;
-    }
     if (isLastMessageFromMe) return `You: ${displayMessage}`;
     return displayMessage || "";
   };
@@ -129,7 +126,10 @@ const ChatItem: React.FC<ChatItemProps> = ({
     isHighlighted && highlightAnim
       ? highlightAnim.interpolate({
           inputRange: [0, 1],
-          outputRange: ["transparent", "rgba(139, 92, 246, 0.12)"],
+          outputRange: [
+            "transparent",
+            isDark ? "rgba(167, 139, 250, 0.15)" : "rgba(139, 92, 246, 0.12)",
+          ],
         })
       : "transparent";
 
@@ -159,7 +159,13 @@ const ChatItem: React.FC<ChatItemProps> = ({
         <Pressable
           style={({ pressed }) => [
             styles.row,
-            pressed && !isPressed && styles.rowPressed,
+            { borderBottomColor: colors.border },
+            pressed &&
+              !isPressed && {
+                backgroundColor: isDark
+                  ? "rgba(167, 139, 250, 0.08)"
+                  : "rgba(139, 92, 246, 0.04)",
+              },
           ]}
           onPress={onPress}
           onPressIn={() => setIsPressed(false)}
@@ -172,29 +178,63 @@ const ChatItem: React.FC<ChatItemProps> = ({
               showGroupImage ? (
                 <Image
                   source={groupAvatarSource!}
-                  style={[styles.avatar, item.isPinned && styles.pinnedAvatar]}
+                  style={[
+                    styles.avatar,
+                    { backgroundColor: colors.skeleton },
+                    item.isPinned && {
+                      borderWidth: 2,
+                      borderColor: colors.primary,
+                    },
+                  ]}
                   onError={() => setAvatarError(true)}
                 />
               ) : (
-                <View style={[styles.avatar, styles.groupAvatar]}>
-                  <Ionicons name="people" size={24} color={ACCENT_COLOR} />
+                <View
+                  style={[
+                    styles.avatar,
+                    styles.groupAvatar,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(167, 139, 250, 0.15)"
+                        : "#F5F3FF",
+                      borderColor: isDark
+                        ? "rgba(167, 139, 250, 0.3)"
+                        : "#EDE9FE",
+                    },
+                  ]}
+                >
+                  <Ionicons name="people" size={24} color={colors.primary} />
                 </View>
               )
             ) : (
               <Image
                 source={getDirectAvatarSource()}
-                style={[styles.avatar, item.isPinned && styles.pinnedAvatar]}
+                style={[
+                  styles.avatar,
+                  { backgroundColor: colors.skeleton },
+                  item.isPinned && {
+                    borderWidth: 2,
+                    borderColor: colors.primary,
+                  },
+                ]}
                 onError={() => setAvatarError(true)}
               />
             )}
 
             {isMuted && (
-              <View style={styles.mutedBadge}>
+              <View style={[styles.mutedBadge, { borderColor: colors.card }]}>
                 <Ionicons name="volume-mute" size={12} color="#fff" />
               </View>
             )}
 
-            {isUnread && <View style={styles.unreadDot} />}
+            {isUnread && (
+              <View
+                style={[
+                  styles.unreadDot,
+                  { backgroundColor: colors.primary, borderColor: colors.card },
+                ]}
+              />
+            )}
           </View>
 
           {/* Content */}
@@ -205,7 +245,7 @@ const ChatItem: React.FC<ChatItemProps> = ({
                   <Ionicons
                     name="people-outline"
                     size={14}
-                    color="#8E8E93"
+                    color={colors.textSecondary}
                     style={styles.groupIcon}
                   />
                 )}
@@ -213,13 +253,14 @@ const ChatItem: React.FC<ChatItemProps> = ({
                   <Ionicons
                     name="pin"
                     size={14}
-                    color={ACCENT_COLOR}
+                    color={colors.primary}
                     style={styles.pinIcon}
                   />
                 )}
                 <Text
                   style={[
                     styles.name,
+                    { color: colors.text },
                     isUnread && styles.nameUnread,
                     isGroup && styles.groupName,
                   ]}
@@ -235,22 +276,37 @@ const ChatItem: React.FC<ChatItemProps> = ({
                 <Ionicons
                   name="volume-mute"
                   size={14}
-                  color="#C7C7CC"
+                  color={colors.textMuted}
                   style={styles.muteIcon}
                 />
               )}
               <Text
                 style={[
                   styles.lastMessage,
-                  isUnread && styles.lastMessageUnread,
-                  isMuted && styles.lastMessageMuted,
+                  { color: colors.textSecondary },
+                  isUnread && {
+                    color: colors.text,
+                    fontWeight: "500",
+                    fontFamily: "SofiaSans-Medium",
+                  },
+                  isMuted && { color: colors.textMuted },
                 ]}
                 numberOfLines={1}
               >
                 {getLastMessageText()}
               </Text>
               {item.lastMessage && (
-                <Text style={[styles.time, isUnread && styles.timeUnread]}>
+                <Text
+                  style={[
+                    styles.time,
+                    { color: colors.textSecondary },
+                    isUnread && {
+                      color: colors.primary,
+                      fontWeight: "600",
+                      fontFamily: "SofiaSans-SemiBold",
+                    },
+                  ]}
+                >
                   {formatTime(item.lastMessage.sentAt)}
                 </Text>
               )}
@@ -289,26 +345,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#F0F0F0",
     alignItems: "center",
     width: "100%",
   },
-  rowPressed: { backgroundColor: "rgba(139, 92, 246, 0.04)" },
   avatarContainer: { marginRight: 14, position: "relative" },
   avatar: {
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: "#F0F0F0",
   },
   groupAvatar: {
-    backgroundColor: "#F5F3FF",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1.5,
-    borderColor: "#EDE9FE",
   },
-  pinnedAvatar: { borderWidth: 2, borderColor: ACCENT_COLOR },
   mutedBadge: {
     position: "absolute",
     bottom: 0,
@@ -320,7 +370,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
-    borderColor: "#fff",
   },
   unreadDot: {
     position: "absolute",
@@ -329,9 +378,7 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: ACCENT_COLOR,
     borderWidth: 2,
-    borderColor: "#fff",
   },
   info: { flex: 1, justifyContent: "center" },
   headerRow: {
@@ -346,7 +393,6 @@ const styles = StyleSheet.create({
   name: {
     fontSize: 16,
     fontWeight: "500",
-    color: "#000",
     fontFamily: "SofiaSans-Medium",
     flex: 1,
   },
@@ -357,24 +403,11 @@ const styles = StyleSheet.create({
   lastMessage: {
     flex: 1,
     fontSize: 14,
-    color: "#8E8E93",
     fontFamily: "SofiaSans-Regular",
   },
-  lastMessageUnread: {
-    color: "#000",
-    fontWeight: "500",
-    fontFamily: "SofiaSans-Medium",
-  },
-  lastMessageMuted: { color: "#C7C7CC" },
   time: {
     fontSize: 12,
-    color: "#8E8E93",
     marginLeft: 8,
     fontFamily: "SofiaSans-Regular",
-  },
-  timeUnread: {
-    color: ACCENT_COLOR,
-    fontWeight: "600",
-    fontFamily: "SofiaSans-SemiBold",
   },
 });

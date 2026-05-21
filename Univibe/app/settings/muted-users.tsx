@@ -17,6 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useAuth } from "../../lib/contexts/AuthContext";
+import { useTheme } from "../../lib/contexts/ThemeContext";
 import {
   getMutedUsers,
   toggleMuteUser,
@@ -35,6 +36,7 @@ interface MutedUser {
 export default function MutedUsersScreen() {
   const router = useRouter();
   const { token } = useAuth();
+  const { colors } = useTheme();
   const [mutedUsers, setMutedUsers] = useState<MutedUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -112,7 +114,6 @@ export default function MutedUsersScreen() {
     setHasMore(true);
     await loadMutedUsers(1, false);
   };
-
   const loadMore = () => {
     if (!loadingMore && hasMore && !loading) loadMutedUsers(page + 1, true);
   };
@@ -151,7 +152,9 @@ export default function MutedUsersScreen() {
     const initial = displayName.charAt(0).toUpperCase();
     return (
       <TouchableOpacity
-        style={styles.userCard}
+        style={[
+          styles.userCard,
+        ]}
         onPress={() => router.push(`/profile/${item._id}`)}
         activeOpacity={0.7}
       >
@@ -159,48 +162,96 @@ export default function MutedUsersScreen() {
           {item.profilePicture ? (
             <Image
               source={{ uri: getFullImageUrl(item.profilePicture) }}
-              style={styles.avatar}
+              style={[styles.avatar, { backgroundColor: colors.skeleton }]}
             />
           ) : (
-            <View style={[styles.avatar, styles.avatarPlaceholder]}>
+            <View
+              style={[
+                styles.avatar,
+                styles.avatarPlaceholder,
+                { backgroundColor: colors.primary },
+              ]}
+            >
               <Text style={styles.avatarText}>{initial}</Text>
             </View>
           )}
           <View style={styles.userDetails}>
-            <Text style={styles.userName}>{displayName}</Text>
-            <Text style={styles.userUsername}>@{item.username}</Text>
+            <Text style={[styles.userName, { color: colors.text }]}>
+              {displayName}
+            </Text>
+            <Text
+              style={[styles.userUsername, { color: colors.textSecondary }]}
+            >
+              @{item.username}
+            </Text>
           </View>
         </View>
         <TouchableOpacity
-          style={styles.unmuteButton}
+          style={[styles.unmuteButton, { backgroundColor: colors.skeleton }]}
           onPress={(e) => {
             e.stopPropagation();
             handleUnmute(item._id, displayName);
           }}
         >
-          <Ionicons name="volume-high-outline" size={20} color="#8b5cf6" />
-          <Text style={styles.unmuteText}>Unmute</Text>
+          <Ionicons
+            name="volume-high-outline"
+            size={20}
+            color={colors.primary}
+          />
+          <Text style={[styles.unmuteText, { color: colors.primary }]}>
+            Unmute
+          </Text>
         </TouchableOpacity>
       </TouchableOpacity>
     );
   };
 
+  const renderEmptyState = () => (
+    <View style={styles.emptyContainer}>
+      <Ionicons name="volume-off-outline" size={64} color={colors.textMuted} />
+      <Text style={[styles.emptyTitle, { color: colors.text }]}>
+        No muted users
+      </Text>
+      <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+        Users you mute will appear here
+      </Text>
+      <TouchableOpacity
+        style={[styles.browseButton, { backgroundColor: colors.primary }]}
+        onPress={() => router.push("/(tabs)/feed")}
+      >
+        <Text style={styles.browseButtonText}>Browse Feed</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      <View style={styles.header}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      edges={["top"]}
+    >
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: colors.background, borderBottomColor: colors.border },
+        ]}
+      >
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
         >
-          <Ionicons name="arrow-back" size={24} color="#111827" />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Muted Users</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>
+          Muted Users
+        </Text>
         <View style={{ width: 40 }} />
       </View>
       {loading && !refreshing ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8b5cf6" />
-          <Text style={styles.loadingText}>Loading muted users...</Text>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+            Loading muted users...
+          </Text>
         </View>
       ) : (
         <FlatList
@@ -208,26 +259,19 @@ export default function MutedUsersScreen() {
           keyExtractor={(item) => item._id}
           renderItem={renderUser}
           contentContainerStyle={styles.listContent}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="volume-off-outline" size={64} color="#d1d5db" />
-              <Text style={styles.emptyTitle}>No muted users</Text>
-              <Text style={styles.emptyText}>
-                Users you mute will appear here
-              </Text>
-              <TouchableOpacity
-                style={styles.browseButton}
-                onPress={() => router.push("/(tabs)/feed")}
-              >
-                <Text style={styles.browseButtonText}>Browse Feed</Text>
-              </TouchableOpacity>
-            </View>
-          }
+          ListEmptyComponent={renderEmptyState}
           ListFooterComponent={
             loadingMore ? (
               <View style={styles.footerLoader}>
-                <ActivityIndicator size="small" color="#8b5cf6" />
-                <Text style={styles.loadingMoreText}>Loading more...</Text>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text
+                  style={[
+                    styles.loadingMoreText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Loading more...
+                </Text>
               </View>
             ) : null
           }
@@ -237,8 +281,9 @@ export default function MutedUsersScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor="#8b5cf6"
-              colors={["#8b5cf6"]}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+              progressBackgroundColor={colors.card}
             />
           }
         />
@@ -253,7 +298,7 @@ export default function MutedUsersScreen() {
                   ? "#10b981"
                   : infoType === "error"
                     ? "#ef4444"
-                    : "#8b5cf6",
+                    : colors.primary,
               transform: [{ translateY: slideAnim }],
             },
           ]}
@@ -277,19 +322,21 @@ export default function MutedUsersScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f9fafb" },
+  container: { flex: 1 },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: "#ffffff",
     borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
   },
   backButton: { padding: 8, marginLeft: -8 },
-  headerTitle: { fontSize: 18, fontWeight: "600", color: "#111827" },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
+  },
   listContent: { flexGrow: 1, paddingBottom: 20 },
   userCard: {
     flexDirection: "row",
@@ -299,7 +346,6 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginVertical: 8,
     padding: 16,
-    shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
@@ -307,30 +353,34 @@ const styles = StyleSheet.create({
   },
   userInfo: { flexDirection: "row", alignItems: "center", flex: 1 },
   avatar: { width: 50, height: 50, borderRadius: 25, marginRight: 12 },
-  avatarPlaceholder: {
-    backgroundColor: "#8b5cf6",
-    alignItems: "center",
-    justifyContent: "center",
+  avatarPlaceholder: { alignItems: "center", justifyContent: "center" },
+  avatarText: {
+    color: "#ffffff",
+    fontSize: 20,
+    fontWeight: "600",
+    fontFamily: "SofiaSans-Bold",
   },
-  avatarText: { color: "#ffffff", fontSize: 20, fontWeight: "600" },
   userDetails: { flex: 1 },
   userName: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#111827",
     marginBottom: 2,
+    fontFamily: "SofiaSans-Bold",
   },
-  userUsername: { fontSize: 14, color: "#6b7280" },
+  userUsername: { fontSize: 14, fontFamily: "SofiaSans-Regular" },
   unmuteButton: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 8,
     paddingHorizontal: 16,
-    backgroundColor: "#f3f4f6",
     borderRadius: 20,
     gap: 8,
   },
-  unmuteText: { color: "#8b5cf6", fontSize: 14, fontWeight: "500" },
+  unmuteText: {
+    fontSize: 14,
+    fontWeight: "500",
+    fontFamily: "SofiaSans-Regular",
+  },
   emptyContainer: {
     flex: 1,
     alignItems: "center",
@@ -340,25 +390,29 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#374151",
     marginTop: 16,
+    fontFamily: "SofiaSans-Bold",
   },
   emptyText: {
     fontSize: 14,
-    color: "#6b7280",
     marginTop: 8,
     textAlign: "center",
+    fontFamily: "SofiaSans-Regular",
   },
   browseButton: {
     marginTop: 20,
     paddingHorizontal: 20,
     paddingVertical: 10,
-    backgroundColor: "#8b5cf6",
     borderRadius: 20,
   },
-  browseButtonText: { color: "#ffffff", fontSize: 14, fontWeight: "500" },
+  browseButtonText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "500",
+    fontFamily: "SofiaSans-Regular",
+  },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
-  loadingText: { marginTop: 12, fontSize: 14, color: "#6b7280" },
+  loadingText: { marginTop: 12, fontSize: 14, fontFamily: "SofiaSans-Regular" },
   footerLoader: {
     flexDirection: "row",
     justifyContent: "center",
@@ -366,7 +420,7 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
     gap: 8,
   },
-  loadingMoreText: { fontSize: 12, color: "#6b7280" },
+  loadingMoreText: { fontSize: 12, fontFamily: "SofiaSans-Regular" },
   infoBar: {
     position: "absolute",
     bottom: 50,
@@ -393,5 +447,6 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: "left",
     lineHeight: 20,
+    fontFamily: "SofiaSans-Regular",
   },
 });

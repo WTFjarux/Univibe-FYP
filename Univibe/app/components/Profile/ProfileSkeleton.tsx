@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef } from "react";
 import { View, StyleSheet, ScrollView, Animated } from "react-native";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 
 // Props interface for the skeleton
 interface ProfileSkeletonProps {
@@ -11,6 +12,7 @@ interface ProfileSkeletonProps {
 // Individual Post Skeleton Component
 const PostSkeleton = () => {
   const shimmerValue = useRef(new Animated.Value(0)).current;
+  const { colors } = useTheme();
 
   useEffect(() => {
     const animation = Animated.loop(
@@ -37,14 +39,21 @@ const PostSkeleton = () => {
   });
 
   const SkeletonBlock = ({ style }: { style: any }) => (
-    <Animated.View style={[style, { opacity, backgroundColor: "#e5e7eb" }]} />
+    <Animated.View
+      style={[style, { opacity, backgroundColor: colors.skeleton }]}
+    />
   );
 
   return (
-    <View style={styles.postCard}>
+    <View style={[styles.postCard, { backgroundColor: colors.card }]}>
       {/* Post Header */}
       <View style={styles.postHeader}>
-        <SkeletonBlock style={styles.postAvatar} />
+        <SkeletonBlock
+          style={[
+            styles.postAvatar,
+            { backgroundColor: colors.skeletonHighlight },
+          ]}
+        />
         <View style={styles.postUserInfo}>
           <SkeletonBlock style={styles.postUserName} />
           <SkeletonBlock style={styles.postUserHandle} />
@@ -62,7 +71,7 @@ const PostSkeleton = () => {
       <SkeletonBlock style={styles.postImage} />
 
       {/* Post Actions */}
-      <View style={styles.postActions}>
+      <View style={[styles.postActions, { borderTopColor: colors.border }]}>
         <SkeletonBlock style={styles.actionButton} />
         <SkeletonBlock style={styles.actionButton} />
         <SkeletonBlock style={styles.actionButton} />
@@ -76,6 +85,7 @@ export default function ProfileSkeleton({
   isOwnProfile = false,
 }: ProfileSkeletonProps) {
   const shimmerValue = useRef(new Animated.Value(0)).current;
+  const { colors } = useTheme();
 
   useEffect(() => {
     const animation = Animated.loop(
@@ -102,13 +112,20 @@ export default function ProfileSkeleton({
   });
 
   const SkeletonBlock = ({ style }: { style: any }) => (
-    <Animated.View style={[style, { opacity, backgroundColor: "#e5e7eb" }]} />
+    <Animated.View
+      style={[style, { opacity, backgroundColor: colors.skeleton }]}
+    />
   );
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header with back button and name */}
-      <View style={styles.header}>
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: colors.card, borderBottomColor: colors.border },
+        ]}
+      >
         <SkeletonBlock style={styles.backButton} />
         <SkeletonBlock style={styles.headerTitleSkeleton} />
         <View style={styles.headerSpacer} />
@@ -121,7 +138,9 @@ export default function ProfileSkeleton({
         {/* Profile Picture and Name Section */}
         <View style={styles.profileImageNameContainer}>
           <View style={styles.profileImageWrapper}>
-            <SkeletonBlock style={styles.profileImage} />
+            <SkeletonBlock
+              style={[styles.profileImage, { borderColor: colors.card }]}
+            />
           </View>
           <View style={styles.nameUsernameContainer}>
             <SkeletonBlock style={styles.fullNameSkeleton} />
@@ -144,7 +163,7 @@ export default function ProfileSkeleton({
         )}
 
         {/* About Section */}
-        <View style={styles.aboutSection}>
+        <View style={[styles.aboutSection, { backgroundColor: colors.card }]}>
           <SkeletonBlock style={styles.sectionTitle} />
           <View style={styles.infoItem}>
             <SkeletonBlock style={styles.infoIcon} />
@@ -170,7 +189,7 @@ export default function ProfileSkeleton({
         </View>
 
         {/* Activity Section */}
-        <View style={styles.statsSection}>
+        <View style={[styles.statsSection, { backgroundColor: colors.card }]}>
           <SkeletonBlock style={styles.sectionTitle} />
           <View style={styles.statsContainer}>
             {[1, 2, 3].map((i) => (

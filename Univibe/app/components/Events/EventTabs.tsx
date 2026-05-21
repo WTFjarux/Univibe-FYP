@@ -2,6 +2,7 @@
 import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 
 export type TabType = "details" | "attendees" | "interested";
 
@@ -18,6 +19,8 @@ export const EventTabs = ({
   rsvpCount,
   interestedCount,
 }: EventTabsProps) => {
+  const { colors } = useTheme();
+
   const tabs = [
     {
       key: "details" as const,
@@ -37,22 +40,34 @@ export const EventTabs = ({
   ];
 
   return (
-    <View style={styles.tabsContainer}>
+    <View style={[styles.tabsContainer, { borderBottomColor: colors.border }]}>
       {tabs.map((tab) => (
         <TouchableOpacity
           key={tab.key}
-          style={[styles.tab, activeTab === tab.key && styles.tabActive]}
+          style={[
+            styles.tab,
+            activeTab === tab.key && [
+              styles.tabActive,
+              { borderBottomColor: colors.primary },
+            ],
+          ]}
           onPress={() => onTabChange(tab.key)}
         >
           <Ionicons
             name={tab.icon as any}
             size={20}
-            color={activeTab === tab.key ? "#8b5cf6" : "#6b7280"}
+            color={
+              activeTab === tab.key ? colors.primary : colors.textSecondary
+            }
           />
           <Text
             style={[
               styles.tabText,
-              activeTab === tab.key && styles.tabTextActive,
+              { color: colors.textSecondary },
+              activeTab === tab.key && [
+                styles.tabTextActive,
+                { color: colors.primary },
+              ],
             ]}
           >
             {tab.label}
@@ -68,7 +83,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     marginBottom: 20,
     borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
     gap: 20,
   },
   tab: {
@@ -79,18 +93,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: "transparent",
   },
-  tabActive: {
-    borderBottomColor: "#8b5cf6",
-  },
-  tabText: {
-    fontSize: 15,
-    color: "#6b7280",
-    fontFamily: "SofiaSans-Regular",
-  },
-  tabTextActive: {
-    color: "#8b5cf6",
-    fontFamily: "SofiaSans-Bold",
-  },
+  tabActive: {},
+  tabText: { fontSize: 15, fontFamily: "SofiaSans-Regular" },
+  tabTextActive: { fontFamily: "SofiaSans-Bold" },
 });
 
 export default EventTabs;

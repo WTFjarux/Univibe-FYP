@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { View, Text, StyleSheet, Animated, Dimensions } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useTheme } from "@/lib/contexts/ThemeContext";
 
 const { width: screenWidth } = Dimensions.get("window");
 
@@ -22,6 +23,7 @@ const SkeletonBlock: React.FC<SkeletonBlockProps> = ({
   style,
 }) => {
   const shimmerAnim = useRef(new Animated.Value(0)).current;
+  const { colors } = useTheme();
 
   useEffect(() => {
     const animation = Animated.loop(
@@ -54,7 +56,7 @@ const SkeletonBlock: React.FC<SkeletonBlockProps> = ({
           width: width as any,
           height,
           borderRadius,
-          backgroundColor: "#E5E7EB",
+          backgroundColor: colors.skeleton,
           overflow: "hidden",
         },
         style,
@@ -71,7 +73,7 @@ const SkeletonBlock: React.FC<SkeletonBlockProps> = ({
           style={{
             width: "100%",
             height: "100%",
-            backgroundColor: "#F3F4F6",
+            backgroundColor: colors.skeletonHighlight,
             opacity: 0.6,
           }}
         />
@@ -85,12 +87,21 @@ const SkeletonBlock: React.FC<SkeletonBlockProps> = ({
 // ============================================
 
 const PostDetailSkeleton: React.FC = () => {
+  const { colors } = useTheme();
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       {/* Header */}
-      <View style={styles.header}>
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: colors.card, borderBottomColor: colors.border },
+        ]}
+      >
         <View style={styles.headerPlaceholder} />
-        <Text style={styles.headerTitle}>Post</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Post</Text>
         <View style={styles.headerPlaceholder} />
       </View>
 
@@ -134,7 +145,7 @@ const PostDetailSkeleton: React.FC = () => {
         </View>
 
         {/* Divider */}
-        <View style={styles.divider} />
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
         {/* Comments section */}
         <SkeletonBlock
@@ -177,7 +188,7 @@ const PostDetailSkeleton: React.FC = () => {
         ))}
 
         {/* Comment input placeholder */}
-        <View style={styles.inputSkeleton}>
+        <View style={[styles.inputSkeleton, { borderTopColor: colors.border }]}>
           <SkeletonBlock
             width={32}
             height={32}

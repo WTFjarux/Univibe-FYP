@@ -12,6 +12,7 @@ import {
   StyleSheet,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../../../../lib/contexts/ThemeContext";
 import UserItem from "../ChatList/UserItem";
 import { API_BASE_URL } from "../../../../constants/ipConstants";
 
@@ -42,6 +43,7 @@ export default function NewChatModal({
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
+  const { colors } = useTheme();
 
   useEffect(() => {
     if (!visible) {
@@ -117,24 +119,42 @@ export default function NewChatModal({
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <View style={styles.modalContainer}>
-        <View style={styles.modalHeader}>
+      <View
+        style={[styles.modalContainer, { backgroundColor: colors.background }]}
+      >
+        <View
+          style={[
+            styles.modalHeader,
+            { backgroundColor: colors.card, borderBottomColor: colors.border },
+          ]}
+        >
           <TouchableOpacity
             onPress={onClose}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Ionicons name="close" size={28} color="#007AFF" />
+            <Ionicons name="close" size={28} color={colors.primary} />
           </TouchableOpacity>
-          <Text style={styles.modalTitle}>New Chat</Text>
+          <Text style={[styles.modalTitle, { color: colors.text }]}>
+            New Chat
+          </Text>
           <View style={{ width: 28 }} />
         </View>
 
-        <View style={styles.modalSearchContainer}>
-          <Ionicons name="search-outline" size={20} color="#999" />
+        <View
+          style={[
+            styles.modalSearchContainer,
+            { backgroundColor: colors.skeleton },
+          ]}
+        >
+          <Ionicons
+            name="search-outline"
+            size={20}
+            color={colors.textSecondary}
+          />
           <TextInput
-            style={styles.modalSearchInput}
+            style={[styles.modalSearchInput, { color: colors.text }]}
             placeholder="Search by name or username..."
-            placeholderTextColor="#999"
+            placeholderTextColor={colors.textMuted}
             value={searchQuery}
             onChangeText={handleSearchChange}
             autoFocus
@@ -143,7 +163,11 @@ export default function NewChatModal({
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => handleSearchChange("")}>
-              <Ionicons name="close-circle" size={20} color="#999" />
+              <Ionicons
+                name="close-circle"
+                size={20}
+                color={colors.textSecondary}
+              />
             </TouchableOpacity>
           )}
         </View>
@@ -152,7 +176,7 @@ export default function NewChatModal({
           <ActivityIndicator
             style={styles.loader}
             size="large"
-            color="#007AFF"
+            color={colors.primary}
           />
         ) : (
           <FlatList
@@ -164,14 +188,28 @@ export default function NewChatModal({
             keyboardShouldPersistTaps="handled"
             ListEmptyComponent={
               <View style={styles.emptyUsersContainer}>
-                <Ionicons name="people-outline" size={48} color="#C7C7CC" />
-                <Text style={styles.emptyUsersText}>
+                <Ionicons
+                  name="people-outline"
+                  size={48}
+                  color={colors.textMuted}
+                />
+                <Text
+                  style={[
+                    styles.emptyUsersText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
                   {searchQuery.length > 0
                     ? "No users found"
                     : "Search for users to start a chat"}
                 </Text>
                 {searchQuery.length === 0 && (
-                  <Text style={styles.emptyUsersSubtext}>
+                  <Text
+                    style={[
+                      styles.emptyUsersSubtext,
+                      { color: colors.textMuted },
+                    ]}
+                  >
                     Enter a name or username to find people
                   </Text>
                 )}
@@ -187,7 +225,6 @@ export default function NewChatModal({
 const styles = StyleSheet.create({
   modalContainer: {
     flex: 1,
-    backgroundColor: "#fff",
   },
   modalHeader: {
     flexDirection: "row",
@@ -196,19 +233,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#e5e5ea",
-    backgroundColor: "#fff",
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#000",
     fontFamily: "SofiaSans-Bold",
   },
   modalSearchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#f0f0f0",
     marginHorizontal: 16,
     marginTop: 16,
     marginBottom: 8,
@@ -232,13 +265,11 @@ const styles = StyleSheet.create({
   },
   emptyUsersText: {
     fontSize: 16,
-    color: "#999",
     marginTop: 16,
     fontFamily: "SofiaSans-Regular",
   },
   emptyUsersSubtext: {
     fontSize: 14,
-    color: "#C7C7CC",
     marginTop: 8,
     fontFamily: "SofiaSans-Regular",
   },

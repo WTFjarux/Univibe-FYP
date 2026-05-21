@@ -1,6 +1,6 @@
 // app/components/CommentOptionsModal.tsx
 
-import React from "react";
+import React, { useMemo } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "@/lib/contexts/ThemeContext";
 
 interface CommentOptionsModalProps {
   visible: boolean;
@@ -30,23 +31,12 @@ interface CommentOptionsModalProps {
 }
 
 /**
- * CommentOptionsModal - Pure Presentational Component
- *
- * Responsibilities:
- * - Display options for a comment
- * - Fire callbacks when user selects an option
- *
- * DOES NOT:
- * - Manage ReportModal visibility
- * - Handle report submission directly
- * - Contain timeout chains
- * - Render nested modals
+ * CommentOptionsModal - Pure Presentational Component with Transparent Overlay
  */
 const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
   visible,
   onClose,
   commentId,
-  postId,
   isOwnComment,
   isPostOwner,
   isReported = false,
@@ -58,6 +48,42 @@ const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
   onHide,
   onShowInfoBar,
 }) => {
+  const { colors } = useTheme();
+
+  // ===== Dynamic Style Matrix =====
+  const dynamicStyles = useMemo(
+    () => ({
+      modalContent: {
+        backgroundColor: colors.card,
+        // Added a subtle shadow so the sheet stands out cleanly against the transparent background
+        ...Platform.select({
+          ios: {
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: -3 },
+            shadowOpacity: 0.1,
+            shadowRadius: 5,
+          },
+          android: {
+            elevation: 10,
+          },
+        }),
+      },
+      optionText: {
+        color: colors.text,
+      },
+      divider: {
+        backgroundColor: colors.border,
+      },
+      cancelButton: {
+        borderTopColor: colors.border,
+      },
+      cancelButtonText: {
+        color: colors.textSecondary,
+      },
+    }),
+    [colors],
+  );
+
   const handleReply = () => {
     onClose();
     requestAnimationFrame(() => {
@@ -116,7 +142,6 @@ const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
   };
 
   const handleReport = () => {
-    // If already reported, show info and close
     if (isReported) {
       if (onShowInfoBar) {
         onShowInfoBar("You have already reported this comment", "info");
@@ -125,10 +150,7 @@ const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
       return;
     }
 
-    // Close this modal - parent will handle opening ReportModal
     onClose();
-
-    // Tell parent we want to report this comment
     requestAnimationFrame(() => {
       if (onReport) onReport(commentId);
     });
@@ -147,27 +169,33 @@ const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
         activeOpacity={1}
         onPress={onClose}
       >
-        <View style={styles.modalContent}>
-          {/* Reply - Available for everyone */}
+        <View style={[styles.modalContent, dynamicStyles.modalContent]}>
+          {/* Reply */}
           <TouchableOpacity style={styles.optionItem} onPress={handleReply}>
-            <Ionicons name="chatbubble-outline" size={24} color="#374151" />
-            <Text style={styles.optionText}>Reply</Text>
+            <Ionicons name="chatbubble-outline" size={24} color={colors.icon} />
+            <Text style={[styles.optionText, dynamicStyles.optionText]}>
+              Reply
+            </Text>
           </TouchableOpacity>
 
-          {/* Share - Available for everyone */}
+          {/* Share */}
           <TouchableOpacity style={styles.optionItem} onPress={handleShare}>
-            <Ionicons name="share-outline" size={24} color="#374151" />
-            <Text style={styles.optionText}>Share</Text>
+            <Ionicons name="share-outline" size={24} color={colors.icon} />
+            <Text style={[styles.optionText, dynamicStyles.optionText]}>
+              Share
+            </Text>
           </TouchableOpacity>
 
           {/* Comment Owner Specific Options */}
           {isOwnComment ? (
             <>
-              <View style={styles.divider} />
+              <View style={[styles.divider, dynamicStyles.divider]} />
 
               <TouchableOpacity style={styles.optionItem} onPress={handleEdit}>
-                <Ionicons name="pencil-outline" size={24} color="#374151" />
-                <Text style={styles.optionText}>Edit</Text>
+                <Ionicons name="pencil-outline" size={24} color={colors.icon} />
+                <Text style={[styles.optionText, dynamicStyles.optionText]}>
+                  Edit
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -183,11 +211,17 @@ const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
           ) : isPostOwner ? (
             // Post Owner Options (for others' comments)
             <>
-              <View style={styles.divider} />
+              <View style={[styles.divider, dynamicStyles.divider]} />
 
               <TouchableOpacity style={styles.optionItem} onPress={handleHide}>
-                <Ionicons name="eye-off-outline" size={24} color="#374151" />
-                <Text style={styles.optionText}>Hide</Text>
+                <Ionicons
+                  name="eye-off-outline"
+                  size={24}
+                  color={colors.icon}
+                />
+                <Text style={[styles.optionText, dynamicStyles.optionText]}>
+                  Hide
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -207,11 +241,12 @@ const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
                 <Ionicons
                   name={isReported ? "flag" : "flag-outline"}
                   size={24}
-                  color={isReported ? "#ef4444" : "#374151"}
+                  color={isReported ? "#ef4444" : colors.icon}
                 />
                 <Text
                   style={[
                     styles.optionText,
+                    dynamicStyles.optionText,
                     isReported && { color: "#ef4444" },
                   ]}
                 >
@@ -222,7 +257,7 @@ const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
           ) : (
             // Regular User Options (for others' comments)
             <>
-              <View style={styles.divider} />
+              <View style={[styles.divider, dynamicStyles.divider]} />
 
               <TouchableOpacity
                 style={styles.optionItem}
@@ -231,11 +266,12 @@ const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
                 <Ionicons
                   name={isReported ? "flag" : "flag-outline"}
                   size={24}
-                  color={isReported ? "#ef4444" : "#374151"}
+                  color={isReported ? "#ef4444" : colors.icon}
                 />
                 <Text
                   style={[
                     styles.optionText,
+                    dynamicStyles.optionText,
                     isReported && { color: "#ef4444" },
                   ]}
                 >
@@ -246,8 +282,15 @@ const CommentOptionsModal: React.FC<CommentOptionsModalProps> = ({
           )}
 
           {/* Cancel Option */}
-          <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
-            <Text style={styles.cancelButtonText}>Cancel</Text>
+          <TouchableOpacity
+            style={[styles.cancelButton, dynamicStyles.cancelButton]}
+            onPress={onClose}
+          >
+            <Text
+              style={[styles.cancelButtonText, dynamicStyles.cancelButtonText]}
+            >
+              Cancel
+            </Text>
           </TouchableOpacity>
         </View>
       </TouchableOpacity>
@@ -259,9 +302,9 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     justifyContent: "flex-end",
+    backgroundColor: "transparent", 
   },
   modalContent: {
-    backgroundColor: "white",
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingBottom: Platform.OS === "ios" ? 34 : 20,
@@ -277,7 +320,6 @@ const styles = StyleSheet.create({
   optionText: {
     fontSize: 16,
     fontFamily: "SofiaSans-Regular",
-    color: "#374151",
     fontWeight: "500",
   },
   deleteText: {
@@ -285,7 +327,6 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: "#f3f4f6",
     marginVertical: 4,
     marginHorizontal: 20,
   },
@@ -294,12 +335,10 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: "center",
     borderTopWidth: 1,
-    borderTopColor: "#f3f4f6",
   },
   cancelButtonText: {
     fontSize: 16,
     fontFamily: "SofiaSans-Regular",
-    color: "#6b7280",
     fontWeight: "600",
   },
 });

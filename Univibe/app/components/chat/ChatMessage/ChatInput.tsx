@@ -27,6 +27,7 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as Location from "expo-location";
+import { useTheme } from "../../../../lib/contexts/ThemeContext";
 import { API_BASE_URL } from "../../../../constants/ipConstants";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -83,6 +84,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
   const [showRecordingUI, setShowRecordingUI] = useState(false);
   const [showAttachmentSheet, setShowAttachmentSheet] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  const { colors } = useTheme();
 
   useImperativeHandle(ref, () => ({
     focus: () => inputRef.current?.focus(),
@@ -90,7 +92,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
     clear: () => setInputText(""),
   }));
 
-  // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -105,7 +106,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // Recording animations
   useEffect(() => {
     if (showRecordingUI && isRecording) {
       Animated.loop(
@@ -176,7 +176,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
     }
   }, [isRecording]);
 
-  // Attachment sheet animations
   const openAttachmentSheet = useCallback(() => {
     setShowAttachmentSheet(true);
     Animated.spring(attachSheetAnim, {
@@ -206,7 +205,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
     setInputText("");
   };
 
-  // 🔴 Pick multiple images
   const pickImages = async () => {
     closeAttachmentSheet();
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -215,7 +213,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
       allowsMultipleSelection: true,
       selectionLimit: 5,
     });
-
     if (!result.canceled && result.assets.length > 0) {
       const attachments: AttachmentData[] = result.assets.map((asset) => ({
         type: "image" as const,
@@ -228,7 +225,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
     }
   };
 
-  // 🔴 Take photo
   const takePhoto = async () => {
     closeAttachmentSheet();
     const permission = await ImagePicker.requestCameraPermissionsAsync();
@@ -251,7 +247,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
     }
   };
 
-  // 🔴 Pick video
   const pickVideo = async () => {
     closeAttachmentSheet();
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -274,7 +269,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
     }
   };
 
-  // 🔴 Pick documents (multiple)
   const pickDocuments = async () => {
     closeAttachmentSheet();
     const result = await DocumentPicker.getDocumentAsync({
@@ -282,7 +276,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
       copyToCacheDirectory: true,
       multiple: true,
     });
-
     if (!result.canceled && result.assets && result.assets.length > 0) {
       const attachments: AttachmentData[] = result.assets.map((asset) => ({
         type: "document" as const,
@@ -295,7 +288,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
     }
   };
 
-  // 🔴 Share location
   const shareLocation = async () => {
     closeAttachmentSheet();
     const permission = await Location.requestForegroundPermissionsAsync();
@@ -318,7 +310,6 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
     }
   };
 
-  // Recording handlers
   const handleStartRecording = async () => {
     if (uploading) return;
     if (Platform.OS === "ios")
@@ -386,17 +377,17 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
 
   return (
     <View>
-      {/* Transparent backdrop */}
       {showAttachmentSheet && (
         <Pressable style={styles.backdrop} onPress={closeAttachmentSheet} />
       )}
 
-      {/* Attachment Sheet */}
       {showAttachmentSheet && (
         <Animated.View
           style={[
             styles.attachmentSheet,
             {
+              backgroundColor: colors.card,
+              borderTopColor: colors.border,
               transform: [
                 {
                   translateY: attachSheetAnim.interpolate({
@@ -429,19 +420,30 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
                     color={option.color}
                   />
                 </View>
-                <Text style={styles.attachmentLabel}>{option.label}</Text>
+                <Text
+                  style={[
+                    styles.attachmentLabel,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  {option.label}
+                </Text>
               </TouchableOpacity>
             ))}
           </View>
         </Animated.View>
       )}
 
-      {/* Normal or Recording UI */}
       {showRecordingUI ? (
         <Animated.View
           style={[
             styles.recordingArea,
-            { opacity: fadeAnim, transform: [{ scale: scaleAnim }] },
+            {
+              backgroundColor: colors.card,
+              borderTopColor: colors.border,
+              opacity: fadeAnim,
+              transform: [{ scale: scaleAnim }],
+            },
           ]}
         >
           <View style={styles.recordingContainer}>
@@ -451,10 +453,19 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
               disabled={uploading}
               activeOpacity={0.7}
             >
-              <Ionicons name="close" size={28} color="#8E8E93" />
-              <Text style={styles.cancelText}>Cancel</Text>
+              <Ionicons name="close" size={28} color={colors.textSecondary} />
+              <Text
+                style={[styles.cancelText, { color: colors.textSecondary }]}
+              >
+                Cancel
+              </Text>
             </TouchableOpacity>
-            <View style={styles.recordingIndicator}>
+            <View
+              style={[
+                styles.recordingIndicator,
+                { backgroundColor: colors.background },
+              ]}
+            >
               <Animated.View
                 style={[
                   styles.recordingDot,
@@ -468,6 +479,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
             <TouchableOpacity
               style={[
                 styles.sendRecordingButton,
+                { backgroundColor: colors.primary },
                 uploading && styles.disabledButton,
               ]}
               onPress={handleSendRecording}
@@ -508,27 +520,43 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
           </View>
         </Animated.View>
       ) : (
-        <View style={styles.inputArea}>
+        <View
+          style={[
+            styles.inputArea,
+            { backgroundColor: colors.card, borderTopColor: colors.border },
+          ]}
+        >
           <View style={styles.inputContainer}>
             <TouchableOpacity
-              style={styles.attachButton}
+              style={[
+                styles.attachButton,
+                { backgroundColor: colors.skeleton },
+              ]}
               onPress={toggleAttachmentSheet}
               activeOpacity={0.7}
             >
               <Ionicons
                 name={showAttachmentSheet ? "close" : "add"}
                 size={24}
-                color={showAttachmentSheet ? "#FF3B30" : "#8B5CF6"}
+                color={showAttachmentSheet ? "#FF3B30" : colors.primary}
               />
             </TouchableOpacity>
-            <View style={styles.inputWrapper}>
+            <View
+              style={[
+                styles.inputWrapper,
+                {
+                  backgroundColor: colors.background,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
               <TextInput
                 ref={inputRef}
-                style={styles.input}
+                style={[styles.input, { color: colors.text }]}
                 value={inputText}
                 onChangeText={setInputText}
                 placeholder="Message..."
-                placeholderTextColor="#999"
+                placeholderTextColor={colors.textMuted}
                 multiline
                 editable={!uploading}
               />
@@ -537,6 +565,7 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
               <TouchableOpacity
                 style={[
                   styles.sendButton,
+                  { backgroundColor: colors.primary },
                   (!socketConnected || uploading) && styles.sendButtonDisabled,
                 ]}
                 onPress={handleSend}
@@ -551,12 +580,16 @@ const ChatInput = forwardRef<ChatInputRef, ChatInputProps>((props, ref) => {
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
-                style={[styles.voiceButton, uploading && styles.disabledButton]}
+                style={[
+                  styles.voiceButton,
+                  { backgroundColor: colors.skeleton },
+                  uploading && styles.disabledButton,
+                ]}
                 onPress={handleStartRecording}
                 disabled={uploading || !socketConnected}
                 activeOpacity={0.7}
               >
-                <Ionicons name="mic-outline" size={24} color="#007AFF" />
+                <Ionicons name="mic-outline" size={24} color={colors.primary} />
               </TouchableOpacity>
             )}
           </View>
@@ -579,12 +612,7 @@ const styles = StyleSheet.create({
     height: SCREEN_HEIGHT * 3,
     zIndex: 5,
   },
-  inputArea: {
-    backgroundColor: "#fff",
-    borderTopWidth: 1,
-    paddingTop: 5,
-    borderTopColor: "#e5e5ea",
-  },
+  inputArea: { borderTopWidth: 1, paddingTop: 5 },
   inputContainer: {
     flexDirection: "row",
     alignItems: "flex-end",
@@ -597,30 +625,21 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#f0f0f0",
     justifyContent: "center",
     alignItems: "center",
   },
-  inputWrapper: {
-    flex: 1,
-    backgroundColor: "#f8f9fa",
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: "#e5e5ea",
-  },
+  inputWrapper: { flex: 1, borderRadius: 24, borderWidth: 1 },
   input: {
     maxHeight: 100,
     paddingHorizontal: 16,
     paddingVertical: 10,
     fontSize: 16,
-    color: "#000",
     fontFamily: "SofiaSans-Regular",
   },
   voiceButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#f0f0f0",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -628,19 +647,12 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#8b5cf6",
     justifyContent: "center",
     alignItems: "center",
   },
   sendButtonDisabled: { backgroundColor: "#ccc" },
   disabledButton: { opacity: 0.5 },
-  attachmentSheet: {
-    backgroundColor: "#f8f9fa",
-    borderTopWidth: 1,
-    borderTopColor: "#e5e5ea",
-    paddingVertical: 16,
-    zIndex: 10,
-  },
+  attachmentSheet: { borderTopWidth: 1, paddingVertical: 16, zIndex: 10 },
   attachmentSheetContent: {
     flexDirection: "row",
     justifyContent: "space-around",
@@ -654,17 +666,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  attachmentLabel: {
-    fontSize: 11,
-    color: "#666",
-    fontFamily: "SofiaSans-Regular",
-  },
-  recordingArea: {
-    backgroundColor: "#fff",
-    borderTopWidth: 1,
-    borderTopColor: "#e5e5ea",
-    paddingBottom: 12,
-  },
+  attachmentLabel: { fontSize: 11, fontFamily: "SofiaSans-Regular" },
+  recordingArea: { borderTopWidth: 1, paddingBottom: 12 },
   recordingContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -674,19 +677,13 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   cancelButton: { alignItems: "center", justifyContent: "center", padding: 8 },
-  cancelText: {
-    fontSize: 12,
-    color: "#8E8E93",
-    marginTop: 4,
-    fontFamily: "SofiaSans-Regular",
-  },
+  cancelText: { fontSize: 12, marginTop: 4, fontFamily: "SofiaSans-Regular" },
   recordingIndicator: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 12,
-    backgroundColor: "#f8f9fa",
     borderRadius: 24,
     paddingVertical: 10,
     paddingHorizontal: 20,
@@ -708,7 +705,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    backgroundColor: "#8b5cf6",
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 24,

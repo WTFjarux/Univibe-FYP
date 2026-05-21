@@ -13,6 +13,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { Event } from "@/lib/services/eventService";
 import { useRouter } from "expo-router";
+import { useTheme } from "@/lib/contexts/ThemeContext";
 import { API_BASE_URL } from "../../../constants/ipConstants";
 import socketService from "@/lib/services/socketService";
 
@@ -28,38 +29,31 @@ export const EventDetailsTab = ({
   onOrganizerPress,
 }: EventDetailsTabProps) => {
   const router = useRouter();
+  const { colors, isDark } = useTheme();
   const [imageError, setImageError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // LOCAL STATE for real-time counts
   const [localRsvpCount, setLocalRsvpCount] = useState(event.rsvpCount ?? 0);
   const [localInterestedCount, setLocalInterestedCount] = useState(
     event.interestedCount ?? 0,
   );
 
-  // Sync with event prop changes
   useEffect(() => {
     setLocalRsvpCount(event.rsvpCount ?? 0);
     setLocalInterestedCount(event.interestedCount ?? 0);
   }, [event.rsvpCount, event.interestedCount]);
 
-  // Listen for socket updates
   useEffect(() => {
     if (!event._id) return;
-
     const handleEventUpdate = (data: any) => {
       if (data.eventId === event._id) {
-        if (data.rsvpCount !== undefined) {
+        if (data.rsvpCount !== undefined)
           setLocalRsvpCount(data.rsvpCount ?? 0);
-        }
-        if (data.interestedCount !== undefined) {
+        if (data.interestedCount !== undefined)
           setLocalInterestedCount(data.interestedCount ?? 0);
-        }
       }
     };
-
     socketService.on("event:updated", handleEventUpdate);
-
     return () => {
       socketService.off("event:updated", handleEventUpdate);
     };
@@ -101,9 +95,7 @@ export const EventDetailsTab = ({
     const profilePic = event.organizer.profilePicture;
     if (profilePic && profilePic !== "" && !imageError) {
       const fullUrl = getFullImageUrl(profilePic);
-      if (fullUrl) {
-        return { uri: fullUrl };
-      }
+      if (fullUrl) return { uri: fullUrl };
     }
     return DEFAULT_AVATAR;
   };
@@ -113,7 +105,6 @@ export const EventDetailsTab = ({
   const handleImageLoad = () => {
     setIsLoading(false);
   };
-
   const handleImageError = () => {
     setImageError(true);
     setIsLoading(false);
@@ -121,24 +112,40 @@ export const EventDetailsTab = ({
 
   return (
     <View style={styles.detailsTab}>
-      <View style={styles.statsContainer}>
+      <View
+        style={[styles.statsContainer, { borderBottomColor: colors.border }]}
+      >
         <View style={styles.stat}>
-          <Ionicons name="people-outline" size={18} color="#8b5cf6" />
-          <Text style={styles.statText}>{localRsvpCount} attending</Text>
+          <Ionicons name="people-outline" size={18} color={colors.primary} />
+          <Text style={[styles.statText, { color: colors.textSecondary }]}>
+            {localRsvpCount} attending
+          </Text>
         </View>
         <View style={styles.stat}>
-          <Ionicons name="heart-outline" size={18} color="#8b5cf6" />
-          <Text style={styles.statText}>{localInterestedCount} interested</Text>
+          <Ionicons name="heart-outline" size={18} color={colors.primary} />
+          <Text style={[styles.statText, { color: colors.textSecondary }]}>
+            {localInterestedCount} interested
+          </Text>
         </View>
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Date & Time</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          Date & Time
+        </Text>
         <View style={styles.detailItem}>
-          <Ionicons name="calendar-outline" size={20} color="#6b7280" />
+          <Ionicons
+            name="calendar-outline"
+            size={20}
+            color={colors.textSecondary}
+          />
           <View style={styles.detailTextContainer}>
-            <Text style={styles.detailText}>{startDate.date}</Text>
-            <Text style={styles.detailSubtext}>
+            <Text style={[styles.detailText, { color: colors.text }]}>
+              {startDate.date}
+            </Text>
+            <Text
+              style={[styles.detailSubtext, { color: colors.textSecondary }]}
+            >
               {startDate.time} - {endDate.time}
             </Text>
           </View>
@@ -146,32 +153,73 @@ export const EventDetailsTab = ({
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Location</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          Location
+        </Text>
         <View style={styles.locationContainer}>
-          <View style={styles.locationIconWrapper}>
-            <Ionicons name="location-outline" size={20} color="#8b5cf6" />
+          <View
+            style={[
+              styles.locationIconWrapper,
+              {
+                backgroundColor: isDark
+                  ? "rgba(167, 139, 250, 0.2)"
+                  : "#f3e8ff",
+              },
+            ]}
+          >
+            <Ionicons
+              name="location-outline"
+              size={20}
+              color={colors.primary}
+            />
           </View>
           <View style={styles.locationTextContainer}>
-            <Text style={styles.locationText}>{event.location}</Text>
+            <Text style={[styles.locationText, { color: colors.text }]}>
+              {event.location}
+            </Text>
             <TouchableOpacity style={styles.getDirectionsButton}>
-              <Text style={styles.getDirectionsText}>Get Directions</Text>
-              <Ionicons name="arrow-forward" size={14} color="#8b5cf6" />
+              <Text
+                style={[styles.getDirectionsText, { color: colors.primary }]}
+              >
+                Get Directions
+              </Text>
+              <Ionicons name="arrow-forward" size={14} color={colors.primary} />
             </TouchableOpacity>
           </View>
         </View>
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Organizer</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          Organizer
+        </Text>
         <TouchableOpacity
           style={styles.organizerContainer}
           onPress={handleOrganizerPress}
           activeOpacity={0.7}
         >
-          <View style={styles.organizerAvatar}>
+          <View
+            style={[
+              styles.organizerAvatar,
+              {
+                backgroundColor: isDark
+                  ? "rgba(167, 139, 250, 0.2)"
+                  : "#f3e8ff",
+              },
+            ]}
+          >
             {isLoading && (
-              <View style={styles.loadingOverlay}>
-                <ActivityIndicator size="small" color="#8b5cf6" />
+              <View
+                style={[
+                  styles.loadingOverlay,
+                  {
+                    backgroundColor: isDark
+                      ? "rgba(30, 30, 30, 0.8)"
+                      : "rgba(243, 232, 255, 0.8)",
+                  },
+                ]}
+              >
+                <ActivityIndicator size="small" color={colors.primary} />
               </View>
             )}
             <Image
@@ -182,10 +230,15 @@ export const EventDetailsTab = ({
             />
           </View>
           <View style={styles.organizerInfo}>
-            <Text style={styles.organizerName}>
+            <Text style={[styles.organizerName, { color: colors.text }]}>
               {(event.organizer as any).fullName || event.organizerName}
             </Text>
-            <Text style={styles.organizerUsername}>
+            <Text
+              style={[
+                styles.organizerUsername,
+                { color: colors.textSecondary },
+              ]}
+            >
               @
               {event.organizer.username ||
                 (event.organizer as any).fullName
@@ -198,17 +251,28 @@ export const EventDetailsTab = ({
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Description</Text>
-        <Text style={styles.description}>{event.description}</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          Description
+        </Text>
+        <Text style={[styles.description, { color: colors.text }]}>
+          {event.description}
+        </Text>
       </View>
 
       {event.tags && event.tags.length > 0 && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Tags</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+            Tags
+          </Text>
           <View style={styles.tagsContainer}>
             {event.tags.map((tag, index) => (
-              <View key={index} style={styles.tag}>
-                <Text style={styles.tagText}>#{tag}</Text>
+              <View
+                key={index}
+                style={[styles.tag, { backgroundColor: colors.skeleton }]}
+              >
+                <Text style={[styles.tagText, { color: colors.textSecondary }]}>
+                  #{tag}
+                </Text>
               </View>
             ))}
           </View>
@@ -217,13 +281,24 @@ export const EventDetailsTab = ({
 
       {event.isOnline && event.meetingLink && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Meeting Link</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+            Meeting Link
+          </Text>
           <TouchableOpacity
-            style={styles.linkButton}
+            style={[
+              styles.linkButton,
+              {
+                backgroundColor: isDark
+                  ? "rgba(167, 139, 250, 0.2)"
+                  : "#f3e8ff",
+              },
+            ]}
             onPress={() => Alert.alert("Meeting Link", event.meetingLink)}
           >
-            <Ionicons name="link-outline" size={20} color="#8b5cf6" />
-            <Text style={styles.linkText}>Join Meeting</Text>
+            <Ionicons name="link-outline" size={20} color={colors.primary} />
+            <Text style={[styles.linkText, { color: colors.primary }]}>
+              Join Meeting
+            </Text>
           </TouchableOpacity>
         </View>
       )}
@@ -232,54 +307,28 @@ export const EventDetailsTab = ({
 };
 
 const styles = StyleSheet.create({
-  detailsTab: {
-    flex: 1,
-  },
+  detailsTab: { flex: 1 },
   statsContainer: {
     flexDirection: "row",
     gap: 24,
     marginBottom: 28,
     paddingBottom: 20,
     borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
   },
-  stat: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  statText: {
-    fontSize: 14,
-    color: "#6b7280",
-    fontFamily: "SofiaSans-Regular",
-  },
-  section: {
-    marginBottom: 28,
-  },
+  stat: { flexDirection: "row", alignItems: "center", gap: 8 },
+  statText: { fontSize: 14, fontFamily: "SofiaSans-Regular" },
+  section: { marginBottom: 28 },
   sectionTitle: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#111827",
     marginBottom: 14,
     fontFamily: "SofiaSans-Bold",
   },
-  detailItem: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 12,
-  },
-  detailTextContainer: {
-    flex: 1,
-  },
-  detailText: {
-    fontSize: 16,
-    color: "#374151",
-    fontFamily: "SofiaSans-Regular",
-    lineHeight: 22,
-  },
+  detailItem: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  detailTextContainer: { flex: 1 },
+  detailText: { fontSize: 16, fontFamily: "SofiaSans-Regular", lineHeight: 22 },
   detailSubtext: {
     fontSize: 14,
-    color: "#6b7280",
     marginTop: 4,
     fontFamily: "SofiaSans-Regular",
   },
@@ -294,17 +343,12 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "#f3e8ff",
     justifyContent: "center",
     alignItems: "center",
   },
-  locationTextContainer: {
-    flex: 1,
-    gap: 8,
-  },
+  locationTextContainer: { flex: 1, gap: 8 },
   locationText: {
     fontSize: 16,
-    color: "#374151",
     fontFamily: "SofiaSans-Regular",
     lineHeight: 22,
   },
@@ -315,11 +359,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     alignSelf: "flex-start",
   },
-  getDirectionsText: {
-    fontSize: 14,
-    color: "#8b5cf6",
-    fontFamily: "SofiaSans-Bold",
-  },
+  getDirectionsText: { fontSize: 14, fontFamily: "SofiaSans-Bold" },
   organizerContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -332,80 +372,47 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: "#f3e8ff",
     justifyContent: "center",
     alignItems: "center",
     overflow: "hidden",
   },
-  organizerAvatarImage: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "cover",
-  },
+  organizerAvatarImage: { width: "100%", height: "100%", resizeMode: "cover" },
   loadingOverlay: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(243, 232, 255, 0.8)",
     justifyContent: "center",
     alignItems: "center",
     zIndex: 1,
   },
-  organizerInfo: {
-    flex: 1,
-  },
+  organizerInfo: { flex: 1 },
   organizerName: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#111827",
     fontFamily: "SofiaSans-Bold",
     marginBottom: 2,
   },
-  organizerUsername: {
-    fontSize: 13,
-    color: "#6b7280",
-    fontFamily: "SofiaSans-Regular",
-  },
+  organizerUsername: { fontSize: 13, fontFamily: "SofiaSans-Regular" },
   description: {
     fontSize: 16,
-    color: "#374151",
     lineHeight: 26,
     fontFamily: "SofiaSans-Regular",
   },
-  tagsContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  tag: {
-    backgroundColor: "#f3f4f6",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  tagText: {
-    fontSize: 14,
-    color: "#6b7280",
-    fontFamily: "SofiaSans-Regular",
-  },
+  tagsContainer: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  tag: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
+  tagText: { fontSize: 14, fontFamily: "SofiaSans-Regular" },
   linkButton: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    backgroundColor: "#f3e8ff",
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 12,
     alignSelf: "flex-start",
   },
-  linkText: {
-    fontSize: 16,
-    color: "#8b5cf6",
-    fontWeight: "500",
-    fontFamily: "SofiaSans-Bold",
-  },
+  linkText: { fontSize: 16, fontWeight: "500", fontFamily: "SofiaSans-Bold" },
 });
 
 export default EventDetailsTab;

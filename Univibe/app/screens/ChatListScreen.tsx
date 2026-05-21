@@ -14,6 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useAuth } from "../../lib/contexts/AuthContext";
 import { useActiveRoom } from "../../lib/contexts/ActiveRoomContext";
+import { useTheme } from "../../lib/contexts/ThemeContext";
 import { useChatList } from "../../hooks/chatList/useChatList";
 import { useChatItemAnimations } from "../../hooks/chatList/useChatItemAnimation";
 import ChatListHeader from "../components/chat/ChatList/ChatListHeader";
@@ -34,6 +35,7 @@ export default function ChatListScreen() {
   const router = useRouter();
   const { token, user } = useAuth();
   const { clearActiveRoom } = useActiveRoom();
+  const { colors, isDark } = useTheme();
 
   // Clear active room when this screen gains focus
   useFocusEffect(
@@ -69,7 +71,7 @@ export default function ChatListScreen() {
   });
   const [showOptionsModal, setShowOptionsModal] = useState(false);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
-  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false); // NEW
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
 
   // ─── Animations ──────────────────────────────────────────────────────────
 
@@ -123,7 +125,6 @@ export default function ChatListScreen() {
         markRoomAsRead(room.roomId);
       }
 
-      // Check if it's a group chat
       const isGroup = room.type === "group";
 
       router.push({
@@ -153,7 +154,6 @@ export default function ChatListScreen() {
       const currentUserId = user?.id;
       if (!currentUserId) return;
 
-      // Generate proper direct room ID
       const roomId = getDirectRoomId(currentUserId, userId);
 
       router.push({
@@ -186,11 +186,10 @@ export default function ChatListScreen() {
           otherUserId: "",
           otherUserAvatar: "",
           isGroup: "true",
-          participantCount: "0", // Will be updated when room loads
+          participantCount: "0",
         },
       });
 
-      // Refresh chat list to show the new group
       fetchRooms();
     },
     [router, fetchRooms],
@@ -254,8 +253,8 @@ export default function ChatListScreen() {
 
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#8b5cf6" />
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
@@ -265,14 +264,19 @@ export default function ChatListScreen() {
   // ---------------------------------------------------------------------------
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+    <SafeAreaView
+      style={[styles.safeArea, { backgroundColor: colors.background }]}
+    >
+      <StatusBar
+        barStyle={isDark ? "light-content" : "dark-content"}
+        backgroundColor={colors.background}
+      />
 
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         {/* Header with New Chat and New Group buttons */}
         <ChatListHeader
           onNewChat={() => setShowNewChatModal(true)}
-          onNewGroup={() => setShowCreateGroupModal(true)} // NEW
+          onNewGroup={() => setShowCreateGroupModal(true)}
         />
 
         <SearchBar value={searchQuery} onChangeText={setSearchQuery} />
@@ -285,8 +289,9 @@ export default function ChatListScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor="#8b5cf6"
-              colors={["#8b5cf6"]}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+              progressBackgroundColor={colors.card}
             />
           }
           ListEmptyComponent={<EmptyChatList />}

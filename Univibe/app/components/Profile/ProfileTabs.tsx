@@ -1,6 +1,7 @@
 // app/components/Profile/ProfileTabs.tsx
 import React from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 
 type TabType = "posts" | "about";
 
@@ -15,6 +16,8 @@ export default function ProfileTabs({
   onTabChange,
   postCount = 0,
 }: ProfileTabsProps) {
+  const { colors } = useTheme();
+
   return (
     <View style={styles.tabsContainer}>
       <TouchableOpacity
@@ -25,13 +28,18 @@ export default function ProfileTabs({
         <Text
           style={[
             styles.tabText,
-            activeTab === "about" && styles.activeTabText,
-
+            { color: colors.textMuted },
+            activeTab === "about" && [
+              styles.activeTabText,
+              { color: colors.text },
+            ],
           ]}
         >
           About
         </Text>
-        {activeTab === "about" && <View style={styles.underline} />}
+        {activeTab === "about" && (
+          <View style={[styles.underline, { backgroundColor: colors.text }]} />
+        )}
       </TouchableOpacity>
 
       <TouchableOpacity
@@ -42,12 +50,18 @@ export default function ProfileTabs({
         <Text
           style={[
             styles.tabText,
-            activeTab === "posts" && styles.activeTabText,
+            { color: colors.textMuted },
+            activeTab === "posts" && [
+              styles.activeTabText,
+              { color: colors.text },
+            ],
           ]}
         >
           Posts {postCount > 0 ? `(${postCount})` : ""}
         </Text>
-        {activeTab === "posts" && <View style={styles.underline} />}
+        {activeTab === "posts" && (
+          <View style={[styles.underline, { backgroundColor: colors.text }]} />
+        )}
       </TouchableOpacity>
     </View>
   );
@@ -68,13 +82,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "500",
     color: "#9ca3af",
-    fontFamily:"SofiaSans-Bold",
+    fontFamily: "SofiaSans-Bold",
   },
   activeTabText: {
     color: "#111827",
     fontWeight: "700",
   },
-    underline: {
+  underline: {
     position: "absolute",
     bottom: -1,
     left: -8,

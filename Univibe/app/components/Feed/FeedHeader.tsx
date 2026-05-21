@@ -13,6 +13,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useAuth } from "../../../lib/contexts/AuthContext";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 
 interface FeedHeaderProps {
   title?: string;
@@ -29,6 +30,7 @@ const FeedHeader: React.FC<FeedHeaderProps> = ({
 }) => {
   const router = useRouter();
   const { user } = useAuth();
+  const { colors } = useTheme();
 
   const handleProfilePress = () => {
     if (onProfilePress) {
@@ -43,10 +45,12 @@ const FeedHeader: React.FC<FeedHeaderProps> = ({
   };
 
   return (
-    <View style={styles.header}>
+    <View style={[styles.header, { borderBottomColor: colors.headerBorder }]}>
       <View>
-        <Text style={styles.title}>{title}</Text>
-        <Text style={styles.subtitle}>{subtitle}</Text>
+        <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
+        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+          {subtitle}
+        </Text>
       </View>
 
       <View style={styles.actions}>
@@ -59,7 +63,7 @@ const FeedHeader: React.FC<FeedHeaderProps> = ({
           onPress={handleSearchPress}
           android_ripple={{ color: "rgba(0,0,0,0.1)", borderless: true }}
         >
-          <Ionicons name="search-outline" size={28} color="#111827" />
+          <Ionicons name="search-outline" size={28} color={colors.icon} />
         </Pressable>
       </View>
     </View>

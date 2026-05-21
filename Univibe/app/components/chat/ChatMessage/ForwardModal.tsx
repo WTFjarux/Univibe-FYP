@@ -16,6 +16,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import chatApi from "../../../../lib/services/chatApi";
 import { useAuth } from "../../../../lib/contexts/AuthContext";
+import { useTheme } from "../../../../lib/contexts/ThemeContext";
 import { getFullImageUrl } from "../../../../lib/utils/chatUtils";
 import type { ChatRoom } from "../../../../lib/types/chat.types";
 
@@ -65,6 +66,7 @@ export default function ForwardModal({
   currentRoomId,
 }: ForwardModalProps) {
   const { token } = useAuth();
+  const { colors, isDark } = useTheme();
 
   const [chats, setChats] = useState<ChatRoom[]>([]);
   const [selectedChats, setSelectedChats] = useState<Set<string>>(new Set());
@@ -73,14 +75,12 @@ export default function ForwardModal({
   const [searchQuery, setSearchQuery] = useState("");
   const [avatarErrors, setAvatarErrors] = useState<Set<string>>(new Set());
 
-  // Reset state when modal opens
   useEffect(() => {
     if (visible) {
       setSelectedChats(new Set());
       setSearchQuery("");
       fetchChats();
     } else {
-      // Clean up when modal closes
       setSearchQuery("");
     }
   }, [visible]);
@@ -90,7 +90,6 @@ export default function ForwardModal({
       setLoading(true);
       const response = await chatApi.getChatRooms();
       if (response.success && response.data) {
-        // Filter out the current chat if roomId is available
         const filteredChats = currentRoomId
           ? response.data.filter(
               (chat: ChatRoom) => chat.roomId !== currentRoomId,
@@ -99,7 +98,6 @@ export default function ForwardModal({
         setChats(filteredChats || []);
       }
     } catch (error) {
-      console.error("Error fetching chats:", error);
       Alert.alert("Error", "Failed to load chats");
     } finally {
       setLoading(false);
@@ -114,7 +112,7 @@ export default function ForwardModal({
       } else {
         if (newSelected.size >= 5) {
           Alert.alert("Limit", "You can forward to maximum 5 chats at once");
-          return prev; // Return unchanged if limit reached
+          return prev;
         }
         newSelected.add(roomId);
       }
@@ -127,30 +125,26 @@ export default function ForwardModal({
       Alert.alert("Error", "Please select at least one chat");
       return;
     }
-
     if (!token) {
       Alert.alert("Error", "Authentication required");
       return;
     }
-
     setForwarding(true);
     try {
       const response = await chatApi.forwardMessage(
         messageData._id,
         Array.from(selectedChats),
       );
-
       if (response.success) {
-        const result = response.data;
         Alert.alert(
           "Success",
-          `Message forwarded to ${result?.forwardedCount || 0} chat(s)`,
+          `Message forwarded to ${response.data?.forwardedCount || 0} chat(s)`,
           [
             {
               text: "OK",
               onPress: () => {
                 setForwarding(false);
-                onSuccess?.(result);
+                onSuccess?.(response.data);
                 onClose();
               },
             },
@@ -161,10 +155,10 @@ export default function ForwardModal({
         setForwarding(false);
       }
     } catch (error: any) {
-      console.error("Error forwarding message:", error);
-      const message =
-        error.response?.data?.message || "Failed to forward message";
-      Alert.alert("Error", message);
+      Alert.alert(
+        "Error",
+        error.response?.data?.message || "Failed to forward message",
+      );
       setForwarding(false);
     }
   };
@@ -173,23 +167,16 @@ export default function ForwardModal({
     setAvatarErrors((prev) => new Set([...prev, roomId]));
   };
 
-  // Memoized filtered chats with case-insensitive search
   const filteredChats = useMemo(() => {
-    if (!searchQuery.trim()) {
-      return chats;
-    }
-
+    if (!searchQuery.trim()) return chats;
     const query = searchQuery.toLowerCase().trim();
-    return chats.filter((chat) => {
-      const name = (chat.name || "").toLowerCase();
-      return name.includes(query);
-    });
+    return chats.filter((chat) =>
+      (chat.name || "").toLowerCase().includes(query),
+    );
   }, [chats, searchQuery]);
 
   const renderChat = ({ item }: { item: ChatRoom }) => {
     const isSelected = selectedChats.has(item.roomId);
-
-    // Handle null/undefined avatar with a fallback
     const avatarUri = item.otherUserAvatar || null;
     const avatarSource =
       avatarUri && !avatarErrors.has(item.roomId)
@@ -198,26 +185,42 @@ export default function ForwardModal({
 
     return (
       <TouchableOpacity
-        style={[styles.chatItem, isSelected && styles.selectedChat]}
+        style={[
+          styles.chatItem,
+          { borderBottomColor: colors.border },
+          isSelected && {
+            backgroundColor: isDark ? "rgba(167, 139, 250, 0.1)" : "#F2F0FF",
+          },
+        ]}
         onPress={() => toggleChatSelection(item.roomId)}
         activeOpacity={0.7}
       >
         <View style={styles.checkbox}>
           {isSelected ? (
-            <Ionicons name="checkmark-circle" size={24} color="#8B5CF6" />
+            <Ionicons
+              name="checkmark-circle"
+              size={24}
+              color={colors.primary}
+            />
           ) : (
-            <View style={styles.uncheckedCircle} />
+            <View
+              style={[
+                styles.uncheckedCircle,
+                { borderColor: colors.textMuted },
+              ]}
+            />
           )}
         </View>
-
         <Image
           source={avatarSource}
-          style={styles.avatar}
+          style={[styles.avatar, { backgroundColor: colors.skeleton }]}
           onError={() => handleAvatarError(item.roomId)}
         />
-
         <View style={styles.chatInfo}>
-          <Text style={styles.chatName} numberOfLines={1}>
+          <Text
+            style={[styles.chatName, { color: colors.text }]}
+            numberOfLines={1}
+          >
             {item.name || "Unknown"}
           </Text>
         </View>
@@ -227,19 +230,20 @@ export default function ForwardModal({
 
   const renderEmptyComponent = () => {
     if (loading) return null;
-
     return (
       <View style={styles.emptyState}>
         <Ionicons
           name={searchQuery ? "search-outline" : "chatbubbles-outline"}
           size={48}
-          color="#C7C7CC"
+          color={colors.textMuted}
         />
-        <Text style={styles.emptyText}>
+        <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
           {searchQuery ? "No chats found" : "No chats available"}
         </Text>
         {searchQuery && (
-          <Text style={styles.emptySubtext}>Try a different search term</Text>
+          <Text style={[styles.emptySubtext, { color: colors.textMuted }]}>
+            Try a different search term
+          </Text>
         )}
       </View>
     );
@@ -254,25 +258,27 @@ export default function ForwardModal({
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <View style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={[styles.header, { borderBottomColor: colors.border }]}>
           <TouchableOpacity onPress={onClose} style={styles.headerButton}>
-            <Ionicons name="close" size={28} color="#1C1C1E" />
+            <Ionicons name="close" size={28} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Forward to</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>
+            Forward to
+          </Text>
           <TouchableOpacity
             onPress={handleForward}
             disabled={forwarding || selectedChats.size === 0}
             style={styles.headerButton}
           >
             {forwarding ? (
-              <ActivityIndicator size="small" color="#8B5CF6" />
+              <ActivityIndicator size="small" color={colors.primary} />
             ) : (
               <Text
                 style={[
                   styles.sendButton,
-                  selectedChats.size === 0 && styles.sendButtonDisabled,
+                  { color: colors.primary },
+                  selectedChats.size === 0 && { color: colors.textMuted },
                 ]}
               >
                 Send
@@ -281,15 +287,16 @@ export default function ForwardModal({
           </TouchableOpacity>
         </View>
 
-        {/* Search Bar */}
-        <View style={styles.searchContainer}>
-          <Ionicons name="search" size={20} color="#8E8E93" />
+        <View
+          style={[styles.searchContainer, { backgroundColor: colors.skeleton }]}
+        >
+          <Ionicons name="search" size={20} color={colors.textSecondary} />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: colors.text }]}
             placeholder="Search chats..."
             value={searchQuery}
             onChangeText={setSearchQuery}
-            placeholderTextColor="#8E8E93"
+            placeholderTextColor={colors.textMuted}
             autoFocus={false}
             autoCapitalize="none"
             autoCorrect={false}
@@ -301,15 +308,18 @@ export default function ForwardModal({
               onPress={() => setSearchQuery("")}
               style={styles.clearButton}
             >
-              <Ionicons name="close-circle" size={18} color="#8E8E93" />
+              <Ionicons
+                name="close-circle"
+                size={18}
+                color={colors.textSecondary}
+              />
             </TouchableOpacity>
           )}
         </View>
 
-        {/* Chat List */}
         {loading ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#8B5CF6" />
+            <ActivityIndicator size="large" color={colors.primary} />
           </View>
         ) : (
           <FlatList
@@ -326,10 +336,19 @@ export default function ForwardModal({
           />
         )}
 
-        {/* Selected count */}
         {selectedChats.size > 0 && (
-          <View style={styles.selectedCount}>
-            <Text style={styles.selectedCountText}>
+          <View
+            style={[
+              styles.selectedCount,
+              {
+                backgroundColor: isDark
+                  ? "rgba(167, 139, 250, 0.1)"
+                  : "#F2F0FF",
+                borderTopColor: colors.border,
+              },
+            ]}
+          >
+            <Text style={[styles.selectedCountText, { color: colors.primary }]}>
               {selectedChats.size} chat{selectedChats.size > 1 ? "s" : ""}{" "}
               selected
             </Text>
@@ -345,10 +364,7 @@ export default function ForwardModal({
 // -----------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#FFFFFF",
-  },
+  container: { flex: 1 },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -356,27 +372,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 0.5,
-    borderBottomColor: "#E5E5EA",
   },
-  headerButton: {
-    padding: 4,
-    minWidth: 44,
-    alignItems: "center",
-  },
+  headerButton: { padding: 4, minWidth: 44, alignItems: "center" },
   headerTitle: {
     fontSize: 17,
     fontWeight: "600",
-    color: "#1C1C1E",
     fontFamily: "SofiaSans-Bold",
   },
   sendButton: {
     fontSize: 17,
     fontWeight: "600",
-    color: "#8B5CF6",
     fontFamily: "SofiaSans-SemiBold",
-  },
-  sendButtonDisabled: {
-    color: "#C7C7CC",
   },
   searchContainer: {
     flexDirection: "row",
@@ -385,96 +391,44 @@ const styles = StyleSheet.create({
     marginVertical: 8,
     paddingHorizontal: 12,
     height: 40,
-    backgroundColor: "#F2F2F7",
     borderRadius: 12,
   },
   searchInput: {
     flex: 1,
     marginLeft: 8,
     fontSize: 15,
-    color: "#1C1C1E",
     fontFamily: "SofiaSans-Regular",
   },
-  clearButton: {
-    padding: 4,
-  },
-  chatList: {
-    flexGrow: 1,
-  },
-  emptyListContainer: {
-    flex: 1,
-    justifyContent: "center",
-  },
+  clearButton: { padding: 4 },
+  chatList: { flexGrow: 1 },
+  emptyListContainer: { flex: 1, justifyContent: "center" },
   chatItem: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 0.5,
-    borderBottomColor: "#F2F2F7",
   },
-  selectedChat: {
-    backgroundColor: "#F2F0FF",
-  },
-  checkbox: {
-    marginRight: 12,
-  },
-  uncheckedCircle: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: "#C7C7CC",
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    marginRight: 12,
-    backgroundColor: "#F2F2F7",
-  },
-  chatInfo: {
-    flex: 1,
-    justifyContent: "center",
-  },
-  chatName: {
-    fontSize: 16,
-    fontWeight: "500",
-    color: "#1C1C1E",
-    fontFamily: "SofiaSans-Medium",
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  checkbox: { marginRight: 12 },
+  uncheckedCircle: { width: 24, height: 24, borderRadius: 12, borderWidth: 2 },
+  avatar: { width: 44, height: 44, borderRadius: 22, marginRight: 12 },
+  chatInfo: { flex: 1, justifyContent: "center" },
+  chatName: { fontSize: 16, fontWeight: "500", fontFamily: "SofiaSans-Medium" },
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   emptyState: {
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 40,
   },
-  emptyText: {
-    fontSize: 16,
-    color: "#8E8E93",
-    marginTop: 12,
-    fontFamily: "SofiaSans-Regular",
-  },
-  emptySubtext: {
-    fontSize: 13,
-    color: "#C7C7CC",
-    marginTop: 4,
-    fontFamily: "SofiaSans-Regular",
-  },
+  emptyText: { fontSize: 16, marginTop: 12, fontFamily: "SofiaSans-Regular" },
+  emptySubtext: { fontSize: 13, marginTop: 4, fontFamily: "SofiaSans-Regular" },
   selectedCount: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: "#F2F0FF",
     borderTopWidth: 0.5,
-    borderTopColor: "#E5E5EA",
   },
   selectedCountText: {
     fontSize: 13,
-    color: "#8B5CF6",
     fontWeight: "500",
     fontFamily: "SofiaSans-Medium",
     textAlign: "center",

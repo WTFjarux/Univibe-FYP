@@ -9,6 +9,7 @@ import {
   Platform,
   UIManager,
 } from "react-native";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 import { SearchCategory } from "../../../lib/types/search";
 
 // Enable LayoutAnimation on Android
@@ -55,6 +56,8 @@ export const SearchCategories: React.FC<SearchCategoriesProps> = ({
   onCategoryChange,
   resultCounts,
 }) => {
+  const { colors } = useTheme();
+
   const handleCategoryPress = (category: SearchCategory) => {
     if (category === activeCategory) return;
 
@@ -64,7 +67,7 @@ export const SearchCategories: React.FC<SearchCategoriesProps> = ({
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { borderBottomColor: colors.background }]}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -78,11 +81,21 @@ export const SearchCategories: React.FC<SearchCategoriesProps> = ({
           return (
             <TouchableOpacity
               key={category.id}
-              style={[styles.tab, isActive && styles.activeTab]}
+              style={[
+                styles.tab,
+                { backgroundColor: colors.skeleton },
+                isActive && [styles.activeTab, { backgroundColor: colors.primary }],
+              ]}
               onPress={() => handleCategoryPress(category.id)}
               activeOpacity={0.7}
             >
-              <Text style={[styles.tabText, isActive && styles.activeTabText]}>
+              <Text
+                style={[
+                  styles.tabText,
+                  { color: colors.textSecondary },
+                  isActive && styles.activeTabText,
+                ]}
+              >
                 {category.label}
               </Text>
 
@@ -91,12 +104,14 @@ export const SearchCategories: React.FC<SearchCategoriesProps> = ({
                 <View
                   style={[
                     styles.countBadge,
+                    { backgroundColor: colors.skeletonHighlight },
                     isActive && styles.activeCountBadge,
                   ]}
                 >
                   <Text
                     style={[
                       styles.countText,
+                      { color: colors.textSecondary },
                       isActive && styles.activeCountText,
                     ]}
                   >

@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useAuth } from "../../lib/contexts/AuthContext";
+import { useTheme } from "../../lib/contexts/ThemeContext";
 import { Post } from "../../lib/services/postService";
 import {
   getSavedPosts,
@@ -25,6 +26,7 @@ import PostCard from "../components/Feed/Post/PostCard";
 export default function SavedPostsScreen() {
   const router = useRouter();
   const { user, token } = useAuth();
+  const { colors } = useTheme();
   const [savedPosts, setSavedPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -153,22 +155,52 @@ export default function SavedPostsScreen() {
     </View>
   );
 
+  const renderEmptyState = () => (
+    <View style={styles.emptyContainer}>
+      <Ionicons name="bookmark-outline" size={64} color={colors.textMuted} />
+      <Text style={[styles.emptyTitle, { color: colors.text }]}>
+        No saved posts
+      </Text>
+      <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+        Posts you save will appear here
+      </Text>
+      <TouchableOpacity
+        style={[styles.browseButton, { backgroundColor: colors.primary }]}
+        onPress={() => router.push("/(tabs)/feed")}
+      >
+        <Text style={styles.browseButtonText}>Browse Feed</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      <View style={styles.header}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      edges={["top"]}
+    >
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: colors.background, borderBottomColor: colors.border },
+        ]}
+      >
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
         >
-          <Ionicons name="arrow-back" size={24} color="#111827" />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Saved Posts</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>
+          Saved Posts
+        </Text>
         <View style={{ width: 40 }} />
       </View>
       {loading && !refreshing ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8b5cf6" />
-          <Text style={styles.loadingText}>Loading saved posts...</Text>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+            Loading saved posts...
+          </Text>
         </View>
       ) : (
         <FlatList
@@ -176,26 +208,19 @@ export default function SavedPostsScreen() {
           keyExtractor={(item) => item._id}
           renderItem={renderPost}
           contentContainerStyle={styles.listContent}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="bookmark-outline" size={64} color="#d1d5db" />
-              <Text style={styles.emptyTitle}>No saved posts</Text>
-              <Text style={styles.emptyText}>
-                Posts you save will appear here
-              </Text>
-              <TouchableOpacity
-                style={styles.browseButton}
-                onPress={() => router.push("/(tabs)/feed")}
-              >
-                <Text style={styles.browseButtonText}>Browse Feed</Text>
-              </TouchableOpacity>
-            </View>
-          }
+          ListEmptyComponent={renderEmptyState}
           ListFooterComponent={
             loadingMore ? (
               <View style={styles.footerLoader}>
-                <ActivityIndicator size="small" color="#8b5cf6" />
-                <Text style={styles.loadingMoreText}>Loading more...</Text>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text
+                  style={[
+                    styles.loadingMoreText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Loading more...
+                </Text>
               </View>
             ) : null
           }
@@ -205,8 +230,9 @@ export default function SavedPostsScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor="#8b5cf6"
-              colors={["#8b5cf6"]}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+              progressBackgroundColor={colors.card}
             />
           }
         />
@@ -221,7 +247,7 @@ export default function SavedPostsScreen() {
                   ? "#10b981"
                   : infoType === "error"
                     ? "#ef4444"
-                    : "#8b5cf6",
+                    : colors.primary,
               transform: [{ translateY: slideAnim }],
             },
           ]}
@@ -245,26 +271,23 @@ export default function SavedPostsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f9fafb" },
+  container: { flex: 1 },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: "#ffffff",
     borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
   },
   backButton: { padding: 8, marginLeft: -8 },
   headerTitle: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#111827",
-    fontFamily: "SofiaSans-SemiBold",
+    fontFamily: "SofiaSans-Bold",
   },
   listContent: { flexGrow: 1, paddingBottom: 20 },
-  postCardContainer: { padding: 16, marginBottom: 8 },
+  postCardContainer: { marginBottom: 8 },
   emptyContainer: {
     flex: 1,
     alignItems: "center",
@@ -274,13 +297,11 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#374151",
     marginTop: 16,
     fontFamily: "SofiaSans-SemiBold",
   },
   emptyText: {
     fontSize: 14,
-    color: "#6b7280",
     marginTop: 8,
     fontFamily: "SofiaSans-Regular",
     textAlign: "center",
@@ -289,7 +310,6 @@ const styles = StyleSheet.create({
     marginTop: 20,
     paddingHorizontal: 20,
     paddingVertical: 10,
-    backgroundColor: "#8b5cf6",
     borderRadius: 20,
   },
   browseButtonText: {
@@ -299,12 +319,7 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Medium",
   },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: "#6b7280",
-    fontFamily: "SofiaSans-Regular",
-  },
+  loadingText: { marginTop: 12, fontSize: 14, fontFamily: "SofiaSans-Regular" },
   footerLoader: {
     flexDirection: "row",
     justifyContent: "center",
@@ -312,11 +327,7 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
     gap: 8,
   },
-  loadingMoreText: {
-    fontSize: 12,
-    color: "#6b7280",
-    fontFamily: "SofiaSans-Regular",
-  },
+  loadingMoreText: { fontSize: 12, fontFamily: "SofiaSans-Regular" },
   infoBar: {
     position: "absolute",
     bottom: 50,

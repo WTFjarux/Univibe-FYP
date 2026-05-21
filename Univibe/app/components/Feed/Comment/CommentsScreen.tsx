@@ -25,6 +25,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useAuth } from "@/lib/contexts/AuthContext";
+import { useTheme } from "@/lib/contexts/ThemeContext";
 
 // Components
 import CommentHeader from "./CommentHeader";
@@ -83,10 +84,9 @@ export default function CommentScreen() {
   const { postId } = useLocalSearchParams<{ postId: string }>();
   const router = useRouter();
   const { user, token } = useAuth();
+  const { colors, isDark } = useTheme();
 
-  // ===========================================================================
   // Post & Comments State
-  // ===========================================================================
   const [post, setPost] = useState<Post | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [totalComments, setTotalComments] = useState(0);
@@ -102,9 +102,7 @@ export default function CommentScreen() {
   const [isPostLiked, setIsPostLiked] = useState(false);
   const [postLikesCount, setPostLikesCount] = useState(0);
 
-  // ===========================================================================
-  // InfoBar State (like FeedScreen)
-  // ===========================================================================
+  // InfoBar State
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [infoType, setInfoType] = useState<"success" | "error" | "info">(
     "info",
@@ -114,24 +112,18 @@ export default function CommentScreen() {
     undefined,
   );
 
-  // ===========================================================================
-  // Report Modal State - SINGLE SOURCE OF TRUTH
-  // ===========================================================================
+  // Report Modal State
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [reportTargetId, setReportTargetId] = useState("");
   const [reportTargetType, setReportTargetType] = useState<
     "Post" | "Comment" | "User" | "Event"
   >("Comment");
 
-  // ===========================================================================
   // Options Modal Tracking
-  // ===========================================================================
   const [isOptionsModalOpen, setIsOptionsModalOpen] = useState(false);
 
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<any>(null);
-
-  // Prevent duplicate fetches
   const isFetchingRef = useRef(false);
 
   const {
@@ -154,25 +146,34 @@ export default function CommentScreen() {
     user,
   );
 
-  // ===========================================================================
-  // InfoBar Management (same pattern as FeedScreen)
-  // ===========================================================================
+  // Dynamic Style Matrix
+  const dynamicStyles = useMemo(
+    () => ({
+      container: {
+        backgroundColor: colors.background,
+      },
+      emptyTitle: {
+        color: colors.text,
+      },
+      emptyText: {
+        color: colors.textSecondary,
+      },
+    }),
+    [colors],
+  );
 
+  // InfoBar Management
   const showInfoBar = useCallback(
     (
       message: string,
       type: "success" | "error" | "info" = "info",
       autoHide = true,
     ) => {
-      // Clear any existing timeout
-      if (infoTimeoutRef.current) {
-        clearTimeout(infoTimeoutRef.current);
-      }
+      if (infoTimeoutRef.current) clearTimeout(infoTimeoutRef.current);
 
       setInfoMessage(message);
       setInfoType(type);
 
-      // Slide in
       Animated.timing(slideAnim, {
         toValue: 0,
         duration: 300,
@@ -196,9 +197,7 @@ export default function CommentScreen() {
   );
 
   const hideInfoBar = useCallback(() => {
-    if (infoTimeoutRef.current) {
-      clearTimeout(infoTimeoutRef.current);
-    }
+    if (infoTimeoutRef.current) clearTimeout(infoTimeoutRef.current);
     Animated.timing(slideAnim, {
       toValue: 100,
       duration: 300,
@@ -209,24 +208,13 @@ export default function CommentScreen() {
     });
   }, [slideAnim]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (infoTimeoutRef.current) {
-        clearTimeout(infoTimeoutRef.current);
-      }
+      if (infoTimeoutRef.current) clearTimeout(infoTimeoutRef.current);
     };
   }, []);
 
-  // ===========================================================================
-  // REPORT FLOW - Centralized Modal Orchestration
-  // ===========================================================================
-
-  /**
-   * Called when user taps "Report" in CommentOptionsModal
-   * CommentOptionsModal closes itself first (calls onClose), then calls this
-   * via requestAnimationFrame to ensure close animation has started
-   */
+  // Report Flow Orchestration
   const handleCommentReportPress = useCallback(
     (commentId: string) => {
       if (!token) {
@@ -234,7 +222,6 @@ export default function CommentScreen() {
         return;
       }
 
-      // Find the comment in the tree to check if already reported
       const findComment = (commentsList: Comment[]): Comment | null => {
         for (const comment of commentsList) {
           if (comment._id === commentId) return comment;
@@ -256,11 +243,9 @@ export default function CommentScreen() {
         return;
       }
 
-      // Set target and open ReportModal after CommentOptionsModal close animation
       setReportTargetId(commentId);
       setReportTargetType("Comment");
 
-      // Delay to ensure CommentOptionsModal's close animation has started
       setTimeout(() => {
         setReportModalVisible(true);
       }, 300);
@@ -268,29 +253,16 @@ export default function CommentScreen() {
     [token, comments, showInfoBar],
   );
 
-  /**
-   * Called when ReportModal closes (user cancels or submits)
-   */
   const handleReportModalClose = useCallback(() => {
     setReportModalVisible(false);
   }, []);
 
-  /**
-   * Called when report is successfully submitted
-   * ReportModal has already closed itself by this point
-   * We just need to update the comment's isReported flag in the tree
-   */
   const handleReportSuccess = useCallback(() => {
     if (reportTargetType === "Comment" && reportTargetId) {
-      // Mark the comment as reported in the tree
       handleReportFromHook(reportTargetId);
     }
   }, [reportTargetType, reportTargetId, handleReportFromHook]);
 
-  /**
-   * InfoBar callback from ReportModal
-   * Uses the InfoBar instead of Alert
-   */
   const handleReportShowInfoBar = useCallback(
     (message: string, type: "success" | "error" | "info") => {
       showInfoBar(message, type);
@@ -298,24 +270,15 @@ export default function CommentScreen() {
     [showInfoBar],
   );
 
-  /**
-   * Called when CommentOptionsModal opens
-   */
   const handleOptionsModalOpen = useCallback(() => {
     setIsOptionsModalOpen(true);
   }, []);
 
-  /**
-   * Called when CommentOptionsModal closes
-   */
   const handleOptionsModalClose = useCallback(() => {
     setIsOptionsModalOpen(false);
   }, []);
 
-  // ===========================================================================
   // Fetch Logic
-  // ===========================================================================
-
   const fetchPostDetails = async () => {
     try {
       const response = await getPostById(postId);
@@ -329,10 +292,7 @@ export default function CommentScreen() {
 
   const fetchComments = async (pageNum = 1, refresh = false) => {
     if (isFetchingRef.current && pageNum > 1) return;
-
-    if (refresh || pageNum === 1) {
-      isFetchingRef.current = true;
-    }
+    if (refresh || pageNum === 1) isFetchingRef.current = true;
 
     try {
       const response = await getPostComments(postId, pageNum, 20);
@@ -355,9 +315,7 @@ export default function CommentScreen() {
     } finally {
       setLoading(false);
       setRefreshing(false);
-      if (refresh || pageNum === 1) {
-        isFetchingRef.current = false;
-      }
+      if (refresh || pageNum === 1) isFetchingRef.current = false;
     }
   };
 
@@ -392,13 +350,8 @@ export default function CommentScreen() {
     }
   };
 
-  // ===========================================================================
-  // Post & Comment Actions
-  // ===========================================================================
-
   const handlePostLike = async () => {
     if (!token || !post) return;
-
     try {
       const newLikedState = !isPostLiked;
       setIsPostLiked(newLikedState);
@@ -453,10 +406,6 @@ export default function CommentScreen() {
     const index = Math.round(event.nativeEvent.contentOffset.x / screenWidth);
     setSelectedImageIndex(index);
   };
-
-  // ===========================================================================
-  // Render Functions
-  // ===========================================================================
 
   const renderPostHeader = useMemo(() => {
     if (!post) return null;
@@ -513,21 +462,28 @@ export default function CommentScreen() {
     if (loading) return null;
     return (
       <View style={styles.emptyContainer}>
-        <Ionicons name="chatbubbles-outline" size={48} color="#9ca3af" />
-        <Text style={styles.emptyTitle}>No comments yet</Text>
-        <Text style={styles.emptyText}>Be the first to comment!</Text>
+        <Ionicons
+          name="chatbubbles-outline"
+          size={48}
+          color={colors.textMuted}
+        />
+        <Text style={[styles.emptyTitle, dynamicStyles.emptyTitle]}>
+          No comments yet
+        </Text>
+        <Text style={[styles.emptyText, dynamicStyles.emptyText]}>
+          Be the first to comment!
+        </Text>
       </View>
     );
-  }, [loading]);
+  }, [loading, colors, dynamicStyles]);
 
   const renderFooter = useCallback(() => {
     if (!loading || comments.length === 0) return null;
-    return <ActivityIndicator style={styles.footerLoader} color="#8b5cf6" />;
-  }, [loading, comments.length]);
+    return (
+      <ActivityIndicator style={styles.footerLoader} color={colors.primary} />
+    );
+  }, [loading, comments.length, colors.primary]);
 
-  // ===========================================================================
-  // InfoBar Render
-  // ===========================================================================
   const renderInfoBar = () => {
     if (!infoMessage) return null;
 
@@ -536,8 +492,7 @@ export default function CommentScreen() {
         ? "#10b981"
         : infoType === "error"
           ? "#ef4444"
-          : "#8b5cf6";
-
+          : colors.primary;
     const icon =
       infoType === "success"
         ? "checkmark-circle"
@@ -552,33 +507,30 @@ export default function CommentScreen() {
           { backgroundColor: bg, transform: [{ translateY: slideAnim }] },
         ]}
       >
-        <Ionicons name={icon} size={20} color="#fff" />
-        <Text style={styles.infoBarText}>{infoMessage}</Text>
+        <Ionicons name={icon} size={20} color={colors.badgeText} />
+        <Text style={[styles.infoBarText, { color: colors.badgeText }]}>
+          {infoMessage}
+        </Text>
         <TouchableOpacity onPress={hideInfoBar} style={styles.infoBarClose}>
-          <Ionicons name="close" size={20} color="#fff" />
+          <Ionicons name="close" size={20} color={colors.badgeText} />
         </TouchableOpacity>
       </Animated.View>
     );
   };
 
-  // ===========================================================================
-  // Loading State
-  // ===========================================================================
-
   if (loading && !post) {
     return <CommentScreenSkeleton />;
   }
 
-  // ===========================================================================
-  // Main Render
-  // ===========================================================================
-
   return (
-    <SafeAreaView style={styles.container}>
+    // Replaced standard context view to ensure colors.card flows smoothly into the screen base bounds
+    <SafeAreaView
+      style={[styles.container, dynamicStyles.container]}
+      edges={["top", "left", "right"]}
+    >
       <KeyboardAvoidingView
         style={styles.keyboardView}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <CommentHeader
           totalComments={totalComments}
@@ -635,7 +587,6 @@ export default function CommentScreen() {
           onScroll={handleModalScroll}
         />
 
-        {/* Report Modal - at root level, controlled ONLY by CommentScreen */}
         <ReportModal
           visible={reportModalVisible}
           onClose={handleReportModalClose}
@@ -649,22 +600,21 @@ export default function CommentScreen() {
         />
       </KeyboardAvoidingView>
 
-      {/* InfoBar - Rendered outside KeyboardAvoidingView to overlay everything */}
       {renderInfoBar()}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
+  container: { flex: 1 },
   keyboardView: { flex: 1 },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
-  listContent: { flexGrow: 1 },
+  // 💡 Trimmed down from 100 to 16 to remove unnecessary trailing dead space beneath the flush comment input field
+  listContent: { flexGrow: 1, paddingBottom: 16 },
   emptyContainer: { paddingVertical: 48, alignItems: "center" },
   emptyTitle: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#111827",
     fontFamily: "SofiaSans-Bold",
     marginTop: 12,
     marginBottom: 4,
@@ -672,12 +622,10 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     fontFamily: "SofiaSans-Regular",
-    color: "#6b7280",
   },
   footerLoader: { paddingVertical: 20, alignItems: "center" },
-  // InfoBar Styles
   infoBar: {
-    position: "absolute" as "absolute",
+    position: "absolute",
     bottom: 35,
     left: 16,
     right: 16,
@@ -697,7 +645,6 @@ const styles = StyleSheet.create({
   },
   infoBarText: {
     flex: 1,
-    color: "#fff",
     fontSize: 14,
     fontFamily: "SofiaSans-Regular",
     fontWeight: "500",

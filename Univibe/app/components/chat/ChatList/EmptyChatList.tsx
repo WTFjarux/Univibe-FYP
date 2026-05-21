@@ -3,13 +3,18 @@
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../../../../lib/contexts/ThemeContext";
 
 export default function EmptyChatList() {
+  const { colors } = useTheme();
+
   return (
     <View style={styles.emptyContainer}>
-      <Ionicons name="chatbubbles-outline" size={60} color="#C7C7CC" />
-      <Text style={styles.emptyText}>No conversations yet</Text>
-      <Text style={styles.emptySubtext}>
+      <Ionicons name="chatbubbles-outline" size={60} color={colors.textMuted} />
+      <Text style={[styles.emptyText, { color: colors.text }]}>
+        No conversations yet
+      </Text>
+      <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
         Tap the + icon to start a new chat
       </Text>
     </View>
@@ -26,13 +31,11 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#333",
     marginBottom: 10,
     fontFamily: "SofiaSans-Regular",
   },
   emptySubtext: {
     fontSize: 14,
-    color: "#999",
     textAlign: "center",
     fontFamily: "SofiaSans-Regular",
   },

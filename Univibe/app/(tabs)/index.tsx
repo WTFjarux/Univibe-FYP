@@ -15,6 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Link, useFocusEffect, useRouter } from "expo-router";
 import { useAuth } from "../../lib/contexts/AuthContext";
+import { useTheme } from "../../lib/contexts/ThemeContext";
 import chatApi from "../../lib/services/chatApi";
 import storyApi from "../../lib/services/storyApi";
 import {
@@ -30,6 +31,7 @@ const { width } = Dimensions.get("window");
 // Skeleton component for the entire home screen
 const HomeScreenSkeleton = () => {
   const shimmerValue = useRef(new Animated.Value(0)).current;
+  const { colors } = useTheme();
 
   useEffect(() => {
     const animation = Animated.loop(
@@ -56,17 +58,39 @@ const HomeScreenSkeleton = () => {
   });
 
   return (
-    <View style={styles.skeletonContainer}>
+    <View
+      style={[styles.skeletonContainer, { backgroundColor: colors.background }]}
+    >
       {/* Header Skeleton */}
       <View style={styles.skeletonHeader}>
-        <Animated.View style={[styles.skeletonIcon, { opacity }]} />
-        <Animated.View style={[styles.skeletonLogo, { opacity }]} />
-        <Animated.View style={[styles.skeletonIcon, { opacity }]} />
+        <Animated.View
+          style={[
+            styles.skeletonIcon,
+            { opacity, backgroundColor: colors.skeleton },
+          ]}
+        />
+        <Animated.View
+          style={[
+            styles.skeletonLogo,
+            { opacity, backgroundColor: colors.skeleton },
+          ]}
+        />
+        <Animated.View
+          style={[
+            styles.skeletonIcon,
+            { opacity, backgroundColor: colors.skeleton },
+          ]}
+        />
       </View>
 
       {/* Stories Skeleton */}
       <View style={styles.skeletonSection}>
-        <Animated.View style={[styles.skeletonTitle, { opacity }]} />
+        <Animated.View
+          style={[
+            styles.skeletonTitle,
+            { opacity, backgroundColor: colors.skeleton },
+          ]}
+        />
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -74,12 +98,29 @@ const HomeScreenSkeleton = () => {
         >
           {[...Array(6)].map((_, index) => (
             <View key={index} style={styles.skeletonStoryCard}>
-              <Animated.View style={[styles.skeletonStoryRing, { opacity }]}>
+              <Animated.View
+                style={[
+                  styles.skeletonStoryRing,
+                  {
+                    opacity,
+                    backgroundColor: colors.skeleton,
+                    borderColor: colors.skeletonHighlight,
+                  },
+                ]}
+              >
                 <Animated.View
-                  style={[styles.skeletonStoryAvatar, { opacity }]}
+                  style={[
+                    styles.skeletonStoryAvatar,
+                    { opacity, backgroundColor: colors.skeletonHighlight },
+                  ]}
                 />
               </Animated.View>
-              <Animated.View style={[styles.skeletonStoryName, { opacity }]} />
+              <Animated.View
+                style={[
+                  styles.skeletonStoryName,
+                  { opacity, backgroundColor: colors.skeleton },
+                ]}
+              />
             </View>
           ))}
         </ScrollView>
@@ -87,18 +128,44 @@ const HomeScreenSkeleton = () => {
 
       {/* Events Skeleton */}
       <View style={styles.skeletonSection}>
-        <Animated.View style={[styles.skeletonTitle, { opacity }]} />
+        <Animated.View
+          style={[
+            styles.skeletonTitle,
+            { opacity, backgroundColor: colors.skeleton },
+          ]}
+        />
         {[...Array(3)].map((_, index) => (
           <Animated.View
             key={index}
-            style={[styles.skeletonEventCard, { opacity }]}
+            style={[
+              styles.skeletonEventCard,
+              { opacity, backgroundColor: colors.card },
+            ]}
           >
-            <Animated.View style={[styles.skeletonEventDate, { opacity }]} />
+            <Animated.View
+              style={[
+                styles.skeletonEventDate,
+                { opacity, backgroundColor: colors.skeleton },
+              ]}
+            />
             <View style={styles.skeletonEventDetails}>
-              <Animated.View style={[styles.skeletonEventName, { opacity }]} />
-              <Animated.View style={[styles.skeletonEventMeta, { opacity }]} />
               <Animated.View
-                style={[styles.skeletonEventAttendees, { opacity }]}
+                style={[
+                  styles.skeletonEventName,
+                  { opacity, backgroundColor: colors.skeleton },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.skeletonEventMeta,
+                  { opacity, backgroundColor: colors.skeleton },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.skeletonEventAttendees,
+                  { opacity, backgroundColor: colors.skeleton },
+                ]}
               />
             </View>
           </Animated.View>
@@ -111,6 +178,7 @@ const HomeScreenSkeleton = () => {
 export default function HomeScreen() {
   const { token } = useAuth();
   const router = useRouter();
+  const { colors } = useTheme();
   const [unreadCount, setUnreadCount] = useState(0);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -347,36 +415,48 @@ export default function HomeScreen() {
   // Show full screen skeleton during initial load
   if (isInitialLoading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+      >
         <HomeScreenSkeleton />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={refreshAll}
-            tintColor="#8b5cf6"
-            colors={["#8b5cf6"]}
-            progressBackgroundColor="#ffffff"
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+            progressBackgroundColor={colors.card}
           />
         }
       >
         {/* Header */}
-        <View style={styles.header}>
+        <View
+          style={[
+            styles.header,
+            {
+              backgroundColor: colors.background,
+              borderBottomColor: colors.headerBorder,
+            },
+          ]}
+        >
           <TouchableOpacity
             style={styles.iconButton}
             onPress={handleChatPress}
             activeOpacity={0.7}
           >
-            <Ionicons name="chatbubble-outline" size={28} color="#374151" />
+            <Ionicons name="chatbubble-outline" size={28} color={colors.icon} />
             {unreadChatCount > 0 && (
-              <View style={styles.badge}>
+              <View style={[styles.badge, { borderColor: colors.background }]}>
                 <Text style={styles.badgeText}>
                   {unreadChatCount > 99 ? "99+" : unreadChatCount}
                 </Text>
@@ -384,17 +464,21 @@ export default function HomeScreen() {
             )}
           </TouchableOpacity>
 
-          <Text style={styles.logoText}>UNIVIBE</Text>
+          <Text style={[styles.logoText, { color: colors.logoText }]}>
+            UNIVIBE
+          </Text>
 
           <Link href="/screens/notifications" asChild>
             <TouchableOpacity style={styles.iconButton} activeOpacity={0.7}>
               <Ionicons
                 name="notifications-outline"
                 size={28}
-                color="#374151"
+                color={colors.icon}
               />
               {unreadCount > 0 && (
-                <View style={styles.badge}>
+                <View
+                  style={[styles.badge, { borderColor: colors.background }]}
+                >
                   <Text style={styles.badgeText}>
                     {unreadCount > 99 ? "99+" : unreadCount}
                   </Text>
@@ -413,10 +497,14 @@ export default function HomeScreen() {
         {/* Events */}
         <View style={styles.eventsSection}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Upcoming Events</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+              Upcoming Events
+            </Text>
             <Link href="/(tabs)/events" asChild>
               <TouchableOpacity>
-                <Text style={styles.seeAllText}>View Calendar</Text>
+                <Text style={[styles.seeAllText, { color: colors.primary }]}>
+                  View Calendar
+                </Text>
               </TouchableOpacity>
             </Link>
           </View>
@@ -424,38 +512,80 @@ export default function HomeScreen() {
           {upcomingEvents.map((event) => (
             <TouchableOpacity
               key={event.id}
-              style={styles.eventCard}
+              style={[
+                styles.eventCard,
+                {
+                  backgroundColor: colors.eventCardBg,
+                  borderColor: colors.eventCardBorder,
+                  shadowColor: colors.shadow,
+                },
+              ]}
               activeOpacity={0.7}
             >
-              <View style={styles.eventDate}>
-                <Text style={styles.eventDateDay}>
+              <View
+                style={[
+                  styles.eventDate,
+                  { backgroundColor: colors.primaryLight },
+                ]}
+              >
+                <Text style={[styles.eventDateDay, { color: colors.primary }]}>
                   {formatEventDate(event.date)}
                 </Text>
-                <Text style={styles.eventDateLabel}>Day</Text>
+                <Text
+                  style={[styles.eventDateLabel, { color: colors.primary }]}
+                >
+                  Day
+                </Text>
               </View>
 
               <View style={styles.eventDetails}>
-                <Text style={styles.eventName}>{event.name}</Text>
+                <Text style={[styles.eventName, { color: colors.text }]}>
+                  {event.name}
+                </Text>
 
                 <View style={styles.eventMeta}>
                   <View style={styles.eventMetaItem}>
-                    <Ionicons name="time-outline" size={14} color="#6b7280" />
-                    <Text style={styles.eventMetaText}>{event.date}</Text>
+                    <Ionicons
+                      name="time-outline"
+                      size={14}
+                      color={colors.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.eventMetaText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      {event.date}
+                    </Text>
                   </View>
 
                   <View style={styles.eventMetaItem}>
                     <Ionicons
                       name="location-outline"
                       size={14}
-                      color="#6b7280"
+                      color={colors.textSecondary}
                     />
-                    <Text style={styles.eventMetaText}>{event.location}</Text>
+                    <Text
+                      style={[
+                        styles.eventMetaText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      {event.location}
+                    </Text>
                   </View>
                 </View>
 
                 <View style={styles.eventAttendees}>
-                  <Ionicons name="people-outline" size={12} color="#8b5cf6" />
-                  <Text style={styles.attendeesText}>
+                  <Ionicons
+                    name="people-outline"
+                    size={12}
+                    color={colors.primary}
+                  />
+                  <Text
+                    style={[styles.attendeesText, { color: colors.primary }]}
+                  >
                     {event.attendees} attending
                   </Text>
 
@@ -467,14 +597,36 @@ export default function HomeScreen() {
                         style={[
                           styles.attendeeAvatar,
                           { marginLeft: i > 0 ? -8 : 0 },
+                          {
+                            backgroundColor: colors.primaryLight,
+                            borderColor: colors.card,
+                          },
                         ]}
                       >
-                        <Ionicons name="person" size={10} color="#8b5cf6" />
+                        <Ionicons
+                          name="person"
+                          size={10}
+                          color={colors.primary}
+                        />
                       </View>
                     ))}
                     {event.attendees > 3 && (
-                      <View style={[styles.attendeeAvatar, { marginLeft: -8 }]}>
-                        <Text style={styles.attendeeMoreText}>
+                      <View
+                        style={[
+                          styles.attendeeAvatar,
+                          {
+                            marginLeft: -8,
+                            backgroundColor: colors.primaryLight,
+                            borderColor: colors.card,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.attendeeMoreText,
+                            { color: colors.primary },
+                          ]}
+                        >
                           +{event.attendees - 3}
                         </Text>
                       </View>
@@ -483,7 +635,11 @@ export default function HomeScreen() {
                 </View>
               </View>
 
-              <Ionicons name="chevron-forward" size={20} color="#d1d5db" />
+              <Ionicons
+                name="chevron-forward"
+                size={20}
+                color={colors.textMuted}
+              />
             </TouchableOpacity>
           ))}
         </View>

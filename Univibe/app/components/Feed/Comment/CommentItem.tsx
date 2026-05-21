@@ -34,6 +34,7 @@ import CommentOptionsModal from "./CommentOptionsModal";
 import BlurhashImage from "@/app/components/BlurhashImage";
 import { API_BASE_URL } from "@/constants/ipConstants";
 import { useAuth } from "@/lib/contexts/AuthContext";
+import { useTheme } from "@/lib/contexts/ThemeContext";
 
 // Local default avatar
 const DEFAULT_AVATAR: ImageSourcePropType = require("../../../../assets/images/default-avatar.png");
@@ -59,7 +60,6 @@ interface CommentItemProps {
   currentUserId: string;
   level?: number;
   onEditStateChange?: (isEditing: boolean) => void;
-  // NEW PROPS for modal orchestration
   onOptionsOpen?: () => void;
   onOptionsClose?: () => void;
   onShowInfoBar?: (message: string, type: "success" | "error" | "info") => void;
@@ -83,8 +83,6 @@ const getProfileImageSource = (
 
 /**
  * Helper to extract mention from text - captures full display name with spaces
- * Format: @Full Display Name (can include spaces) followed by space or end of string
- * Example: "@John Doe" or "@Jane Smith hello there"
  */
 const extractMention = (
   content: string,
@@ -132,13 +130,14 @@ const CommentItem: React.FC<CommentItemProps> = ({
   currentUserId,
   level = 0,
   onEditStateChange,
-  onOptionsOpen, // NEW
-  onOptionsClose, // NEW
-  onShowInfoBar, // NEW
+  onOptionsOpen,
+  onOptionsClose,
+  onShowInfoBar,
 }) => {
   // ===== Hooks =====
   const router = useRouter();
   const { user: currentUserData } = useAuth();
+  const { colors, isDark } = useTheme();
 
   // ===== State =====
   const [isEditing, setIsEditing] = useState(false);
@@ -210,6 +209,70 @@ const CommentItem: React.FC<CommentItemProps> = ({
   const mentionText = mentionData.mention;
   const remainingText = mentionData.remaining;
 
+  // ===== Dynamic Styles =====
+  const dynamicStyles = useMemo(
+    () => ({
+      longPressed: {
+        backgroundColor: isDark ? colors.border : "#f3f4f6",
+      },
+      avatar: {
+        backgroundColor: isDark ? colors.border : "#f3f4f6",
+      },
+      anonymousAvatar: {
+        backgroundColor: isDark ? colors.background : "#f3f4f6",
+        borderColor: colors.border,
+      },
+      userName: {
+        color: colors.text,
+      },
+      anonymousName: {
+        color: colors.textSecondary,
+      },
+      authorBadge: {
+        backgroundColor: isDark ? colors.primaryLight : "#fef3c7",
+      },
+      authorBadgeText: {
+        color: isDark ? colors.primary : "#92400e",
+      },
+      anonymousBadge: {
+        backgroundColor: isDark ? colors.border : "#f3f4f6",
+      },
+      anonymousBadgeText: {
+        color: colors.textSecondary,
+      },
+      editedBadge: {
+        color: colors.textMuted,
+      },
+      mentionText: {
+        color: colors.primary,
+      },
+      commentText: {
+        color: isDark ? colors.textSecondary : "#374151",
+      },
+      timestamp: {
+        color: colors.textMuted,
+      },
+      footerActionText: {
+        color: colors.textSecondary,
+      },
+      editInput: {
+        borderColor: colors.primary,
+        backgroundColor: colors.card,
+        color: colors.text,
+      },
+      cancelButtonText: {
+        color: colors.textSecondary,
+      },
+      saveButton: {
+        backgroundColor: colors.primary,
+      },
+      toggleRepliesText: {
+        color: colors.textSecondary,
+      },
+    }),
+    [colors, isDark],
+  );
+
   // ===== Navigation Handler =====
   const handleUserPress = useCallback(() => {
     if (isAnonymous) return;
@@ -247,7 +310,6 @@ const CommentItem: React.FC<CommentItemProps> = ({
     setLongPressed(true);
     handlePressOut();
     setOptionsVisible(true);
-    // Notify parent that options modal is open
     if (onOptionsOpen) {
       onOptionsOpen();
     }
@@ -256,7 +318,6 @@ const CommentItem: React.FC<CommentItemProps> = ({
 
   const handleOptionsClose = useCallback(() => {
     setOptionsVisible(false);
-    // Notify parent that options modal is closed
     if (onOptionsClose) {
       onOptionsClose();
     }
@@ -337,8 +398,14 @@ const CommentItem: React.FC<CommentItemProps> = ({
   const renderAvatar = () => {
     if (isAnonymous) {
       return (
-        <View style={[styles.avatar, styles.anonymousAvatar]}>
-          <Ionicons name="eye-off-outline" size={18} color="#9ca3af" />
+        <View
+          style={[
+            styles.avatar,
+            styles.anonymousAvatar,
+            dynamicStyles.anonymousAvatar,
+          ]}
+        >
+          <Ionicons name="eye-off-outline" size={18} color={colors.textMuted} />
         </View>
       );
     }
@@ -346,7 +413,13 @@ const CommentItem: React.FC<CommentItemProps> = ({
     if (avatarError) {
       return (
         <TouchableOpacity onPress={handleUserPress}>
-          <View style={[styles.avatar, styles.fallbackAvatar]}>
+          <View
+            style={[
+              styles.avatar,
+              styles.fallbackAvatar,
+              { backgroundColor: colors.primary },
+            ]}
+          >
             <Text style={styles.fallbackAvatarText}>
               {displayInfo.name.charAt(0).toUpperCase()}
             </Text>
@@ -362,14 +435,13 @@ const CommentItem: React.FC<CommentItemProps> = ({
         <TouchableOpacity onPress={handleUserPress}>
           <Image
             source={DEFAULT_AVATAR}
-            style={styles.avatar}
+            style={[styles.avatar, dynamicStyles.avatar]}
             contentFit="cover"
           />
         </TouchableOpacity>
       );
     }
 
-    // Build full URL (handles relative paths like "/uploads/...")
     const fullUrl = profileImageUrl.startsWith("http")
       ? profileImageUrl
       : `${API_BASE_URL}${profileImageUrl}`;
@@ -385,27 +457,47 @@ const CommentItem: React.FC<CommentItemProps> = ({
       </TouchableOpacity>
     );
   };
+
   const renderBadges = () => (
     <View style={styles.badgeContainer}>
       {isFromAuthor && (
-        <View style={styles.authorBadge}>
+        <View style={[styles.authorBadge, dynamicStyles.authorBadge]}>
           <Ionicons name="star" size={12} color="#fbbf24" />
-          <Text style={styles.authorBadgeText}>Author</Text>
+          <Text style={[styles.authorBadgeText, dynamicStyles.authorBadgeText]}>
+            Author
+          </Text>
         </View>
       )}
       {isAnonymous && (
-        <View style={styles.anonymousBadge}>
-          <Ionicons name="eye-off-outline" size={10} color="#6b7280" />
-          <Text style={styles.anonymousBadgeText}>Anonymous</Text>
+        <View style={[styles.anonymousBadge, dynamicStyles.anonymousBadge]}>
+          <Ionicons
+            name="eye-off-outline"
+            size={10}
+            color={colors.textSecondary}
+          />
+          <Text
+            style={[
+              styles.anonymousBadgeText,
+              dynamicStyles.anonymousBadgeText,
+            ]}
+          >
+            Anonymous
+          </Text>
         </View>
       )}
-      {comment.isEdited && <Text style={styles.editedBadge}>(edited)</Text>}
+      {comment.isEdited && (
+        <Text style={[styles.editedBadge, dynamicStyles.editedBadge]}>
+          (edited)
+        </Text>
+      )}
     </View>
   );
 
   const renderActions = () => (
     <View style={styles.footer}>
-      <Text style={styles.timestamp}>{formattedTime}</Text>
+      <Text style={[styles.timestamp, dynamicStyles.timestamp]}>
+        {formattedTime}
+      </Text>
 
       <TouchableOpacity
         style={styles.footerAction}
@@ -415,10 +507,14 @@ const CommentItem: React.FC<CommentItemProps> = ({
         <Ionicons
           name={comment.isLiked ? "heart" : "heart-outline"}
           size={16}
-          color={comment.isLiked ? "#ef4444" : "#6b7280"}
+          color={comment.isLiked ? "#ef4444" : colors.textSecondary}
         />
         <Text
-          style={[styles.footerActionText, comment.isLiked && styles.likedText]}
+          style={[
+            styles.footerActionText,
+            dynamicStyles.footerActionText,
+            comment.isLiked && styles.likedText,
+          ]}
         >
           {comment.likes?.length || 0}
         </Text>
@@ -429,8 +525,16 @@ const CommentItem: React.FC<CommentItemProps> = ({
           style={styles.footerAction}
           onPress={handleReplyPress}
         >
-          <Ionicons name="chatbubble-outline" size={16} color="#6b7280" />
-          <Text style={styles.footerActionText}>Reply</Text>
+          <Ionicons
+            name="chatbubble-outline"
+            size={16}
+            color={colors.textSecondary}
+          />
+          <Text
+            style={[styles.footerActionText, dynamicStyles.footerActionText]}
+          >
+            Reply
+          </Text>
         </TouchableOpacity>
       )}
     </View>
@@ -439,9 +543,10 @@ const CommentItem: React.FC<CommentItemProps> = ({
   const renderEditMode = () => (
     <View style={styles.editContainer}>
       <TextInput
-        style={styles.editInput}
+        style={[styles.editInput, dynamicStyles.editInput]}
         value={editText}
         onChangeText={setEditText}
+        placeholderTextColor={colors.textMuted}
         multiline
         autoFocus
         maxLength={500}
@@ -451,18 +556,23 @@ const CommentItem: React.FC<CommentItemProps> = ({
           style={styles.cancelButton}
           onPress={handleCancelEdit}
         >
-          <Text style={styles.cancelButtonText}>Cancel</Text>
+          <Text
+            style={[styles.cancelButtonText, dynamicStyles.cancelButtonText]}
+          >
+            Cancel
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[
             styles.saveButton,
+            dynamicStyles.saveButton,
             (!editText.trim() || isSubmitting) && styles.disabledButton,
           ]}
           onPress={handleUpdate}
           disabled={!editText.trim() || isSubmitting}
         >
           {isSubmitting ? (
-            <ActivityIndicator size="small" color="#fff" />
+            <ActivityIndicator size="small" color={colors.badgeText} />
           ) : (
             <Text style={styles.saveButtonText}>Save</Text>
           )}
@@ -477,9 +587,13 @@ const CommentItem: React.FC<CommentItemProps> = ({
     if (hasMention && mentionText) {
       return (
         <View style={styles.commentContentWrapper}>
-          <Text style={styles.mentionText}>{mentionText}</Text>
+          <Text style={[styles.mentionText, dynamicStyles.mentionText]}>
+            {mentionText}
+          </Text>
           {remainingText ? (
-            <Text style={styles.commentText}>{remainingText}</Text>
+            <Text style={[styles.commentText, dynamicStyles.commentText]}>
+              {remainingText}
+            </Text>
           ) : null}
         </View>
       );
@@ -487,7 +601,9 @@ const CommentItem: React.FC<CommentItemProps> = ({
 
     return (
       <View style={styles.commentContentWrapper}>
-        <Text style={styles.commentText}>{comment.content}</Text>
+        <Text style={[styles.commentText, dynamicStyles.commentText]}>
+          {comment.content}
+        </Text>
       </View>
     );
   };
@@ -501,8 +617,14 @@ const CommentItem: React.FC<CommentItemProps> = ({
           style={styles.toggleRepliesButton}
           onPress={() => setShowReplies(!showReplies)}
         >
-          <Ionicons name="chatbubble-outline" size={16} color="#6b7280" />
-          <Text style={styles.toggleRepliesText}>
+          <Ionicons
+            name="chatbubble-outline"
+            size={16}
+            color={colors.textSecondary}
+          />
+          <Text
+            style={[styles.toggleRepliesText, dynamicStyles.toggleRepliesText]}
+          >
             {replyCount} {replyCount === 1 ? "reply" : "replies"}
           </Text>
         </TouchableOpacity>
@@ -518,9 +640,11 @@ const CommentItem: React.FC<CommentItemProps> = ({
           <Ionicons
             name={showReplies ? "chevron-down" : "chevron-forward"}
             size={16}
-            color="#6b7280"
+            color={colors.textSecondary}
           />
-          <Text style={styles.toggleRepliesText}>
+          <Text
+            style={[styles.toggleRepliesText, dynamicStyles.toggleRepliesText]}
+          >
             {showReplies ? "Hide" : "Show"} {replyCount}{" "}
             {replyCount === 1 ? "reply" : "replies"}
           </Text>
@@ -546,9 +670,9 @@ const CommentItem: React.FC<CommentItemProps> = ({
                 currentUserId={currentUserId}
                 level={level + 1}
                 onEditStateChange={onEditStateChange}
-                onOptionsOpen={onOptionsOpen} // Pass down to nested replies
-                onOptionsClose={onOptionsClose} // Pass down to nested replies
-                onShowInfoBar={onShowInfoBar} // Pass down to nested replies
+                onOptionsOpen={onOptionsOpen}
+                onOptionsClose={onOptionsClose}
+                onShowInfoBar={onShowInfoBar}
               />
             ))}
           </View>
@@ -565,7 +689,7 @@ const CommentItem: React.FC<CommentItemProps> = ({
           styles.container,
           { marginLeft: INDENTATION },
           { transform: [{ scale: scaleAnim }] },
-          longPressed && styles.longPressed,
+          longPressed && dynamicStyles.longPressed,
         ]}
       >
         {level > 0 && (
@@ -592,7 +716,8 @@ const CommentItem: React.FC<CommentItemProps> = ({
                     <Text
                       style={[
                         styles.userName,
-                        isAnonymous && styles.anonymousName,
+                        dynamicStyles.userName,
+                        isAnonymous && dynamicStyles.anonymousName,
                       ]}
                     >
                       {displayInfo.name}
@@ -611,7 +736,6 @@ const CommentItem: React.FC<CommentItemProps> = ({
         {renderReplies()}
       </Animated.View>
 
-      {/* Updated CommentOptionsModal with new props */}
       <CommentOptionsModal
         visible={optionsVisible}
         onClose={handleOptionsClose}
@@ -635,6 +759,7 @@ const CommentItem: React.FC<CommentItemProps> = ({
 const styles = StyleSheet.create({
   container: {
     marginBottom: 12,
+    marginTop: 12,
     position: "relative",
   },
   depthLine: {
@@ -645,9 +770,6 @@ const styles = StyleSheet.create({
     width: 2,
     opacity: 0.3,
     borderRadius: 1,
-  },
-  longPressed: {
-    backgroundColor: "#f3f4f6",
   },
   commentContainer: {
     flexDirection: "row",
@@ -660,19 +782,15 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 18,
     marginRight: 12,
-    backgroundColor: "#f3f4f6",
   },
   fallbackAvatar: {
-    backgroundColor: "#8b5cf6",
     justifyContent: "center",
     alignItems: "center",
   },
   anonymousAvatar: {
-    backgroundColor: "#f3f4f6",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#e5e7eb",
     borderStyle: "dashed",
   },
   fallbackAvatarText: {
@@ -696,11 +814,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     fontFamily: "SofiaSans-SemiBold",
-    color: "#111827",
-  },
-  anonymousName: {
-    color: "#6b7280",
-    fontFamily: "SofiaSans-Regular",
   },
   badgeContainer: {
     flexDirection: "row",
@@ -711,7 +824,6 @@ const styles = StyleSheet.create({
   authorBadge: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#fef3c7",
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 12,
@@ -720,13 +832,11 @@ const styles = StyleSheet.create({
   authorBadgeText: {
     fontSize: 10,
     fontFamily: "SofiaSans-Regular",
-    color: "#92400e",
     fontWeight: "500",
   },
   anonymousBadge: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#f3f4f6",
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 12,
@@ -734,11 +844,9 @@ const styles = StyleSheet.create({
   },
   anonymousBadgeText: {
     fontSize: 10,
-    color: "#6b7280",
   },
   editedBadge: {
     fontSize: 11,
-    color: "#9ca3af",
     fontStyle: "italic",
     fontFamily: "SofiaSans-Regular",
   },
@@ -751,7 +859,6 @@ const styles = StyleSheet.create({
   mentionText: {
     fontSize: 14,
     lineHeight: 20,
-    color: "#8b5cf6",
     fontFamily: "SofiaSans-Bold",
     fontWeight: "500",
     marginRight: 4,
@@ -759,7 +866,6 @@ const styles = StyleSheet.create({
   commentText: {
     fontSize: 14,
     lineHeight: 20,
-    color: "#374151",
     fontFamily: "SofiaSans-Regular",
     flex: 1,
   },
@@ -770,7 +876,6 @@ const styles = StyleSheet.create({
   },
   timestamp: {
     fontSize: 11,
-    color: "#9ca3af",
   },
   footerAction: {
     flexDirection: "row",
@@ -780,7 +885,6 @@ const styles = StyleSheet.create({
   footerActionText: {
     fontSize: 12,
     fontFamily: "SofiaSans-Regular",
-    color: "#6b7280",
   },
   likedText: {
     color: "#ef4444",
@@ -790,12 +894,10 @@ const styles = StyleSheet.create({
   },
   editInput: {
     borderWidth: 1,
-    borderColor: "#8b5cf6",
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 14,
-    backgroundColor: "#fff",
     minHeight: 80,
     textAlignVertical: "top",
   },
@@ -810,11 +912,9 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   cancelButtonText: {
-    color: "#6b7280",
     fontSize: 13,
   },
   saveButton: {
-    backgroundColor: "#8b5cf6",
     paddingHorizontal: 16,
     paddingVertical: 6,
     borderRadius: 16,
@@ -839,7 +939,6 @@ const styles = StyleSheet.create({
   },
   toggleRepliesText: {
     fontSize: 12,
-    color: "#6b7280",
     fontWeight: "500",
   },
   repliesList: {

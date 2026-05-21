@@ -11,6 +11,7 @@ import {
   Pressable,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 
 interface UploadModalProps {
   visible: boolean;
@@ -37,6 +38,8 @@ export default function UploadModal({
   viewLabel = "View Photo",
   deleteLabel = "Remove Photo",
 }: UploadModalProps) {
+  const { colors } = useTheme();
+
   const handleDeletePhoto = () => {
     const modalTitle =
       title === "Cover Photo" ? "Cover Photo" : "Profile Picture";
@@ -63,11 +66,14 @@ export default function UploadModal({
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
 
         {/* BOTTOM SHEET */}
-        <View style={styles.container}>
-          <View style={styles.header}>
-            <Text style={styles.title}>{title}</Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <Ionicons name="close" size={20} color="#6b7280" />
+        <View style={[styles.container, { backgroundColor: colors.card }]}>
+          <View style={[styles.header, { borderBottomColor: colors.border }]}>
+            <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
+            <TouchableOpacity
+              onPress={onClose}
+              style={[styles.closeButton, { backgroundColor: colors.skeleton }]}
+            >
+              <Ionicons name="close" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
@@ -78,18 +84,24 @@ export default function UploadModal({
               onViewImage();
             }}
           >
-            <Ionicons name="eye-outline" size={18} color="#6366f1" />
-            <Text style={styles.optionText}>{viewLabel}</Text>
+            <Ionicons name="eye-outline" size={18} color={colors.primary} />
+            <Text style={[styles.optionText, { color: colors.text }]}>
+              {viewLabel}
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.option} onPress={onPickImage}>
-            <Ionicons name="images-outline" size={18} color="#6366f1" />
-            <Text style={styles.optionText}>Choose from Gallery</Text>
+            <Ionicons name="images-outline" size={18} color={colors.primary} />
+            <Text style={[styles.optionText, { color: colors.text }]}>
+              Choose from Gallery
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.option} onPress={onTakePhoto}>
-            <Ionicons name="camera-outline" size={18} color="#6366f1" />
-            <Text style={styles.optionText}>Take Photo</Text>
+            <Ionicons name="camera-outline" size={18} color={colors.primary} />
+            <Text style={[styles.optionText, { color: colors.text }]}>
+              Take Photo
+            </Text>
           </TouchableOpacity>
 
           {hasExistingImage && (

@@ -7,9 +7,10 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
-  Platform, // Add this import
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 
 interface EventOptionsModalProps {
   visible: boolean;
@@ -56,17 +57,13 @@ const EventOptionsModal: React.FC<EventOptionsModalProps> = ({
   eventDate,
   eventLocation,
 }) => {
-  /**
-   * Handle edit event action
-   */
+  const { colors } = useTheme();
+
   const handleEdit = () => {
     onClose();
     if (onEdit) onEdit(eventId);
   };
 
-  /**
-   * Handle delete event with confirmation
-   */
   const handleDelete = () => {
     Alert.alert(
       "Delete Event",
@@ -85,17 +82,11 @@ const EventOptionsModal: React.FC<EventOptionsModalProps> = ({
     );
   };
 
-  /**
-   * Handle save/unsave event
-   */
   const handleSave = () => {
     onClose();
     if (onSave) onSave(eventId);
   };
 
-  /**
-   * Handle report event with reason selection
-   */
   const handleReport = () => {
     Alert.alert(
       "Report Event",
@@ -142,25 +133,15 @@ const EventOptionsModal: React.FC<EventOptionsModalProps> = ({
     );
   };
 
-  /**
-   * Handle share event
-   */
   const handleShare = () => {
     onClose();
     if (onShare) onShare(eventId);
   };
-
-  /**
-   * Handle add to calendar
-   */
   const handleAddToCalendar = () => {
     onClose();
     if (onAddToCalendar) onAddToCalendar(eventId);
   };
 
-  /**
-   * Handle mute organizer
-   */
   const handleMuteOrganizer = () => {
     Alert.alert(
       "Mute Organizer",
@@ -179,9 +160,6 @@ const EventOptionsModal: React.FC<EventOptionsModalProps> = ({
     );
   };
 
-  /**
-   * Handle block organizer
-   */
   const handleBlockOrganizer = () => {
     Alert.alert(
       "Block Organizer",
@@ -200,131 +178,149 @@ const EventOptionsModal: React.FC<EventOptionsModalProps> = ({
     );
   };
 
-  /**
-   * Render organizer options (Edit/Delete)
-   */
   const renderOrganizerOptions = () => (
     <>
       <TouchableOpacity style={styles.optionItem} onPress={handleEdit}>
-        <Ionicons name="create-outline" size={22} color="#8b5cf6" />
-        <Text style={styles.optionText}>Edit Event</Text>
+        <Ionicons name="create-outline" size={22} color={colors.primary} />
+        <Text style={[styles.optionText, { color: colors.text }]}>
+          Edit Event
+        </Text>
       </TouchableOpacity>
-
       <TouchableOpacity style={styles.optionItem} onPress={handleDelete}>
         <Ionicons name="trash-outline" size={22} color="#ef4444" />
         <Text style={[styles.optionText, styles.deleteText]}>Delete Event</Text>
       </TouchableOpacity>
-
-      <View style={styles.divider} />
+      <View style={[styles.divider, { backgroundColor: colors.border }]} />
     </>
   );
 
-  /**
-   * Render organizer actions (Mute/Block for attendees)
-   */
   const renderOrganizerActions = () => (
     <>
       <TouchableOpacity style={styles.optionItem} onPress={handleMuteOrganizer}>
-        <Ionicons name="volume-mute-outline" size={22} color="#6b7280" />
-        <Text style={styles.optionText}>Mute Organizer</Text>
+        <Ionicons
+          name="volume-mute-outline"
+          size={22}
+          color={colors.textSecondary}
+        />
+        <Text style={[styles.optionText, { color: colors.text }]}>
+          Mute Organizer
+        </Text>
       </TouchableOpacity>
-
       <TouchableOpacity
         style={styles.optionItem}
         onPress={handleBlockOrganizer}
       >
         <Ionicons name="ban-outline" size={22} color="#ef4444" />
-        <Text style={[styles.optionText, styles.deleteText]}>
+        <Text
+          style={[styles.optionText, { color: colors.text }, styles.deleteText]}
+        >
           Block Organizer
         </Text>
       </TouchableOpacity>
-
-      <View style={styles.divider} />
+      <View style={[styles.divider, { backgroundColor: colors.border }]} />
     </>
   );
 
-  /**
-   * Render common options for all users
-   */
   const renderCommonOptions = () => (
     <>
       <TouchableOpacity style={styles.optionItem} onPress={handleSave}>
         <Ionicons
           name={isSaved ? "bookmark" : "bookmark-outline"}
           size={22}
-          color={isSaved ? "#8b5cf6" : "#6b7280"}
+          color={isSaved ? colors.primary : colors.textSecondary}
         />
-        <Text style={[styles.optionText, isSaved && styles.savedText]}>
+        <Text
+          style={[
+            styles.optionText,
+            { color: colors.text },
+            isSaved && { color: colors.primary },
+          ]}
+        >
           {isSaved ? "Saved" : "Save Event"}
         </Text>
       </TouchableOpacity>
-
       <TouchableOpacity style={styles.optionItem} onPress={handleAddToCalendar}>
-        <Ionicons name="calendar-outline" size={22} color="#6b7280" />
-        <Text style={styles.optionText}>Add to Calendar</Text>
+        <Ionicons
+          name="calendar-outline"
+          size={22}
+          color={colors.textSecondary}
+        />
+        <Text style={[styles.optionText, { color: colors.text }]}>
+          Add to Calendar
+        </Text>
       </TouchableOpacity>
-
       <TouchableOpacity style={styles.optionItem} onPress={handleShare}>
-        <Ionicons name="share-outline" size={22} color="#6b7280" />
-        <Text style={styles.optionText}>Share Event</Text>
+        <Ionicons name="share-outline" size={22} color={colors.textSecondary} />
+        <Text style={[styles.optionText, { color: colors.text }]}>
+          Share Event
+        </Text>
       </TouchableOpacity>
     </>
   );
 
-  /**
-   * Render event status info (for non-organizers)
-   */
   const renderEventStatus = () => (
     <>
-      <View style={styles.statusSection}>
+      <View
+        style={[styles.statusSection, { backgroundColor: colors.skeleton }]}
+      >
         <View style={styles.statusHeader}>
           <Ionicons
             name="information-circle-outline"
             size={18}
-            color="#9ca3af"
+            color={colors.textMuted}
           />
-          <Text style={styles.statusTitle}>Your Status</Text>
+          <Text style={[styles.statusTitle, { color: colors.textSecondary }]}>
+            Your Status
+          </Text>
         </View>
-
         {isInterested && (
           <View style={styles.statusItem}>
             <Ionicons name="heart" size={18} color="#ef4444" />
-            <Text style={styles.statusText}>
+            <Text style={[styles.statusText, { color: colors.text }]}>
               You're interested in this event
             </Text>
           </View>
         )}
-
         {isRsvpd && (
           <View style={styles.statusItem}>
             <Ionicons name="checkmark-circle" size={18} color="#10b981" />
-            <Text style={styles.statusText}>You're attending this event</Text>
+            <Text style={[styles.statusText, { color: colors.text }]}>
+              You're attending this event
+            </Text>
           </View>
         )}
-
         {!isInterested && !isRsvpd && (
           <View style={styles.statusItem}>
-            <Ionicons name="ellipsis-horizontal" size={18} color="#9ca3af" />
-            <Text style={styles.statusText}>No RSVP or interest yet</Text>
+            <Ionicons
+              name="ellipsis-horizontal"
+              size={18}
+              color={colors.textMuted}
+            />
+            <Text style={[styles.statusText, { color: colors.text }]}>
+              No RSVP or interest yet
+            </Text>
           </View>
         )}
       </View>
-      <View style={styles.divider} />
+      <View style={[styles.divider, { backgroundColor: colors.border }]} />
     </>
   );
 
-  /**
-   * Render report option (only for non-organizers)
-   */
   const renderReportOption = () => (
     <>
       <TouchableOpacity style={styles.optionItem} onPress={handleReport}>
         <Ionicons
           name={isReported ? "flag" : "flag-outline"}
           size={22}
-          color={isReported ? "#ef4444" : "#6b7280"}
+          color={isReported ? "#ef4444" : colors.textSecondary}
         />
-        <Text style={[styles.optionText, isReported && styles.reportedText]}>
+        <Text
+          style={[
+            styles.optionText,
+            { color: colors.text },
+            isReported && styles.reportedText,
+          ]}
+        >
           {isReported ? "Reported" : "Report Event"}
         </Text>
       </TouchableOpacity>
@@ -343,32 +339,38 @@ const EventOptionsModal: React.FC<EventOptionsModalProps> = ({
         activeOpacity={1}
         onPress={onClose}
       >
-        <View style={styles.modalContent}>
-          {/* Header with event info if available */}
-          <View style={styles.modalHeader}>
+        <View
+          style={[
+            styles.modalContent,
+            { backgroundColor: colors.card, shadowColor: colors.shadow },
+          ]}
+        >
+          <View
+            style={[styles.modalHeader, { borderBottomColor: colors.border }]}
+          >
             <View>
-              <Text style={styles.modalTitle}>Event Options</Text>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
+                Event Options
+              </Text>
               {eventTitle && (
-                <Text style={styles.eventTitlePreview} numberOfLines={1}>
+                <Text
+                  style={[
+                    styles.eventTitlePreview,
+                    { color: colors.textMuted },
+                  ]}
+                  numberOfLines={1}
+                >
                   {eventTitle}
                 </Text>
               )}
             </View>
             <TouchableOpacity onPress={onClose}>
-              <Ionicons name="close" size={24} color="#6b7280" />
+              <Ionicons name="close" size={24} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
-
-          {/* Dynamic Options based on ownership */}
           {isOrganizer ? renderOrganizerOptions() : renderOrganizerActions()}
-
-          {/* Event Status for non-organizers */}
           {!isOrganizer && renderEventStatus()}
-
-          {/* Common Options for all users */}
           {renderCommonOptions()}
-
-          {/* Report option for non-organizers */}
           {!isOrganizer && renderReportOption()}
         </View>
       </TouchableOpacity>
@@ -383,16 +385,11 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   modalContent: {
-    backgroundColor: "white",
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingBottom: Platform.OS === "ios" ? 30 : 20,
     maxHeight: "80%",
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: -3,
-    },
+    shadowOffset: { width: 0, height: -3 },
     shadowOpacity: 0.1,
     shadowRadius: 5,
     elevation: 10,
@@ -404,18 +401,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
   },
-  modalTitle: {
-    fontSize: 18,
-    fontFamily: "SofiaSans-Bold",
-    fontWeight: "600",
-    color: "#111827",
-  },
+  modalTitle: { fontSize: 18, fontFamily: "SofiaSans-Bold", fontWeight: "600" },
   eventTitlePreview: {
     fontSize: 13,
     fontFamily: "SofiaSans-Regular",
-    color: "#9ca3af",
     marginTop: 2,
     maxWidth: 250,
   },
@@ -426,31 +416,11 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     gap: 12,
   },
-  optionText: {
-    fontSize: 16,
-    fontFamily: "SofiaSans-Regular",
-    color: "#374151",
-    flex: 1,
-  },
-  deleteText: {
-    color: "#ef4444",
-  },
-  savedText: {
-    color: "#8b5cf6",
-  },
-  reportedText: {
-    color: "#ef4444",
-  },
-  divider: {
-    height: 1,
-    backgroundColor: "#f3f4f6",
-    marginVertical: 8,
-  },
-  statusSection: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    backgroundColor: "#f9fafb",
-  },
+  optionText: { fontSize: 16, fontFamily: "SofiaSans-Regular", flex: 1 },
+  deleteText: { color: "#ef4444" },
+  reportedText: { color: "#ef4444" },
+  divider: { height: 1, marginVertical: 8 },
+  statusSection: { paddingHorizontal: 20, paddingVertical: 12 },
   statusHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -460,7 +430,6 @@ const styles = StyleSheet.create({
   statusTitle: {
     fontSize: 13,
     fontFamily: "SofiaSans-Bold",
-    color: "#6b7280",
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
@@ -470,12 +439,7 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingVertical: 6,
   },
-  statusText: {
-    fontSize: 14,
-    fontFamily: "SofiaSans-Regular",
-    color: "#374151",
-    flex: 1,
-  },
+  statusText: { fontSize: 14, fontFamily: "SofiaSans-Regular", flex: 1 },
 });
 
-export default EventOptionsModal; 
+export default EventOptionsModal;

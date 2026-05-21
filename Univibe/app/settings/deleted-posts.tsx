@@ -16,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useAuth } from "../../lib/contexts/AuthContext";
+import { useTheme } from "../../lib/contexts/ThemeContext";
 import {
   Post,
   restorePost,
@@ -27,6 +28,7 @@ import { API_BASE_URL } from "../../constants/ipConstants";
 export default function DeletedPostsScreen() {
   const router = useRouter();
   const { user, token } = useAuth();
+  const { colors, isDark } = useTheme();
   const [deletedPosts, setDeletedPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -67,19 +69,16 @@ export default function DeletedPostsScreen() {
   const loadDeletedPosts = useCallback(
     async (pageNum: number = 1, shouldAppend: boolean = false) => {
       if (!token) return;
-
       if (shouldAppend) {
         setLoadingMore(true);
       } else {
         setLoading(true);
       }
-
       try {
         const params = new URLSearchParams({
           page: pageNum.toString(),
           limit: "10",
         });
-
         const response = await fetch(
           `${API_BASE_URL}/api/posts/deleted?${params.toString()}`,
           {
@@ -90,21 +89,18 @@ export default function DeletedPostsScreen() {
           },
         );
         const data = await response.json();
-
         if (data.success && data.data) {
           if (shouldAppend) {
             setDeletedPosts((prev) => [...prev, ...data.data.posts]);
           } else {
             setDeletedPosts(data.data.posts);
           }
-
           setHasMore(data.data.pagination.page < data.data.pagination.pages);
           setPage(pageNum);
         } else {
           setDeletedPosts([]);
         }
       } catch (error) {
-        console.error("Error loading deleted posts:", error);
         showInfoBar("Failed to load deleted posts", "error");
         setDeletedPosts([]);
       } finally {
@@ -122,7 +118,6 @@ export default function DeletedPostsScreen() {
     setHasMore(true);
     await loadDeletedPosts(1, false);
   };
-
   const loadMore = () => {
     if (!loadingMore && hasMore && !loading) {
       loadDeletedPosts(page + 1, true);
@@ -149,7 +144,6 @@ export default function DeletedPostsScreen() {
             setDeletedPosts((prev) =>
               prev.filter((post) => post._id !== postId),
             );
-
             try {
               const result = await restorePost(postId);
               if (result.success) {
@@ -178,7 +172,6 @@ export default function DeletedPostsScreen() {
             setDeletedPosts((prev) =>
               prev.filter((post) => post._id !== postId),
             );
-
             try {
               const result = await permanentlyDeletePost(postId);
               if (result.success) {
@@ -198,7 +191,7 @@ export default function DeletedPostsScreen() {
   };
 
   const renderPost = ({ item }: { item: Post }) => (
-    <View style={styles.postCardContainer}>
+    <View style={[styles.postCardContainer, { backgroundColor: colors.card }]}>
       <PostCard
         post={item}
         compact={true}
@@ -213,16 +206,22 @@ export default function DeletedPostsScreen() {
         onMuteUser={() => {}}
         onBlockUser={() => {}}
       />
-      <View style={styles.actionButtons}>
+      <View style={[styles.actionButtons, { borderTopColor: colors.border }]}>
         <TouchableOpacity
-          style={styles.restoreButton}
+          style={[
+            styles.restoreButton,
+            { backgroundColor: isDark ? "#052e16" : "#f0fdf4" },
+          ]}
           onPress={() => handleRestore(item._id)}
         >
           <Ionicons name="refresh-outline" size={20} color="#10b981" />
           <Text style={styles.restoreText}>Restore</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.permanentDeleteButton}
+          style={[
+            styles.permanentDeleteButton,
+            { backgroundColor: isDark ? "#451a1a" : "#fef2f2" },
+          ]}
           onPress={() => handlePermanentDelete(item._id)}
         >
           <Ionicons name="trash-outline" size={20} color="#ef4444" />
@@ -234,20 +233,32 @@ export default function DeletedPostsScreen() {
 
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
-      <Ionicons name="trash-outline" size={64} color="#d1d5db" />
-      <Text style={styles.emptyTitle}>No deleted posts</Text>
-      <Text style={styles.emptyText}>
+      <Ionicons name="trash-outline" size={64} color={colors.textMuted} />
+      <Text style={[styles.emptyTitle, { color: colors.text }]}>
+        No deleted posts
+      </Text>
+      <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
         Posts you delete will appear here for 30 days
       </Text>
     </View>
   );
 
   const renderHeader = () => (
-    <View style={styles.header}>
+    <View
+      style={[
+        styles.header,
+        {
+          backgroundColor: colors.background,
+          borderBottomColor: colors.border,
+        },
+      ]}
+    >
       <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-        <Ionicons name="arrow-back" size={24} color="#111827" />
+        <Ionicons name="arrow-back" size={24} color={colors.text} />
       </TouchableOpacity>
-      <Text style={styles.headerTitle}>Deleted Posts</Text>
+      <Text style={[styles.headerTitle, { color: colors.text }]}>
+        Deleted Posts
+      </Text>
       <View style={{ width: 40 }} />
     </View>
   );
@@ -256,26 +267,36 @@ export default function DeletedPostsScreen() {
     if (!loadingMore) return null;
     return (
       <View style={styles.footerLoader}>
-        <ActivityIndicator size="small" color="#8b5cf6" />
-        <Text style={styles.loadingMoreText}>Loading more...</Text>
+        <ActivityIndicator size="small" color={colors.primary} />
+        <Text style={[styles.loadingMoreText, { color: colors.textSecondary }]}>
+          Loading more...
+        </Text>
       </View>
     );
   };
 
   if (loading && !refreshing) {
     return (
-      <SafeAreaView style={styles.container} edges={["top"]}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        edges={["top"]}
+      >
         {renderHeader()}
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8b5cf6" />
-          <Text style={styles.loadingText}>Loading deleted posts...</Text>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+            Loading deleted posts...
+          </Text>
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      edges={["top"]}
+    >
       {renderHeader()}
       <FlatList
         data={deletedPosts}
@@ -290,8 +311,9 @@ export default function DeletedPostsScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor="#8b5cf6"
-            colors={["#8b5cf6"]}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+            progressBackgroundColor={colors.card}
           />
         }
       />
@@ -305,7 +327,7 @@ export default function DeletedPostsScreen() {
                   ? "#10b981"
                   : infoType === "error"
                     ? "#ef4444"
-                    : "#8b5cf6",
+                    : colors.primary,
               transform: [{ translateY: slideAnim }],
             },
           ]}
@@ -323,40 +345,26 @@ export default function DeletedPostsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f9fafb",
-  },
+  container: { flex: 1 },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: "#ffffff",
     borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
   },
-  backButton: {
-    padding: 8,
-    marginLeft: -8,
-  },
+  backButton: { padding: 8, marginLeft: -8 },
   headerTitle: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#111827",
-    fontFamily: "SofiaSans-SemiBold",
+    fontFamily: "SofiaSans-Bold",
   },
-  listContent: {
-    flexGrow: 1,
-    paddingBottom: 20,
-  },
+  listContent: { flexGrow: 1, paddingBottom: 20 },
   postCardContainer: {
     padding: 16,
     marginBottom: 8,
-    backgroundColor: "#ffffff",
     borderRadius: 12,
-    marginHorizontal: 16,
     marginVertical: 8,
   },
   actionButtons: {
@@ -365,7 +373,6 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: "#e5e7eb",
     gap: 12,
   },
   restoreButton: {
@@ -374,7 +381,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 8,
-    backgroundColor: "#f0fdf4",
     borderRadius: 8,
     gap: 8,
   },
@@ -390,7 +396,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 8,
-    backgroundColor: "#fef2f2",
     borderRadius: 8,
     gap: 8,
   },
@@ -409,28 +414,17 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#374151",
     marginTop: 16,
     fontFamily: "SofiaSans-SemiBold",
   },
   emptyText: {
     fontSize: 14,
-    color: "#6b7280",
     marginTop: 8,
     fontFamily: "SofiaSans-Regular",
     textAlign: "center",
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: "#6b7280",
-    fontFamily: "SofiaSans-Regular",
-  },
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  loadingText: { marginTop: 12, fontSize: 14, fontFamily: "SofiaSans-Regular" },
   footerLoader: {
     flexDirection: "row",
     justifyContent: "center",
@@ -438,11 +432,7 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
     gap: 8,
   },
-  loadingMoreText: {
-    fontSize: 12,
-    color: "#6b7280",
-    fontFamily: "SofiaSans-Regular",
-  },
+  loadingMoreText: { fontSize: 12, fontFamily: "SofiaSans-Regular" },
   infoBar: {
     position: "absolute",
     bottom: 50,

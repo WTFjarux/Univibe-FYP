@@ -20,12 +20,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { useAuth } from "../../lib/contexts/AuthContext";
+import { useTheme } from "../../lib/contexts/ThemeContext";
 import chatApi from "../../lib/services/chatApi";
 import socketService from "../../lib/services/socketService";
 import DiscardChangesModal from "../components/DiscardChangesModal";
 import { API_BASE_URL } from "../../constants/ipConstants";
-
-const ACCENT_COLOR = "#8b5cf6";
 
 // -----------------------------------------------------------------------------
 // Types
@@ -68,14 +67,13 @@ export default function GroupInfoScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { token, user } = useAuth();
+  const { colors, isDark } = useTheme();
   const roomId = params.roomId as string;
 
-  // Core state
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [leaving, setLeaving] = useState(false);
 
-  // Editable fields
   const [groupName, setGroupName] = useState("");
   const [groupDescription, setGroupDescription] = useState("");
   const [groupPhoto, setGroupPhoto] = useState<string | null>(null);
@@ -87,7 +85,6 @@ export default function GroupInfoScreen() {
     photo: string | null;
   } | null>(null);
 
-  // UI state
   const [showDiscardModal, setShowDiscardModal] = useState(false);
   const [showAddMembers, setShowAddMembers] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -95,27 +92,22 @@ export default function GroupInfoScreen() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [addingMembers, setAddingMembers] = useState(false);
 
-  // Members data
   const [participants, setParticipants] = useState<GroupMember[]>([]);
   const [participantCount, setParticipantCount] = useState(0);
 
-  // Derived
   const currentMember = participants.find((p) => p.userId === user?.id);
   const isOwner = currentMember?.role === "owner";
   const isAdmin = currentMember?.role === "admin" || isOwner;
 
   const hasUnsavedChanges = useCallback(() => {
     if (!originalData) return false;
-    const nameChanged = groupName.trim() !== originalData.name.trim();
-    const descChanged =
-      groupDescription.trim() !== originalData.description.trim();
-    const photoChanged = selectedPhotoUri !== null;
-    return nameChanged || descChanged || photoChanged;
+    return (
+      groupName.trim() !== originalData.name.trim() ||
+      groupDescription.trim() !== originalData.description.trim() ||
+      selectedPhotoUri !== null
+    );
   }, [originalData, groupName, groupDescription, selectedPhotoUri]);
 
-  // ---------------------------------------------------------------------------
-  // Fetch group info
-  // ---------------------------------------------------------------------------
   const fetchGroupInfo = useCallback(async () => {
     if (!roomId || !token) {
       setLoading(false);
@@ -160,9 +152,6 @@ export default function GroupInfoScreen() {
     fetchGroupInfo();
   }, [fetchGroupInfo]);
 
-  // ---------------------------------------------------------------------------
-  // Search connections
-  // ---------------------------------------------------------------------------
   useEffect(() => {
     if (!showAddMembers || !searchQuery.trim()) {
       setSearchResults([]);
@@ -173,9 +162,7 @@ export default function GroupInfoScreen() {
       setSearchLoading(true);
       fetch(
         `${API_BASE_URL}/api/profile/search-connections?query=${encodeURIComponent(searchQuery)}&limit=20`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        },
+        { headers: { Authorization: `Bearer ${token}` } },
       )
         .then((res) => res.json())
         .then((data) => {
@@ -203,9 +190,6 @@ export default function GroupInfoScreen() {
     return () => clearTimeout(timer);
   }, [searchQuery, showAddMembers]);
 
-  // ---------------------------------------------------------------------------
-  // Navigation
-  // ---------------------------------------------------------------------------
   const handleBack = () => {
     if (hasUnsavedChanges()) {
       setShowDiscardModal(true);
@@ -213,10 +197,8 @@ export default function GroupInfoScreen() {
       router.back();
     }
   };
-
   const handleDiscard = () => {
     setShowDiscardModal(false);
-    // Reset to original data
     if (originalData) {
       setGroupName(originalData.name);
       setGroupDescription(originalData.description);
@@ -227,9 +209,6 @@ export default function GroupInfoScreen() {
     router.back();
   };
 
-  // ---------------------------------------------------------------------------
-  // Photo handling
-  // ---------------------------------------------------------------------------
   const handlePickPhoto = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
@@ -249,28 +228,16 @@ export default function GroupInfoScreen() {
       setSelectedPhotoUri(result.assets[0].uri);
     }
   };
-
   const handleRemovePhoto = () => setSelectedPhotoUri("__remove__");
 
-  // ---------------------------------------------------------------------------
-  // Save all changes AND close modal
-  // ---------------------------------------------------------------------------
   const handleSave = async () => {
     if (!hasUnsavedChanges()) {
       setIsEditingInfo(false);
       return;
     }
-
-    const nameChanged = groupName.trim() !== (originalData?.name || "").trim();
-    const descChanged =
-      groupDescription.trim() !== (originalData?.description || "").trim();
-    const photoChanged = selectedPhotoUri !== null;
-
     setSaving(true);
     try {
       let newPhotoUrl = groupPhoto;
-
-      // Upload new photo
       if (selectedPhotoUri && selectedPhotoUri !== "__remove__") {
         const formData = new FormData();
         const uri = selectedPhotoUri;
@@ -291,15 +258,15 @@ export default function GroupInfoScreen() {
       } else if (selectedPhotoUri === "__remove__") {
         newPhotoUrl = null;
       }
-
       const updates: any = {};
-      if (nameChanged) updates.name = groupName.trim();
-      if (descChanged) updates.description = groupDescription.trim();
-      if (photoChanged || newPhotoUrl !== groupPhoto) {
+      if (groupName.trim() !== (originalData?.name || "").trim())
+        updates.name = groupName.trim();
+      if (groupDescription.trim() !== (originalData?.description || "").trim())
+        updates.description = groupDescription.trim();
+      if (newPhotoUrl !== groupPhoto) {
         updates.icon = newPhotoUrl || "";
         updates.groupPhoto = newPhotoUrl || "";
       }
-
       if (Object.keys(updates).length > 0) {
         const response = await chatApi.updateGroupInfo(roomId, updates);
         if (!response.success) {
@@ -307,8 +274,6 @@ export default function GroupInfoScreen() {
           return;
         }
       }
-
-      // Update local state
       setGroupPhoto(newPhotoUrl);
       setSelectedPhotoUri(null);
       setOriginalData({
@@ -316,21 +281,24 @@ export default function GroupInfoScreen() {
         description: groupDescription.trim(),
         photo: newPhotoUrl,
       });
-      setIsEditingInfo(false); // ✅ Close edit mode
-
-      // ✅ Emit socket event
+      setIsEditingInfo(false);
       if (socketService.getConnectionStatus()) {
         socketService.emit("group_updated", {
           roomId,
-          name: nameChanged ? groupName.trim() : undefined,
-          icon: photoChanged ? newPhotoUrl : undefined,
-          groupPhoto: photoChanged ? newPhotoUrl : undefined,
-          description: descChanged ? groupDescription.trim() : undefined,
+          name:
+            groupName.trim() !== (originalData?.name || "").trim()
+              ? groupName.trim()
+              : undefined,
+          icon: newPhotoUrl !== groupPhoto ? newPhotoUrl : undefined,
+          groupPhoto: newPhotoUrl !== groupPhoto ? newPhotoUrl : undefined,
+          description:
+            groupDescription.trim() !== (originalData?.description || "").trim()
+              ? groupDescription.trim()
+              : undefined,
           updatedBy: user?.id,
           timestamp: new Date().toISOString(),
         });
       }
-
       Alert.alert("Success", "Group updated successfully");
     } catch {
       Alert.alert("Error", "Failed to save changes");
@@ -339,9 +307,6 @@ export default function GroupInfoScreen() {
     }
   };
 
-  // ---------------------------------------------------------------------------
-  // Add members
-  // ---------------------------------------------------------------------------
   const handleAddSelectedMembers = async () => {
     const selected = searchResults.filter((u) => u.selected);
     if (selected.length === 0) return;
@@ -367,9 +332,6 @@ export default function GroupInfoScreen() {
     }
   };
 
-  // ---------------------------------------------------------------------------
-  // Role management
-  // ---------------------------------------------------------------------------
   const handleMakeAdmin = async (memberId: string) => {
     try {
       const response = await chatApi.makeAdmin(roomId, memberId);
@@ -386,7 +348,6 @@ export default function GroupInfoScreen() {
       Alert.alert("Error", "Failed to change role");
     }
   };
-
   const handleRemoveAdmin = async (memberId: string) => {
     try {
       const response = await chatApi.removeAdmin(roomId, memberId);
@@ -403,7 +364,6 @@ export default function GroupInfoScreen() {
       Alert.alert("Error", "Failed to change role");
     }
   };
-
   const handleRemoveMember = (member: GroupMember) => {
     Alert.alert("Remove Member", `Remove ${member.name} from the group?`, [
       { text: "Cancel", style: "cancel" },
@@ -431,7 +391,6 @@ export default function GroupInfoScreen() {
       },
     ]);
   };
-
   const handleLeaveGroup = () => {
     Alert.alert(
       "Leave Group",
@@ -467,21 +426,15 @@ export default function GroupInfoScreen() {
       ],
     );
   };
-
-  // ✅ Navigate to member's profile instead of DM
   const handleMemberPress = (member: GroupMember) => {
     if (member.userId === user?.id) return;
     router.push(`/profile/${member.userId}`);
   };
 
-  // ---------------------------------------------------------------------------
-  // Display helpers
-  // ---------------------------------------------------------------------------
   const sortedMembers = [...participants].sort((a, b) => {
     const order: Record<string, number> = { owner: 0, admin: 1, member: 2 };
     return (order[a.role] ?? 2) - (order[b.role] ?? 2);
   });
-
   const displayPhotoUri =
     selectedPhotoUri === "__remove__"
       ? null
@@ -490,33 +443,41 @@ export default function GroupInfoScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container} edges={["top"]}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        edges={["top"]}
+      >
         <View style={styles.center}>
-          <ActivityIndicator size="large" color={ACCENT_COLOR} />
+          <ActivityIndicator size="large" color={colors.primary} />
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      {/* Header */}
-      <View style={styles.header}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      edges={["top"]}
+    >
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={handleBack} style={styles.headerBtn}>
-          <Ionicons name="close" size={24} color="#000" />
+          <Ionicons name="close" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Group Info</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>
+          Group Info
+        </Text>
         <TouchableOpacity
           onPress={handleSave}
           disabled={saving || (!hasUnsavedChanges() && !isEditingInfo)}
           style={styles.headerSaveWrap}
         >
           {saving ? (
-            <ActivityIndicator size="small" color={ACCENT_COLOR} />
+            <ActivityIndicator size="small" color={colors.primary} />
           ) : (
             <Text
               style={[
                 styles.headerSaveText,
+                { color: colors.primary },
                 !hasUnsavedChanges() &&
                   !isEditingInfo &&
                   styles.headerSaveDisabled,
@@ -545,8 +506,12 @@ export default function GroupInfoScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Group Photo */}
-          <View style={styles.profileSection}>
+          <View
+            style={[
+              styles.profileSection,
+              { borderBottomColor: colors.border },
+            ]}
+          >
             <TouchableOpacity
               style={styles.photoWrap}
               onPress={isEditingInfo ? handlePickPhoto : undefined}
@@ -555,12 +520,31 @@ export default function GroupInfoScreen() {
               {displayPhotoUri ? (
                 <Image source={{ uri: displayPhotoUri }} style={styles.photo} />
               ) : (
-                <View style={[styles.photo, styles.photoPlaceholder]}>
-                  <Ionicons name="people" size={40} color={ACCENT_COLOR} />
+                <View
+                  style={[
+                    styles.photo,
+                    styles.photoPlaceholder,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(167,139,250,0.1)"
+                        : "#F5F3FF",
+                      borderColor: isDark ? "rgba(167,139,250,0.3)" : "#EDE9FE",
+                    },
+                  ]}
+                >
+                  <Ionicons name="people" size={40} color={colors.primary} />
                 </View>
               )}
               {isEditingInfo && (
-                <View style={styles.cameraBadge}>
+                <View
+                  style={[
+                    styles.cameraBadge,
+                    {
+                      backgroundColor: colors.primary,
+                      borderColor: colors.card,
+                    },
+                  ]}
+                >
                   <Ionicons name="camera" size={14} color="#fff" />
                 </View>
               )}
@@ -580,45 +564,62 @@ export default function GroupInfoScreen() {
                 onPress={() => setSelectedPhotoUri(null)}
                 style={styles.undoPhotoBtn}
               >
-                <Text style={styles.undoPhotoText}>Keep current photo</Text>
+                <Text style={[styles.undoPhotoText, { color: colors.primary }]}>
+                  Keep current photo
+                </Text>
               </TouchableOpacity>
             )}
 
-            {/* Name */}
             <View style={styles.nameRow}>
               {isEditingInfo ? (
                 <TextInput
-                  style={styles.nameInput}
+                  style={[
+                    styles.nameInput,
+                    { color: colors.text, borderBottomColor: colors.primary },
+                  ]}
                   value={groupName}
                   onChangeText={setGroupName}
                   maxLength={50}
                   autoFocus
                   placeholder="Group name"
+                  placeholderTextColor={colors.textMuted}
                 />
               ) : (
                 <View style={styles.nameDisplayRow}>
-                  <Text style={styles.groupName}>{groupName}</Text>
+                  <Text style={[styles.groupName, { color: colors.text }]}>
+                    {groupName}
+                  </Text>
                   {isAdmin && (
                     <TouchableOpacity
                       onPress={() => setIsEditingInfo(true)}
                       style={styles.editIconBtn}
                     >
-                      <Ionicons name="pencil" size={18} color={ACCENT_COLOR} />
+                      <Ionicons
+                        name="pencil"
+                        size={18}
+                        color={colors.primary}
+                      />
                     </TouchableOpacity>
                   )}
                 </View>
               )}
             </View>
 
-            {/* Description */}
             {isEditingInfo ? (
               <TextInput
-                style={styles.descInput}
+                style={[
+                  styles.descInput,
+                  {
+                    color: colors.textSecondary,
+                    borderBottomColor: colors.border,
+                  },
+                ]}
                 value={groupDescription}
                 onChangeText={setGroupDescription}
                 maxLength={200}
                 multiline
                 placeholder="Group description"
+                placeholderTextColor={colors.textMuted}
                 textAlignVertical="top"
               />
             ) : (
@@ -626,7 +627,8 @@ export default function GroupInfoScreen() {
                 <Text
                   style={[
                     styles.descText,
-                    !groupDescription && styles.descPlaceholder,
+                    { color: colors.textSecondary },
+                    !groupDescription && { color: colors.textMuted },
                   ]}
                 >
                   {groupDescription || "Add a group description"}
@@ -636,21 +638,26 @@ export default function GroupInfoScreen() {
                     onPress={() => setIsEditingInfo(true)}
                     style={styles.editIconBtn}
                   >
-                    <Ionicons name="pencil" size={14} color="#8E8E93" />
+                    <Ionicons
+                      name="pencil"
+                      size={14}
+                      color={colors.textSecondary}
+                    />
                   </TouchableOpacity>
                 )}
               </View>
             )}
 
-            <Text style={styles.memberCount}>
+            <Text style={[styles.memberCount, { color: colors.textSecondary }]}>
               {participantCount} member{participantCount !== 1 ? "s" : ""}
             </Text>
           </View>
 
-          {/* Members */}
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>
+              <Text
+                style={[styles.sectionTitle, { color: colors.textSecondary }]}
+              >
                 Members ({participantCount})
               </Text>
               {isAdmin && (
@@ -658,7 +665,11 @@ export default function GroupInfoScreen() {
                   style={styles.addBtn}
                   onPress={() => setShowAddMembers(true)}
                 >
-                  <Ionicons name="person-add" size={20} color={ACCENT_COLOR} />
+                  <Ionicons
+                    name="person-add"
+                    size={20}
+                    color={colors.primary}
+                  />
                 </TouchableOpacity>
               )}
             </View>
@@ -669,6 +680,7 @@ export default function GroupInfoScreen() {
                   key={member.userId}
                   style={[
                     styles.memberItem,
+                    { borderBottomColor: colors.border },
                     idx === sortedMembers.length - 1 && styles.lastMemberItem,
                   ]}
                   onPress={() => handleMemberPress(member)}
@@ -681,8 +693,22 @@ export default function GroupInfoScreen() {
                         style={styles.mAvatarImg}
                       />
                     ) : (
-                      <View style={styles.mAvatarPlaceholder}>
-                        <Text style={styles.mAvatarText}>
+                      <View
+                        style={[
+                          styles.mAvatarPlaceholder,
+                          {
+                            backgroundColor: isDark
+                              ? "rgba(167,139,250,0.15)"
+                              : "#F5F3FF",
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.mAvatarText,
+                            { color: colors.primary },
+                          ]}
+                        >
                           {member.name.charAt(0).toUpperCase()}
                         </Text>
                       </View>
@@ -690,7 +716,10 @@ export default function GroupInfoScreen() {
                   </View>
                   <View style={styles.mInfo}>
                     <View style={styles.mNameRow}>
-                      <Text style={styles.mName} numberOfLines={1}>
+                      <Text
+                        style={[styles.mName, { color: colors.text }]}
+                        numberOfLines={1}
+                      >
                         {member.name}
                         {member.userId === user?.id ? " (You)" : ""}
                       </Text>
@@ -703,20 +732,28 @@ export default function GroupInfoScreen() {
                               : styles.adminBadge,
                           ]}
                         >
-                          <Text style={styles.roleText}>
+                          <Text
+                            style={[styles.roleText, { color: colors.primary }]}
+                          >
                             {member.role === "owner" ? "Owner" : "Admin"}
                           </Text>
                         </View>
                       )}
                     </View>
-                    <Text style={styles.mUsername}>@{member.username}</Text>
+                    <Text
+                      style={[
+                        styles.mUsername,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      @{member.username}
+                    </Text>
                   </View>
-                  {/* Chevron to indicate tappable */}
                   {member.userId !== user?.id && (
                     <Ionicons
                       name="chevron-forward"
                       size={16}
-                      color="#C7C7CC"
+                      color={colors.textMuted}
                     />
                   )}
                   {isOwner &&
@@ -728,14 +765,26 @@ export default function GroupInfoScreen() {
                             style={styles.actionBtn}
                             onPress={() => handleMakeAdmin(member.userId)}
                           >
-                            <Text style={styles.actionBtnText}>Make Admin</Text>
+                            <Text
+                              style={[
+                                styles.actionBtnText,
+                                { color: colors.primary },
+                              ]}
+                            >
+                              Make Admin
+                            </Text>
                           </TouchableOpacity>
                         ) : (
                           <TouchableOpacity
                             style={styles.actionBtn}
                             onPress={() => handleRemoveAdmin(member.userId)}
                           >
-                            <Text style={styles.actionBtnText}>
+                            <Text
+                              style={[
+                                styles.actionBtnText,
+                                { color: colors.primary },
+                              ]}
+                            >
                               Remove Admin
                             </Text>
                           </TouchableOpacity>
@@ -779,7 +828,6 @@ export default function GroupInfoScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Add Members Modal */}
       <Modal
         visible={showAddMembers}
         animationType="slide"
@@ -790,8 +838,16 @@ export default function GroupInfoScreen() {
           setSearchResults([]);
         }}
       >
-        <SafeAreaView style={styles.modalContainer} edges={["top"]}>
-          <View style={styles.modalHeader}>
+        <SafeAreaView
+          style={[
+            styles.modalContainer,
+            { backgroundColor: colors.background },
+          ]}
+          edges={["top"]}
+        >
+          <View
+            style={[styles.modalHeader, { borderBottomColor: colors.border }]}
+          >
             <TouchableOpacity
               onPress={() => {
                 setShowAddMembers(false);
@@ -799,9 +855,11 @@ export default function GroupInfoScreen() {
                 setSearchResults([]);
               }}
             >
-              <Ionicons name="close" size={24} color={ACCENT_COLOR} />
+              <Ionicons name="close" size={24} color={colors.primary} />
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>Add Members</Text>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              Add Members
+            </Text>
             <TouchableOpacity
               onPress={handleAddSelectedMembers}
               disabled={addingMembers || selectedCount === 0}
@@ -809,7 +867,7 @@ export default function GroupInfoScreen() {
               <Text
                 style={[
                   styles.addText,
-                  selectedCount > 0 && styles.addTextActive,
+                  selectedCount > 0 && { color: colors.primary },
                 ]}
               >
                 {addingMembers
@@ -820,12 +878,18 @@ export default function GroupInfoScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-          <View style={styles.searchBox}>
-            <Ionicons name="search-outline" size={20} color="#8E8E93" />
+          <View
+            style={[styles.searchBox, { backgroundColor: colors.skeleton }]}
+          >
+            <Ionicons
+              name="search-outline"
+              size={20}
+              color={colors.textSecondary}
+            />
             <TextInput
-              style={styles.searchInput}
+              style={[styles.searchInput, { color: colors.text }]}
               placeholder="Search connections..."
-              placeholderTextColor="#C7C7CC"
+              placeholderTextColor={colors.textMuted}
               value={searchQuery}
               onChangeText={setSearchQuery}
               autoFocus
@@ -835,7 +899,7 @@ export default function GroupInfoScreen() {
           {searchLoading ? (
             <ActivityIndicator
               style={styles.searchLoader}
-              color={ACCENT_COLOR}
+              color={colors.primary}
             />
           ) : (
             <ScrollView
@@ -844,7 +908,12 @@ export default function GroupInfoScreen() {
             >
               {searchResults.length === 0 ? (
                 <View style={styles.emptySearch}>
-                  <Text style={styles.emptySearchText}>
+                  <Text
+                    style={[
+                      styles.emptySearchText,
+                      { color: colors.textMuted },
+                    ]}
+                  >
                     {searchQuery.trim()
                       ? "No connections found"
                       : "Search your connections to add"}
@@ -858,7 +927,11 @@ export default function GroupInfoScreen() {
                       key={item._id}
                       style={[
                         styles.userItem,
-                        isSelected && styles.userItemSelected,
+                        isSelected && {
+                          backgroundColor: isDark
+                            ? "rgba(167,139,250,0.1)"
+                            : "rgba(139,92,246,0.06)",
+                        },
                       ]}
                       onPress={() =>
                         setSearchResults((prev) =>
@@ -870,28 +943,49 @@ export default function GroupInfoScreen() {
                         )
                       }
                     >
-                      <View style={styles.userAvatar}>
+                      <View
+                        style={[
+                          styles.userAvatar,
+                          { backgroundColor: colors.skeleton },
+                        ]}
+                      >
                         {item.profilePicture ? (
                           <Image
                             source={{ uri: item.profilePicture }}
                             style={styles.userAvatarImg}
                           />
                         ) : (
-                          <Text style={styles.userAvatarText}>
+                          <Text
+                            style={[
+                              styles.userAvatarText,
+                              { color: colors.textSecondary },
+                            ]}
+                          >
                             {item.name.charAt(0).toUpperCase()}
                           </Text>
                         )}
                       </View>
                       <View style={styles.userInfo}>
-                        <Text style={styles.userName}>{item.name}</Text>
-                        <Text style={styles.userUsername}>
+                        <Text style={[styles.userName, { color: colors.text }]}>
+                          {item.name}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.userUsername,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
                           @{item.username}
                         </Text>
                       </View>
                       <View
                         style={[
                           styles.checkbox,
-                          isSelected && styles.checkboxSelected,
+                          { borderColor: colors.textMuted },
+                          isSelected && {
+                            backgroundColor: colors.primary,
+                            borderColor: colors.primary,
+                          },
                         ]}
                       >
                         {isSelected && (
@@ -921,7 +1015,7 @@ export default function GroupInfoScreen() {
 // -----------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#FFFFFF" },
+  container: { flex: 1 },
   flex: { flex: 1 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   header: {
@@ -931,19 +1025,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
   },
   headerBtn: { width: 50 },
   headerTitle: {
     fontSize: 17,
     fontWeight: "600",
-    color: "#000",
     fontFamily: "SofiaSans-SemiBold",
   },
   headerSaveWrap: { width: 60, alignItems: "flex-end" },
   headerSaveText: {
     fontSize: 16,
-    color: ACCENT_COLOR,
     fontWeight: "600",
     fontFamily: "SofiaSans-SemiBold",
   },
@@ -967,30 +1058,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 24,
     borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
     paddingHorizontal: 20,
   },
   photoWrap: { position: "relative", marginBottom: 16 },
   photo: { width: 80, height: 80, borderRadius: 40 },
   photoPlaceholder: {
-    backgroundColor: "#F5F3FF",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
-    borderColor: "#EDE9FE",
   },
   cameraBadge: {
     position: "absolute",
     bottom: 0,
     right: 0,
-    backgroundColor: ACCENT_COLOR,
     width: 28,
     height: 28,
     borderRadius: 14,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
-    borderColor: "#fff",
   },
   removePhotoBtn: { paddingVertical: 4, marginBottom: 8 },
   removePhotoText: {
@@ -999,26 +1085,15 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Medium",
   },
   undoPhotoBtn: { paddingVertical: 4, marginBottom: 8 },
-  undoPhotoText: {
-    fontSize: 13,
-    color: ACCENT_COLOR,
-    fontFamily: "SofiaSans-Medium",
-  },
+  undoPhotoText: { fontSize: 13, fontFamily: "SofiaSans-Medium" },
   nameRow: { width: "100%", marginBottom: 8, alignItems: "center" },
   nameDisplayRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  groupName: {
-    fontSize: 20,
-    fontWeight: "600",
-    color: "#000",
-    fontFamily: "SofiaSans-Bold",
-  },
+  groupName: { fontSize: 20, fontWeight: "600", fontFamily: "SofiaSans-Bold" },
   nameInput: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#000",
     textAlign: "center",
     borderBottomWidth: 2,
-    borderBottomColor: ACCENT_COLOR,
     paddingVertical: 4,
     fontFamily: "SofiaSans-Bold",
     minWidth: 200,
@@ -1032,29 +1107,20 @@ const styles = StyleSheet.create({
   },
   descText: {
     fontSize: 14,
-    color: "#8E8E93",
     textAlign: "center",
     fontFamily: "SofiaSans-Regular",
   },
-  descPlaceholder: { color: "#C7C7CC", fontStyle: "italic" },
   descInput: {
     fontSize: 14,
-    color: "#8E8E93",
     textAlign: "center",
     minHeight: 40,
     maxHeight: 80,
     width: "100%",
     fontFamily: "SofiaSans-Regular",
     borderBottomWidth: 1,
-    borderBottomColor: "#E5E5EA",
     paddingVertical: 4,
   },
-  memberCount: {
-    fontSize: 14,
-    color: "#8E8E93",
-    marginTop: 8,
-    fontFamily: "SofiaSans-Regular",
-  },
+  memberCount: { fontSize: 14, marginTop: 8, fontFamily: "SofiaSans-Regular" },
   section: { marginTop: 24, paddingHorizontal: 20 },
   sectionHeader: {
     flexDirection: "row",
@@ -1065,7 +1131,6 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#8E8E93",
     textTransform: "uppercase",
     letterSpacing: 0.5,
     fontFamily: "SofiaSans-SemiBold",
@@ -1076,7 +1141,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#F5F5F5",
   },
   lastMemberItem: { borderBottomWidth: 0 },
   mAvatar: { marginRight: 12 },
@@ -1085,14 +1149,12 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#F5F3FF",
     justifyContent: "center",
     alignItems: "center",
   },
   mAvatarText: {
     fontSize: 18,
     fontWeight: "600",
-    color: ACCENT_COLOR,
     fontFamily: "SofiaSans-SemiBold",
   },
   mInfo: { flex: 1 },
@@ -1100,30 +1162,22 @@ const styles = StyleSheet.create({
   mName: {
     fontSize: 16,
     fontWeight: "500",
-    color: "#000",
     fontFamily: "SofiaSans-Medium",
     flex: 1,
   },
-  mUsername: {
-    fontSize: 13,
-    color: "#8E8E93",
-    marginTop: 2,
-    fontFamily: "SofiaSans-Regular",
-  },
+  mUsername: { fontSize: 13, marginTop: 2, fontFamily: "SofiaSans-Regular" },
   roleBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
   ownerBadge: { backgroundColor: "#FEF3C7" },
   adminBadge: { backgroundColor: "#EDE9FE" },
   roleText: {
     fontSize: 11,
     fontWeight: "600",
-    color: ACCENT_COLOR,
     fontFamily: "SofiaSans-SemiBold",
   },
   mActions: { marginLeft: 8 },
   actionBtn: { paddingHorizontal: 10, paddingVertical: 6 },
   actionBtnText: {
     fontSize: 13,
-    color: ACCENT_COLOR,
     fontWeight: "500",
     fontFamily: "SofiaSans-Medium",
   },
@@ -1147,7 +1201,7 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-SemiBold",
   },
   spacer: { height: 40 },
-  modalContainer: { flex: 1, backgroundColor: "#fff" },
+  modalContainer: { flex: 1 },
   modalHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -1155,20 +1209,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
   },
-  modalTitle: {
-    fontSize: 17,
-    fontWeight: "600",
-    color: "#000",
-    fontFamily: "SofiaSans-Bold",
-  },
-  addText: { fontSize: 16, color: "#C7C7CC", fontFamily: "SofiaSans-SemiBold" },
-  addTextActive: { color: ACCENT_COLOR },
+  modalTitle: { fontSize: 17, fontWeight: "600", fontFamily: "SofiaSans-Bold" },
+  addText: { fontSize: 16, fontFamily: "SofiaSans-SemiBold" },
   searchBox: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F0F0F0",
     margin: 16,
     paddingHorizontal: 12,
     borderRadius: 12,
@@ -1188,49 +1234,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
-  userItemSelected: { backgroundColor: "rgba(139, 92, 246, 0.06)" },
   userAvatar: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#F0F0F0",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 12,
     overflow: "hidden",
   },
   userAvatarImg: { width: "100%", height: "100%" },
-  userAvatarText: { fontSize: 18, fontWeight: "600", color: "#8E8E93" },
+  userAvatarText: { fontSize: 18, fontWeight: "600" },
   userInfo: { flex: 1 },
-  userName: {
-    fontSize: 16,
-    fontWeight: "500",
-    color: "#000",
-    fontFamily: "SofiaSans-Medium",
-  },
-  userUsername: {
-    fontSize: 13,
-    color: "#8E8E93",
-    marginTop: 2,
-    fontFamily: "SofiaSans-Regular",
-  },
+  userName: { fontSize: 16, fontWeight: "500", fontFamily: "SofiaSans-Medium" },
+  userUsername: { fontSize: 13, marginTop: 2, fontFamily: "SofiaSans-Regular" },
   checkbox: {
     width: 24,
     height: 24,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: "#C7C7CC",
     justifyContent: "center",
     alignItems: "center",
   },
-  checkboxSelected: {
-    backgroundColor: ACCENT_COLOR,
-    borderColor: ACCENT_COLOR,
-  },
   emptySearch: { alignItems: "center", paddingTop: 60 },
-  emptySearchText: {
-    fontSize: 14,
-    color: "#C7C7CC",
-    fontFamily: "SofiaSans-Regular",
-  },
+  emptySearchText: { fontSize: 14, fontFamily: "SofiaSans-Regular" },
 });

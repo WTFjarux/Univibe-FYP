@@ -1,6 +1,7 @@
 import { Tabs, Redirect, useRouter, usePathname } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../lib/contexts/AuthContext";
+import { useTheme } from "../../lib/contexts/ThemeContext";
 import {
   View,
   ActivityIndicator,
@@ -16,6 +17,7 @@ export default function TabLayout() {
   const router = useRouter();
   const pathname = usePathname();
   const prevTokenRef = useRef(token);
+  const { colors, isDark } = useTheme();
 
   useEffect(() => {
     if (isLoading) return;
@@ -34,9 +36,16 @@ export default function TabLayout() {
 
   if (isLoading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#8b5cf6" />
-        <Text style={styles.loadingText}>Loading...</Text>
+      <View
+        style={[
+          styles.loadingContainer,
+          { backgroundColor: colors.background },
+        ]}
+      >
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+          Loading...
+        </Text>
       </View>
     );
   }
@@ -45,6 +54,16 @@ export default function TabLayout() {
   if (!user?.isEmailVerified) return <Redirect href="/(auth)/login" />;
   if (user?.profileComplete === false)
     return <Redirect href="/(auth)/setup-profile" />;
+
+  // Dynamic tab bar colors based on theme
+  const tabBarBackgroundColor = Platform.select({
+    ios: isDark ? "rgba(30, 41, 59, 0.85)" : "rgba(255, 255, 255, 0.85)",
+    android: isDark ? "#1e293b" : "#ffffff",
+  });
+
+  const tabBarBorderColor = isDark
+    ? "rgba(255,255,255,0.06)"
+    : "rgba(0,0,0,0.06)";
 
   return (
     <Tabs
@@ -56,24 +75,21 @@ export default function TabLayout() {
           right: 0,
           bottom: 0,
           height: Platform.OS === "ios" ? 92 : 76,
-          backgroundColor: Platform.select({
-            ios: "rgba(255, 255, 255, 0.85)",
-            android: "#ffffff",
-          }),
+          backgroundColor: tabBarBackgroundColor,
           borderTopWidth: 1,
-          borderTopColor: "rgba(0,0,0,0.06)",
+          borderTopColor: tabBarBorderColor,
           borderTopLeftRadius: 20,
           borderTopRightRadius: 20,
           paddingTop: 10,
           paddingBottom: Platform.OS === "ios" ? 30 : 14,
-          shadowColor: "#000",
+          shadowColor: isDark ? "#000" : "#000",
           shadowOffset: { width: 0, height: -4 },
-          shadowOpacity: 0.12,
+          shadowOpacity: isDark ? 0.3 : 0.12,
           shadowRadius: 16,
           elevation: 10,
         },
-        tabBarActiveTintColor: "#8b5cf6",
-        tabBarInactiveTintColor: "#6b7280",
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textSecondary,
         tabBarLabelStyle: {
           fontSize: 11,
           fontFamily: "SofiaSans-Bold",
@@ -86,8 +102,10 @@ export default function TabLayout() {
         },
         tabBarBackground: () => (
           <BlurView
-            intensity={Platform.OS === "ios" ? 65 : 90}
-            tint="light"
+            intensity={
+              Platform.OS === "ios" ? (isDark ? 80 : 65) : isDark ? 100 : 90
+            }
+            tint={isDark ? "dark" : "light"}
             style={[
               StyleSheet.absoluteFill,
               {
@@ -108,7 +126,10 @@ export default function TabLayout() {
             <View
               style={[
                 styles.iconContainer,
-                focused && styles.focusedIconContainer,
+                focused && [
+                  styles.focusedIconContainer,
+                  { backgroundColor: colors.primary },
+                ],
               ]}
             >
               <Ionicons
@@ -128,7 +149,10 @@ export default function TabLayout() {
             <View
               style={[
                 styles.iconContainer,
-                focused && styles.focusedIconContainer,
+                focused && [
+                  styles.focusedIconContainer,
+                  { backgroundColor: colors.primary },
+                ],
               ]}
             >
               <Ionicons
@@ -148,7 +172,10 @@ export default function TabLayout() {
             <View
               style={[
                 styles.iconContainer,
-                focused && styles.focusedIconContainer,
+                focused && [
+                  styles.focusedIconContainer,
+                  { backgroundColor: colors.primary },
+                ],
               ]}
             >
               <Ionicons
@@ -168,7 +195,10 @@ export default function TabLayout() {
             <View
               style={[
                 styles.iconContainer,
-                focused && styles.focusedIconContainer,
+                focused && [
+                  styles.focusedIconContainer,
+                  { backgroundColor: colors.primary },
+                ],
               ]}
             >
               <Ionicons
@@ -188,7 +218,10 @@ export default function TabLayout() {
             <View
               style={[
                 styles.iconContainer,
-                focused && styles.focusedIconContainer,
+                focused && [
+                  styles.focusedIconContainer,
+                  { backgroundColor: colors.primary },
+                ],
               ]}
             >
               <Ionicons

@@ -11,6 +11,7 @@ import {
   Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../../lib/contexts/ThemeContext";
 
 interface ReportModalProps {
   visible: boolean;
@@ -98,6 +99,7 @@ const ReportModal: React.FC<ReportModalProps> = ({
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
   const hasSubmitted = useRef(false);
   const isMounted = useRef(true);
+  const { colors, isDark } = useTheme();
 
   // Reset state when modal opens
   useEffect(() => {
@@ -133,9 +135,6 @@ const ReportModal: React.FC<ReportModalProps> = ({
         // Close modal first
         onClose();
 
-        // Use onModalHide or parent coordination instead of setTimeout
-        // The parent (FeedScreen) will handle showing success message
-        // after ReportModal's onModalHide fires
         if (onReportSuccess) {
           onReportSuccess();
         }
@@ -147,7 +146,6 @@ const ReportModal: React.FC<ReportModalProps> = ({
           );
         }
       } else {
-        // Handle error cases - keep modal open to show error
         if (onShowInfoBar) {
           if (response.message?.includes("already reported")) {
             onShowInfoBar(
@@ -205,20 +203,31 @@ const ReportModal: React.FC<ReportModalProps> = ({
           if (!reporting) onClose();
         }}
       >
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>{getTitle()}</Text>
+        <View
+          style={[
+            styles.modalContent,
+            { backgroundColor: colors.card, shadowColor: colors.shadow },
+          ]}
+        >
+          <View
+            style={[styles.modalHeader, { borderBottomColor: colors.border }]}
+          >
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              {getTitle()}
+            </Text>
             <TouchableOpacity
               onPress={() => {
                 if (!reporting) onClose();
               }}
               disabled={reporting}
             >
-              <Ionicons name="close" size={24} color="#6b7280" />
+              <Ionicons name="close" size={24} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.reportDescription}>
+          <Text
+            style={[styles.reportDescription, { color: colors.textSecondary }]}
+          >
             Please select a reason for reporting this{" "}
             {TARGET_TYPE_LABELS[targetType]}. Your report will be reviewed by
             our team.
@@ -226,8 +235,12 @@ const ReportModal: React.FC<ReportModalProps> = ({
 
           {reporting ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#8b5cf6" />
-              <Text style={styles.loadingText}>Submitting report...</Text>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text
+                style={[styles.loadingText, { color: colors.textSecondary }]}
+              >
+                Submitting report...
+              </Text>
             </View>
           ) : (
             <>
@@ -236,18 +249,31 @@ const ReportModal: React.FC<ReportModalProps> = ({
                   key={reason.id}
                   style={[
                     styles.reportReasonItem,
-                    selectedReason === reason.id &&
+                    selectedReason === reason.id && [
                       styles.reportReasonItemSelected,
+                      {
+                        backgroundColor: isDark
+                          ? "rgba(139, 92, 246, 0.1)"
+                          : "#f5f3ff",
+                      },
+                    ],
                   ]}
                   onPress={() => handleReport(reason.id)}
                   disabled={reporting}
                 >
-                  <View style={styles.reportReasonIcon}>
+                  <View
+                    style={[
+                      styles.reportReasonIcon,
+                      { backgroundColor: colors.skeleton },
+                    ]}
+                  >
                     <Ionicons
                       name={reason.icon as any}
                       size={22}
                       color={
-                        selectedReason === reason.id ? "#8b5cf6" : "#6b7280"
+                        selectedReason === reason.id
+                          ? colors.primary
+                          : colors.textSecondary
                       }
                     />
                   </View>
@@ -255,23 +281,31 @@ const ReportModal: React.FC<ReportModalProps> = ({
                     <Text
                       style={[
                         styles.reportReasonLabel,
-                        selectedReason === reason.id &&
+                        { color: colors.text },
+                        selectedReason === reason.id && [
                           styles.reportReasonLabelSelected,
+                          { color: colors.primary },
+                        ],
                       ]}
                     >
                       {reason.label}
                     </Text>
-                    <Text style={styles.reportReasonDescription}>
+                    <Text
+                      style={[
+                        styles.reportReasonDescription,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
                       {reason.description}
                     </Text>
                   </View>
                   {reporting && selectedReason === reason.id ? (
-                    <ActivityIndicator size="small" color="#8b5cf6" />
+                    <ActivityIndicator size="small" color={colors.primary} />
                   ) : (
                     <Ionicons
                       name="chevron-forward"
                       size={20}
-                      color="#d1d5db"
+                      color={colors.textMuted}
                     />
                   )}
                 </TouchableOpacity>
@@ -280,13 +314,15 @@ const ReportModal: React.FC<ReportModalProps> = ({
           )}
 
           <TouchableOpacity
-            style={styles.cancelButton}
+            style={[styles.cancelButton, { backgroundColor: colors.skeleton }]}
             onPress={() => {
               if (!reporting) onClose();
             }}
             disabled={reporting}
           >
-            <Text style={styles.cancelButtonText}>Cancel</Text>
+            <Text style={[styles.cancelButtonText, { color: colors.text }]}>
+              Cancel
+            </Text>
           </TouchableOpacity>
         </View>
       </TouchableOpacity>

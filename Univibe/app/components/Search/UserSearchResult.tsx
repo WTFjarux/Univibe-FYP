@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { View, Text, TouchableOpacity, Image, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 import { UserSearchResult as UserSearchResultType } from "../../../lib/types/search";
 import { getFullImageUrl } from "../../../lib/services/postService";
 
@@ -66,6 +67,7 @@ export const UserSearchResult: React.FC<UserSearchResultProps> = ({
 }) => {
   const router = useRouter();
   const [avatarError, setAvatarError] = useState(false);
+  const { colors } = useTheme();
   const config = getConnectionConfig(user.connectionStatus);
 
   const handlePress = () => {
@@ -88,7 +90,9 @@ export const UserSearchResult: React.FC<UserSearchResultProps> = ({
 
   return (
     <TouchableOpacity
-      style={styles.container}
+      style={[
+        styles.container,
+      ]}
       onPress={handlePress}
       activeOpacity={0.7}
     >
@@ -96,39 +100,44 @@ export const UserSearchResult: React.FC<UserSearchResultProps> = ({
       <View style={styles.avatarContainer}>
         <Image
           source={getAvatarSource()}
-          style={styles.avatar}
+          style={[styles.avatar, { backgroundColor: colors.skeleton }]}
           onError={() => setAvatarError(true)}
         />
-        {/* Online indicator placeholder - can be wired up later */}
-        {/* <View style={styles.onlineIndicator} /> */}
+
       </View>
 
       {/* User Info */}
       <View style={styles.infoContainer}>
         <View style={styles.nameRow}>
-          <Text style={styles.name} numberOfLines={1}>
+          <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>
             {user.fullName}
           </Text>
           {user.verified && (
             <Ionicons
               name="checkmark-circle"
               size={16}
-              color="#8b5cf6"
+              color={colors.primary}
               style={styles.verifiedBadge}
             />
           )}
         </View>
 
-        <Text style={styles.username} numberOfLines={1}>
+        <Text
+          style={[styles.username, { color: colors.textSecondary }]}
+          numberOfLines={1}
+        >
           @{user.username}
         </Text>
 
         {user.bio ? (
-          <Text style={styles.bio} numberOfLines={1}>
+          <Text
+            style={[styles.bio, { color: colors.textSecondary }]}
+            numberOfLines={1}
+          >
             {user.bio}
           </Text>
         ) : (
-          <Text style={styles.meta}>
+          <Text style={[styles.meta, { color: colors.textMuted }]}>
             {[user.major, user.year, user.campus].filter(Boolean).join(" • ")}
           </Text>
         )}
@@ -159,7 +168,6 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
     gap: 12,
-    shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 2,
@@ -172,18 +180,6 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: "#f3f4f6",
-  },
-  onlineIndicator: {
-    position: "absolute",
-    bottom: 0,
-    right: 0,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "#10b981",
-    borderWidth: 2,
-    borderColor: "#ffffff",
   },
   infoContainer: {
     flex: 1,
@@ -196,7 +192,6 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: 15,
-    color: "#111827",
     fontFamily: "SofiaSans-Bold",
   },
   verifiedBadge: {
@@ -204,19 +199,16 @@ const styles = StyleSheet.create({
   },
   username: {
     fontSize: 13,
-    color: "#6b7280",
     fontFamily: "SofiaSans-Regular",
     marginTop: 1,
   },
   bio: {
     fontSize: 13,
-    color: "#6b7280",
     fontFamily: "SofiaSans-Regular",
     marginTop: 2,
   },
   meta: {
     fontSize: 12,
-    color: "#9ca3af",
     fontFamily: "SofiaSans-Regular",
     marginTop: 2,
   },

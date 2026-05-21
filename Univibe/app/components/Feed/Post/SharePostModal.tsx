@@ -22,6 +22,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import chatApi from "../../../../lib/services/chatApi";
 import { useAuth } from "../../../../lib/contexts/AuthContext";
+import { useTheme } from "../../../../lib/contexts/ThemeContext";
 import { getFullImageUrl } from "../../../../lib/utils/chatUtils";
 import type { ChatRoom } from "../../../../lib/types/chat.types";
 
@@ -54,6 +55,7 @@ export default function SharePostModal({
   currentRoomId,
 }: SharePostModalProps) {
   const { token } = useAuth();
+  const { colors } = useTheme();
   const [chats, setChats] = useState<ChatRoom[]>([]);
   const [selectedChats, setSelectedChats] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -136,7 +138,7 @@ export default function SharePostModal({
       keyboardWillShow.remove();
       keyboardWillHide.remove();
     };
-  }, [isMessageFocused]); // Add isMessageFocused as dependency
+  }, [isMessageFocused]);
 
   const fetchChats = async () => {
     try {
@@ -270,7 +272,9 @@ export default function SharePostModal({
       >
         {isSelected && (
           <View style={styles.selectedOverlay}>
-            <View style={styles.checkmark}>
+            <View
+              style={[styles.checkmark, { backgroundColor: colors.primary }]}
+            >
               <Ionicons name="checkmark" size={14} color="#fff" />
             </View>
           </View>
@@ -282,15 +286,21 @@ export default function SharePostModal({
           {avatarSource ? (
             <Image
               source={avatarSource}
-              style={styles.avatar}
+              style={[styles.avatar, { backgroundColor: colors.skeleton }]}
               onError={() => handleAvatarError(item.roomId)}
             />
           ) : isGroup ? (
             <View style={[styles.avatar, styles.groupAvatar]}>
-              <Ionicons name="people" size={28} color="#8B5CF6" />
+              <Ionicons name="people" size={28} color={colors.primary} />
             </View>
           ) : (
-            <View style={[styles.avatar, styles.defaultAvatar]}>
+            <View
+              style={[
+                styles.avatar,
+                styles.defaultAvatar,
+                { backgroundColor: colors.primary },
+              ]}
+            >
               <Text style={styles.defaultAvatarText}>
                 {(item.name || "U").charAt(0).toUpperCase()}
               </Text>
@@ -298,7 +308,10 @@ export default function SharePostModal({
           )}
         </View>
 
-        <Text style={styles.chatName} numberOfLines={1}>
+        <Text
+          style={[styles.chatName, { color: colors.text }]}
+          numberOfLines={1}
+        >
           {item.name || "Unknown"}
         </Text>
       </TouchableOpacity>
@@ -332,37 +345,48 @@ export default function SharePostModal({
             {
               height: modalHeight,
               transform: [{ translateY: slideAnim }],
+              backgroundColor: colors.background,
             },
           ]}
         >
           {/* Header */}
-          <View style={styles.header}>
-            <View style={styles.handle} />
+          <View style={[styles.header, { borderBottomColor: colors.border }]}>
+            <View
+              style={[styles.handle, { backgroundColor: colors.textMuted }]}
+            />
             <View style={styles.headerRow}>
-              <Text style={styles.headerTitle}>Share Post</Text>
+              <Text style={[styles.headerTitle, { color: colors.text }]}>
+                Share Post
+              </Text>
               <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                <Ionicons name="close" size={24} color="#1C1C1E" />
+                <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
           </View>
 
           {/* Search Bar */}
-          <View style={styles.searchContainer}>
-            <Ionicons name="search" size={18} color="#8E8E93" />
+          <View
+            style={[styles.searchContainer, { backgroundColor: colors.card }]}
+          >
+            <Ionicons name="search" size={18} color={colors.textSecondary} />
             <TextInput
               ref={searchInputRef}
-              style={styles.searchInput}
+              style={[styles.searchInput, { color: colors.text }]}
               placeholder="Search chats..."
               value={searchQuery}
               onChangeText={setSearchQuery}
-              placeholderTextColor="#8E8E93"
+              placeholderTextColor={colors.textSecondary}
               autoCapitalize="none"
               autoCorrect={false}
-              onFocus={() => setIsMessageFocused(false)} // Ensure message doesn't move when search is focused
+              onFocus={() => setIsMessageFocused(false)}
             />
             {searchQuery.length > 0 && (
               <TouchableOpacity onPress={() => setSearchQuery("")}>
-                <Ionicons name="close-circle" size={18} color="#8E8E93" />
+                <Ionicons
+                  name="close-circle"
+                  size={18}
+                  color={colors.textSecondary}
+                />
               </TouchableOpacity>
             )}
           </View>
@@ -370,7 +394,9 @@ export default function SharePostModal({
           {/* Selected count */}
           {selectedChats.size > 0 && (
             <View style={styles.selectedCount}>
-              <Text style={styles.selectedCountText}>
+              <Text
+                style={[styles.selectedCountText, { color: colors.primary }]}
+              >
                 {selectedChats.size} selected
               </Text>
             </View>
@@ -379,7 +405,7 @@ export default function SharePostModal({
           {/* Chat Grid */}
           {loading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#8B5CF6" />
+              <ActivityIndicator size="large" color={colors.primary} />
             </View>
           ) : (
             <FlatList
@@ -398,9 +424,11 @@ export default function SharePostModal({
                       searchQuery ? "search-outline" : "chatbubbles-outline"
                     }
                     size={48}
-                    color="#C7C7CC"
+                    color={colors.textMuted}
                   />
-                  <Text style={styles.emptyText}>
+                  <Text
+                    style={[styles.emptyText, { color: colors.textSecondary }]}
+                  >
                     {searchQuery ? "No chats found" : "No chats available"}
                   </Text>
                 </View>
@@ -408,25 +436,32 @@ export default function SharePostModal({
             />
           )}
 
-          {/* Message Input & Send Button - Only moves up when message is focused */}
+          {/* Message Input & Send Button */}
           <Animated.View
             style={[
               styles.bottomSection,
               {
+                backgroundColor: colors.background,
+                borderTopColor: colors.border,
                 transform: [
                   { translateY: Animated.multiply(messageSlideAnim, -1) },
                 ],
               },
             ]}
           >
-            <View style={styles.messageInputContainer}>
+            <View
+              style={[
+                styles.messageInputContainer,
+                { backgroundColor: colors.card },
+              ]}
+            >
               <TextInput
                 ref={messageInputRef}
-                style={styles.messageInput}
+                style={[styles.messageInput, { color: colors.text }]}
                 placeholder="Write a message..."
                 value={message}
                 onChangeText={setMessage}
-                placeholderTextColor="#8E8E93"
+                placeholderTextColor={colors.textSecondary}
                 maxLength={200}
                 multiline
                 onFocus={handleMessageFocus}
@@ -437,8 +472,11 @@ export default function SharePostModal({
             <TouchableOpacity
               style={[
                 styles.sendButton,
-                (selectedChats.size === 0 || sharing) &&
+                { backgroundColor: colors.primary },
+                (selectedChats.size === 0 || sharing) && [
                   styles.sendButtonDisabled,
+                  { backgroundColor: colors.textMuted },
+                ],
               ]}
               onPress={handleShare}
               disabled={selectedChats.size === 0 || sharing}

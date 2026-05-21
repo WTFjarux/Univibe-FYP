@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 import { API_BASE_URL } from "@/constants/ipConstants";
 
 // Default avatar from assets
@@ -34,6 +35,7 @@ export default function PendingRequestItem({
   onReject,
   isProcessing = false,
 }: PendingRequestItemProps) {
+  const { colors, isDark } = useTheme();
   const displayName = request.fullName || request.name;
   const displayUsername = request.username.startsWith("@")
     ? request.username
@@ -60,14 +62,22 @@ export default function PendingRequestItem({
   };
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: colors.card, shadowColor: colors.shadow },
+      ]}
+    >
       {/* Avatar */}
       <TouchableOpacity
         style={styles.avatarContainer}
         onPress={() => router.push(`/profile/${request._id}`)}
         disabled={isProcessing}
       >
-        <Image source={getAvatarSource()} style={styles.avatar} />
+        <Image
+          source={getAvatarSource()}
+          style={[styles.avatar, { backgroundColor: colors.skeleton }]}
+        />
       </TouchableOpacity>
 
       {/* Info */}
@@ -76,15 +86,23 @@ export default function PendingRequestItem({
         onPress={() => router.push(`/profile/${request._id}`)}
         disabled={isProcessing}
       >
-        <Text style={styles.name}>{displayName}</Text>
-        <Text style={styles.username}>{displayUsername}</Text>
-        <Text style={styles.requestText}>wants to connect with you</Text>
+        <Text style={[styles.name, { color: colors.text }]}>{displayName}</Text>
+        <Text style={[styles.username, { color: colors.textSecondary }]}>
+          {displayUsername}
+        </Text>
+        <Text style={[styles.requestText, { color: colors.primary }]}>
+          wants to connect with you
+        </Text>
       </TouchableOpacity>
 
       {/* Actions */}
       <View style={styles.actionsContainer}>
         <TouchableOpacity
-          style={[styles.actionButton, styles.acceptButton]}
+          style={[
+            styles.actionButton,
+            styles.acceptButton,
+            { backgroundColor: "#10b981" },
+          ]}
           onPress={() => onAccept(request._id, displayName)}
           disabled={isProcessing}
         >
@@ -95,7 +113,11 @@ export default function PendingRequestItem({
           )}
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.actionButton, styles.rejectButton]}
+          style={[
+            styles.actionButton,
+            styles.rejectButton,
+            { backgroundColor: isDark ? "#451a1a" : "#fee2e2" },
+          ]}
           onPress={() => onReject(request._id, displayName)}
           disabled={isProcessing}
         >
@@ -110,11 +132,9 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "white",
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
-    shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 2,
@@ -127,7 +147,6 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: "#f3f4f6",
   },
   infoContainer: {
     flex: 1,
@@ -135,17 +154,14 @@ const styles = StyleSheet.create({
   name: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#111827",
     marginBottom: 2,
   },
   username: {
     fontSize: 13,
-    color: "#6b7280",
     marginBottom: 2,
   },
   requestText: {
     fontSize: 12,
-    color: "#8b5cf6",
   },
   actionsContainer: {
     flexDirection: "row",
@@ -158,10 +174,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  acceptButton: {
-    backgroundColor: "#10b981",
-  },
-  rejectButton: {
-    backgroundColor: "#fee2e2",
-  },
+  acceptButton: {},
+  rejectButton: {},
 });

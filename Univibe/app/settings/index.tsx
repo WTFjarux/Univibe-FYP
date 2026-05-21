@@ -16,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter, Href } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTheme } from "../../lib/contexts/ThemeContext";
 
 interface SettingsScreenProps {
   onLogout: () => void;
@@ -32,10 +33,10 @@ export default function SettingsScreen({
 }: SettingsScreenProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { colors, isDark, toggleTheme } = useTheme();
   const [notifications, setNotifications] = useState(true);
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [pushNotifications, setPushNotifications] = useState(true);
-  const [darkMode, setDarkMode] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -52,7 +53,6 @@ export default function SettingsScreen({
         setNotifications(settings.notifications ?? true);
         setEmailNotifications(settings.emailNotifications ?? true);
         setPushNotifications(settings.pushNotifications ?? true);
-        setDarkMode(settings.darkMode ?? false);
       }
     } catch (error) {
       console.error("Error loading settings:", error);
@@ -65,7 +65,6 @@ export default function SettingsScreen({
         notifications,
         emailNotifications,
         pushNotifications,
-        darkMode,
         [key]: value,
       };
       await SecureStore.setItemAsync(
@@ -132,9 +131,18 @@ export default function SettingsScreen({
   };
 
   const renderSection = (title: string, children: React.ReactNode) => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <View style={styles.sectionContent}>{children}</View>
+    <View
+      style={[
+        styles.section,
+        { backgroundColor: colors.card, shadowColor: colors.shadow },
+      ]}
+    >
+      <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+        {title}
+      </Text>
+      <View style={[styles.sectionContent, { borderTopColor: colors.border }]}>
+        {children}
+      </View>
     </View>
   );
 
@@ -145,23 +153,32 @@ export default function SettingsScreen({
     onValueChange: (value: boolean) => void,
     description?: string,
   ) => (
-    <View style={styles.settingItem}>
+    <View style={[styles.settingItem, { borderBottomColor: colors.border }]}>
       <View style={styles.settingItemLeft}>
         <View style={styles.iconContainer}>
-          <Ionicons name={icon as any} size={22} color="#6b7280" />
+          <Ionicons name={icon as any} size={22} color={colors.textSecondary} />
         </View>
         <View style={styles.settingItemText}>
-          <Text style={styles.settingLabel}>{label}</Text>
+          <Text style={[styles.settingLabel, { color: colors.text }]}>
+            {label}
+          </Text>
           {description && (
-            <Text style={styles.settingDescription}>{description}</Text>
+            <Text
+              style={[
+                styles.settingDescription,
+                { color: colors.textSecondary },
+              ]}
+            >
+              {description}
+            </Text>
           )}
         </View>
       </View>
       <Switch
         value={value}
         onValueChange={onValueChange}
-        trackColor={{ false: "#e5e7eb", true: "#8b5cf6" }}
-        thumbColor="#ffffff"
+        trackColor={{ false: colors.skeletonHighlight, true: colors.primary }}
+        thumbColor={colors.card}
       />
     </View>
   );
@@ -174,16 +191,24 @@ export default function SettingsScreen({
     showArrow: boolean = true,
     badge?: number,
   ) => (
-    <TouchableOpacity style={styles.actionItem} onPress={onPress}>
+    <TouchableOpacity
+      style={[styles.actionItem, { borderBottomColor: colors.border }]}
+      onPress={onPress}
+    >
       <View style={styles.settingItemLeft}>
         <View style={styles.iconContainer}>
           <Ionicons
             name={icon as any}
             size={22}
-            color={iconColor || "#6b7280"}
+            color={iconColor || colors.textSecondary}
           />
         </View>
-        <Text style={[styles.actionLabel, iconColor && { color: iconColor }]}>
+        <Text
+          style={[
+            styles.actionLabel,
+            iconColor ? { color: iconColor } : { color: colors.text },
+          ]}
+        >
           {label}
         </Text>
         {badge !== undefined && badge > 0 && (
@@ -193,20 +218,35 @@ export default function SettingsScreen({
         )}
       </View>
       {showArrow && (
-        <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+        <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
       )}
     </TouchableOpacity>
   );
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f9fafb" />
+    <View
+      style={[
+        styles.container,
+        { paddingTop: insets.top, backgroundColor: colors.background },
+      ]}
+    >
+      <StatusBar
+        barStyle={isDark ? "light-content" : "dark-content"}
+        backgroundColor={colors.card}
+      />
 
-      <View style={styles.header}>
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: colors.background, borderBottomColor: colors.border },
+        ]}
+      >
         <TouchableOpacity onPress={onClose} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#111827" />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Settings</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>
+          Settings
+        </Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -223,15 +263,12 @@ export default function SettingsScreen({
               navigateToScreen("/profile/edit" as Href),
             )}
             {renderActionItem("lock-closed-outline", "Change Password", () =>
-              // ✅ FIXED: /settings/change-password
               navigateToScreen("/settings/change-password" as Href),
             )}
             {renderActionItem("person-remove-outline", "Blocked Users", () =>
-              // ✅ FIXED: /settings/blocked-users
               navigateToScreen("/settings/blocked-users" as Href),
             )}
             {renderActionItem("volume-off-outline", "Muted Users", () =>
-              // ✅ FIXED: /settings/muted-users
               navigateToScreen("/settings/muted-users" as Href),
             )}
           </>,
@@ -242,15 +279,12 @@ export default function SettingsScreen({
           "Content Management",
           <>
             {renderActionItem("bookmark-outline", "Saved Posts", () =>
-              // /settings/saved-posts
               navigateToScreen("/settings/saved-posts" as Href),
             )}
             {renderActionItem("eye-off-outline", "Hidden Posts", () =>
-              // /settings/hidden-posts
               navigateToScreen("/settings/hidden-posts" as Href),
             )}
             {renderActionItem("trash-outline", "Deleted Posts", () =>
-              // /settings/deleted-posts
               navigateToScreen("/settings/deleted-posts" as Href),
             )}
           </>,
@@ -281,13 +315,41 @@ export default function SettingsScreen({
         {renderSection(
           "Preferences",
           <>
-            {renderSettingItem(
-              "moon-outline",
-              "Dark Mode",
-              darkMode,
-              setDarkMode,
-              "Coming soon",
-            )}
+            <View
+              style={[styles.settingItem, { borderBottomColor: colors.border }]}
+            >
+              <View style={styles.settingItemLeft}>
+                <View style={styles.iconContainer}>
+                  <Ionicons
+                    name={isDark ? "moon" : "moon-outline"}
+                    size={22}
+                    color={colors.textSecondary}
+                  />
+                </View>
+                <View style={styles.settingItemText}>
+                  <Text style={[styles.settingLabel, { color: colors.text }]}>
+                    Dark Mode
+                  </Text>
+                  <Text
+                    style={[
+                      styles.settingDescription,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    {isDark ? "Dark mode is on" : "Light mode is on"}
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={isDark}
+                onValueChange={toggleTheme}
+                trackColor={{
+                  false: colors.skeletonHighlight,
+                  true: colors.primary,
+                }}
+                thumbColor={colors.card}
+              />
+            </View>
             {renderActionItem("language-outline", "Language", () =>
               Alert.alert("Coming Soon", "Language selection coming soon"),
             )}
@@ -301,11 +363,9 @@ export default function SettingsScreen({
             {renderActionItem(
               "shield-checkmark-outline",
               "Privacy Policy",
-              // ✅ FIXED: /settings/PrivacyPolicy
               () => navigateToScreen("/settings/PrivacyPolicy" as Href),
             )}
             {renderActionItem("document-text-outline", "Terms of Service", () =>
-              // ✅ FIXED: /settings/TermsOfService
               navigateToScreen("/settings/TermsOfService" as Href),
             )}
             {renderActionItem(
@@ -343,8 +403,12 @@ export default function SettingsScreen({
           "About",
           <>
             <View style={styles.versionContainer}>
-              <Text style={styles.versionText}>Version 1.0.0</Text>
-              <Text style={styles.copyrightText}>
+              <Text
+                style={[styles.versionText, { color: colors.textSecondary }]}
+              >
+                Version 1.0.0
+              </Text>
+              <Text style={[styles.copyrightText, { color: colors.textMuted }]}>
                 © 2024 Univibe. All rights reserved.
               </Text>
             </View>

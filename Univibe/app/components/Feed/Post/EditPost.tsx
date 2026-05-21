@@ -20,6 +20,7 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useAuth } from "../../../../lib/contexts/AuthContext";
+import { useTheme } from "../../../../lib/contexts/ThemeContext";
 import {
   getPostById,
   Post,
@@ -34,6 +35,7 @@ export default function EditPostScreen() {
   const router = useRouter();
   const { postId } = useLocalSearchParams<{ postId: string }>();
   const { token } = useAuth();
+  const { colors } = useTheme();
 
   // State
   const [post, setPost] = useState<Post | null>(null);
@@ -312,34 +314,44 @@ export default function EditPostScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+      >
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8b5cf6" />
+          <ActivityIndicator size="large" color={colors.primary} />
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { borderBottomColor: colors.border }]}>
           <TouchableOpacity
             onPress={handleBackPress}
             style={styles.backButton}
             disabled={submitting}
           >
-            <Ionicons name="close" size={28} color="#000" />
+            <Ionicons name="close" size={28} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Edit Post</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>
+            Edit Post
+          </Text>
           <TouchableOpacity
             style={[
               styles.saveButton,
-              (!hasChanges() || submitting) && styles.saveButtonDisabled,
+              { backgroundColor: colors.primary },
+              (!hasChanges() || submitting) && [
+                styles.saveButtonDisabled,
+                { backgroundColor: colors.textMuted },
+              ],
             ]}
             onPress={handleSubmit}
             disabled={!hasChanges() || submitting}
@@ -356,22 +368,26 @@ export default function EditPostScreen() {
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
           {/* Text Input */}
           <TextInput
-            style={styles.input}
+            style={[styles.input, { color: colors.text }]}
             placeholder="What's on your mind?"
             value={content}
             onChangeText={setContent}
             multiline
             maxLength={500}
             editable={!submitting}
-            placeholderTextColor="#999"
+            placeholderTextColor={colors.textMuted}
           />
 
           {/* Character Count */}
-          <Text style={styles.charCount}>{content.length}/500</Text>
+          <Text style={[styles.charCount, { color: colors.textMuted }]}>
+            {content.length}/500
+          </Text>
 
           {/* Images Section */}
           <View style={styles.imagesContainer}>
-            <Text style={styles.imagesTitle}>Photos ({images.length}/4)</Text>
+            <Text style={[styles.imagesTitle, { color: colors.text }]}>
+              Photos ({images.length}/4)
+            </Text>
             <View style={styles.imagesGrid}>
               {images.map((image, index) => (
                 <View key={image.id || index} style={styles.imageWrapper}>
@@ -400,14 +416,14 @@ export default function EditPostScreen() {
               ))}
               {images.length < 4 && (
                 <TouchableOpacity
-                  style={styles.addMoreButton}
+                  style={[styles.addMoreButton, { borderColor: colors.border }]}
                   onPress={pickImages}
                   disabled={submitting}
                 >
                   <Ionicons
                     name="add-circle-outline"
                     size={32}
-                    color="#8b5cf6"
+                    color={colors.primary}
                   />
                 </TouchableOpacity>
               )}
@@ -416,10 +432,15 @@ export default function EditPostScreen() {
 
           {/* Visibility Options */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>
               Who can see this?
               {isAnonymous && (
-                <Text style={styles.anonymousNote}>
+                <Text
+                  style={[
+                    styles.anonymousNote,
+                    { color: colors.textSecondary },
+                  ]}
+                >
                   {" "}
                   (Campus only for anonymous posts)
                 </Text>
@@ -434,7 +455,17 @@ export default function EditPostScreen() {
                     key={option.id}
                     style={[
                       styles.visibilityOption,
-                      visibility === option.id && styles.visibilityOptionActive,
+                      {
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                      },
+                      visibility === option.id && [
+                        styles.visibilityOptionActive,
+                        {
+                          backgroundColor: colors.primary,
+                          borderColor: colors.primary,
+                        },
+                      ],
                       isDisabled && styles.visibilityOptionDisabled,
                     ]}
                     onPress={() => {
@@ -451,15 +482,19 @@ export default function EditPostScreen() {
                         visibility === option.id
                           ? "#fff"
                           : isDisabled
-                            ? "#9ca3af"
-                            : "#666"
+                            ? colors.textMuted
+                            : colors.textSecondary
                       }
                     />
                     <Text
                       style={[
                         styles.visibilityText,
+                        { color: colors.textSecondary },
                         visibility === option.id && styles.visibilityTextActive,
-                        isDisabled && styles.visibilityTextDisabled,
+                        isDisabled && [
+                          styles.visibilityTextDisabled,
+                          { color: colors.textMuted },
+                        ],
                       ]}
                     >
                       {getVisibilityLabel(option.id)}
@@ -468,7 +503,9 @@ export default function EditPostScreen() {
                 );
               })}
             </View>
-            <Text style={styles.visibilityDescription}>
+            <Text
+              style={[styles.visibilityDescription, { color: colors.primary }]}
+            >
               {isAnonymous
                 ? "Anonymous posts are always visible to everyone in your campus for maximum reach while protecting your identity."
                 : visibility === "campus"
@@ -488,14 +525,26 @@ export default function EditPostScreen() {
                 <Ionicons
                   name={isAnonymous ? "eye-off" : "eye-off-outline"}
                   size={22}
-                  color={isAnonymous ? "#8b5cf6" : "#6b7280"}
+                  color={isAnonymous ? colors.primary : colors.textSecondary}
                 />
-                <Text style={styles.anonymousToggleText}>
+                <Text
+                  style={[styles.anonymousToggleText, { color: colors.text }]}
+                >
                   Post as Anonymous
                 </Text>
               </View>
               <View
-                style={[styles.checkbox, isAnonymous && styles.checkboxActive]}
+                style={[
+                  styles.checkbox,
+                  { borderColor: colors.textMuted },
+                  isAnonymous && [
+                    styles.checkboxActive,
+                    {
+                      backgroundColor: colors.primary,
+                      borderColor: colors.primary,
+                    },
+                  ],
+                ]}
               >
                 {isAnonymous && (
                   <Ionicons name="checkmark" size={16} color="#fff" />
@@ -504,7 +553,12 @@ export default function EditPostScreen() {
             </TouchableOpacity>
 
             {isAnonymous && (
-              <Text style={styles.anonymousNoteText}>
+              <Text
+                style={[
+                  styles.anonymousNoteText,
+                  { color: colors.textSecondary },
+                ]}
+              >
                 Your identity will be hidden. Your name and profile picture
                 won't be visible. Anonymous posts are always visible to your
                 entire campus.

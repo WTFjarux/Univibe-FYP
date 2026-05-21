@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 
 interface SearchErrorStateProps {
   message?: string;
@@ -19,18 +20,27 @@ export const SearchErrorState: React.FC<SearchErrorStateProps> = ({
   message = "Something went wrong while searching. Please try again.",
   onRetry,
 }) => {
+  const { colors, isDark } = useTheme();
+
   return (
     <View style={styles.container}>
-      <View style={styles.iconContainer}>
+      <View
+        style={[
+          styles.iconContainer,
+          { backgroundColor: isDark ? "#451a1a" : "#fef2f2" },
+        ]}
+      >
         <Ionicons name="alert-circle-outline" size={48} color="#ef4444" />
       </View>
 
-      <Text style={styles.title}>Search Failed</Text>
+      <Text style={[styles.title, { color: colors.text }]}>Search Failed</Text>
 
-      <Text style={styles.message}>{message}</Text>
+      <Text style={[styles.message, { color: colors.textSecondary }]}>
+        {message}
+      </Text>
 
       <TouchableOpacity
-        style={styles.retryButton}
+        style={[styles.retryButton, { backgroundColor: colors.primary }]}
         onPress={onRetry}
         activeOpacity={0.7}
       >
@@ -53,21 +63,18 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: "#fef2f2",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 16,
   },
   title: {
     fontSize: 18,
-    color: "#111827",
     fontFamily: "SofiaSans-Bold",
     marginBottom: 8,
     textAlign: "center",
   },
   message: {
     fontSize: 14,
-    color: "#6b7280",
     fontFamily: "SofiaSans-Regular",
     textAlign: "center",
     lineHeight: 20,
@@ -76,7 +83,6 @@ const styles = StyleSheet.create({
   retryButton: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#8b5cf6",
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 25,
@@ -89,4 +95,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default SearchErrorState
+export default SearchErrorState;

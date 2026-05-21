@@ -6,9 +6,10 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTheme } from "@/lib/contexts/ThemeContext";
 
 interface ReplyingToType {
   commentId: string;
@@ -18,34 +19,17 @@ interface ReplyingToType {
 }
 
 interface CommentInputProps {
-  /** Current input value */
   value: string;
-  /** Callback when input text changes */
   onChangeText: (text: string) => void;
-  /** Callback when submit button is pressed */
   onSubmit: () => void;
-  /** Whether comment should be anonymous */
   isAnonymous: boolean;
-  /** Toggle anonymous mode */
   onAnonymousToggle: () => void;
-  /** Whether submission is in progress */
   isSubmitting: boolean;
-  /** Reply context - shows who user is replying to */
   replyingTo: ReplyingToType | null;
-  /** Cancel reply mode */
   onCancelReply: () => void;
-  /** Placeholder text when not replying */
   placeholder?: string;
 }
 
-/**
- * Comment input component with anonymous toggle and reply indicator
- * Features:
- * - Multiline text input with character limit
- * - Anonymous mode toggle with visual feedback
- * - Reply indicator when replying to a comment
- * - Submit button with loading state
- */
 const CommentInput = forwardRef<TextInput, CommentInputProps>(
   (
     {
@@ -61,20 +45,92 @@ const CommentInput = forwardRef<TextInput, CommentInputProps>(
     },
     ref,
   ) => {
+    const { colors, isDark } = useTheme();
+    const insets = useSafeAreaInsets();
+
     const handleSubmit = () => {
       if (value.trim() && !isSubmitting) {
         onSubmit();
       }
     };
 
+    const dynamicStyles = {
+      container: {
+        borderTopColor: colors.border,
+        backgroundColor: colors.card,
+        paddingTop: 10,
+        // Extends down to screen bounds using exact safe-area parameters
+        paddingBottom: insets.bottom > 0 ? insets.bottom : 10,
+      },
+      replyingIndicator: {
+        backgroundColor: isDark ? colors.background : "#f9fafb",
+      },
+      replyingText: {
+        color: colors.textSecondary,
+      },
+      replyingUsername: {
+        color: colors.primary,
+      },
+      input: [
+        styles.input,
+        {
+          borderColor: colors.border,
+          backgroundColor: isDark ? colors.background : "#f9fafb",
+          color: colors.text,
+        },
+        replyingTo && {
+          borderColor: colors.primary,
+          backgroundColor: colors.primaryLight,
+        },
+        isAnonymous && {
+          borderColor: isDark ? colors.primary : "#c4b5fd",
+        },
+      ],
+      anonymousToggle: [
+        styles.anonymousToggle,
+        {
+          backgroundColor: isDark ? colors.background : "#f3f4f6",
+          borderColor: colors.border,
+        },
+        isAnonymous && {
+          backgroundColor: colors.primaryLight,
+          borderColor: colors.primary,
+        },
+      ],
+      sendButton: [
+        styles.sendButton,
+        { backgroundColor: colors.primary },
+        (!value.trim() || isSubmitting) && {
+          opacity: 0.5,
+          backgroundColor: isDark ? colors.border : "#c4b5fd",
+        },
+      ],
+      charCount: {
+        color: colors.textMuted,
+      },
+      anonymousStatus: {
+        backgroundColor: colors.primaryLight,
+      },
+      anonymousStatusText: {
+        color: colors.primary,
+      },
+    };
+
     return (
-      <View style={styles.inputContainer}>
-        {/* Reply Indicator - Shows when replying to a comment */}
+      <View style={[styles.inputContainer, dynamicStyles.container]}>
+        {/* Reply Indicator */}
         {replyingTo && (
-          <View style={styles.replyingIndicator}>
-            <Text style={styles.replyingText}>
+          <View
+            style={[styles.replyingIndicator, dynamicStyles.replyingIndicator]}
+          >
+            <Text style={[styles.replyingText, dynamicStyles.replyingText]}>
               Replying to{" "}
-              <Text style={styles.replyingUsername}>
+              <Text
+                style={[
+                  styles.replyingUsername,
+                  dynamicStyles.replyingUsername,
+                ]}
+              >
                 @{replyingTo.username}
               </Text>
             </Text>
@@ -83,7 +139,7 @@ const CommentInput = forwardRef<TextInput, CommentInputProps>(
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               activeOpacity={0.7}
             >
-              <Ionicons name="close" size={18} color="#6b7280" />
+              <Ionicons name="close" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
         )}
@@ -92,13 +148,9 @@ const CommentInput = forwardRef<TextInput, CommentInputProps>(
         <View style={styles.inputWrapper}>
           <TextInput
             ref={ref}
-            style={[
-              styles.input,
-              replyingTo && styles.inputWithReply,
-              isAnonymous && styles.inputAnonymous,
-            ]}
+            style={dynamicStyles.input}
             placeholder={replyingTo ? "Write a reply..." : placeholder}
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={colors.textMuted}
             value={value}
             onChangeText={onChangeText}
             multiline
@@ -111,10 +163,7 @@ const CommentInput = forwardRef<TextInput, CommentInputProps>(
 
           {/* Anonymous Toggle Button */}
           <TouchableOpacity
-            style={[
-              styles.anonymousToggle,
-              isAnonymous && styles.anonymousToggleActive,
-            ]}
+            style={dynamicStyles.anonymousToggle}
             onPress={onAnonymousToggle}
             disabled={isSubmitting}
             hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
@@ -123,43 +172,53 @@ const CommentInput = forwardRef<TextInput, CommentInputProps>(
             <Ionicons
               name={isAnonymous ? "eye-off" : "eye-off-outline"}
               size={20}
-              color={isAnonymous ? "#8b5cf6" : "#6b7280"}
+              color={isAnonymous ? colors.primary : colors.textSecondary}
             />
           </TouchableOpacity>
 
           {/* Submit Button */}
           <TouchableOpacity
-            style={[
-              styles.sendButton,
-              (!value.trim() || isSubmitting) && styles.sendButtonDisabled,
-            ]}
+            style={dynamicStyles.sendButton}
             onPress={handleSubmit}
             disabled={!value.trim() || isSubmitting}
             hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
             activeOpacity={0.7}
           >
             {isSubmitting ? (
-              <ActivityIndicator size="small" color="#fff" />
+              <ActivityIndicator size="small" color={colors.badgeText} />
             ) : (
-              <Ionicons name="send" size={20} color="#fff" />
+              <Ionicons name="send" size={20} color={colors.badgeText} />
             )}
           </TouchableOpacity>
         </View>
 
-        {/* Character Count */}
-        <View style={styles.footer}>
-          <Text style={styles.charCount}>{value.length}/500</Text>
+        {/* Inline Compact Footer row */}
+        <View style={styles.footerRow}>
+          {isAnonymous ? (
+            <View
+              style={[styles.anonymousStatus, dynamicStyles.anonymousStatus]}
+            >
+              <Ionicons
+                name="eye-off-outline"
+                size={12}
+                color={colors.primary}
+              />
+              <Text
+                style={[
+                  styles.anonymousStatusText,
+                  dynamicStyles.anonymousStatusText,
+                ]}
+              >
+                Your identity will be hidden
+              </Text>
+            </View>
+          ) : (
+            <View />
+          )}
+          <Text style={[styles.charCount, dynamicStyles.charCount]}>
+            {value.length}/500
+          </Text>
         </View>
-
-        {/* Anonymous Status Message */}
-        {isAnonymous && (
-          <View style={styles.anonymousStatus}>
-            <Ionicons name="eye-off-outline" size={12} color="#8b5cf6" />
-            <Text style={styles.anonymousStatusText}>
-              Your identity will be hidden
-            </Text>
-          </View>
-        )}
       </View>
     );
   },
@@ -168,26 +227,14 @@ const CommentInput = forwardRef<TextInput, CommentInputProps>(
 CommentInput.displayName = "CommentInput";
 
 const styles = StyleSheet.create({
-  /**
-   * Main container with top border
-   */
   inputContainer: {
     borderTopWidth: 1,
-    borderTopColor: "#f3f4f6",
-    backgroundColor: "#fff",
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    paddingBottom: Platform.OS === "ios" ? 12 : 12,
   },
-
-  /**
-   * Reply indicator bar showing who user is replying to
-   */
   replyingIndicator: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "#f9fafb",
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 12,
@@ -196,17 +243,11 @@ const styles = StyleSheet.create({
   replyingText: {
     fontSize: 13,
     fontFamily: "SofiaSans-Regular",
-    color: "#6b7280",
     flex: 1,
   },
   replyingUsername: {
-    color: "#8b5cf6",
     fontWeight: "600",
   },
-
-  /**
-   * Input row containing text input and buttons
-   */
   inputWrapper: {
     flexDirection: "row",
     alignItems: "flex-end",
@@ -215,91 +256,52 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#e5e7eb",
     borderRadius: 24,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 10,
     fontSize: 15,
     fontFamily: "SofiaSans-Regular",
     maxHeight: 100,
-    minHeight: 44,
-    backgroundColor: "#f9fafb",
-    color: "#111827",
+    minHeight: 40,
     lineHeight: 20,
   },
-  inputWithReply: {
-    borderColor: "#8b5cf6",
-    backgroundColor: "#faf5ff",
-  },
-  inputAnonymous: {
-    borderColor: "#c4b5fd",
-  },
-
-  /**
-   * Anonymous toggle button
-   */
   anonymousToggle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#f3f4f6",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#e5e7eb",
   },
-  anonymousToggleActive: {
-    backgroundColor: "#ede9fe",
-    borderColor: "#8b5cf6",
-  },
-
-  /**
-   * Submit button
-   */
   sendButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#8b5cf6",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: "center",
     alignItems: "center",
   },
-  sendButtonDisabled: {
-    opacity: 0.5,
-    backgroundColor: "#c4b5fd",
-  },
-
-  /**
-   * Footer section
-   */
-  footer: {
+  footerRow: {
     flexDirection: "row",
-    justifyContent: "flex-end",
-    marginTop: 6,
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 4,
   },
   charCount: {
     fontSize: 11,
     fontFamily: "SofiaSans-Regular",
-    color: "#9ca3af",
+    marginLeft: "auto",
   },
-
-  /**
-   * Anonymous status message
-   */
   anonymousStatus: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    marginTop: 8,
     paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: "#f5f3ff",
-    borderRadius: 8,
-    alignSelf: "flex-start",
+    paddingVertical: 2,
+    borderRadius: 6,
   },
   anonymousStatusText: {
     fontSize: 11,
-    color: "#8b5cf6",
+    fontFamily: "SofiaSans-Regular",
   },
 });
 

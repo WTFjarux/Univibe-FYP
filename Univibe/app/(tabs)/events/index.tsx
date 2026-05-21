@@ -8,10 +8,12 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
+import { useTheme } from "@/lib/contexts/ThemeContext";
 import { eventService, Event } from "@/lib/services/eventService";
 import EventCard from "@/app/components/Events/EventCard";
 import EventCategory from "@/app/components/Events/EventCategory";
@@ -35,6 +37,7 @@ const baseCategories = [
 export default function EventsScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const { colors } = useTheme();
   const currentUserId = user?.id;
 
   const [events, setEvents] = useState<Event[]>([]);
@@ -78,7 +81,6 @@ export default function EventsScreen() {
     if (refresh) {
       setPage(1);
       setHasMore(true);
-      // Clear cache on refresh to always get fresh data
       eventService.clearCache();
     }
 
@@ -86,7 +88,7 @@ export default function EventsScreen() {
       const params: any = {
         page: refresh ? 1 : page,
         limit: 10,
-        skipCache: refresh, // Skip cache when refreshing
+        skipCache: refresh,
       };
       if (selectedCategory !== "all") params.category = selectedCategory;
 
@@ -97,13 +99,11 @@ export default function EventsScreen() {
 
         if (refresh) {
           setEvents(newEvents);
-          // Join event rooms for all new events
           newEvents.forEach((event) => {
             socketService.joinRoom(`event_${event._id}`, null, "event");
           });
         } else {
           setEvents((prev) => deduplicateEvents([...prev, ...newEvents]));
-          // Join event rooms for newly loaded events
           newEvents.forEach((event) => {
             socketService.joinRoom(`event_${event._id}`, null, "event");
           });
@@ -126,7 +126,6 @@ export default function EventsScreen() {
       setEvents((prev) => {
         const newEvents = prev.map((event) => {
           if (event._id !== data.eventId) return event;
-
           return {
             ...event,
             status: (data.status as Event["status"]) ?? event.status,
@@ -162,13 +161,11 @@ export default function EventsScreen() {
     const event = events.find((e) => e._id === eventId);
     if (!event) return;
 
-    // Track this optimistic update
     pendingUpdates.current.set(eventId, {
       type: "interest",
       timestamp: Date.now(),
     });
 
-    // Optimistic UI update
     setEvents((prev) =>
       prev.map((e) => {
         if (e._id !== eventId) return e;
@@ -185,11 +182,9 @@ export default function EventsScreen() {
 
     try {
       const response = await eventService.toggleInterest(eventId);
-      // Clean up pending update
       pendingUpdates.current.delete(eventId);
 
       if (response.success) {
-        // Server-confirmed update
         setEvents((prev) =>
           prev.map((e) => {
             if (e._id !== eventId) return e;
@@ -202,11 +197,9 @@ export default function EventsScreen() {
           }),
         );
       } else {
-        // Revert on failure
         revertOptimisticUpdate(eventId, "interest");
       }
     } catch (error) {
-      // Clean up and revert on error
       pendingUpdates.current.delete(eventId);
       revertOptimisticUpdate(eventId, "interest");
     }
@@ -220,12 +213,10 @@ export default function EventsScreen() {
     const wasRsvpd = event.isRsvpd ?? false;
     const currentCount = event.rsvpCount ?? 0;
 
-    // Calculate new count safely
     const newRsvpCount = wasRsvpd
-      ? Math.max(0, currentCount - 1) // Removing RSVP
-      : currentCount + 1; // Adding RSVP
+      ? Math.max(0, currentCount - 1)
+      : currentCount + 1;
 
-    // Optimistic UI update
     setEvents((prev) =>
       prev.map((e) => {
         if (e._id !== eventId) return e;
@@ -241,14 +232,10 @@ export default function EventsScreen() {
       const response = await eventService.toggleRsvp(eventId);
 
       if (response.success) {
-        // Use server values, but fall back to optimistic if undefined
         const serverRsvpCount =
           response.rsvpCount !== undefined ? response.rsvpCount : newRsvpCount;
-
         const serverIsRsvpd =
           response.isRsvpd !== undefined ? response.isRsvpd : !wasRsvpd;
-
-        // Cast the status to the correct type
         const serverStatus: Event["status"] =
           (response.status as Event["status"]) ?? event.status;
 
@@ -265,29 +252,19 @@ export default function EventsScreen() {
           }),
         );
       } else {
-        // Revert on failure
         setEvents((prev) =>
           prev.map((e) => {
             if (e._id !== eventId) return e;
-            return {
-              ...e,
-              isRsvpd: wasRsvpd,
-              rsvpCount: currentCount,
-            };
+            return { ...e, isRsvpd: wasRsvpd, rsvpCount: currentCount };
           }),
         );
       }
     } catch (error) {
       console.error("💥 Error, reverting:", error);
-      // Revert on error
       setEvents((prev) =>
         prev.map((e) => {
           if (e._id !== eventId) return e;
-          return {
-            ...e,
-            isRsvpd: wasRsvpd,
-            rsvpCount: currentCount,
-          };
+          return { ...e, isRsvpd: wasRsvpd, rsvpCount: currentCount };
         }),
       );
     }
@@ -324,27 +301,38 @@ export default function EventsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      eventService.clearCache(); // Always clear cache on focus
+      eventService.clearCache();
       fetchEvents(true);
-    }, []), // Empty array = always run on focus, but only create callback once
+    }, []),
   );
 
   if (loading && events.length === 0) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+      >
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8b5cf6" />
+          <ActivityIndicator size="large" color={colors.primary} />
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      edges={["top"]}
+    >
       <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+            progressBackgroundColor={colors.card}
+          />
         }
         onScroll={({ nativeEvent }) => {
           const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
@@ -361,14 +349,16 @@ export default function EventsScreen() {
         {/* Header */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.title}>Events</Text>
-            <Text style={styles.subtitle}>Discover campus happenings</Text>
+            <Text style={[styles.title, { color: colors.text }]}>Events</Text>
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+              Discover campus happenings
+            </Text>
           </View>
           <TouchableOpacity
             style={styles.searchIconButton}
             onPress={() => router.push("/(tabs)/search")}
           >
-            <Ionicons name="search-outline" size={24} color="#111827" />
+            <Ionicons name="search-outline" size={24} color={colors.icon} />
           </TouchableOpacity>
         </View>
 
@@ -396,9 +386,17 @@ export default function EventsScreen() {
         <View style={styles.eventsContainer}>
           {events.length === 0 && !loading ? (
             <View style={styles.emptyState}>
-              <Ionicons name="calendar-outline" size={64} color="#d1d5db" />
-              <Text style={styles.emptyStateTitle}>No events found</Text>
-              <Text style={styles.emptyStateText}>
+              <Ionicons
+                name="calendar-outline"
+                size={64}
+                color={colors.textMuted}
+              />
+              <Text style={[styles.emptyStateTitle, { color: colors.text }]}>
+                No events found
+              </Text>
+              <Text
+                style={[styles.emptyStateText, { color: colors.textSecondary }]}
+              >
                 Be the first to create an event!
               </Text>
             </View>
@@ -416,20 +414,27 @@ export default function EventsScreen() {
         </View>
 
         {loading && events.length > 0 && (
-          <ActivityIndicator style={styles.loader} color="#8b5cf6" />
+          <ActivityIndicator style={styles.loader} color={colors.primary} />
         )}
 
         {!hasMore && events.length > 0 && (
           <View style={styles.endMessage}>
-            <Text style={styles.endMessageText}>No more events to load</Text>
+            <Text style={[styles.endMessageText, { color: colors.textMuted }]}>
+              No more events to load
+            </Text>
           </View>
         )}
 
+        {/* Extra bottom padding so FAB doesn't overlap last card */}
         <View style={styles.bottomPadding} />
       </ScrollView>
 
+      {/* FAB - Positioned above tab bar */}
       <TouchableOpacity
-        style={styles.fab}
+        style={[
+          styles.fab,
+          { backgroundColor: colors.primary, shadowColor: colors.shadow },
+        ]}
         onPress={() => router.push("/events/create")}
         activeOpacity={0.8}
       >
@@ -442,7 +447,6 @@ export default function EventsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f8fafc",
   },
   loadingContainer: {
     flex: 1,
@@ -462,17 +466,14 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: "bold",
-    color: "#111827",
   },
   subtitle: {
     fontSize: 14,
-    color: "#6b7280",
     marginTop: 4,
   },
   searchIconButton: {
     padding: 8,
   },
-
   categoriesScroll: {
     marginBottom: 20,
   },
@@ -490,12 +491,10 @@ const styles = StyleSheet.create({
   emptyStateTitle: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#374151",
     marginTop: 16,
   },
   emptyStateText: {
     fontSize: 14,
-    color: "#6b7280",
     textAlign: "center",
     marginTop: 8,
   },
@@ -508,25 +507,23 @@ const styles = StyleSheet.create({
   },
   endMessageText: {
     fontSize: 14,
-    color: "#9ca3af",
   },
   bottomPadding: {
-    height: 80,
+    height: 100, 
   },
   fab: {
     position: "absolute",
-    bottom: 20,
+    bottom: Platform.OS === "ios" ? 100 : 90, 
     right: 20,
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: "#8b5cf6",
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 5,
+    zIndex: 100,
   },
 });

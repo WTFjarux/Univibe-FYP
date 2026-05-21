@@ -8,6 +8,7 @@ import {
   Linking,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 
 interface ProfileInfoProps {
   profile?: {
@@ -42,6 +43,8 @@ type InfoItemType = {
 };
 
 export default function ProfileInfo({ profile, user }: ProfileInfoProps) {
+  const { colors } = useTheme();
+
   // Create base info items
   const infoItems: InfoItemType[] = [];
 
@@ -140,16 +143,23 @@ export default function ProfileInfo({ profile, user }: ProfileInfoProps) {
   // If no info items, show a message
   if (infoItems.length === 0) {
     return (
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>About</Text>
+      <View
+        style={[
+          styles.section,
+          { backgroundColor: colors.card, shadowColor: colors.shadow },
+        ]}
+      >
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>About</Text>
         <View style={styles.emptyContainer}>
           <Ionicons
             name="information-circle-outline"
             size={40}
-            color="#d1d5db"
+            color={colors.textMuted}
           />
-          <Text style={styles.emptyText}>No profile information available</Text>
-          <Text style={styles.emptySubtext}>
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+            No profile information available
+          </Text>
+          <Text style={[styles.emptySubtext, { color: colors.textMuted }]}>
             Complete your profile to share more about yourself
           </Text>
         </View>
@@ -164,8 +174,13 @@ export default function ProfileInfo({ profile, user }: ProfileInfoProps) {
   };
 
   return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>About</Text>
+    <View
+      style={[
+        styles.section,
+        { backgroundColor: colors.card, shadowColor: colors.shadow },
+      ]}
+    >
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>About</Text>
 
       {infoItems.map((item) => (
         <InfoItem
@@ -193,6 +208,7 @@ interface InfoItemProps {
 }
 
 function InfoItem({ icon, label, value, isLink, onPress }: InfoItemProps) {
+  const { colors } = useTheme();
   const ItemWrapper = isLink ? TouchableOpacity : View;
 
   return (
@@ -202,12 +218,18 @@ function InfoItem({ icon, label, value, isLink, onPress }: InfoItemProps) {
       activeOpacity={isLink ? 0.7 : 1}
     >
       <View style={styles.infoIcon}>
-        <Ionicons name={icon} size={20} color={"#6b7280"} />
+        <Ionicons name={icon} size={20} color={colors.textSecondary} />
       </View>
       <View style={styles.infoContent}>
-        <Text style={styles.infoLabel}>{label}</Text>
+        <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>
+          {label}
+        </Text>
         <Text
-          style={[styles.infoValue, isLink && styles.linkValue]}
+          style={[
+            styles.infoValue,
+            { color: colors.text },
+            isLink && [styles.linkValue, { color: colors.primary }],
+          ]}
           numberOfLines={2}
         >
           {value}
@@ -217,7 +239,7 @@ function InfoItem({ icon, label, value, isLink, onPress }: InfoItemProps) {
         <Ionicons
           name="open-outline"
           size={16}
-          color="#8b5cf6"
+          color={colors.primary}
           style={styles.linkIcon}
         />
       )}
@@ -242,7 +264,7 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#111827",
     marginBottom: 16,
-    fontFamily:"SofiaSans-Bold",
+    fontFamily: "SofiaSans-Bold",
   },
   infoItem: {
     flexDirection: "row",
@@ -256,7 +278,6 @@ const styles = StyleSheet.create({
   infoContent: {
     flex: 1,
     marginLeft: 12,
-
   },
   infoLabel: {
     color: "#6b7280",

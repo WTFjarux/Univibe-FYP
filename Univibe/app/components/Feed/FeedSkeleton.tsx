@@ -1,9 +1,11 @@
 import React, { useEffect, useRef } from "react";
 import { View, StyleSheet, ScrollView, Animated } from "react-native";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
 
 // Post Skeleton - Matches PostCard layout exactly
 const PostSkeleton = () => {
   const shimmerValue = useRef(new Animated.Value(0)).current;
+  const { colors } = useTheme();
 
   useEffect(() => {
     const animation = Animated.loop(
@@ -30,14 +32,21 @@ const PostSkeleton = () => {
   });
 
   const SkeletonBlock = ({ style }: { style: any }) => (
-    <Animated.View style={[style, { opacity, backgroundColor: "#e5e7eb" }]} />
+    <Animated.View
+      style={[style, { opacity, backgroundColor: colors.skeleton }]}
+    />
   );
 
   return (
-    <View style={styles.postCard}>
+    <View style={[styles.postCard, { backgroundColor: colors.card }]}>
       {/* Post Header - matches paddingTop: 25, paddingHorizontal: 20 */}
       <View style={styles.postHeader}>
-        <SkeletonBlock style={styles.postAvatar} />
+        <SkeletonBlock
+          style={[
+            styles.postAvatar,
+            { backgroundColor: colors.skeletonHighlight },
+          ]}
+        />
         <View style={styles.postUserInfo}>
           <View style={styles.postUserRow}>
             <SkeletonBlock style={styles.postUserName} />
@@ -59,7 +68,7 @@ const PostSkeleton = () => {
       <SkeletonBlock style={styles.postImage} />
 
       {/* Post Actions - matches paddingHorizontal: 20, borderTop */}
-      <View style={styles.postActions}>
+      <View style={[styles.postActions, { borderTopColor: colors.border }]}>
         <View style={styles.actionItem}>
           <SkeletonBlock style={styles.actionIcon} />
           <SkeletonBlock style={styles.actionCount} />
@@ -77,6 +86,7 @@ const PostSkeleton = () => {
 // Full Feed Page Skeleton
 export default function FeedSkeleton() {
   const shimmerValue = useRef(new Animated.Value(0)).current;
+  const { colors } = useTheme();
 
   useEffect(() => {
     const animation = Animated.loop(
@@ -103,11 +113,13 @@ export default function FeedSkeleton() {
   });
 
   const SkeletonBlock = ({ style }: { style: any }) => (
-    <Animated.View style={[style, { opacity, backgroundColor: "#e5e7eb" }]} />
+    <Animated.View
+      style={[style, { opacity, backgroundColor: colors.skeleton }]}
+    />
   );
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Feed Header Skeleton */}
         <View style={styles.feedHeader}>
@@ -121,8 +133,15 @@ export default function FeedSkeleton() {
         </View>
 
         {/* Create Post Button Skeleton */}
-        <View style={styles.createPostButton}>
-          <SkeletonBlock style={styles.createPostAvatar} />
+        <View
+          style={[styles.createPostButton, { backgroundColor: colors.card }]}
+        >
+          <SkeletonBlock
+            style={[
+              styles.createPostAvatar,
+              { backgroundColor: colors.skeletonHighlight },
+            ]}
+          />
           <SkeletonBlock style={styles.createPostText} />
           <SkeletonBlock style={styles.createPostIcon} />
         </View>

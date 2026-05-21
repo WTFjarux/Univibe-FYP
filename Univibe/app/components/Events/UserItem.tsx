@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { useTheme } from "@/lib/contexts/ThemeContext";
 import { API_BASE_URL } from "@/constants/ipConstants";
 
 const DEFAULT_AVATAR = require("@/assets/images/default-avatar.png");
@@ -36,6 +37,7 @@ export const UserItem = ({
   onPress,
 }: UserItemProps) => {
   const router = useRouter();
+  const { colors, isDark } = useTheme();
   const [imageError, setImageError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -50,7 +52,6 @@ export const UserItem = ({
 
   const getProfileImage = () => {
     const profilePic = user.profilePicture;
-
     if (profilePic && profilePic !== "" && !imageError) {
       const fullUrl = getFullImageUrl(profilePic);
       if (fullUrl) {
@@ -65,7 +66,6 @@ export const UserItem = ({
   const handleImageLoad = () => {
     setIsLoading(false);
   };
-
   const handleImageError = () => {
     setImageError(true);
     setIsLoading(false);
@@ -85,14 +85,28 @@ export const UserItem = ({
 
   return (
     <TouchableOpacity
-      style={styles.userCard}
+      style={[styles.userCard, { backgroundColor: colors.skeleton }]}
       onPress={handlePress}
       activeOpacity={0.7}
     >
-      <View style={styles.userAvatar}>
+      <View
+        style={[
+          styles.userAvatar,
+          { backgroundColor: isDark ? "rgba(167, 139, 250, 0.2)" : "#f3e8ff" },
+        ]}
+      >
         {isLoading && (
-          <View style={styles.loadingOverlay}>
-            <ActivityIndicator size="small" color="#8b5cf6" />
+          <View
+            style={[
+              styles.loadingOverlay,
+              {
+                backgroundColor: isDark
+                  ? "rgba(30, 30, 30, 0.8)"
+                  : "rgba(243, 232, 255, 0.8)",
+              },
+            ]}
+          >
+            <ActivityIndicator size="small" color={colors.primary} />
           </View>
         )}
         <Image
@@ -104,13 +118,26 @@ export const UserItem = ({
         />
       </View>
       <View style={styles.userInfo}>
-        <Text style={styles.userName}>{displayName}</Text>
-        <Text style={styles.userUsername}>@{displayUsername}</Text>
+        <Text style={[styles.userName, { color: colors.text }]}>
+          {displayName}
+        </Text>
+        <Text style={[styles.userUsername, { color: colors.textSecondary }]}>
+          @{displayUsername}
+        </Text>
       </View>
       {showOrganizerBadge && (
-        <View style={styles.organizerBadge}>
-          <Ionicons name="star" size={12} color="#8b5cf6" />
-          <Text style={styles.organizerBadgeText}>Organizer</Text>
+        <View
+          style={[
+            styles.organizerBadge,
+            {
+              backgroundColor: isDark ? "rgba(167, 139, 250, 0.2)" : "#f3e8ff",
+            },
+          ]}
+        >
+          <Ionicons name="star" size={12} color={colors.primary} />
+          <Text style={[styles.organizerBadgeText, { color: colors.primary }]}>
+            Organizer
+          </Text>
         </View>
       )}
     </TouchableOpacity>
@@ -122,7 +149,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     padding: 12,
-    backgroundColor: "#f9fafb",
     borderRadius: 12,
     marginBottom: 12,
     gap: 12,
@@ -132,44 +158,30 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: "#f3e8ff",
     justifyContent: "center",
     alignItems: "center",
     overflow: "hidden",
   },
-  userAvatarImage: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "cover",
-  },
+  userAvatarImage: { width: "100%", height: "100%", resizeMode: "cover" },
   loadingOverlay: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(243, 232, 255, 0.8)",
     justifyContent: "center",
     alignItems: "center",
     zIndex: 1,
   },
-  userInfo: {
-    flex: 1,
-  },
+  userInfo: { flex: 1 },
   userName: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#111827",
     fontFamily: "SofiaSans-Bold",
     marginBottom: 2,
   },
-  userUsername: {
-    fontSize: 13,
-    color: "#6b7280",
-    fontFamily: "SofiaSans-Regular",
-  },
+  userUsername: { fontSize: 13, fontFamily: "SofiaSans-Regular" },
   organizerBadge: {
-    backgroundColor: "#f3e8ff",
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
@@ -177,11 +189,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
   },
-  organizerBadgeText: {
-    fontSize: 11,
-    color: "#8b5cf6",
-    fontFamily: "SofiaSans-Bold",
-  },
+  organizerBadgeText: { fontSize: 11, fontFamily: "SofiaSans-Bold" },
 });
 
 export default UserItem;

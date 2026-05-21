@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "@/lib/contexts/ThemeContext";
 
 interface CommentHeaderProps {
   totalComments: number;
@@ -11,12 +12,19 @@ const CommentHeader: React.FC<CommentHeaderProps> = ({
   totalComments,
   onBackPress,
 }) => {
+  const { colors } = useTheme();
+
   return (
-    <View style={styles.header}>
+    <View
+      style={[
+        styles.header,
+        { backgroundColor: colors.background, borderBottomColor: colors.border },
+      ]}
+    >
       <TouchableOpacity onPress={onBackPress} style={styles.backButton}>
-        <Ionicons name="arrow-back" size={24} color="#111827" />
+        <Ionicons name="arrow-back" size={24} color={colors.text} />
       </TouchableOpacity>
-      <Text style={styles.headerTitle}>
+      <Text style={[styles.headerTitle, { color: colors.text }]}>
         Comments {totalComments > 0 ? `(${totalComments})` : ""}
       </Text>
       <View style={{ width: 40 }} />

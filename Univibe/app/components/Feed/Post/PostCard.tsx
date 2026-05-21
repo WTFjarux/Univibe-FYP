@@ -19,6 +19,7 @@ import { Post, getFullImageUrl } from "@/lib/services/postService";
 import { formatTimeAgo } from "@/lib/utils/formatTime";
 import PostOptionsModal from "./PostOptionsModal";
 import { useAuth } from "@/lib/contexts/AuthContext";
+import { useTheme } from "@/lib/contexts/ThemeContext";
 import { commentEvents, EVENTS } from "@/lib/utils/eventEmitter";
 
 const DEFAULT_AVATAR: ImageSourcePropType = require("../../../../assets/images/default-avatar.png");
@@ -85,6 +86,7 @@ const PostCard: React.FC<PostCardProps> = ({
   const router = useRouter();
   const pathname = usePathname();
   const { user, profile } = useAuth();
+  const { colors } = useTheme();
 
   // ===== State Management =====
   const [optionsVisible, setOptionsVisible] = useState(false);
@@ -538,7 +540,14 @@ const PostCard: React.FC<PostCardProps> = ({
   // ===== MAIN RENDER =====
   return (
     <View
-      style={[styles.postCard, compact && styles.compactPostCard]}
+      style={[
+        styles.postCard,
+        {
+          backgroundColor: colors.card,
+          borderBottomColor: colors.border,
+        },
+        compact && [styles.compactPostCard, { borderColor: colors.border }],
+      ]}
       onLayout={(event) => setContainerWidth(event.nativeEvent.layout.width)}
     >
       {/* Post Header */}
@@ -563,7 +572,11 @@ const PostCard: React.FC<PostCardProps> = ({
               disabled={compact || post.isAnonymous}
             >
               <Text
-                style={[styles.postUserName, compact && styles.compactUserName]}
+                style={[
+                  styles.postUserName,
+                  { color: colors.text },
+                  compact && styles.compactUserName,
+                ]}
               >
                 {getUserNameForActions()}
               </Text>
@@ -598,6 +611,7 @@ const PostCard: React.FC<PostCardProps> = ({
             <Text
               style={[
                 styles.postUserDetails,
+                { color: colors.textSecondary },
                 compact && styles.compactUserDetails,
               ]}
             >
@@ -615,7 +629,11 @@ const PostCard: React.FC<PostCardProps> = ({
             }}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Ionicons name="ellipsis-horizontal" size={20} color="#9ca3af" />
+            <Ionicons
+              name="ellipsis-horizontal"
+              size={20}
+              color={colors.textMuted}
+            />
           </TouchableOpacity>
         )}
       </View>
@@ -623,11 +641,16 @@ const PostCard: React.FC<PostCardProps> = ({
       {/* Post Content */}
       {!compact && post.content ? (
         <Pressable onPress={handlePostNavigation}>
-          <Text style={styles.postContent}>{post.content}</Text>
+          <Text style={[styles.postContent, { color: colors.text }]}>
+            {post.content}
+          </Text>
         </Pressable>
       ) : compact && post.content ? (
         <Pressable onPress={handlePostNavigation}>
-          <Text style={styles.compactPostContent} numberOfLines={2}>
+          <Text
+            style={[styles.compactPostContent, { color: colors.text }]}
+            numberOfLines={2}
+          >
             {post.content}
           </Text>
         </Pressable>
@@ -653,7 +676,11 @@ const PostCard: React.FC<PostCardProps> = ({
       {/* Post Actions */}
       {!hideActions && (
         <View
-          style={[styles.postActions, compact && styles.compactPostActions]}
+          style={[
+            styles.postActions,
+            { borderTopColor: colors.border },
+            compact && styles.compactPostActions,
+          ]}
         >
           <TouchableOpacity
             style={styles.postAction}
@@ -665,11 +692,12 @@ const PostCard: React.FC<PostCardProps> = ({
             <Ionicons
               name={isLiked ? "heart" : "heart-outline"}
               size={compact ? 16 : 20}
-              color={isLiked ? "#ef4444" : "#6b7280"}
+              color={isLiked ? "#ef4444" : colors.textSecondary}
             />
             <Text
               style={[
                 styles.postActionText,
+                { color: colors.textSecondary },
                 isLiked && styles.likedText,
                 compact && styles.compactActionText,
               ]}
@@ -687,11 +715,12 @@ const PostCard: React.FC<PostCardProps> = ({
             <Ionicons
               name="chatbubble-outline"
               size={compact ? 16 : 20}
-              color="#6b7280"
+              color={colors.textSecondary}
             />
             <Text
               style={[
                 styles.postActionText,
+                { color: colors.textSecondary },
                 compact && styles.compactActionText,
               ]}
             >
@@ -706,7 +735,11 @@ const PostCard: React.FC<PostCardProps> = ({
                 onSharePress(post._id);
               }}
             >
-              <Ionicons name="share-outline" size={20} color="#6b7280" />
+              <Ionicons
+                name="share-outline"
+                size={20}
+                color={colors.textSecondary}
+              />
             </TouchableOpacity>
           )}
         </View>
@@ -737,17 +770,16 @@ const PostCard: React.FC<PostCardProps> = ({
 const styles = StyleSheet.create({
   postCard: {
     backgroundColor: "white",
-    marginBottom: 8, 
+    marginBottom: 8,
     borderRadius: 0,
     overflow: "hidden",
-    // Removed shadow for cleaner flat look
     shadowColor: "transparent",
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0,
     shadowRadius: 0,
     elevation: 0,
-    borderBottomWidth: 1, 
-    borderBottomColor: "#f3f4f6", 
+    borderBottomWidth: 1,
+    borderBottomColor: "#f3f4f6",
   },
   compactPostCard: {
     marginBottom: 0,

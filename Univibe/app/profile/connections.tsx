@@ -16,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { useAuth } from "../../lib/contexts/AuthContext";
+import { useTheme } from "../../lib/contexts/ThemeContext";
 import { connectionService } from "../../lib/services/connectionService";
 import { getFullImageUrl } from "../../lib/services/postService";
 
@@ -33,6 +34,7 @@ export default function ConnectionsScreen() {
   const router = useRouter();
   const { userId } = useLocalSearchParams<{ userId: string }>();
   const { token, user: currentUser } = useAuth();
+  const { colors } = useTheme();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -110,7 +112,10 @@ export default function ConnectionsScreen() {
 
     return (
       <TouchableOpacity
-        style={styles.userCard}
+        style={[
+          styles.userCard,
+          { shadowColor: colors.shadow },
+        ]}
         onPress={() => router.push(`/profile/${item._id}`)}
         activeOpacity={0.7}
       >
@@ -119,19 +124,31 @@ export default function ConnectionsScreen() {
             {item.profilePicture ? (
               <Image
                 source={{ uri: getFullImageUrl(item.profilePicture) }}
-                style={styles.avatar}
+                style={[styles.avatar, { backgroundColor: colors.skeleton }]}
               />
             ) : (
-              <View style={[styles.avatar, styles.avatarPlaceholder]}>
+              <View
+                style={[
+                  styles.avatar,
+                  styles.avatarPlaceholder,
+                  { backgroundColor: colors.primary },
+                ]}
+              >
                 <Text style={styles.avatarText}>{initial}</Text>
               </View>
             )}
           </View>
           <View style={styles.userDetails}>
-            <Text style={styles.userName}>{displayName}</Text>
-            <Text style={styles.userUsername}>@{item.username || "user"}</Text>
+            <Text style={[styles.userName, { color: colors.text }]}>
+              {displayName}
+            </Text>
+            <Text
+              style={[styles.userUsername, { color: colors.textSecondary }]}
+            >
+              @{item.username || "user"}
+            </Text>
             {!item.isOnline && item.lastSeen && (
-              <Text style={styles.lastSeen}>
+              <Text style={[styles.lastSeen, { color: colors.textMuted }]}>
                 Last seen {formatLastSeen(item.lastSeen)}
               </Text>
             )}
@@ -158,9 +175,11 @@ export default function ConnectionsScreen() {
 
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
-      <Ionicons name="people-outline" size={64} color="#d1d5db" />
-      <Text style={styles.emptyTitle}>No connections</Text>
-      <Text style={styles.emptyText}>
+      <Ionicons name="people-outline" size={64} color={colors.textMuted} />
+      <Text style={[styles.emptyTitle, { color: colors.text }]}>
+        No connections
+      </Text>
+      <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
         Connect with other students to see them here
       </Text>
     </View>
@@ -168,22 +187,34 @@ export default function ConnectionsScreen() {
 
   // ✅ Single return - header always present
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      <View style={styles.header}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      edges={["top"]}
+    >
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: colors.background, borderBottomColor: colors.border },
+        ]}
+      >
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
         >
-          <Ionicons name="arrow-back" size={24} color="#111827" />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Connections</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>
+          Connections
+        </Text>
         <View style={{ width: 40 }} />
       </View>
 
       {loading && !refreshing ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8b5cf6" />
-          <Text style={styles.loadingText}>Loading connections...</Text>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+            Loading connections...
+          </Text>
         </View>
       ) : (
         <FlatList
@@ -195,8 +226,15 @@ export default function ConnectionsScreen() {
           ListFooterComponent={
             loadingMore ? (
               <View style={styles.footerLoader}>
-                <ActivityIndicator size="small" color="#8b5cf6" />
-                <Text style={styles.loadingMoreText}>Loading more...</Text>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text
+                  style={[
+                    styles.loadingMoreText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Loading more...
+                </Text>
               </View>
             ) : null
           }
@@ -206,8 +244,9 @@ export default function ConnectionsScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor="#8b5cf6"
-              colors={["#8b5cf6"]}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+              progressBackgroundColor={colors.card}
             />
           }
         />
@@ -233,18 +272,15 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "600",
     color: "#111827",
-    fontFamily: "SofiaSans-SemiBold",
+    fontFamily: "SofiaSans-Bold",
   },
   listContent: { flexGrow: 1, paddingBottom: 20 },
   userCard: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    borderRadius: 12,
-    marginHorizontal: 16,
     marginVertical: 6,
     padding: 16,
-
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
@@ -265,7 +301,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontFamily: "SofiaSans-Bold",
   },
-
   userDetails: { flex: 1, marginLeft: 6 },
   userName: {
     fontSize: 16,
