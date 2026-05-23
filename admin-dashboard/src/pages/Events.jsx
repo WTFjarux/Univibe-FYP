@@ -264,6 +264,11 @@ function Events() {
     return badges[status] || badges.upcoming;
   };
 
+  // Helper to check if event is completed or cancelled
+  const isEventFinalized = (event) => {
+    return event.status === 'completed' || event.status === 'cancelled';
+  };
+
   const prevImage = (eventId, totalImages, e) => {
     e.stopPropagation();
     setActiveImageIndex((prev) => ({ ...prev, [eventId]: prev[eventId] ? (prev[eventId] - 1 + totalImages) % totalImages : totalImages - 1 }));
@@ -362,6 +367,7 @@ function Events() {
             const currentImageIndex = activeImageIndex[event._id] || 0;
             const totalImages = images.length;
             const statusBadge = getStatusBadge(event.status);
+            const eventFinalized = isEventFinalized(event);
 
             return (
               <div key={event._id} className={`bg-white rounded-2xl border overflow-hidden transition-shadow hover:shadow-lg ${
@@ -394,6 +400,14 @@ function Events() {
                       <span className={`text-xs font-semibold px-2.5 py-1 rounded-full shadow-sm ${event.approvalStatus === 'approved' ? 'bg-green-500 text-white' : event.approvalStatus === 'rejected' ? 'bg-red-500 text-white' : 'bg-yellow-500 text-white'}`} style={{ fontFamily: 'Sofia Sans' }}>{event.approvalStatus}</span>
                     </div>
                     {event.isFeatured && <div className="absolute top-3 left-3"><Star size={20} className="text-yellow-500 fill-yellow-500 drop-shadow-sm" /></div>}
+                    {/* Show "Completed/Cancelled" overlay badge if event is finalized */}
+                    {eventFinalized && (
+                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                        <span className="text-white text-sm font-bold px-4 py-2 rounded-full bg-black/50 backdrop-blur-sm" style={{ fontFamily: 'Sofia Sans' }}>
+                          {event.status === 'completed' ? 'Event Completed' : 'Event Cancelled'}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="relative h-48 bg-gradient-to-br from-purple-100 to-blue-100 flex items-center justify-center">
@@ -402,6 +416,13 @@ function Events() {
                       <span className={`text-xs font-semibold px-2.5 py-1 rounded-full shadow-sm ${event.approvalStatus === 'approved' ? 'bg-green-500 text-white' : event.approvalStatus === 'rejected' ? 'bg-red-500 text-white' : 'bg-yellow-500 text-white'}`} style={{ fontFamily: 'Sofia Sans' }}>{event.approvalStatus}</span>
                     </div>
                     {event.isFeatured && <div className="absolute top-3 left-3"><Star size={20} className="text-yellow-500 fill-yellow-500 drop-shadow-sm" /></div>}
+                    {eventFinalized && (
+                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                        <span className="text-white text-sm font-bold px-4 py-2 rounded-full bg-black/50 backdrop-blur-sm" style={{ fontFamily: 'Sofia Sans' }}>
+                          {event.status === 'completed' ? 'Event Completed' : 'Event Cancelled'}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -456,9 +477,18 @@ function Events() {
                     <p className="text-xs text-red-500 mb-3 bg-red-50 rounded-lg px-3 py-2" style={{ fontFamily: 'Sofia Sans' }}>Reason: {event.rejectionReason}</p>
                   )}
 
+                  {/* Finalized event message */}
+                  {eventFinalized && (
+                    <div className="text-xs text-amber-600 mb-3 bg-amber-50 rounded-lg px-3 py-2 flex items-center gap-2" style={{ fontFamily: 'Sofia Sans' }}>
+                      <CheckCircle2 size={14} />
+                      This event has {event.status === 'completed' ? 'ended' : 'been cancelled'} and cannot be approved or rejected.
+                    </div>
+                  )}
+
                   {/* Actions */}
                   <div className="flex gap-2 pt-3 border-t border-gray-100">
-                    {event.approvalStatus === 'pending' && (
+                    {/* Show approve/reject only for pending events that are NOT finalized */}
+                    {event.approvalStatus === 'pending' && !eventFinalized && (
                       <>
                         <button onClick={() => confirmApprove(event._id)} disabled={actionLoading === event._id}
                           className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-green-500 text-white text-sm font-semibold hover:bg-green-600 transition-colors disabled:opacity-50" style={{ fontFamily: 'Sofia Sans' }}>
@@ -470,6 +500,14 @@ function Events() {
                         </button>
                       </>
                     )}
+                    
+                    {/* Show pending badge for finalized events that are still pending */}
+                    {event.approvalStatus === 'pending' && eventFinalized && (
+                      <div className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-gray-100 text-gray-500 text-sm font-semibold" style={{ fontFamily: 'Sofia Sans' }}>
+                        <Clock size={16} /> Pending Review (Event Ended)
+                      </div>
+                    )}
+
                     <button onClick={() => handleFeature(event._id)}
                       className={`flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-sm font-semibold transition-colors ${event.isFeatured ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`} style={{ fontFamily: 'Sofia Sans' }}>
                       <Star size={16} className={event.isFeatured ? 'fill-yellow-500 text-yellow-500' : ''} />

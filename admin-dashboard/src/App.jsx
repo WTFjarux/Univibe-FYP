@@ -9,41 +9,14 @@ import Comments from './pages/Comments';
 import Events from './pages/Events';
 import Users from './pages/Users';
 import UserDetailPage from './pages/UserDetailPage';
+import Reports from './pages/Reports';  
 import AdminLayout from './components/layout/AdminLayout';
 import useAuthStore from './store/authStore';
 
 // ============================================
-// PLACEHOLDER PAGES
+// PLACEHOLDER PAGES (Keep for future use)
 // ============================================
-function Reports() {
-  return (
-    <div className="text-center py-20">
-      <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
-        <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" />
-        </svg>
-      </div>
-      <h1 style={{ fontFamily: 'Sofia Sans', fontWeight: 700, fontSize: 24, color: '#111827' }}>Reports Center</h1>
-      <p className="text-gray-500 mt-2" style={{ fontFamily: 'Sofia Sans' }}>Manage and resolve user reports</p>
-      <span className="inline-block mt-3 px-3 py-1 rounded-full bg-purple-100 text-purple-600 text-xs font-semibold" style={{ fontFamily: 'Sofia Sans' }}>Coming Soon</span>
-    </div>
-  );
-}
 
-function Logs() {
-  return (
-    <div className="text-center py-20">
-      <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
-        <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
-      </div>
-      <h1 style={{ fontFamily: 'Sofia Sans', fontWeight: 700, fontSize: 24, color: '#111827' }}>Moderation Logs</h1>
-      <p className="text-gray-500 mt-2" style={{ fontFamily: 'Sofia Sans' }}>Track all moderation actions</p>
-      <span className="inline-block mt-3 px-3 py-1 rounded-full bg-purple-100 text-purple-600 text-xs font-semibold" style={{ fontFamily: 'Sofia Sans' }}>Coming Soon</span>
-    </div>
-  );
-}
 
 function Settings() {
   return (
@@ -71,7 +44,7 @@ function ProtectedRoute({ children }) {
 
   useEffect(() => {
     // Try to restore session on mount
-    const restored = restoreSession();
+    restoreSession();
     setIsReady(true);
   }, []);
 
@@ -116,7 +89,6 @@ function App() {
           <Route path="/users/:userId" element={<UserDetailPage />} />
           <Route path="/events" element={<Events />} />
           <Route path="/reports" element={<Reports />} />
-          <Route path="/logs" element={<Logs />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
 

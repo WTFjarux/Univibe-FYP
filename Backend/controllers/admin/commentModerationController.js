@@ -72,6 +72,7 @@ const getComments = async (req, res) => {
         return { ...comment, reportCount };
       }),
     );
+
     const userIds = [
       ...new Set(
         commentsWithReportCount.map((c) => c.user?._id).filter(Boolean),
@@ -136,7 +137,7 @@ const deleteComment = async (req, res) => {
 
     comment.isDeleted = true;
     comment.deletedAt = new Date();
-    comment.content = "[deleted by moderator]";
+    // ❌ REMOVED: comment.content = "[deleted by moderator]";
     await comment.save();
 
     // Update post comment count
@@ -186,12 +187,12 @@ const bulkDeleteComments = async (req, res) => {
       });
     }
 
+    // ❌ REMOVED content overwrite
     await Comment.updateMany(
       { _id: { $in: commentIds } },
       {
         isDeleted: true,
         deletedAt: new Date(),
-        content: "[deleted by moderator]",
       },
     );
 

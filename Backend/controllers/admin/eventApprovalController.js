@@ -3,13 +3,21 @@ const { getAdminModel } = require("../../config/database");
 const Notification = require("../../models/Notification");
 
 // GET PENDING EVENTS
+// GET PENDING EVENTS
 const getEvents = async (req, res) => {
   try {
     const { page = 1, limit = 20, status = "pending", search = "" } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     const query = {};
-    if (status !== "all") query.approvalStatus = status;
+    if (status !== "all") {
+      query.approvalStatus = status;
+
+      // If filtering by pending, exclude completed and cancelled events
+      if (status === "pending") {
+        query.status = { $nin: ["completed", "cancelled"] };
+      }
+    }
     if (search) query.title = { $regex: search, $options: "i" };
 
     const [events, total] = await Promise.all([
@@ -22,6 +30,7 @@ const getEvents = async (req, res) => {
       Event.countDocuments(query),
     ]);
 
+    // Rest of the code remains the same...
     // Fetch profile pictures for organizers
     const Profile = require("../../models/Profile");
     const organizerIds = [

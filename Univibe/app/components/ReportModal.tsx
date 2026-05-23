@@ -1,6 +1,6 @@
 // app/components/ReportModal.tsx
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -78,7 +78,7 @@ const REPORT_REASONS = [
   },
 ];
 
-const TARGET_TYPE_LABELS = {
+const TARGET_TYPE_LABELS: Record<string, string> = {
   Post: "post",
   Comment: "comment",
   User: "user",
@@ -118,90 +118,105 @@ const ReportModal: React.FC<ReportModalProps> = ({
     };
   }, []);
 
-  const handleReport = async (reason: string) => {
-    // Prevent duplicate submissions
-    if (hasSubmitted.current || reporting) return;
-    hasSubmitted.current = true;
+  const handleReport = useCallback(
+    async (reason: string) => {
+      // Prevent duplicate submissions
+      if (hasSubmitted.current || reporting) return;
+      hasSubmitted.current = true;
 
-    setSelectedReason(reason);
-    setReporting(true);
+      setSelectedReason(reason);
+      setReporting(true);
 
-    try {
-      const response = await reportFunction(targetId, reason);
+      try {
+        const response = await reportFunction(targetId, reason);
 
-      if (!isMounted.current) return;
+        if (!isMounted.current) return;
 
-      if (response.success) {
-        // Close modal first
-        onClose();
+        if (response.success) {
+          // Close modal first
+          onClose();
 
-        if (onReportSuccess) {
-          onReportSuccess();
-        }
+          if (onReportSuccess) {
+            onReportSuccess();
+          }
 
-        if (onShowInfoBar) {
-          onShowInfoBar(
-            "Report submitted. Thank you for your feedback.",
-            "success",
-          );
-        }
-      } else {
-        if (onShowInfoBar) {
-          if (response.message?.includes("already reported")) {
+          if (onShowInfoBar) {
             onShowInfoBar(
-              `You have already reported this ${TARGET_TYPE_LABELS[targetType]}`,
-              "info",
-            );
-          } else {
-            onShowInfoBar(
-              response.message || "Failed to submit report",
-              "error",
+              "Report submitted. Thank you for your feedback.",
+              "success",
             );
           }
+        } else {
+          if (onShowInfoBar) {
+            if (response.message?.includes("already reported")) {
+              onShowInfoBar(
+                `You have already reported this ${TARGET_TYPE_LABELS[targetType]}`,
+                "info",
+              );
+            } else {
+              onShowInfoBar(
+                response.message || "Failed to submit report",
+                "error",
+              );
+            }
+          }
+
+          // Reset state so user can try again
+          if (isMounted.current) {
+            setReporting(false);
+            setSelectedReason(null);
+            hasSubmitted.current = false;
+          }
+        }
+      } catch (error: any) {
+        if (!isMounted.current) return;
+
+        if (onShowInfoBar) {
+          onShowInfoBar(error.message || "Failed to submit report", "error");
         }
 
-        // Reset state so user can try again
+        // Reset state on error
         setReporting(false);
         setSelectedReason(null);
         hasSubmitted.current = false;
       }
-    } catch (error: any) {
-      if (!isMounted.current) return;
+    },
+    [
+      reporting,
+      reportFunction,
+      targetId,
+      targetType,
+      onClose,
+      onReportSuccess,
+      onShowInfoBar,
+    ],
+  );
 
-      if (onShowInfoBar) {
-        onShowInfoBar(error.message || "Failed to submit report", "error");
-      }
-
-      // Reset state on error
-      setReporting(false);
-      setSelectedReason(null);
-      hasSubmitted.current = false;
-    }
-  };
-
-  const getTitle = () => {
+  const getTitle = useCallback(() => {
     if (targetType === "User" && targetName) {
       return `Report ${targetName}`;
     }
     return `Report ${TARGET_TYPE_LABELS[targetType]}`;
-  };
+  }, [targetType, targetName]);
+
+  const handleClose = useCallback(() => {
+    if (!reporting) {
+      onClose();
+    }
+  }, [reporting, onClose]);
 
   return (
     <Modal
       visible={visible}
       transparent={true}
       animationType="slide"
-      onRequestClose={() => {
-        if (!reporting) onClose();
-      }}
+      onRequestClose={handleClose}
       statusBarTranslucent={Platform.OS === "android"}
     >
       <TouchableOpacity
         style={styles.modalOverlay}
         activeOpacity={1}
-        onPress={() => {
-          if (!reporting) onClose();
-        }}
+        onPress={handleClose}
       >
         <View
           style={[
@@ -215,12 +230,7 @@ const ReportModal: React.FC<ReportModalProps> = ({
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               {getTitle()}
             </Text>
-            <TouchableOpacity
-              onPress={() => {
-                if (!reporting) onClose();
-              }}
-              disabled={reporting}
-            >
+            <TouchableOpacity onPress={handleClose} disabled={reporting}>
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
@@ -315,9 +325,7 @@ const ReportModal: React.FC<ReportModalProps> = ({
 
           <TouchableOpacity
             style={[styles.cancelButton, { backgroundColor: colors.skeleton }]}
-            onPress={() => {
-              if (!reporting) onClose();
-            }}
+            onPress={handleClose}
             disabled={reporting}
           >
             <Text style={[styles.cancelButtonText, { color: colors.text }]}>

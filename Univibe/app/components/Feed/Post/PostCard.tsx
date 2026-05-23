@@ -1,6 +1,12 @@
 // app/components/Feed/Post/PostCard.tsx
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+} from "react";
 import {
   View,
   Text,
@@ -120,41 +126,52 @@ const PostCard: React.FC<PostCardProps> = ({
   useEffect(() => {
     setDisplayCommentCount(post.commentCount || 0);
   }, [post.commentCount]);
+
   useEffect(() => {
     setIsLiked(post.isLiked || false);
     setLikesCount(post.likeCount ?? post.likes?.length ?? 0);
     setIsSaved(post.isSaved || false);
   }, [post.isLiked, post.likeCount, post.likes?.length, post.isSaved]);
+
   useEffect(() => {
     setLocalIsHidden(isHidden);
   }, [isHidden]);
+
   useEffect(() => {
     setLocalIsMuted(isMuted);
   }, [isMuted]);
+
   useEffect(() => {
     setLocalIsBlocked(isBlocked);
   }, [isBlocked]);
+
   useEffect(() => {
     setIsReported(post.isReported || false);
   }, [post.isReported]);
 
-  // ===== Event Listeners =====
+  // ===== Event Listeners with proper cleanup =====
   useEffect(() => {
     const unsubComments = commentEvents.on(
       EVENTS.COMMENT_COUNT_CHANGED,
       (data: { postId: string; count: number }) => {
-        if (data.postId === post._id) setDisplayCommentCount(data.count);
+        if (data.postId === post._id) {
+          setDisplayCommentCount(data.count);
+        }
       },
     );
+
     return () => {
-      unsubComments();
+      if (typeof unsubComments === "function") {
+        unsubComments();
+      }
     };
   }, [post._id]);
 
   // ===== Image Error Handling =====
   useEffect(() => {
-    if (post.images?.length > 0)
+    if (post.images?.length > 0) {
       setPostImageError(new Array(post.images.length).fill(false));
+    }
   }, [post.images?.length]);
 
   const handleImageError = useCallback((index: number) => {
@@ -166,19 +183,20 @@ const PostCard: React.FC<PostCardProps> = ({
   }, []);
 
   // ===== User Identification =====
-  const getCurrentUserId = useCallback((): string | null => {
-    if (user?.id) return user.id.toString();
-    if (profile?.user?._id) return profile.user._id.toString();
-    if (profile?._id) return profile._id.toString();
+  const currentUserId = useMemo(() => {
+    if (user?.id) return String(user.id);
+    if (profile?.user?._id) return String(profile.user._id);
+    if (profile?._id) return String(profile._id);
     return null;
   }, [user, profile]);
-  const currentUserId = getCurrentUserId();
 
   const isOwnPost = useCallback((): boolean => {
-    if (post.isAnonymous && post.originalUser)
-      return currentUserId === post.originalUser._id?.toString();
-    return currentUserId === (post.user?._id ?? null)?.toString();
+    if (post.isAnonymous && post.originalUser) {
+      return currentUserId === String(post.originalUser._id);
+    }
+    return currentUserId === String(post.user?._id ?? "");
   }, [currentUserId, post.isAnonymous, post.originalUser, post.user]);
+
   const ownPost = isOwnPost();
 
   const getUserNameForActions = useCallback((): string => {
@@ -187,23 +205,24 @@ const PostCard: React.FC<PostCardProps> = ({
   }, [post.isAnonymous, post.user?.name]);
 
   const getUserIdForNavigation = useCallback((): string | null => {
-    if (post.isAnonymous && post.originalUser)
-      return post.originalUser._id?.toString() ?? null;
-    return post.user?._id ?? null;
+    if (post.isAnonymous && post.originalUser) {
+      return String(post.originalUser._id);
+    }
+    return post.user?._id ? String(post.user._id) : null;
   }, [post.isAnonymous, post.originalUser, post.user]);
 
   // ===== Image Handling =====
-  const getPostImages = useCallback(() => {
+  const postImages = useMemo(() => {
     if (!post.images?.length) return [];
     return post.images.map((image) => ({
       ...image,
       url: getFullImageUrl(image.url),
     }));
   }, [post.images]);
-  const postImages = getPostImages();
 
   // ===== Navigation =====
   const isAlreadyOnPostDetail = pathname === "/post/[id]";
+
   const handlePostNavigation = useCallback(() => {
     if (disableNavigation || isAlreadyOnPostDetail) return;
     router.push({ pathname: "/post/[id]", params: { id: post._id } });
@@ -228,9 +247,10 @@ const PostCard: React.FC<PostCardProps> = ({
   // ===== Image Carousel =====
   const handleScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      setCurrentImageIndex(
-        Math.round(event.nativeEvent.contentOffset.x / containerWidth),
-      );
+      const offsetX = event.nativeEvent.contentOffset.x;
+      if (containerWidth > 0) {
+        setCurrentImageIndex(Math.round(offsetX / containerWidth));
+      }
     },
     [containerWidth],
   );
@@ -249,21 +269,23 @@ const PostCard: React.FC<PostCardProps> = ({
   );
 
   // ===== Visibility Helpers =====
-  const getVisibilityIconName = useCallback((): IconName => {
+  const visibilityIconName = useMemo((): IconName => {
     const icons: Record<string, IconName> = {
       campus: "school-outline",
       connections: "people-outline",
     };
     return icons[post.visibility] || "globe-outline";
   }, [post.visibility]);
-  const getVisibilityDisplayName = useCallback((): string => {
+
+  const visibilityDisplayName = useMemo((): string => {
     const names: Record<string, string> = {
       campus: "Campus",
       connections: "Connections",
     };
     return names[post.visibility] || "Public";
   }, [post.visibility]);
-  const getVisibilityBadgeColor = useCallback((): string => {
+
+  const visibilityBadgeColor = useMemo((): string => {
     const colors: Record<string, string> = {
       campus: "#3b82f6",
       connections: "#8b5cf6",
@@ -276,24 +298,36 @@ const PostCard: React.FC<PostCardProps> = ({
     setOptionsVisible(true);
     onOptionsOpen?.();
   }, [onOptionsOpen]);
+
   const handleOptionsClose = useCallback(() => {
     setOptionsVisible(false);
     onOptionsClose?.();
   }, [onOptionsClose]);
 
-  const postData = {
-    postId: post._id,
-    isOwnPost: ownPost,
-    isSaved,
-    isReported,
-    isHidden: localIsHidden,
-    isMuted: localIsMuted,
-    isBlocked: localIsBlocked,
-    userId: post.user?._id ?? undefined,
-    userName: getUserNameForActions(),
-  };
-  const visibilityIconName = getVisibilityIconName();
-  const visibilityBadgeColor = getVisibilityBadgeColor();
+  const postData = useMemo(
+    () => ({
+      postId: post._id,
+      isOwnPost: ownPost,
+      isSaved,
+      isReported,
+      isHidden: localIsHidden,
+      isMuted: localIsMuted,
+      isBlocked: localIsBlocked,
+      userId: post.user?._id ?? undefined,
+      userName: getUserNameForActions(),
+    }),
+    [
+      post._id,
+      post.user?._id,
+      ownPost,
+      isSaved,
+      isReported,
+      localIsHidden,
+      localIsMuted,
+      localIsBlocked,
+      getUserNameForActions,
+    ],
+  );
 
   // ===== RENDER: Indicators =====
   const renderIndicators = useCallback(() => {
@@ -602,7 +636,7 @@ const PostCard: React.FC<PostCardProps> = ({
                     { color: visibilityBadgeColor },
                   ]}
                 >
-                  {getVisibilityDisplayName()}
+                  {visibilityDisplayName}
                 </Text>
               </View>
             )}

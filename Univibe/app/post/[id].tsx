@@ -12,23 +12,23 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
   Dimensions,
+  Alert,
+  ListRenderItemInfo,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/lib/contexts/AuthContext";
-import { useTheme } from "@/lib/contexts/ThemeContext"; 
+import { useTheme } from "@/lib/contexts/ThemeContext";
 import PostDetailSkeleton from "@/app/components/Feed/Post/PostDetailSkeleton";
 import {
   getPostById,
   getPostComments,
   toggleLike,
-  deletePost,
   Post,
   Comment,
   getFullImageUrl,
@@ -37,7 +37,9 @@ import PostPreview from "@/app/components/Feed/Comment/PostPreview";
 import CommentItem from "@/app/components/Feed/Comment/CommentItem";
 import CommentInput from "@/app/components/Feed/Comment/CommentInput";
 import ImageModal from "@/app/components/Feed/Comment/ImageModal";
+import ReportModal from "@/app/components/ReportModal";
 import useComments from "@/app/components/Feed/Comment/useComments";
+import { reportContent } from "@/lib/services/contentService";
 
 const { width: screenWidth } = Dimensions.get("window");
 
@@ -49,7 +51,6 @@ export default function PostDetailScreen() {
   const router = useRouter();
   const { token, user } = useAuth();
 
-  // ✅ Tap straight into your global context tokens
   const { isDark, colors } = useTheme();
 
   // Post state
@@ -73,10 +74,21 @@ export default function PostDetailScreen() {
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [isAnyCommentEditing, setIsAnyCommentEditing] = useState(false);
 
+  // Report Modal State
+  const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [reportTargetId, setReportTargetId] = useState("");
+  const [reportTargetType, setReportTargetType] = useState<
+    "Post" | "Comment" | "User" | "Event"
+  >("Comment");
+  const [pendingReportCommentId, setPendingReportCommentId] = useState<
+    string | null
+  >(null);
+
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<any>(null);
   const isFetchingRef = useRef(false);
   const isLikingRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Comments Hook Integration
   const {
@@ -90,7 +102,6 @@ export default function PostDetailScreen() {
     handleEdit: commentEditHandler,
   } = useComments(id, comments, setComments, setTotalComments, setPost, user);
 
-  // Dynamic context-based system overlays
   const alertStyles = useMemo(
     () => ({
       errorBg: isDark ? "#2c1a1a" : "#fee2e2",
@@ -107,8 +118,18 @@ export default function PostDetailScreen() {
       return;
     }
 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     try {
       const response = await getPostById(id);
+
+      if (abortController.signal.aborted) return;
+
       if (response.success && response.post) {
         setPost(response.post);
         setIsPostLiked(response.post.isLiked || false);
@@ -118,6 +139,8 @@ export default function PostDetailScreen() {
         setError("Post not found or has been deleted");
       }
     } catch (error: any) {
+      if (error.name === "AbortError") return;
+
       console.error("Error loading post:", error);
       if (
         error.message?.includes("404") ||
@@ -142,8 +165,11 @@ export default function PostDetailScreen() {
         setIsLoadingMore(true);
       }
 
+      isFetchingRef.current = true;
+
       try {
         const response = await getPostComments(id, pageNum, 20);
+
         if (response.success) {
           const newComments = response.comments;
           setComments((prev) =>
@@ -166,6 +192,7 @@ export default function PostDetailScreen() {
       } catch (error: any) {
         console.error("Error loading comments:", error);
       } finally {
+        isFetchingRef.current = false;
         if (shouldAppend) {
           setIsLoadingMore(false);
         }
@@ -214,14 +241,14 @@ export default function PostDetailScreen() {
         inputRef.current?.focus();
       }, 100);
     },
-    [setReplyingTo],
+    [setReplyingTo, setCommentText, setIsAnonymous],
   );
 
   const handleCancelReply = useCallback(() => {
     setReplyingTo(null);
     setCommentText("");
     setIsAnonymous(false);
-  }, [setReplyingTo]);
+  }, [setReplyingTo, setCommentText, setIsAnonymous]);
 
   const onSubmitComment = useCallback(() => {
     submitComment(commentText, isAnonymous, () => {
@@ -229,7 +256,14 @@ export default function PostDetailScreen() {
       setReplyingTo(null);
       setIsAnonymous(false);
     });
-  }, [commentText, isAnonymous, submitComment, setReplyingTo]);
+  }, [
+    commentText,
+    isAnonymous,
+    submitComment,
+    setReplyingTo,
+    setCommentText,
+    setIsAnonymous,
+  ]);
 
   const handleImagePress = useCallback((index: number) => {
     setSelectedImageIndex(index);
@@ -247,6 +281,65 @@ export default function PostDetailScreen() {
     }
   }, [hasMore, isLoadingMore, comments.length, error, page, loadComments]);
 
+  // ===== Report Flow =====
+  const handleCommentReportPress = useCallback(
+    (commentId: string) => {
+      if (!token) {
+        Alert.alert("Login Required", "Please login to report comments");
+        return;
+      }
+
+      // Find the comment to check if already reported
+      const findComment = (commentsList: Comment[]): Comment | null => {
+        for (const comment of commentsList) {
+          if (comment._id === commentId) return comment;
+          if (
+            Array.isArray(comment.replies) &&
+            comment.replies.length > 0 &&
+            typeof comment.replies[0] === "object"
+          ) {
+            const found = findComment(comment.replies as Comment[]);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+
+      const comment = findComment(comments);
+      if (comment?.isReported) {
+        Alert.alert(
+          "Already Reported",
+          "You have already reported this comment",
+        );
+        return;
+      }
+
+      // Store the comment ID for when report succeeds
+      setPendingReportCommentId(commentId);
+      setReportTargetId(commentId);
+      setReportTargetType("Comment");
+
+      // Small delay to ensure any options modal closes first
+      setTimeout(() => {
+        setReportModalVisible(true);
+      }, 300);
+    },
+    [token, comments],
+  );
+
+  const handleReportModalClose = useCallback(() => {
+    setReportModalVisible(false);
+    setPendingReportCommentId(null);
+  }, []);
+
+  const handleReportSuccess = useCallback(() => {
+    // Call the hook's report handler to update local state
+    if (pendingReportCommentId) {
+      commentReportHandler(pendingReportCommentId);
+      setPendingReportCommentId(null);
+    }
+  }, [pendingReportCommentId, commentReportHandler]);
+
   // ===== Effects =====
   useEffect(() => {
     if (token && id) {
@@ -257,6 +350,12 @@ export default function PostDetailScreen() {
       setLoading(false);
       setError("Please login to view this post");
     }
+
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, [id, token, loadPost]);
 
   useEffect(() => {
@@ -267,7 +366,7 @@ export default function PostDetailScreen() {
 
   // ===== Render Functions =====
   const renderCommentItem = useCallback(
-    ({ item }: { item: Comment }) => (
+    ({ item }: ListRenderItemInfo<Comment>) => (
       <CommentItem
         comment={item}
         postId={post?._id || ""}
@@ -277,7 +376,7 @@ export default function PostDetailScreen() {
         onLike={commentLikeHandler}
         onUpdate={commentEditHandler}
         onDelete={commentDeleteHandler}
-        onReport={commentReportHandler}
+        onReport={handleCommentReportPress}
         currentUserId={user?.id || ""}
         onEditStateChange={setIsAnyCommentEditing}
       />
@@ -291,9 +390,11 @@ export default function PostDetailScreen() {
       commentLikeHandler,
       commentEditHandler,
       commentDeleteHandler,
-      commentReportHandler,
+      handleCommentReportPress,
     ],
   );
+
+  const keyExtractor = useCallback((item: Comment) => item._id, []);
 
   const renderPostHeader = useMemo(() => {
     if (!post) return null;
@@ -333,6 +434,12 @@ export default function PostDetailScreen() {
       </View>
     );
   }, [loading, colors]);
+
+  // ===== MOVE THIS HOOK BEFORE ANY CONDITIONAL RETURNS =====
+  const postImages = useMemo(
+    () => post?.images?.map((img) => ({ url: getFullImageUrl(img.url) })) || [],
+    [post?.images],
+  );
 
   // ===== Error & Loading States =====
   if (
@@ -432,9 +539,6 @@ export default function PostDetailScreen() {
     );
   }
 
-  const postImages =
-    post.images?.map((img) => ({ url: getFullImageUrl(img.url) })) || [];
-
   // ===== Architectural Layout Engine =====
   return (
     <KeyboardAvoidingView
@@ -450,7 +554,10 @@ export default function PostDetailScreen() {
         <View
           style={[
             styles.header,
-            { backgroundColor: colors.background, borderBottomColor: colors.border },
+            {
+              backgroundColor: colors.background,
+              borderBottomColor: colors.border,
+            },
           ]}
         >
           <TouchableOpacity
@@ -467,7 +574,7 @@ export default function PostDetailScreen() {
         <FlatList
           ref={flatListRef}
           data={comments}
-          keyExtractor={(item) => item._id}
+          keyExtractor={keyExtractor}
           renderItem={renderCommentItem}
           ListHeaderComponent={renderPostHeader}
           ListEmptyComponent={renderEmptyComments}
@@ -478,6 +585,10 @@ export default function PostDetailScreen() {
           showsVerticalScrollIndicator={false}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="always"
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          initialNumToRender={10}
         />
 
         {/* Floating Input Controller */}
@@ -506,6 +617,18 @@ export default function PostDetailScreen() {
             onScroll={handleModalScroll}
           />
         )}
+
+        {/* Report Modal */}
+        <ReportModal
+          visible={reportModalVisible}
+          onClose={handleReportModalClose}
+          targetType={reportTargetType}
+          targetId={reportTargetId}
+          onReportSuccess={handleReportSuccess}
+          reportFunction={(targetId: string, reason: string) =>
+            reportContent(reportTargetType, targetId, reason)
+          }
+        />
       </SafeAreaView>
     </KeyboardAvoidingView>
   );

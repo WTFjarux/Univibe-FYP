@@ -941,17 +941,66 @@ const changeUserRole = async (req, res) => {
 const getUserWarnings = async (req, res) => {
   try {
     const UserWarning = getAdminModel("UserWarning");
+
+    // Instead of using .populate() which fails across databases,
+    // fetch warnings without populate first
     const warnings = await UserWarning.find({ user: req.params.id })
-      .populate("issuedBy", "name username")
       .sort({ createdAt: -1 })
       .lean();
 
-    res.status(200).json({ success: true, data: { warnings } });
+    // Manually populate issuedBy names - same pattern used in getUserDetails
+    const issuerIds = [
+      ...new Set(warnings.map((w) => w.issuedBy?.toString()).filter(Boolean)),
+    ];
+
+    if (issuerIds.length > 0) {
+      // Use the User model from the MAIN database, not admin database
+      const User = require("../../models/User");
+      const issuers = await User.find({ _id: { $in: issuerIds } })
+        .select("name username")
+        .lean();
+
+      const issuerMap = {};
+      issuers.forEach((i) => {
+        issuerMap[i._id.toString()] = {
+          name: i.name,
+          username: i.username,
+        };
+      });
+
+      // Map issuers to warnings
+      const populatedWarnings = warnings.map((w) => ({
+        ...w,
+        issuedBy: w.issuedBy
+          ? issuerMap[w.issuedBy.toString()] || {
+              name: "Unknown",
+              username: "unknown",
+            }
+          : { name: "System", username: "system" },
+      }));
+
+      return res.status(200).json({
+        success: true,
+        data: { warnings: populatedWarnings },
+      });
+    }
+
+    // If no issuers to populate, return warnings with default issuer
+    const defaultWarnings = warnings.map((w) => ({
+      ...w,
+      issuedBy: { name: "System", username: "system" },
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: { warnings: defaultWarnings },
+    });
   } catch (error) {
     console.error("Get User Warnings Error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch warnings" });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch warnings",
+    });
   }
 };
 

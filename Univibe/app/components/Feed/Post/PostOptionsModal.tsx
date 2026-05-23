@@ -1,6 +1,6 @@
 // app/components/Feed/Post/PostOptionsModal.tsx
 
-import React from "react";
+import React, { useCallback } from "react";
 import {
   View,
   Text,
@@ -81,15 +81,15 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
     userName,
   } = postData;
 
-  const handleEdit = () => {
+  const handleEdit = useCallback(() => {
     onClose();
     // Small delay to ensure modal close animation starts before navigation
     requestAnimationFrame(() => {
       onEdit(postId);
     });
-  };
+  }, [onClose, onEdit, postId]);
 
-  const handleDelete = () => {
+  const handleDelete = useCallback(() => {
     Alert.alert(
       "Delete Post",
       "Are you sure you want to delete this post? This action cannot be undone.",
@@ -107,16 +107,16 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
         },
       ],
     );
-  };
+  }, [onClose, onDelete, postId]);
 
-  const handleSave = () => {
+  const handleSave = useCallback(() => {
     onClose();
     requestAnimationFrame(() => {
       onSave(postId);
     });
-  };
+  }, [onClose, onSave, postId]);
 
-  const handleReport = () => {
+  const handleReport = useCallback(() => {
     // If already reported, close immediately
     if (isReported) {
       onClose();
@@ -132,9 +132,9 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
     requestAnimationFrame(() => {
       onReport(postId);
     });
-  };
+  }, [isReported, onClose, onReport, postId]);
 
-  const handleHide = () => {
+  const handleHide = useCallback(() => {
     const actionText = isHidden ? "unhide" : "hide";
     const actionMessage = isHidden
       ? "Do you want to unhide this post? It will reappear in your feed."
@@ -153,23 +153,23 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
         },
       },
     ]);
-  };
+  }, [isHidden, onClose, onHide, postId]);
 
-  const handleShare = () => {
+  const handleShare = useCallback(() => {
     onClose();
     requestAnimationFrame(() => {
       onShare(postId);
     });
-  };
+  }, [onClose, onShare, postId]);
 
-  const handleCopyLink = () => {
+  const handleCopyLink = useCallback(() => {
     onClose();
     requestAnimationFrame(() => {
       onCopyLink(postId);
     });
-  };
+  }, [onClose, onCopyLink, postId]);
 
-  const handleMuteUser = () => {
+  const handleMuteUser = useCallback(() => {
     if (!userId) return;
     const displayName = userName || "this user";
     const actionText = isMuted ? "unmute" : "mute";
@@ -190,9 +190,9 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
         },
       },
     ]);
-  };
+  }, [isMuted, onClose, onMuteUser, userId, userName]);
 
-  const handleBlockUser = () => {
+  const handleBlockUser = useCallback(() => {
     if (!userId) return;
     const displayName = userName || "this user";
     const actionText = isBlocked ? "unblock" : "block";
@@ -213,143 +213,173 @@ const PostOptionsModal: React.FC<PostOptionsModalProps> = ({
         },
       },
     ]);
-  };
+  }, [isBlocked, onClose, onBlockUser, userId, userName]);
 
-  const renderOwnerOptions = () => (
-    <>
-      <TouchableOpacity style={styles.optionItem} onPress={handleEdit}>
-        <Ionicons
-          name="pencil-outline"
-          size={22}
-          color={colors.textSecondary}
-        />
-        <Text style={[styles.optionText, { color: colors.text }]}>
-          Edit Post
-        </Text>
-      </TouchableOpacity>
+  const renderOwnerOptions = useCallback(
+    () => (
+      <>
+        <TouchableOpacity style={styles.optionItem} onPress={handleEdit}>
+          <Ionicons
+            name="pencil-outline"
+            size={22}
+            color={colors.textSecondary}
+          />
+          <Text style={[styles.optionText, { color: colors.text }]}>
+            Edit Post
+          </Text>
+        </TouchableOpacity>
 
-      <TouchableOpacity style={styles.optionItem} onPress={handleDelete}>
-        <Ionicons name="trash-outline" size={22} color="#ef4444" />
-        <Text style={[styles.optionText, styles.deleteText]}>Delete Post</Text>
-      </TouchableOpacity>
+        <TouchableOpacity style={styles.optionItem} onPress={handleDelete}>
+          <Ionicons name="trash-outline" size={22} color="#ef4444" />
+          <Text style={[styles.optionText, styles.deleteText]}>
+            Delete Post
+          </Text>
+        </TouchableOpacity>
 
-      <View style={[styles.divider, { backgroundColor: colors.border }]} />
-    </>
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+      </>
+    ),
+    [handleEdit, handleDelete, colors],
   );
 
-  const renderUserActions = () => (
-    <>
-      <TouchableOpacity style={styles.optionItem} onPress={handleMuteUser}>
-        <Ionicons
-          name={isMuted ? "volume-high-outline" : "volume-mute-outline"}
-          size={22}
-          color={isMuted ? colors.primary : colors.textSecondary}
-        />
-        <Text
-          style={[
-            styles.optionText,
-            { color: colors.text },
-            isMuted && styles.activeText,
-          ]}
-        >
-          {isMuted ? "Unmute User" : "Mute User"}
-        </Text>
-      </TouchableOpacity>
+  const renderUserActions = useCallback(
+    () => (
+      <>
+        <TouchableOpacity style={styles.optionItem} onPress={handleMuteUser}>
+          <Ionicons
+            name={isMuted ? "volume-high-outline" : "volume-mute-outline"}
+            size={22}
+            color={isMuted ? colors.primary : colors.textSecondary}
+          />
+          <Text
+            style={[
+              styles.optionText,
+              { color: colors.text },
+              isMuted && styles.activeText,
+            ]}
+          >
+            {isMuted ? "Unmute User" : "Mute User"}
+          </Text>
+        </TouchableOpacity>
 
-      <TouchableOpacity style={styles.optionItem} onPress={handleBlockUser}>
-        <Ionicons
-          name={isBlocked ? "person-add-outline" : "ban-outline"}
-          size={22}
-          color={isBlocked ? colors.primary : "#ef4444"}
-        />
-        <Text
-          style={[
-            styles.optionText,
-            { color: colors.text },
-            isBlocked && styles.activeText,
-            !isBlocked && styles.deleteText,
-          ]}
-        >
-          {isBlocked ? "Unblock User" : "Block User"}
-        </Text>
-      </TouchableOpacity>
+        <TouchableOpacity style={styles.optionItem} onPress={handleBlockUser}>
+          <Ionicons
+            name={isBlocked ? "person-add-outline" : "ban-outline"}
+            size={22}
+            color={isBlocked ? colors.primary : "#ef4444"}
+          />
+          <Text
+            style={[
+              styles.optionText,
+              { color: colors.text },
+              isBlocked && styles.activeText,
+              !isBlocked && styles.deleteText,
+            ]}
+          >
+            {isBlocked ? "Unblock User" : "Block User"}
+          </Text>
+        </TouchableOpacity>
 
-      <View style={[styles.divider, { backgroundColor: colors.border }]} />
-    </>
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+      </>
+    ),
+    [isMuted, isBlocked, handleMuteUser, handleBlockUser, colors],
   );
 
-  const renderCommonOptions = () => (
-    <>
-      <TouchableOpacity style={styles.optionItem} onPress={handleSave}>
-        <Ionicons
-          name={isSaved ? "bookmark" : "bookmark-outline"}
-          size={22}
-          color={isSaved ? colors.primary : colors.textSecondary}
-        />
-        <Text
-          style={[
-            styles.optionText,
-            { color: colors.text },
-            isSaved && styles.activeText,
-          ]}
-        >
-          {isSaved ? "Unsave Post" : "Save Post"}
-        </Text>
-      </TouchableOpacity>
+  const renderCommonOptions = useCallback(
+    () => (
+      <>
+        <TouchableOpacity style={styles.optionItem} onPress={handleSave}>
+          <Ionicons
+            name={isSaved ? "bookmark" : "bookmark-outline"}
+            size={22}
+            color={isSaved ? colors.primary : colors.textSecondary}
+          />
+          <Text
+            style={[
+              styles.optionText,
+              { color: colors.text },
+              isSaved && styles.activeText,
+            ]}
+          >
+            {isSaved ? "Unsave Post" : "Save Post"}
+          </Text>
+        </TouchableOpacity>
 
-      <TouchableOpacity style={styles.optionItem} onPress={handleHide}>
-        <Ionicons
-          name={isHidden ? "eye-outline" : "eye-off-outline"}
-          size={22}
-          color={isHidden ? colors.primary : colors.textSecondary}
-        />
-        <Text
-          style={[
-            styles.optionText,
-            { color: colors.text },
-            isHidden && styles.activeText,
-          ]}
-        >
-          {isHidden ? "Unhide Post" : "Hide Post"}
-        </Text>
-      </TouchableOpacity>
+        <TouchableOpacity style={styles.optionItem} onPress={handleHide}>
+          <Ionicons
+            name={isHidden ? "eye-outline" : "eye-off-outline"}
+            size={22}
+            color={isHidden ? colors.primary : colors.textSecondary}
+          />
+          <Text
+            style={[
+              styles.optionText,
+              { color: colors.text },
+              isHidden && styles.activeText,
+            ]}
+          >
+            {isHidden ? "Unhide Post" : "Hide Post"}
+          </Text>
+        </TouchableOpacity>
 
-      <TouchableOpacity style={styles.optionItem} onPress={handleShare}>
-        <Ionicons name="share-outline" size={22} color={colors.textSecondary} />
-        <Text style={[styles.optionText, { color: colors.text }]}>
-          Share Post
-        </Text>
-      </TouchableOpacity>
+        <TouchableOpacity style={styles.optionItem} onPress={handleShare}>
+          <Ionicons
+            name="share-outline"
+            size={22}
+            color={colors.textSecondary}
+          />
+          <Text style={[styles.optionText, { color: colors.text }]}>
+            Share Post
+          </Text>
+        </TouchableOpacity>
 
-      <TouchableOpacity style={styles.optionItem} onPress={handleCopyLink}>
-        <Ionicons name="link-outline" size={22} color={colors.textSecondary} />
-        <Text style={[styles.optionText, { color: colors.text }]}>
-          Copy Link
-        </Text>
-      </TouchableOpacity>
-    </>
+        <TouchableOpacity style={styles.optionItem} onPress={handleCopyLink}>
+          <Ionicons
+            name="link-outline"
+            size={22}
+            color={colors.textSecondary}
+          />
+          <Text style={[styles.optionText, { color: colors.text }]}>
+            Copy Link
+          </Text>
+        </TouchableOpacity>
+      </>
+    ),
+    [
+      isSaved,
+      isHidden,
+      handleSave,
+      handleHide,
+      handleShare,
+      handleCopyLink,
+      colors,
+    ],
   );
 
-  const renderReportOption = () => (
-    <>
-      <View style={[styles.divider, { backgroundColor: colors.border }]} />
-      <TouchableOpacity style={styles.optionItem} onPress={handleReport}>
-        <Ionicons
-          name={isReported ? "flag" : "flag-outline"}
-          size={24}
-          color={isReported ? "#ef4444" : colors.text}
-        />
-        <Text
-          style={[
-            styles.optionText,
-            { color: colors.text },
-            isReported && styles.reportedText,
-          ]}
-        >
-          {isReported ? "Reported" : "Report"}
-        </Text>
-      </TouchableOpacity>
-    </>
+  const renderReportOption = useCallback(
+    () => (
+      <>
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+        <TouchableOpacity style={styles.optionItem} onPress={handleReport}>
+          <Ionicons
+            name={isReported ? "flag" : "flag-outline"}
+            size={24}
+            color={isReported ? "#ef4444" : colors.text}
+          />
+          <Text
+            style={[
+              styles.optionText,
+              { color: colors.text },
+              isReported && styles.reportedText,
+            ]}
+          >
+            {isReported ? "Reported" : "Report"}
+          </Text>
+        </TouchableOpacity>
+      </>
+    ),
+    [isReported, handleReport, colors],
   );
 
   return (

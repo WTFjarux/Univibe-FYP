@@ -61,6 +61,8 @@ const notificationSchema = new mongoose.Schema(
         "account_banned", // User account permanently banned
         "account_unbanned", // User account unbanned
         "account_reactivated", // User account reactivated after suspension
+        "report_resolved", // Report was resolved by admin
+        "content_removed", // Content was removed due to report
 
         // ============================================
         // SYSTEM TYPES
@@ -94,6 +96,7 @@ const notificationSchema = new mongoose.Schema(
         "UserWarning", // 🆕 Added for warning notifications
         "Connection",
         "Message",
+        "Report",
       ],
     },
     read: {

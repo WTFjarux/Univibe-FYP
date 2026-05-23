@@ -45,7 +45,7 @@ const adminPostModerationRoutes = require("./routes/admin/postModerationRoutes")
 const adminCommentModerationRoutes = require("./routes/admin/commentModerationRoutes");
 const adminUserManagementRoutes = require("./routes/admin/userManagementRoutes");
 const adminEventApprovalRoutes = require("./routes/admin/eventApprovalRoutes");
-// const adminReportRoutes = require("./routes/admin/reportRoutes");
+const adminReportRoutes = require("./routes/admin/reportRoutes");
 // const adminLogRoutes = require("./routes/admin/moderationLogRoutes");
 
 // =============================================================================
@@ -167,7 +167,7 @@ app.use("/api/admin/posts", adminPostModerationRoutes);
 app.use("/api/admin/comments", adminCommentModerationRoutes);
 app.use("/api/admin/users", adminUserManagementRoutes);
 app.use("/api/admin/events", adminEventApprovalRoutes);
-// app.use("/api/admin/reports", adminReportRoutes);
+app.use("/api/admin/reports", adminReportRoutes);
 // app.use("/api/admin/logs", adminLogRoutes);
 
 // =============================================================================

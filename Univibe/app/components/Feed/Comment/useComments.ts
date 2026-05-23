@@ -1,3 +1,5 @@
+// app/components/Feed/Comment/useComments.ts
+
 import { useState, useCallback, useRef } from "react";
 import { Alert, Share } from "react-native";
 import {
@@ -10,6 +12,7 @@ import {
 } from "@/lib/services/postService";
 import { commentEvents, EVENTS } from "@/lib/utils/eventEmitter";
 import { reportContent } from "@/lib/services/contentService";
+
 // ===== Helper Functions =====
 const hasPopulatedReplies = (comment: Comment): boolean => {
   return (
@@ -156,6 +159,27 @@ const toggleLikeInTree = (
           commentId,
           userId,
         ),
+      };
+    }
+    return comment;
+  });
+};
+
+/**
+ * Mark a comment as reported in the tree (after successful report API call)
+ */
+const markReportedInTree = (
+  comments: Comment[],
+  commentId: string,
+): Comment[] => {
+  return comments.map((comment) => {
+    if (comment._id === commentId) {
+      return { ...comment, isReported: true };
+    }
+    if (hasPopulatedReplies(comment)) {
+      return {
+        ...comment,
+        replies: markReportedInTree(getPopulatedReplies(comment), commentId),
       };
     }
     return comment;
@@ -320,27 +344,13 @@ export const useComments = (
     }
   };
 
+  /**
+   * handleReport: Called AFTER ReportModal successfully submits a report
+   * This only updates local state to mark the comment as reported
+   */
   const handleReport = useCallback(
     (commentId: string) => {
-      // This is called AFTER the ReportModal successfully submits
-      // Just mark the comment as reported in the tree
-      setComments((prev) => {
-        const reportInTree = (commentsList: Comment[]): Comment[] => {
-          return commentsList.map((comment) => {
-            if (comment._id === commentId) {
-              return { ...comment, isReported: true };
-            }
-            if (hasPopulatedReplies(comment)) {
-              return {
-                ...comment,
-                replies: reportInTree(getPopulatedReplies(comment)),
-              };
-            }
-            return comment;
-          });
-        };
-        return reportInTree(prev);
-      });
+      setComments((prev) => markReportedInTree(prev, commentId));
     },
     [setComments],
   );
@@ -397,7 +407,7 @@ export const useComments = (
     handleSubmit,
     handleLike,
     handleDelete,
-    handleReport,
+    handleReport, 
     handleEdit,
     handleShare,
     handleHide,

@@ -13,7 +13,6 @@ const menuItems = [
   { path: '/users', icon: Users, label: 'Users' },
   { path: '/events', icon: Calendar, label: 'Events' },
   { path: '/reports', icon: Flag, label: 'Reports' },
-  { path: '/logs', icon: ScrollText, label: 'Mod Logs' },
   { path: '/settings', icon: Settings, label: 'Settings' },
 ];
 
