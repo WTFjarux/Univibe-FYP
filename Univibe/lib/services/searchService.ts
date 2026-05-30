@@ -7,6 +7,7 @@ import {
   UnifiedSearchResponse,
   SearchCategory,
   SearchFilters,
+  CommunitySearchResponse,
 } from "../types/search";
 
 // ============================================
@@ -135,4 +136,22 @@ export const searchEvents = async (
   if (filters?.status) params.append("status", filters.status);
 
   return apiRequest<EventSearchResponse>(`/api/search/events?${params}`);
+};
+
+/**
+ * Search communities
+ */
+export const searchCommunities = async (
+  query: string,
+  page: number = 1,
+  limit: number = 20,
+): Promise<CommunitySearchResponse> => {
+  const params = new URLSearchParams({
+    q: query,
+    page: page.toString(),
+    limit: limit.toString(),
+  });
+  return apiRequest<CommunitySearchResponse>(
+    `/api/search/communities?${params}`,
+  );
 };

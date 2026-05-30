@@ -435,6 +435,36 @@ const uploadGroupPhoto = multer({
 }).single("image");
 
 // ============================================
+// Upload Community Photo Middleware
+// ============================================
+
+const communityPhotoStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, "../uploads/group-photos");
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueName = `community_${Date.now()}_${Math.random().toString(36).substr(2, 9)}${path.extname(file.originalname)}`;
+    cb(null, uniqueName);
+  },
+});
+
+const uploadCommunityPhoto = multer({
+  storage: communityPhotoStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only images are allowed"));
+    }
+  },
+}).single("coverImage");
+
+// ============================================
 // ERROR HANDLER
 // ============================================
 
@@ -904,4 +934,5 @@ module.exports = {
   getVideoMetadata,
   deleteOldImage,
   formatBytes,
+  uploadCommunityPhoto,
 };

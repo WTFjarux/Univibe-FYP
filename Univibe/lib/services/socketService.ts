@@ -491,6 +491,16 @@ class SocketService {
       this.emitEvent("event:updated", data);
     });
 
+    // Community events
+    this.socket.on("community:updated", (data: any) => {
+      this.emitEvent("community:updated", data);
+    });
+
+    // ✅ Add this
+    this.socket.on("community:new_post", (data: any) => {
+      this.emitEvent("community:new_post", data);
+    });
+
     // Errors
     this.socket.on("error", (error: Error) => {
       console.error("Socket error:", error.message);

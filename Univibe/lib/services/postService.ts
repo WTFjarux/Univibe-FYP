@@ -35,6 +35,11 @@ export interface Post {
   tags: string[];
   campus: string;
   visibility: "campus" | "connections";
+  community?: {
+    _id: string;
+    name: string;
+    coverImage?: string | null;
+  };
   isAnonymous: boolean;
   isEdited: boolean;
   editedAt?: string | null;
@@ -259,6 +264,7 @@ export const createPost = async (
   images: any[] = [],
   visibility: string = "campus",
   isAnonymous: boolean = false,
+  communityId?: string,
 ): Promise<{ success: boolean; message: string; post: Post }> => {
   try {
     const token = await getAuthToken();
@@ -268,6 +274,11 @@ export const createPost = async (
     formData.append("content", content.trim());
     formData.append("visibility", visibility);
     formData.append("isAnonymous", isAnonymous.toString());
+
+    // ✅ Add communityId if provided
+    if (communityId) {
+      formData.append("communityId", communityId);
+    }
 
     if (images && images.length > 0) {
       for (let i = 0; i < images.length; i++) {

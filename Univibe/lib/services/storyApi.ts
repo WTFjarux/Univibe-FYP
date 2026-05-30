@@ -514,7 +514,6 @@ class StoryApiService {
       page === 1 &&
       this.isCacheValid(this.storiesListCache, this.STORIES_LIST_CACHE_DURATION)
     ) {
-      console.log("⚡ Returning cached stories");
       return this.updateCacheWithViewedStories(this.storiesListCache!.data);
     }
 
@@ -542,7 +541,6 @@ class StoryApiService {
       return this.updateCacheWithViewedStories(result);
     } catch (error) {
       if (this.storiesListCache) {
-        console.log("📦 Request failed, returning cached stories");
         return this.updateCacheWithViewedStories(this.storiesListCache.data);
       }
       throw error;

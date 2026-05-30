@@ -5,6 +5,7 @@ const User = require("../../models/User");
 const Post = require("../../models/Post");
 const Comment = require("../../models/Comment");
 const Event = require("../../models/Event");
+const ApprovalQueue = require("../../models/ApprovalQueue"); // ✅ Main connection
 
 /**
  * Get Dashboard Statistics
@@ -13,7 +14,6 @@ const Event = require("../../models/Event");
 const getDashboardStats = async (req, res) => {
   try {
     const Report = getAdminModel("Report");
-    const ApprovalQueue = getAdminModel("ApprovalQueue");
     const UserWarning = getAdminModel("UserWarning");
 
     const [
@@ -24,9 +24,9 @@ const getDashboardStats = async (req, res) => {
       deletedPosts,
       totalComments,
       deletedComments,
-      pendingApprovals,
-      pendingReports,
+      pendingCommunities,
       pendingEvents,
+      pendingReports,
       totalEvents,
       recentUsers,
     ] = await Promise.all([
@@ -37,9 +37,15 @@ const getDashboardStats = async (req, res) => {
       Post.countDocuments({ isDeleted: true }),
       Comment.countDocuments({ isDeleted: false }),
       Comment.countDocuments({ isDeleted: true }),
-      ApprovalQueue.countDocuments({ status: "pending" }),
+      ApprovalQueue.countDocuments({
+        contentType: { $in: ["community", "department"] },
+        status: "pending",
+      }),
+      ApprovalQueue.countDocuments({
+        contentType: "event",
+        status: "pending",
+      }),
       Report.countDocuments({ status: "pending" }),
-      Event.countDocuments({ approvalStatus: "pending" }),
       Event.countDocuments(),
       User.find()
         .sort({ createdAt: -1 })
@@ -48,9 +54,9 @@ const getDashboardStats = async (req, res) => {
         .lean(),
     ]);
 
-    // ============================================
-    // FETCH PROFILE PICTURES FOR RECENT USERS
-    // ============================================
+    const pendingApprovals = pendingCommunities + pendingEvents;
+
+    // Fetch profile pictures for recent users
     if (recentUsers.length > 0) {
       try {
         const Profile = require("../../models/Profile");
@@ -60,7 +66,6 @@ const getDashboardStats = async (req, res) => {
           .select("user profilePicture")
           .lean();
 
-        // Create a map of userId -> profilePicture
         const profileMap = {};
         profiles.forEach((p) => {
           if (p.user) {
@@ -68,13 +73,11 @@ const getDashboardStats = async (req, res) => {
           }
         });
 
-        // Attach profilePicture to each recent user
         recentUsers.forEach((user) => {
           user.profilePicture = profileMap[user._id.toString()] || null;
         });
       } catch (err) {
         console.warn("Failed to fetch profile pictures:", err.message);
-        // Continue without profile pictures - not critical
         recentUsers.forEach((user) => {
           user.profilePicture = null;
         });
@@ -96,13 +99,16 @@ const getDashboardStats = async (req, res) => {
           total: totalUsers,
           active: activeUsers,
           banned: bannedUsers,
-          recent: recentUsers, // Now includes profilePicture
+          recent: recentUsers,
         },
         content: { totalPosts, deletedPosts, totalComments, deletedComments },
         moderation: {
           pendingApprovals,
+          pendingApprovalsBreakdown: {
+            communities: pendingCommunities,
+            events: pendingEvents,
+          },
           pendingReports,
-          pendingEvents,
           reports: {
             total: pendingReports,
             posts: postReports,

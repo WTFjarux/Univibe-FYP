@@ -37,6 +37,7 @@ const feedRoutes = require("./routes/feedRoutes");
 const storyRoutes = require("./routes/storyRoutes");
 const contentRoutes = require("./routes/contentRoutes");
 const searchRoutes = require("./routes/searchRoutes");
+const communityRoutes = require("./routes/communityRoutes");
 
 // Admin Routes
 const adminAuthRoutes = require("./routes/admin/authRoutes");
@@ -46,6 +47,7 @@ const adminCommentModerationRoutes = require("./routes/admin/commentModerationRo
 const adminUserManagementRoutes = require("./routes/admin/userManagementRoutes");
 const adminEventApprovalRoutes = require("./routes/admin/eventApprovalRoutes");
 const adminReportRoutes = require("./routes/admin/reportRoutes");
+const adminCommunityApprovalRoutes = require("./routes/admin/communityApprovalRoutes");
 // const adminLogRoutes = require("./routes/admin/moderationLogRoutes");
 
 // =============================================================================
@@ -97,7 +99,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(cookieParser()); // Parse cookies for admin auth
+app.use(cookieParser());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: false, limit: "10mb" }));
 
@@ -105,7 +107,6 @@ app.use(express.urlencoded({ extended: false, limit: "10mb" }));
 // STATIC FILE SERVING
 // =============================================================================
 
-// User uploads
 app.use(
   "/uploads/profile-pictures",
   express.static(path.join(__dirname, "uploads/profile-pictures")),
@@ -153,6 +154,7 @@ app.use("/api/chat", chatRoutes);
 app.use("/api/stories", storyRoutes);
 app.use("/api/groups", groupRoutes);
 app.use("/api/search", searchRoutes);
+app.use("/api/communities", communityRoutes);
 
 // =============================================================================
 // API ROUTES - ADMIN DASHBOARD
@@ -168,6 +170,7 @@ app.use("/api/admin/comments", adminCommentModerationRoutes);
 app.use("/api/admin/users", adminUserManagementRoutes);
 app.use("/api/admin/events", adminEventApprovalRoutes);
 app.use("/api/admin/reports", adminReportRoutes);
+app.use("/api/admin/communities", adminCommunityApprovalRoutes);
 // app.use("/api/admin/logs", adminLogRoutes);
 
 // =============================================================================
@@ -188,7 +191,7 @@ app.get("/verify-email/:token", (req, res) => {
 app.get("/", (req, res) => {
   res.json({
     message: "Univibe API is running!",
-    version: "1.7.0",
+    version: "1.8.0",
     endpoints: {
       user: {
         auth: "/api/auth",
@@ -203,6 +206,7 @@ app.get("/", (req, res) => {
         chat: "/api/chat",
         stories: "/api/stories",
         groups: "/api/groups",
+        communities: "/api/communities",
         search: "/api/search",
       },
       admin: {
@@ -230,6 +234,18 @@ app.get("/", (req, res) => {
       schedule: "Every 60 seconds",
       description:
         "Automatically updates event statuses (upcoming → ongoing → completed)",
+    },
+    communities: {
+      status: "active",
+      description: "Official university communities - browse, join, view posts",
+      endpoints: {
+        browse: "GET /api/communities",
+        myCommunities: "GET /api/communities/my",
+        join: "POST /api/communities/:id/join",
+        leave: "POST /api/communities/:id/leave",
+        feed: "GET /api/communities/:id/feed",
+        members: "GET /api/communities/:id/members",
+      },
     },
     admin: {
       status: "active",
@@ -302,11 +318,8 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`📡 Socket.IO running on same port`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
 
-  // Start the cleanup job (deletes old posts after 30 days)
   startCleanupJob();
-
-  // Start the event status cron job (updates event statuses every 60 seconds)
-  startEventStatusCron(60000); // 60,000 ms = 1 minute
+  startEventStatusCron(60000);
 
   console.log(`\n📁 Upload Directories:`);
   console.log(`   Profile Pictures:  /uploads/profile-pictures`);
@@ -329,6 +342,7 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`   Events:         /api/events`);
   console.log(`   Chat:           /api/chat`);
   console.log(`   Groups:         /api/groups`);
+  console.log(`   Communities:    /api/communities`);
   console.log(`   Search:         /api/search`);
   console.log(`   Stories:        /api/stories`);
 
@@ -341,6 +355,15 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`   Events:         /api/admin/events`);
   console.log(`   Reports:        /api/admin/reports (coming soon)`);
   console.log(`   Logs:           /api/admin/logs (coming soon)`);
+
+  console.log(`\n🏘️  Communities:`);
+  console.log(`   Status:         Active`);
+  console.log(`   Type:           Official university communities`);
+  console.log(`   Browse:         GET  /api/communities`);
+  console.log(`   My Communities: GET  /api/communities/my`);
+  console.log(`   Join:           POST /api/communities/:id/join`);
+  console.log(`   Leave:          POST /api/communities/:id/leave`);
+  console.log(`   Feed:           GET  /api/communities/:id/feed`);
 
   console.log(`\n💬 Socket.IO Events:`);
   console.log(
@@ -378,7 +401,6 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`   Schedule:       Every 60 seconds`);
   console.log(`   Description:    Auto-updates event statuses`);
   console.log(`   Transitions:    upcoming → ongoing → completed`);
-  console.log(`   Events API:     PUT /api/events/:eventId/refresh-status`);
 
   console.log(`\n🛡️  Admin Dashboard:`);
   console.log(`   Backend API:    http://localhost:${PORT}/api/admin`);

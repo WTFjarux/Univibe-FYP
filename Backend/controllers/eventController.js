@@ -1,6 +1,7 @@
 const Event = require("../models/Event");
 const User = require("../models/User");
 const Profile = require("../models/Profile");
+const ApprovalQueue = require("../models/ApprovalQueue");
 const Notification = require("../models/Notification");
 const fs = require("fs").promises;
 const path = require("path");
@@ -70,6 +71,14 @@ const createEventNotification = async (
     console.error("Create notification error:", error);
     return null;
   }
+};
+
+let _ApprovalQueue = null;
+const getApprovalQueue = () => {
+  if (!_ApprovalQueue) {
+    _ApprovalQueue = getAdminModel("ApprovalQueue");
+  }
+  return _ApprovalQueue;
 };
 
 // ============================================
@@ -342,7 +351,7 @@ exports.createEvent = async (req, res) => {
       meetingLink: meetingLink || "",
       tags: tags ? (Array.isArray(tags) ? tags : tags.split(",")) : [],
       images: formattedImages,
-      status: initialStatus, // Set correct initial status
+      status: initialStatus,
       approvalStatus: visibility === "connections" ? "approved" : "pending",
     });
 
@@ -351,6 +360,39 @@ exports.createEvent = async (req, res) => {
     }
 
     await event.save();
+
+    if (event.approvalStatus === "pending") {
+      const approvalEntry = new ApprovalQueue({
+        contentType: "event",
+        contentId: event._id,
+        contentModel: "Event",
+        submittedBy: userId,
+        status: "pending",
+        priority: "normal",
+        statusHistory: [
+          {
+            status: "pending",
+            changedBy: userId,
+            changedAt: new Date(),
+            notes: "Event submitted for approval",
+          },
+        ],
+      });
+
+      // Set the snapshot
+      approvalEntry.contentSnapshot = {
+        name: event.title,
+        description: event.description || "",
+        type: "event",
+        eventDate: event.startDate,
+        eventLocation: event.location,
+        eventOrganizer: organizerName,
+        coverImage: event.coverImage || null,
+      };
+
+      await approvalEntry.save();
+      console.log(`📋 Approval entry created for event: ${event.title}`);
+    }
 
     const populatedEvent = await Event.findById(event._id)
       .populate("organizer", "name username email")

@@ -16,6 +16,7 @@ const moderationLogSchema = new mongoose.Schema(
     action: {
       type: String,
       enum: [
+        "admin_login",
         // Post actions
         "post_approved",
         "post_rejected",

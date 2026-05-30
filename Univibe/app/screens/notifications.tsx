@@ -1,4 +1,5 @@
-// app/notifications.tsx
+// app/screens/notifications.tsx - Complete fix
+
 import React, {
   useState,
   useCallback,
@@ -152,9 +153,7 @@ export default function NotificationsScreen() {
           year: "numeric",
         });
       }
-      if (!groups[groupKey]) {
-        groups[groupKey] = [];
-      }
+      if (!groups[groupKey]) groups[groupKey] = [];
       groups[groupKey].push(notification);
     });
     return Object.entries(groups).map(([title, data]) => ({ title, data }));
@@ -176,6 +175,7 @@ export default function NotificationsScreen() {
     if (!token) return;
     try {
       const response = await notificationService.getNotifications(pageNum, 20);
+
       if (response.success && response.data) {
         const newNotifications = response.data.notifications;
         setNotifications((prev) =>
@@ -194,9 +194,7 @@ export default function NotificationsScreen() {
   };
 
   const loadMore = () => {
-    if (!loading && hasMore) {
-      fetchNotifications(page + 1, true);
-    }
+    if (!loading && hasMore) fetchNotifications(page + 1, true);
   };
 
   const onRefresh = async () => {
@@ -230,18 +228,14 @@ export default function NotificationsScreen() {
     setDeletedNotification({ id: notificationId, data: notificationToDelete });
     setNotifications((prev) => prev.filter((n) => n._id !== notificationId));
     const wasUnread = !notificationToDelete.read;
-    if (wasUnread) {
-      setUnreadCount((prev) => Math.max(0, prev - 1));
-    }
+    if (wasUnread) setUnreadCount((prev) => Math.max(0, prev - 1));
     showInfoBar("Notification deleted", "info", false);
     const timeoutId = setTimeout(async () => {
       const response =
         await notificationService.deleteNotification(notificationId);
       if (!response.success) {
         setNotifications((prev) => [...prev, notificationToDelete]);
-        if (wasUnread) {
-          setUnreadCount((prev) => prev + 1);
-        }
+        if (wasUnread) setUnreadCount((prev) => prev + 1);
         showInfoBar("Failed to delete notification", "error");
       }
       setDeletedNotification(null);
@@ -252,9 +246,8 @@ export default function NotificationsScreen() {
 
   const handleUndoDelete = () => {
     if (deletedNotification) {
-      if ((global as any).deleteTimeoutId) {
+      if ((global as any).deleteTimeoutId)
         clearTimeout((global as any).deleteTimeoutId);
-      }
       setNotifications((prev) => [...prev, deletedNotification.data]);
       setNotifications((prev) =>
         prev.sort(
@@ -262,9 +255,7 @@ export default function NotificationsScreen() {
             new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
         ),
       );
-      if (!deletedNotification.data.read) {
-        setUnreadCount((prev) => prev + 1);
-      }
+      if (!deletedNotification.data.read) setUnreadCount((prev) => prev + 1);
       hideInfoBar();
       setDeletedNotification(null);
       showInfoBar("Notification restored", "success");
@@ -282,9 +273,9 @@ export default function NotificationsScreen() {
       if (response.success) {
         setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
         setUnreadCount(0);
-        showInfoBar(`Marked ${unreadCount} notification(s) as read`, "success");
+        showInfoBar(`Marked all as read`, "success");
       } else {
-        showInfoBar(response.message || "Failed to mark all as read", "error");
+        showInfoBar(response.message || "Failed", "error");
       }
     } catch (error) {
       showInfoBar("Failed to mark all as read", "error");
@@ -306,10 +297,10 @@ export default function NotificationsScreen() {
         await fetchNotifications(1, false);
         showInfoBar(`Connected with ${userName}`, "success");
       } else {
-        showInfoBar("Failed to accept connection request", "error");
+        showInfoBar("Failed to accept", "error");
       }
     } catch (error) {
-      showInfoBar("Failed to accept connection request", "error");
+      showInfoBar("Failed to accept", "error");
     } finally {
       setProcessingRequestId(null);
     }
@@ -326,12 +317,12 @@ export default function NotificationsScreen() {
           prev.filter((req) => req._id !== requestId),
         );
         await fetchNotifications(1, false);
-        showInfoBar(`Rejected ${userName}'s connection request`, "info");
+        showInfoBar(`Rejected ${userName}'s request`, "info");
       } else {
-        showInfoBar("Failed to reject connection request", "error");
+        showInfoBar("Failed to reject", "error");
       }
     } catch (error) {
-      showInfoBar("Failed to reject connection request", "error");
+      showInfoBar("Failed to reject", "error");
     } finally {
       setProcessingRequestId(null);
     }
@@ -454,9 +445,9 @@ export default function NotificationsScreen() {
     if (item.type === "notifications") {
       return (
         <>
-          {item.data.map((notification: Notification) => (
+          {item.data.map((notification: Notification, index: number) => (
             <NotificationItem
-              key={notification._id}
+              key={`${notification._id}-${item.id}-${index}`}
               notification={notification}
               onMarkAsRead={handleMarkAsRead}
               onMarkAsUnread={handleMarkAsUnread}
@@ -511,7 +502,10 @@ export default function NotificationsScreen() {
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[
+          styles.listContent,
+          flatListData.length === 0 && { flex: 1 },
+        ]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -539,16 +533,14 @@ export default function NotificationsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f8fafc" },
+  container: { flex: 1 },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 16,
-    backgroundColor: "white",
     borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
   },
   backButton: { padding: 4, width: 40 },
   headerTitle: {
@@ -556,13 +548,11 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "600",
     fontFamily: "SofiaSans-Bold",
-    color: "#111827",
     textAlign: "center",
   },
   markAllButton: { width: 70, alignItems: "flex-end" },
   markAllText: {
     fontSize: 14,
-    color: "#8b5cf6",
     fontFamily: "SofiaSans-Regular",
     fontWeight: "500",
   },
@@ -578,15 +568,13 @@ const styles = StyleSheet.create({
   emptyStateText: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#374151",
     fontFamily: "SofiaSans-Bold",
     marginTop: 16,
   },
   emptyStateSubtext: {
     fontSize: 14,
-    color: "#6b7280",
-    textAlign: "center",
     fontFamily: "SofiaSans-Regular",
+    textAlign: "center",
     marginTop: 8,
     paddingHorizontal: 40,
   },

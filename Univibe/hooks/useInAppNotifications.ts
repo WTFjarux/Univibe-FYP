@@ -1,6 +1,4 @@
-// ============================================
-// IN-APP NOTIFICATION SOCKET LISTENERS
-// ============================================
+// app/hooks/useInAppNotifications.ts
 
 import { useEffect, useRef } from "react";
 import { Image } from "expo-image";
@@ -13,7 +11,6 @@ import {
   ToastType,
   mapBackendTypeToToastType,
 } from "../lib/types/inAppNotification";
-import type { Notification } from "../lib/services/notificationService";
 import type { Message } from "../lib/types/chat.types";
 import { API_BASE_URL } from "../constants/ipConstants";
 
@@ -38,9 +35,8 @@ const getSenderId = (message: Message): string => {
 
 const getMessagePreview = (message: Message): string => {
   const msgType = message.type;
-  if (msgType === "text") {
+  if (msgType === "text")
     return (message as any).message?.substring(0, 100) || "";
-  }
   switch (msgType) {
     case "image":
       return "Sent an image";
@@ -60,10 +56,29 @@ const getMessagePreview = (message: Message): string => {
 };
 
 const prefetchImage = (url?: string) => {
-  if (url) {
-    Image.prefetch(url);
-  }
+  if (url) Image.prefetch(url);
 };
+
+// ============================================
+// NOTIFICATION TYPE CATEGORIES
+// ============================================
+
+/** Show COMMUNITY IMAGE in toaster for these types */
+const TOAST_COMMUNITY_IMAGE_TYPES = [
+  "community_approved",
+  "community_rejected",
+  "join_approved",
+  "join_rejected",
+  "member_removed",
+  "role_updated",
+  "invitation_pending",
+  "invitation_accepted",
+  "invitation_approved",
+  "invitation_rejected",
+];
+
+/** Show SENDER AVATAR in toaster for these types */
+const TOAST_USER_AVATAR_TYPES = ["member_joined", "join_request"];
 
 // ============================================
 // HOOK
@@ -97,12 +112,9 @@ export const useInAppNotifications = () => {
       const currentActiveRoom = activeRoomIdRef.current;
       const senderId = getSenderId(message);
 
-      // Suppress: own message
       if (senderId === currentUserId) return;
-      // Suppress: already in this conversation
       if (currentActiveRoom === message.roomId) return;
 
-      // Extract sender information
       const senderName =
         (message as any).senderName ||
         (typeof message.sender === "object"
@@ -116,38 +128,27 @@ export const useInAppNotifications = () => {
           ? (message.sender as any)?.avatar
           : undefined);
 
-      // Detect if this is a group message
       const isGroupMessage = !!(
         (message as any).isGroup === true ||
         (message as any).roomType === "group" ||
         (message.roomId && !message.roomId.startsWith("direct_"))
       );
 
-      // Extract group information from server payload
       const groupName = isGroupMessage
         ? (message as any).groupName ||
           (message as any).roomName ||
-          (message as any).name ||
           "Group Chat"
         : undefined;
 
       const groupPhoto = isGroupMessage
-        ? (message as any).groupPhoto ||
-          (message as any).groupIcon ||
-          (message as any).roomPhoto ||
-          (message as any).roomIcon ||
-          undefined
+        ? (message as any).groupPhoto || (message as any).roomPhoto || undefined
         : undefined;
 
       const participantCount = isGroupMessage
         ? (message as any).participantCount || 0
         : 0;
 
-      // Build navigation params
-      const navParams: Record<string, string> = {
-        roomId: message.roomId,
-      };
-
+      const navParams: Record<string, string> = { roomId: message.roomId };
       if (isGroupMessage) {
         navParams.isGroup = "true";
         navParams.otherUserId = "";
@@ -159,36 +160,20 @@ export const useInAppNotifications = () => {
         navParams.otherUserName = senderName;
       }
 
-      // Determine toast title and body
-      const toastTitle = isGroupMessage
-        ? groupName || "Group Chat"
-        : senderName;
-
-      const toastBody = isGroupMessage
-        ? `${senderName}: ${getMessagePreview(message)}`
-        : getMessagePreview(message);
-
-      // Determine avatar for toast
-      const toastAvatar = isGroupMessage
-        ? getFullImageUrl(groupPhoto) || getFullImageUrl(senderAvatar)
-        : getFullImageUrl(senderAvatar);
-
       const toast: InAppNotification = {
         id: `msg_${message.roomId}`,
         type: ToastType.MESSAGE,
-        title: toastTitle,
-        body: toastBody,
+        title: isGroupMessage ? groupName || "Group Chat" : senderName,
+        body: isGroupMessage
+          ? `${senderName}: ${getMessagePreview(message)}`
+          : getMessagePreview(message),
         senderName,
-        senderAvatar: toastAvatar,
+        senderAvatar: isGroupMessage
+          ? getFullImageUrl(groupPhoto) || getFullImageUrl(senderAvatar)
+          : getFullImageUrl(senderAvatar),
         isGroupMessage,
-        navigationTarget: {
-          screen: "/screens/ChatScreen",
-          params: navParams,
-        },
-        suppressIf: {
-          activeRoomId: message.roomId,
-          senderId,
-        },
+        navigationTarget: { screen: "/screens/ChatScreen", params: navParams },
+        suppressIf: { activeRoomId: message.roomId, senderId },
         timestamp: Date.now(),
       };
 
@@ -197,16 +182,35 @@ export const useInAppNotifications = () => {
     };
 
     // ── 2. BACKEND NOTIFICATIONS ────────────────────────
-    const handleNewNotification = (data: { notification: Notification }) => {
-      const notif = data.notification;
+    const handleNewNotification = (data: any) => {
+      // Extract notification object
+      let notif;
+      if (data?.notification) {
+        notif = data.notification;
+      } else if (data?.type) {
+        notif = data;
+      } else {
+        return;
+      }
+
+      // Extract sender ID
+      const senderId =
+        typeof notif.sender === "object" ? notif.sender?._id : notif.sender;
       const currentUserId = userIdRef.current;
 
-      if (notif.sender?._id === currentUserId) return;
+      // Skip own notifications
+      if (senderId && senderId.toString() === currentUserId?.toString()) {
+        return;
+      }
 
       const toastType = mapBackendTypeToToastType(notif.type);
-      if (!toastType) return;
+      if (!toastType) {
+        return;
+      }
 
-      let body = notif.message;
+      let body = notif.message || "";
+
+      // Handle grouped like notifications
       if (
         notif.type === "like" &&
         notif.metadata?.isGrouped &&
@@ -219,15 +223,70 @@ export const useInAppNotifications = () => {
         ? `${notif.type}_${notif.targetId}`
         : generateToastId(notif.type);
 
+      // Extract sender info
+      const senderName =
+        typeof notif.sender === "object"
+          ? notif.sender?.fullName || notif.sender?.name || "Someone"
+          : "Someone";
+
+      const senderProfilePic =
+        typeof notif.sender === "object"
+          ? notif.sender?.profilePicture
+          : undefined;
+
+      // ✅ Determine avatar and title based on notification type
+      const isToastCommunityImage = TOAST_COMMUNITY_IMAGE_TYPES.includes(
+        notif.type,
+      );
+      const isToastUserAvatar = TOAST_USER_AVATAR_TYPES.includes(notif.type);
+      const isCommunityInvite = notif.type === "community_invite";
+
+      // For community_invite: check if it's from admin/mod (community image) or member (user avatar)
+      const isInviteFromCommunity =
+        isCommunityInvite &&
+        (notif.message?.includes("has invited you to join") ||
+          notif.message?.includes("invited and added"));
+
+      let avatar: string | undefined;
+      let title: string;
+      let displayName: string;
+
+      if (
+        isToastCommunityImage ||
+        (isCommunityInvite && isInviteFromCommunity)
+      ) {
+        // Show community image
+        avatar = getFullImageUrl(notif.metadata?.communityImage || undefined);
+        title = notif.metadata?.communityName || notif.title || "";
+        displayName = notif.metadata?.communityName || senderName;
+      } else if (isToastUserAvatar || isCommunityInvite) {
+        // Show user avatar (member_joined, join_request, community_invite from member)
+        avatar = getFullImageUrl(senderProfilePic);
+        title = notif.title || "";
+        displayName = senderName;
+      } else {
+        // Default: show user avatar
+        avatar = getFullImageUrl(senderProfilePic);
+        title = notif.title || "";
+        displayName = senderName;
+      }
+
       const toast: InAppNotification = {
         id: toastId,
         type: toastType,
-        title: notif.title,
+        title,
         body,
-        senderName: notif.sender?.name,
-        senderAvatar: getFullImageUrl(notif.sender?.profilePicture),
+        senderName: displayName,
+        senderAvatar: avatar,
+        metadata: isToastCommunityImage
+          ? {
+              communityId: notif.metadata?.communityId,
+              communityName: notif.metadata?.communityName,
+              communityImage: notif.metadata?.communityImage,
+            }
+          : undefined,
         navigationTarget: getNavigationTarget(notif),
-        suppressIf: { senderId: notif.sender?._id },
+        suppressIf: { senderId },
         timestamp: Date.now(),
       };
 
@@ -273,22 +332,25 @@ export const useInAppNotifications = () => {
         },
         timestamp: Date.now(),
       };
-
       showToastRef.current(toast);
     };
+
+    // ── 5. COMMUNITY UPDATES ────────────────────────────
+    const handleCommunityUpdate = (data: any) => {};
 
     // ── REGISTER ────────────────────────────────────────
     socketService.on("receive_message", handleNewMessage);
     socketService.on("notification:new", handleNewNotification);
     socketService.on("connection_request", handleConnectionRequest);
     socketService.on("event:updated", handleEventNotification);
+    socketService.on("community:updated", handleCommunityUpdate);
 
-    // ── CLEANUP ─────────────────────────────────────────
     return () => {
       socketService.off("receive_message", handleNewMessage);
       socketService.off("notification:new", handleNewNotification);
       socketService.off("connection_request", handleConnectionRequest);
       socketService.off("event:updated", handleEventNotification);
+      socketService.off("community:updated", handleCommunityUpdate);
     };
   }, [user?.id]);
 };
@@ -298,7 +360,7 @@ export const useInAppNotifications = () => {
 // ============================================
 
 function getNavigationTarget(
-  notification: Notification,
+  notification: any,
 ): InAppNotification["navigationTarget"] {
   switch (notification.type) {
     case "like":
@@ -316,23 +378,45 @@ function getNavigationTarget(
       return { screen: "/(tabs)/feed" };
 
     case "connection_request":
-    case "connection_accepted":
-      return {
-        screen: "/profile/[id]",
-        params: { id: notification.sender._id },
-      };
+    case "connection_accepted": {
+      const senderId =
+        typeof notification.sender === "object"
+          ? notification.sender?._id
+          : notification.sender;
+      return { screen: "/profile/[id]", params: { id: senderId } };
+    }
 
     case "event_interest":
     case "event_rsvp":
     case "event_approved":
     case "event_rejected":
-      if (notification.targetId) {
+      if (notification.targetId)
         return {
           screen: "/events/[id]",
           params: { id: notification.targetId },
         };
-      }
       return { screen: "/(tabs)/events" };
+
+    case "community_approved":
+    case "community_rejected":
+    case "join_request":
+    case "join_approved":
+    case "join_rejected":
+    case "community_invite":
+    case "invitation_pending":
+    case "invitation_accepted":
+    case "invitation_approved":
+    case "invitation_rejected":
+    case "member_joined":
+    case "member_removed":
+    case "role_updated":
+      if (notification.targetId) {
+        return {
+          screen: "/screens/CommunityScreen",
+          params: { communityId: notification.targetId },
+        };
+      }
+      return { screen: "/screens/notifications" };
 
     default:
       return { screen: "/screens/notifications" };

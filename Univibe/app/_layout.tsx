@@ -112,6 +112,30 @@ export default function RootLayout() {
                         }}
                       />
                       <Stack.Screen
+                        name="screens/CommunityScreen"
+                        options={{
+                          headerShown: false,
+                          presentation: "card",
+                          animation: "slide_from_right",
+                        }}
+                      />
+                      <Stack.Screen
+                        name="screens/CommunitiesListScreen"
+                        options={{
+                          headerShown: false,
+                          presentation: "card",
+                          animation: "slide_from_right",
+                        }}
+                      />
+                      <Stack.Screen
+                        name="screens/CommunityMembersScreen"
+                        options={{
+                          headerShown: false,
+                          presentation: "card",
+                          animation: "slide_from_right",
+                        }}
+                      />
+                      <Stack.Screen
                         name="screens/ChatScreen"
                         options={{ headerShown: false, presentation: "card" }}
                       />

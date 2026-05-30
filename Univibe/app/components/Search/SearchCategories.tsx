@@ -27,6 +27,7 @@ interface SearchCategoriesProps {
     users: number;
     posts: number;
     events: number;
+    communities: number;
   };
 }
 
@@ -41,6 +42,7 @@ const categories: CategoryItem[] = [
   { id: "users", label: "People", icon: "people-outline" },
   { id: "posts", label: "Posts", icon: "chatbubbles-outline" },
   { id: "events", label: "Events", icon: "calendar-outline" },
+  { id: "communities", label: "Communities", icon: "people-outline" },
 ];
 
 /**
@@ -75,8 +77,9 @@ export const SearchCategories: React.FC<SearchCategoriesProps> = ({
       >
         {categories.map((category) => {
           const isActive = activeCategory === category.id;
-          const count =
-            resultCounts?.[category.id as keyof typeof resultCounts];
+          const count = resultCounts
+            ? (resultCounts as any)[category.id]
+            : undefined;
 
           return (
             <TouchableOpacity
@@ -84,7 +87,10 @@ export const SearchCategories: React.FC<SearchCategoriesProps> = ({
               style={[
                 styles.tab,
                 { backgroundColor: colors.skeleton },
-                isActive && [styles.activeTab, { backgroundColor: colors.primary }],
+                isActive && [
+                  styles.activeTab,
+                  { backgroundColor: colors.primary },
+                ],
               ]}
               onPress={() => handleCategoryPress(category.id)}
               activeOpacity={0.7}

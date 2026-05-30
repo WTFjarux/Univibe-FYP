@@ -1,10 +1,12 @@
-import { useState, useCallback, useRef, useEffect } from "react"; // Added useEffect
+// hooks/useSearch.ts
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useDebounce } from "./useDebounce";
 import { useRecentSearches } from "./useRecentSearches";
 import {
   searchUsers,
   searchPosts,
   searchEvents,
+  searchCommunities,
 } from "../lib/services/searchService";
 import {
   SearchCategory,
@@ -12,6 +14,7 @@ import {
   UserSearchResult,
   PostSearchResult,
   EventSearchResult,
+  CommunitySearchResult,
   PaginationMeta,
 } from "../lib/types/search";
 
@@ -24,12 +27,15 @@ interface UseSearchReturn {
   userResults: UserSearchResult[];
   postResults: PostSearchResult[];
   eventResults: EventSearchResult[];
+  communityResults: CommunitySearchResult[];
   userPagination: PaginationMeta | null;
   postPagination: PaginationMeta | null;
   eventPagination: PaginationMeta | null;
+  communityPagination: PaginationMeta | null;
   loadingUsers: boolean;
   loadingPosts: boolean;
   loadingEvents: boolean;
+  loadingCommunities: boolean;
   error: string | null;
   hasSearched: boolean;
 
@@ -55,17 +61,6 @@ interface UseSearchReturn {
   clearResults: () => void;
 }
 
-/**
- * Main search hook that orchestrates all search functionality.
- *
- * Features:
- * - Debounced auto-search (300ms)
- * - Category-based results (all/users/posts/events)
- * - Pagination per category
- * - Recent searches management
- * - Loading/error states per category
- * - "All" tab shows unified results
- */
 export function useSearch(): UseSearchReturn {
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<SearchCategory>("all");
@@ -76,6 +71,9 @@ export function useSearch(): UseSearchReturn {
   const [userResults, setUserResults] = useState<UserSearchResult[]>([]);
   const [postResults, setPostResults] = useState<PostSearchResult[]>([]);
   const [eventResults, setEventResults] = useState<EventSearchResult[]>([]);
+  const [communityResults, setCommunityResults] = useState<
+    CommunitySearchResult[]
+  >([]);
 
   // Pagination per category
   const [userPagination, setUserPagination] = useState<PaginationMeta | null>(
@@ -87,18 +85,19 @@ export function useSearch(): UseSearchReturn {
   const [eventPagination, setEventPagination] = useState<PaginationMeta | null>(
     null,
   );
+  const [communityPagination, setCommunityPagination] =
+    useState<PaginationMeta | null>(null);
 
   // Loading states per category
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [loadingEvents, setLoadingEvents] = useState(false);
+  const [loadingCommunities, setLoadingCommunities] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
 
-  // Debounce the query (300ms)
   const debouncedQuery = useDebounce(query, 300);
 
-  // Recent searches
   const {
     recentSearches,
     loaded: recentSearchesLoaded,
@@ -107,21 +106,16 @@ export function useSearch(): UseSearchReturn {
     clearRecentSearches,
   } = useRecentSearches();
 
-  // Track if a search is in progress to prevent duplicate requests
   const searchInProgress = useRef(false);
 
-  // ✅ AUTO-SEARCH: Trigger search when debounced query changes
   useEffect(() => {
     if (debouncedQuery.trim().length >= 2) {
       performSearch(activeCategory, debouncedQuery);
     } else if (debouncedQuery.trim().length === 0) {
       clearResults();
     }
-  }, [debouncedQuery]); // Re-run when debounced query changes
+  }, [debouncedQuery]);
 
-  /**
-   * Perform search for the current active category
-   */
   const performSearch = useCallback(
     async (category?: SearchCategory, searchQueryOverride?: string) => {
       const searchCategory = category || activeCategory;
@@ -136,7 +130,6 @@ export function useSearch(): UseSearchReturn {
       setHasSearched(true);
 
       try {
-        // Set loading for the active category
         switch (searchCategory) {
           case "users":
             setLoadingUsers(true);
@@ -147,17 +140,19 @@ export function useSearch(): UseSearchReturn {
           case "events":
             setLoadingEvents(true);
             break;
+          case "communities":
+            setLoadingCommunities(true);
+            break;
           case "all":
             setLoadingUsers(true);
             setLoadingPosts(true);
             setLoadingEvents(true);
+            setLoadingCommunities(true);
             break;
         }
 
-        // Add to recent searches
         await addRecentSearch(searchQuery.trim(), searchCategory);
 
-        // Fetch results based on category
         if (searchCategory === "users" || searchCategory === "all") {
           const userResponse = await searchUsers(searchQuery.trim(), 1, 20);
           setUserResults(userResponse.data.users);
@@ -175,6 +170,16 @@ export function useSearch(): UseSearchReturn {
           setEventResults(eventResponse.data.events);
           setEventPagination(eventResponse.data.pagination);
         }
+
+        if (searchCategory === "communities" || searchCategory === "all") {
+          const communityResponse = await searchCommunities(
+            searchQuery.trim(),
+            1,
+            20,
+          );
+          setCommunityResults(communityResponse.data.communities);
+          setCommunityPagination(communityResponse.data.pagination);
+        }
       } catch (err: any) {
         console.error("Search error:", err);
         setError(err.message || "Failed to perform search");
@@ -182,6 +187,7 @@ export function useSearch(): UseSearchReturn {
         setLoadingUsers(false);
         setLoadingPosts(false);
         setLoadingEvents(false);
+        setLoadingCommunities(false);
         setIsSearching(false);
         searchInProgress.current = false;
       }
@@ -189,9 +195,6 @@ export function useSearch(): UseSearchReturn {
     [query, debouncedQuery, activeCategory, addRecentSearch],
   );
 
-  /**
-   * Load more results for the current category (pagination)
-   */
   const loadMore = useCallback(async () => {
     const searchQuery = debouncedQuery || query;
     if (!searchQuery.trim() || searchInProgress.current) return;
@@ -215,8 +218,12 @@ export function useSearch(): UseSearchReturn {
         currentPage = pagination?.page || 1;
         if (!pagination || currentPage >= pagination.pages) return;
         break;
+      case "communities":
+        pagination = communityPagination;
+        currentPage = pagination?.page || 1;
+        if (!pagination || currentPage >= pagination.pages) return;
+        break;
       case "all":
-        // "All" tab doesn't support pagination currently
         return;
     }
 
@@ -260,6 +267,21 @@ export function useSearch(): UseSearchReturn {
           setEventPagination(eventResponse.data.pagination);
           setLoadingEvents(false);
           break;
+
+        case "communities":
+          setLoadingCommunities(true);
+          const communityResponse = await searchCommunities(
+            searchQuery.trim(),
+            nextPage,
+            20,
+          );
+          setCommunityResults((prev) => [
+            ...prev,
+            ...communityResponse.data.communities,
+          ]);
+          setCommunityPagination(communityResponse.data.pagination);
+          setLoadingCommunities(false);
+          break;
       }
     } catch (err: any) {
       console.error("Load more error:", err);
@@ -274,24 +296,23 @@ export function useSearch(): UseSearchReturn {
     userPagination,
     postPagination,
     eventPagination,
+    communityPagination,
   ]);
 
-  /**
-   * Clear all search results and reset state
-   */
   const clearResults = useCallback(() => {
     setUserResults([]);
     setPostResults([]);
     setEventResults([]);
+    setCommunityResults([]);
     setUserPagination(null);
     setPostPagination(null);
     setEventPagination(null);
+    setCommunityPagination(null);
     setError(null);
     setHasSearched(false);
   }, []);
 
   return {
-    // State
     query,
     debouncedQuery,
     activeCategory,
@@ -299,23 +320,22 @@ export function useSearch(): UseSearchReturn {
     userResults,
     postResults,
     eventResults,
+    communityResults,
     userPagination,
     postPagination,
     eventPagination,
+    communityPagination,
     loadingUsers,
     loadingPosts,
     loadingEvents,
+    loadingCommunities,
     error,
     hasSearched,
-
-    // Recent searches
     recentSearches,
     recentSearchesLoaded,
     addRecentSearch,
     removeRecentSearch,
     clearRecentSearches,
-
-    // Actions
     setQuery,
     setActiveCategory,
     performSearch,

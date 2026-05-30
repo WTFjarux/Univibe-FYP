@@ -1,3 +1,5 @@
+// app/(tabs)/search/index.tsx
+
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   View,
@@ -21,6 +23,7 @@ import { SearchCategories } from "../../components/Search/SearchCategories";
 import { UserSearchResult } from "../../components/Search/UserSearchResult";
 import { PostSearchResult } from "../../components/Search/PostSearchResult";
 import { EventSearchResult } from "../../components/Search/EventSearchResult";
+import { CommunitySearchResult } from "../../components/Search/CommunitySearchResult";
 import {
   SearchSkeleton,
   InitialSearchSkeleton,
@@ -32,6 +35,7 @@ import {
   UserSearchResult as UserSearchResultType,
   PostSearchResult as PostSearchResultType,
   EventSearchResult as EventSearchResultType,
+  CommunitySearchResult as CommunitySearchResultType,
 } from "../../../lib/types/search";
 
 export default function SearchScreen() {
@@ -47,12 +51,15 @@ export default function SearchScreen() {
     userResults,
     postResults,
     eventResults,
+    communityResults,
     userPagination,
     postPagination,
     eventPagination,
+    communityPagination,
     loadingUsers,
     loadingPosts,
     loadingEvents,
+    loadingCommunities,
     error,
     hasSearched,
     recentSearches,
@@ -140,24 +147,17 @@ export default function SearchScreen() {
       try {
         if (currentStatus === "connected") {
           const response = await connectionService.removeConnection(userId);
-          if (response.success) {
-            showInfoMessage("Connection removed");
-          }
+          if (response.success) showInfoMessage("Connection removed");
         } else if (currentStatus === "pending_sent") {
           const response =
             await connectionService.cancelConnectionRequest(userId);
-          if (response.success) {
-            showInfoMessage("Request cancelled");
-          }
+          if (response.success) showInfoMessage("Request cancelled");
         } else {
           const response =
             await connectionService.sendConnectionRequest(userId);
           if (response.success) {
-            if (response.data?.autoAccepted) {
-              showInfoMessage("Connected!");
-            } else {
-              showInfoMessage("Request sent!");
-            }
+            if (response.data?.autoAccepted) showInfoMessage("Connected!");
+            else showInfoMessage("Request sent!");
           }
         }
       } catch (error: any) {
@@ -172,11 +172,16 @@ export default function SearchScreen() {
   const getCurrentResults = useCallback(() => {
     switch (activeCategory) {
       case "users":
-        return userResults;
+        return userResults.map((item) => ({ ...item, _type: "user" }));
       case "posts":
-        return postResults;
+        return postResults.map((item) => ({ ...item, _type: "post" }));
       case "events":
-        return eventResults;
+        return eventResults.map((item) => ({ ...item, _type: "event" }));
+      case "communities":
+        return communityResults.map((item) => ({
+          ...item,
+          _type: "community",
+        }));
       case "all":
       default: {
         const combined: any[] = [];
@@ -184,6 +189,7 @@ export default function SearchScreen() {
           userResults.length,
           postResults.length,
           eventResults.length,
+          communityResults.length,
         );
         for (let i = 0; i < maxLength; i++) {
           if (userResults[i])
@@ -192,11 +198,19 @@ export default function SearchScreen() {
             combined.push({ ...postResults[i], _type: "post" });
           if (eventResults[i])
             combined.push({ ...eventResults[i], _type: "event" });
+          if (communityResults[i])
+            combined.push({ ...communityResults[i], _type: "community" });
         }
         return combined;
       }
     }
-  }, [activeCategory, userResults, postResults, eventResults]);
+  }, [
+    activeCategory,
+    userResults,
+    postResults,
+    eventResults,
+    communityResults,
+  ]);
 
   const hasMorePages = useCallback(() => {
     switch (activeCategory) {
@@ -212,10 +226,20 @@ export default function SearchScreen() {
         return eventPagination
           ? eventPagination.page < eventPagination.pages
           : false;
+      case "communities":
+        return communityPagination
+          ? communityPagination.page < communityPagination.pages
+          : false;
       default:
         return false;
     }
-  }, [activeCategory, userPagination, postPagination, eventPagination]);
+  }, [
+    activeCategory,
+    userPagination,
+    postPagination,
+    eventPagination,
+    communityPagination,
+  ]);
 
   const isLoadingCategory = useCallback(() => {
     switch (activeCategory) {
@@ -225,15 +249,26 @@ export default function SearchScreen() {
         return loadingPosts;
       case "events":
         return loadingEvents;
+      case "communities":
+        return loadingCommunities;
       case "all":
-        return loadingUsers || loadingPosts || loadingEvents;
+        return (
+          loadingUsers || loadingPosts || loadingEvents || loadingCommunities
+        );
     }
-  }, [activeCategory, loadingUsers, loadingPosts, loadingEvents]);
+  }, [
+    activeCategory,
+    loadingUsers,
+    loadingPosts,
+    loadingEvents,
+    loadingCommunities,
+  ]);
 
   const resultCounts = {
     users: userResults.length,
     posts: postResults.length,
     events: eventResults.length,
+    communities: communityResults.length,
   };
   const currentResults = getCurrentResults();
   const isInitialLoading = !recentSearchesLoaded;
@@ -256,15 +291,21 @@ export default function SearchScreen() {
       if (item._type === "event" || activeCategory === "events") {
         return <EventSearchResult event={item as EventSearchResultType} />;
       }
+      if (item._type === "community" || activeCategory === "communities") {
+        return (
+          <CommunitySearchResult
+            community={item as CommunitySearchResultType}
+          />
+        );
+      }
       return null;
     },
     [activeCategory, handleConnectionPress, connectionLoading],
   );
 
   const renderRecentSearches = useCallback(() => {
-    if (recentSearches.length === 0) {
+    if (recentSearches.length === 0)
       return <SearchEmptyState type="no_recent" />;
-    }
     return (
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -366,11 +407,10 @@ export default function SearchScreen() {
   const renderListEmpty = useCallback(() => {
     if (isLoading) return null;
     if (!hasSearched || query.trim().length === 0) return null;
-    if (error) {
+    if (error)
       return (
         <SearchErrorState message={error} onRetry={() => performSearch()} />
       );
-    }
     return <SearchEmptyState type="no_results" query={query} />;
   }, [isLoading, hasSearched, query, error, performSearch]);
 
@@ -409,9 +449,7 @@ export default function SearchScreen() {
       </View>
       <SearchBar
         value={query}
-        onChangeText={(text) => {
-          setQuery(text);
-        }}
+        onChangeText={(text) => setQuery(text)}
         onSubmit={() => {
           if (query.trim().length >= 2) {
             performSearch(activeCategory, query.trim());
@@ -440,7 +478,11 @@ export default function SearchScreen() {
       )}
       {isLoading && currentResults.length === 0 ? (
         <SearchSkeleton
-          type={activeCategory === "all" ? "mixed" : activeCategory}
+          type={
+            activeCategory === "all" || activeCategory === "communities"
+              ? "mixed"
+              : activeCategory
+          }
           count={6}
         />
       ) : (
@@ -460,9 +502,7 @@ export default function SearchScreen() {
           ListEmptyComponent={renderListEmpty}
           ListFooterComponent={renderListFooter}
           onEndReached={() => {
-            if (hasMorePages() && !isLoading) {
-              loadMore();
-            }
+            if (hasMorePages() && !isLoading) loadMore();
           }}
           onEndReachedThreshold={0.3}
           contentContainerStyle={[
@@ -476,12 +516,30 @@ export default function SearchScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  header: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 },
-  title: { fontSize: 28, fontWeight: "bold", fontFamily: "SofiaSans-Bold" },
-  listContent: { paddingBottom: 40 },
-  emptyListContent: { flexGrow: 1 },
-  section: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
+  container: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 4,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: "bold",
+    fontFamily: "SofiaSans-Bold",
+  },
+  listContent: {
+    paddingBottom: 40,
+  },
+  emptyListContent: {
+    flexGrow: 1,
+  },
+  section: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -493,7 +551,10 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontFamily: "SofiaSans-Bold",
   },
-  clearAllText: { fontSize: 13, fontFamily: "SofiaSans-Medium" },
+  clearAllText: {
+    fontSize: 13,
+    fontFamily: "SofiaSans-Medium",
+  },
   recentItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -503,7 +564,11 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     gap: 10,
   },
-  recentText: { flex: 1, fontSize: 15, fontFamily: "SofiaSans-Regular" },
+  recentText: {
+    flex: 1,
+    fontSize: 15,
+    fontFamily: "SofiaSans-Regular",
+  },
   suggestionsGrid: {
     paddingTop: 12,
     flexDirection: "row",
@@ -519,7 +584,10 @@ const styles = StyleSheet.create({
     gap: 6,
     borderWidth: 1,
   },
-  suggestionText: { fontSize: 13, fontFamily: "SofiaSans-Medium" },
+  suggestionText: {
+    fontSize: 13,
+    fontFamily: "SofiaSans-Medium",
+  },
   infoToast: {
     flexDirection: "row",
     alignItems: "center",
@@ -543,6 +611,14 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     gap: 8,
   },
-  loadingMoreText: { fontSize: 13, fontFamily: "SofiaSans-Regular" },
-  categoriesWrapper: { marginBottom: 16 },
+  loadingMoreText: {
+    fontSize: 13,
+    fontFamily: "SofiaSans-Regular",
+  },
+  categoriesWrapper: {
+    marginBottom: 16,
+  },
+  bottomPadding: {
+    height: 100,
+  },
 });

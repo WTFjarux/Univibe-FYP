@@ -4,22 +4,40 @@ require("colors");
 // ============================================
 // MAIN DATABASE CONNECTION (Univibe)
 // ============================================
+let isConnecting = false;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+
 const connectDB = async () => {
+  if (isConnecting) {
+    console.log("⏳ Connection already in progress, skipping...".yellow);
+    return;
+  }
+
   try {
+    isConnecting = true;
     mongoose.set("strictQuery", true);
 
     console.log("🔌 Attempting MongoDB connection...");
 
     const conn = await mongoose.connect(process.env.MONGODB_URI, {
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
+      serverSelectionTimeoutMS: 30000,
+      socketTimeoutMS: 0,
+      connectTimeoutMS: 30000,
+      heartbeatFrequencyMS: 5000,
       family: 4,
       maxPoolSize: 10,
-      minPoolSize: 5,
+      minPoolSize: 2,
+      maxIdleTimeMS: 60000,
+      waitQueueTimeoutMS: 30000,
     });
 
     console.log(`✅ Main DB Connected: ${conn.connection.host}`.green);
     console.log(`📊 Database: ${conn.connection.name}`.cyan);
+
+    // Reset reconnect attempts on successful connection
+    reconnectAttempts = 0;
+    isConnecting = false;
 
     // Connect to admin database
     await connectAdminDB();
@@ -28,7 +46,24 @@ const connectDB = async () => {
     checkRegisteredModels();
   } catch (error) {
     console.error(`❌ MongoDB Connection Error: ${error.message}`.red);
-    process.exit(1);
+    isConnecting = false;
+
+    // Retry with exponential backoff instead of exiting
+    if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+      reconnectAttempts++;
+      const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+      console.log(
+        `🔄 Retrying connection in ${delay / 1000}s (Attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`
+          .yellow,
+      );
+      setTimeout(connectDB, delay);
+    } else {
+      console.error(
+        `❌ Max reconnection attempts reached. Please check MongoDB service.`
+          .red,
+      );
+      process.exit(1);
+    }
   }
 };
 
@@ -44,15 +79,20 @@ const connectAdminDB = async () => {
     const adminUri = baseUri.replace(/\/[^/]+$/, "/UnivibeAdmin");
 
     adminConnection = await mongoose.createConnection(adminUri, {
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
+      serverSelectionTimeoutMS: 30000,
+      socketTimeoutMS: 0, // No timeout for admin connection too
+      connectTimeoutMS: 30000,
+      heartbeatFrequencyMS: 5000,
       family: 4,
       maxPoolSize: 5,
-      minPoolSize: 2,
+      minPoolSize: 1,
+      maxIdleTimeMS: 60000,
     });
 
-    console.log(`✅ Admin DB Connected: ${adminConnection.host}`.green);
-    console.log(`📊 Admin Database: ${adminConnection.name}`.cyan);
+    console.log(`✅ Admin DB Connected`.green);
+    console.log(
+      `📊 Admin Database: ${adminConnection.name || "UnivibeAdmin"}`.cyan,
+    );
 
     // Register admin models on this connection
     registerAdminModels(adminConnection);
@@ -74,7 +114,6 @@ const registerAdminModels = (conn) => {
     Report: require("../models/Report"),
     ModerationLog: require("../models/ModerationLog"),
     UserWarning: require("../models/UserWarning"),
-    ApprovalQueue: require("../models/ApprovalQueue"),
   };
 
   Object.entries(modelDefinitions).forEach(([name, schema]) => {
@@ -136,25 +175,68 @@ function checkRegisteredModels() {
 }
 
 // ============================================
-// EVENT HANDLERS
+// IMPROVED EVENT HANDLERS
 // ============================================
+let isManualReconnect = false;
+
 mongoose.connection.on("connected", () => {
   console.log("✅ Mongoose connected (main DB)".green);
+  isManualReconnect = false;
+  reconnectAttempts = 0;
 });
 
 mongoose.connection.on("error", (err) => {
-  console.error(`❌ Mongoose connection error: ${err}`.red);
+  // Don't log stack trace for network errors
+  if (
+    err.message?.includes("PoolClearedOnNetworkError") ||
+    err.message?.includes("topology was destroyed")
+  ) {
+    console.log(
+      "⚠️ Mongoose connection pool issue, attempting to recover...".yellow,
+    );
+  } else if (!err.message?.includes("keepalive")) {
+    // Don't log the keepalive error since we removed it
+    console.error(`❌ Mongoose connection error: ${err.message}`.red);
+  }
 });
 
 mongoose.connection.on("disconnected", () => {
-  console.log("⚠️  Mongoose disconnected (main DB)".yellow);
+  console.log("⚠️ Mongoose disconnected (main DB)".yellow);
+
+  // Auto-reconnect if not already trying
+  if (
+    !isManualReconnect &&
+    !isConnecting &&
+    mongoose.connection.readyState !== 1
+  ) {
+    isManualReconnect = true;
+    console.log("🔄 Auto-reconnecting to MongoDB...".cyan);
+    setTimeout(() => {
+      connectDB().catch(console.error);
+      isManualReconnect = false;
+    }, 3000);
+  }
 });
+
+// Periodic health check to keep connection alive
+let healthCheckInterval = setInterval(async () => {
+  if (mongoose.connection.readyState === 1) {
+    try {
+      // Ping the database to keep connection alive
+      await mongoose.connection.db.admin().ping();
+    } catch (error) {
+      console.log("⚠️ Health check failed, connection may be dead".yellow);
+    }
+  }
+}, 25000); // Check every 25 seconds
 
 // Graceful shutdown
 process.on("SIGINT", async () => {
+  console.log("\n🔌 Shutting down...".yellow);
+  clearInterval(healthCheckInterval);
   await mongoose.connection.close();
   if (adminConnection) await adminConnection.close();
-  console.log("🔌 MongoDB connections closed".yellow);
+  console.log("✅ MongoDB connections closed".green);
   process.exit(0);
 });
 

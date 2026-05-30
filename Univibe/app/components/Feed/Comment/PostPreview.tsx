@@ -10,6 +10,7 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   Alert,
+  Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -56,6 +57,9 @@ const PostPreview: React.FC<PostPreviewProps> = ({
   // Share modal state
   const [shareModalVisible, setShareModalVisible] = useState(false);
 
+  // Check if community post
+  const isCommunityPost = !!post.community?.name;
+
   const userDisplay = formatUserDisplay(post);
   const postImages = post.images?.map((img) => getFullImageUrl(img.url)) || [];
 
@@ -66,8 +70,15 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     }
   }, [postImages.length]);
 
+  // Get display name
+  const getDisplayName = useCallback(() => {
+    if (isCommunityPost) return post.community!.name;
+    return userDisplay.name;
+  }, [isCommunityPost, post.community, userDisplay.name]);
+
   // Handle profile navigation
   const handleProfilePress = useCallback(() => {
+    if (isCommunityPost) return;
     if (post.isAnonymous) return;
     const userId = post.user?._id?.toString();
     if (!userId) return;
@@ -76,7 +87,21 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     } else {
       router.push(`/profile/${userId}`);
     }
-  }, [post.isAnonymous, post.user?._id, currentUser?.id, router]);
+  }, [
+    isCommunityPost,
+    post.isAnonymous,
+    post.user?._id,
+    currentUser?.id,
+    router,
+  ]);
+
+  // Handle community navigation
+  const handleCommunityPress = useCallback(() => {
+    if (!isCommunityPost || !post.community?._id) return;
+    router.push(
+      `/screens/CommunityScreen?communityId=${post.community._id}` as any,
+    );
+  }, [isCommunityPost, post.community?._id, router]);
 
   // Handle image scroll
   const handleScroll = useCallback(
@@ -124,7 +149,7 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     Alert.alert("Shared", "Post shared successfully!");
   }, []);
 
-  // ─── Visibility Badge Helpers (Same as PostCard) ───
+  // ─── Visibility Badge Helpers ───
   const getVisibilityIconName = useCallback((): IconName => {
     const icons: Record<string, IconName> = {
       campus: "school-outline",
@@ -149,9 +174,48 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     return customColors[post.visibility] || colors.textMuted;
   }, [post.visibility, colors.primary, colors.textMuted]);
 
-  // Render avatar (same logic as PostCard)
+  // Render avatar
   const renderAvatar = () => {
     const avatarSize = 40;
+
+    // Community post
+    if (isCommunityPost) {
+      if (post.community?.coverImage) {
+        return (
+          <TouchableOpacity onPress={handleCommunityPress} activeOpacity={0.7}>
+            <Image
+              source={{ uri: getFullImageUrl(post.community.coverImage) }}
+              style={[
+                styles.avatar,
+                {
+                  width: avatarSize,
+                  height: avatarSize,
+                  borderRadius: avatarSize / 2,
+                  backgroundColor: colors.border,
+                },
+              ]}
+            />
+          </TouchableOpacity>
+        );
+      }
+      return (
+        <TouchableOpacity onPress={handleCommunityPress} activeOpacity={0.7}>
+          <View
+            style={[
+              styles.avatar,
+              styles.communityAvatar,
+              {
+                width: avatarSize,
+                height: avatarSize,
+                borderRadius: avatarSize / 2,
+              },
+            ]}
+          >
+            <Ionicons name="people" size={20} color="#ffffff" />
+          </View>
+        </TouchableOpacity>
+      );
+    }
 
     // Anonymous post
     if (post.isAnonymous) {
@@ -263,7 +327,9 @@ const PostPreview: React.FC<PostPreviewProps> = ({
       : undefined,
     postAuthorName: post.isAnonymous
       ? "Anonymous"
-      : post.user?.name || "Unknown",
+      : isCommunityPost
+        ? post.community!.name
+        : post.user?.name || "Unknown",
     postAuthorAvatar: post.user?.profilePicture
       ? getFullImageUrl(post.user.profilePicture)
       : undefined,
@@ -316,47 +382,82 @@ const PostPreview: React.FC<PostPreviewProps> = ({
           setContainerWidth(event.nativeEvent.layout.width);
         }}
       >
-        {/* Header - Same as PostCard with visibility badge */}
+        {/* Header */}
         <View style={styles.header}>
           {renderAvatar()}
 
           <View style={styles.userInfo}>
             <View style={styles.nameRow}>
-              <TouchableOpacity
-                onPress={handleProfilePress}
-                disabled={post.isAnonymous}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.userName, dynamicStyles.userName]}>
-                  {userDisplay.name}
-                </Text>
-              </TouchableOpacity>
+              {isCommunityPost ? (
+                <TouchableOpacity
+                  onPress={handleCommunityPress}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.userName, dynamicStyles.userName]}>
+                    {getDisplayName()}
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  onPress={handleProfilePress}
+                  disabled={post.isAnonymous}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.userName, dynamicStyles.userName]}>
+                    {getDisplayName()}
+                  </Text>
+                </TouchableOpacity>
+              )}
 
-              {/* VISIBILITY BADGE */}
-              <View
-                style={[
-                  styles.visibilityBadge,
-                  { backgroundColor: `${visibilityBadgeColor}15` },
-                ]}
-              >
-                <Ionicons
-                  name={visibilityIconName}
-                  size={12}
-                  color={visibilityBadgeColor}
-                />
-                <Text
+              {/* Badge */}
+              {isCommunityPost ? (
+                <View
                   style={[
-                    styles.visibilityBadgeText,
-                    { color: visibilityBadgeColor },
+                    styles.communityBadge,
+                    { backgroundColor: colors.primary + "15" },
                   ]}
                 >
-                  {getVisibilityDisplayName()}
-                </Text>
-              </View>
+                  <Ionicons
+                    name="people-outline"
+                    size={12}
+                    color={colors.primary}
+                  />
+                  <Text
+                    style={[
+                      styles.communityBadgeText,
+                      { color: colors.primary },
+                    ]}
+                  >
+                    Community
+                  </Text>
+                </View>
+              ) : (
+                <View
+                  style={[
+                    styles.visibilityBadge,
+                    { backgroundColor: `${visibilityBadgeColor}15` },
+                  ]}
+                >
+                  <Ionicons
+                    name={visibilityIconName}
+                    size={12}
+                    color={visibilityBadgeColor}
+                  />
+                  <Text
+                    style={[
+                      styles.visibilityBadgeText,
+                      { color: visibilityBadgeColor },
+                    ]}
+                  >
+                    {getVisibilityDisplayName()}
+                  </Text>
+                </View>
+              )}
             </View>
             <Text style={[styles.timestamp, dynamicStyles.timestamp]}>
-              @{post.isAnonymous ? "anonymous" : post.user?.username || "user"}{" "}
-              • {formatTimeAgo(post.createdAt)}
+              {isCommunityPost
+                ? formatTimeAgo(post.createdAt)
+                : `@${post.isAnonymous ? "anonymous" : post.user?.username || "user"} • ${formatTimeAgo(post.createdAt)}`}
             </Text>
           </View>
         </View>
@@ -372,7 +473,6 @@ const PostPreview: React.FC<PostPreviewProps> = ({
         {postImages.length > 0 && (
           <View style={styles.imagesWrapper}>
             {postImages.length === 1 ? (
-              // Single image
               <TouchableOpacity
                 activeOpacity={0.95}
                 onPress={() => onImagePress(0)}
@@ -414,7 +514,6 @@ const PostPreview: React.FC<PostPreviewProps> = ({
                 )}
               </TouchableOpacity>
             ) : (
-              // Multiple images carousel
               <View>
                 <ScrollView
                   ref={scrollViewRef}
@@ -478,7 +577,6 @@ const PostPreview: React.FC<PostPreviewProps> = ({
 
         {/* Post Actions */}
         <View style={[styles.actions, dynamicStyles.actions]}>
-          {/* Like Button */}
           <TouchableOpacity
             style={styles.action}
             onPress={onLikePress}
@@ -500,7 +598,6 @@ const PostPreview: React.FC<PostPreviewProps> = ({
             </Text>
           </TouchableOpacity>
 
-          {/* Comment Button */}
           <View style={styles.action}>
             <Ionicons
               name="chatbubble-outline"
@@ -512,7 +609,6 @@ const PostPreview: React.FC<PostPreviewProps> = ({
             </Text>
           </View>
 
-          {/* Share Button */}
           <TouchableOpacity
             style={styles.action}
             onPress={handleSharePress}
@@ -565,6 +661,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderStyle: "dashed",
   },
+  communityAvatar: {
+    backgroundColor: "#8b5cf6",
+    justifyContent: "center",
+    alignItems: "center",
+  },
   fallbackAvatar: {
     justifyContent: "center",
     alignItems: "center",
@@ -602,6 +703,19 @@ const styles = StyleSheet.create({
   visibilityBadgeText: {
     fontSize: 10,
     fontFamily: "SofiaSans-Regular",
+  },
+  communityBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    marginLeft: 4,
+  },
+  communityBadgeText: {
+    fontSize: 11,
+    fontFamily: "SofiaSans-SemiBold",
   },
   timestamp: {
     fontSize: 13,

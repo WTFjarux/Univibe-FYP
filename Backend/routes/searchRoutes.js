@@ -26,4 +26,6 @@ router.get("/posts", searchController.searchPosts);
 // GET /api/search/events?q=query&page=1&limit=10&campus=Herald&category=Academic&status=upcoming
 router.get("/events", searchController.searchEvents);
 
+router.get("/communities", searchController.searchCommunities);
+
 module.exports = router;

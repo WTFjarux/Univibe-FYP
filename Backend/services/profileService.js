@@ -23,7 +23,7 @@ const createInitialProfile = async (user) => {
       year: "UPC",
       graduationYear: String(new Date().getFullYear() + 4),
       universityEmail: user.email,
-      profilePicture: `https://api.dicebear.com/7.x/avataaars/svg?seed=user-${user._id}`,
+      profilePicture: "",
       createdAt: new Date(),
       updatedAt: new Date(),
     });

@@ -1,9 +1,4 @@
-// ============================================
-// IN-APP TOAST COMPONENT
-// Animated banner that slides down from top
-// Shows notification content with icon & avatar
-// Auto-hides after 3 seconds
-// ============================================
+// app/components/InAppToast.tsx
 
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -12,7 +7,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   Dimensions,
-  Platform,
 } from "react-native";
 import Animated, {
   useSharedValue,
@@ -38,7 +32,6 @@ import { useInAppNotification } from "../../lib/contexts/InAppNotificationContex
 // ============================================
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const DEFAULT_AVATAR = require("../../assets/images/default-avatar.png");
 
 // ============================================
 // TOAST ICON CONFIG
@@ -81,10 +74,15 @@ const TOAST_ICONS: Record<ToastType, ToastIconConfig> = {
     bgColor: "#10B981",
     iconColor: "#FFFFFF",
   },
+  [ToastType.COMMUNITY]: {
+    iconName: "people",
+    bgColor: "#8B5CF6",
+    iconColor: "#FFFFFF",
+  },
 };
 
 // ============================================
-// INNER TOAST CONTENT (re-created on ID change)
+// TOAST CONTENT (Inner Component)
 // ============================================
 
 interface ToastContentProps {
@@ -97,11 +95,12 @@ const ToastContent: React.FC<ToastContentProps> = React.memo(
   ({ toast, onPress, onDismiss }) => {
     const iconConfig = TOAST_ICONS[toast.type];
     const isGroupMessage = toast.isGroupMessage || false;
+    const isCommunity = toast.type === ToastType.COMMUNITY;
     const { colors } = useTheme();
 
-    // Determine which avatar/icon to show
+    // Determine which left content to show (avatar or icon)
     const renderLeftContent = () => {
-      // Case 1: Has a valid avatar URL (group photo or user avatar)
+      // Case 1: Has a valid avatar URL (community image, group photo, or user avatar)
       if (toast.senderAvatar) {
         return (
           <Image
@@ -115,7 +114,16 @@ const ToastContent: React.FC<ToastContentProps> = React.memo(
         );
       }
 
-      // Case 2: Group message without photo - show group icon
+      // Case 2: Community notification without image → community icon
+      if (isCommunity) {
+        return (
+          <View style={[styles.iconBadge, { backgroundColor: "#8B5CF6" }]}>
+            <Ionicons name="people" size={22} color="#FFFFFF" />
+          </View>
+        );
+      }
+
+      // Case 3: Group message without photo → group icon
       if (isGroupMessage) {
         return (
           <View style={[styles.iconBadge, { backgroundColor: "#8B5CF6" }]}>
@@ -124,7 +132,7 @@ const ToastContent: React.FC<ToastContentProps> = React.memo(
         );
       }
 
-      // Case 3: Direct message without avatar - show person icon
+      // Case 4: Direct message without avatar → person icon
       if (toast.type === ToastType.MESSAGE) {
         return (
           <View
@@ -135,7 +143,7 @@ const ToastContent: React.FC<ToastContentProps> = React.memo(
         );
       }
 
-      // Case 4: Other notification types (likes, comments, events, etc.)
+      // Case 5: Other types (likes, comments, events, etc.) → type-specific icon
       return (
         <View
           style={[styles.iconBadge, { backgroundColor: iconConfig.bgColor }]}
@@ -170,8 +178,15 @@ const ToastContent: React.FC<ToastContentProps> = React.memo(
             >
               {toast.title}
             </Text>
-            {isGroupMessage && (
-              <View style={styles.groupBadge}>
+            {/* Badge for group messages */}
+            {isGroupMessage && !isCommunity && (
+              <View style={styles.badge}>
+                <Ionicons name="people" size={10} color="#8B5CF6" />
+              </View>
+            )}
+            {/* Badge for community notifications */}
+            {isCommunity && (
+              <View style={styles.badge}>
                 <Ionicons name="people" size={10} color="#8B5CF6" />
               </View>
             )}
@@ -206,14 +221,14 @@ const InAppToast: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  // Hold a stable copy of the toast to prevent flashing old data
+  // Stable copy of toast to prevent flashing old data
   const [displayedToast, setDisplayedToast] =
     useState<InAppNotification | null>(null);
   const translateY = useSharedValue(-200);
   const opacity = useSharedValue(0);
   const wasVisible = useRef(false);
 
-  // Update displayed toast immediately when currentToast changes
+  // Update displayed toast when currentToast changes
   useEffect(() => {
     if (currentToast) {
       setDisplayedToast(currentToast);
@@ -227,10 +242,7 @@ const InAppToast: React.FC = () => {
     }
   };
 
-  // ==========================================
-  // ANIMATION LOGIC
-  // ==========================================
-
+  // Animation logic
   useEffect(() => {
     if (isVisible && !wasVisible.current) {
       // Slide in
@@ -259,25 +271,19 @@ const InAppToast: React.FC = () => {
       });
       wasVisible.current = false;
     } else if (isVisible && wasVisible.current && currentToast) {
-      // Already visible, new content — keep position, no animation
+      // Already visible, new content — keep position
       translateY.value = 0;
       opacity.value = 1;
     }
   }, [isVisible, currentToast?.id]);
 
-  // ==========================================
-  // ANIMATED STYLES
-  // ==========================================
-
+  // Animated styles
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }],
     opacity: opacity.value,
   }));
 
-  // ==========================================
-  // HANDLERS
-  // ==========================================
-
+  // Press handler — navigate on tap
   const handlePress = () => {
     if (!displayedToast) return;
     hideToast();
@@ -293,14 +299,12 @@ const InAppToast: React.FC = () => {
     }
   };
 
+  // Dismiss handler
   const handleDismiss = () => {
     hideToast();
   };
 
-  // ==========================================
-  // RENDER
-  // ==========================================
-
+  // Don't render if no toast to display
   if (!displayedToast) return null;
 
   const topPosition = insets.top + 8;
@@ -334,11 +338,9 @@ const styles = StyleSheet.create({
   toastContent: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
     borderRadius: 16,
     paddingVertical: 12,
     paddingHorizontal: 14,
-    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 12,
@@ -351,7 +353,6 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#F3F4F6",
   },
   iconBadge: {
     width: 44,
@@ -372,11 +373,10 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#111827",
     fontFamily: "SofiaSans-Bold",
     flex: 1,
   },
-  groupBadge: {
+  badge: {
     marginLeft: 6,
     width: 18,
     height: 18,
@@ -387,7 +387,6 @@ const styles = StyleSheet.create({
   },
   body: {
     fontSize: 13,
-    color: "#6B7280",
     fontFamily: "SofiaSans-Regular",
     lineHeight: 18,
   },

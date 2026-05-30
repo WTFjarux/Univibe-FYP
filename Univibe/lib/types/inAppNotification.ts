@@ -1,3 +1,5 @@
+// lib/types/inAppNotification.ts
+
 // ============================================
 // IN-APP TOAST NOTIFICATION SYSTEM TYPES
 // Lightweight types for real-time toast banners
@@ -12,6 +14,14 @@ export enum ToastType {
   REPLY = "reply",
   EVENT = "event",
   CONNECTION = "connection",
+  COMMUNITY = "community",
+}
+
+// Community metadata for toast display
+export interface ToastCommunityMetadata {
+  communityId?: string;
+  communityName?: string;
+  communityImage?: string | null;
 }
 
 // The data that flows through the toast system
@@ -23,6 +33,10 @@ export interface InAppNotification {
   senderName?: string;
   senderAvatar?: string;
   isGroupMessage?: boolean;
+
+  // ✅ Community metadata for toast display
+  metadata?: ToastCommunityMetadata;
+
   // Where to navigate on tap
   navigationTarget?: {
     screen: string;
@@ -86,7 +100,23 @@ export function mapBackendTypeToToastType(
     case "event_approved":
     case "event_rejected":
       return ToastType.EVENT;
+
+    // community types
+    case "community_approved":
+    case "community_rejected":
+    case "join_request":
+    case "join_approved":
+    case "join_rejected":
+    case "community_invite":
+    case "invitation_pending":
+    case "invitation_accepted":
+    case "invitation_approved":
+    case "invitation_rejected":
+    case "member_joined":
+    case "member_removed":
+    case "role_updated":
+      return ToastType.COMMUNITY;
     default:
-      return null; // post_removed, repost → no toast
+      return null;
   }
 }

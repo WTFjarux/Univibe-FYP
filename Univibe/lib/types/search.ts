@@ -3,7 +3,34 @@
 // ============================================
 
 // Search categories
-export type SearchCategory = "all" | "users" | "posts" | "events";
+export type SearchCategory =
+  | "all"
+  | "users"
+  | "posts"
+  | "events"
+  | "communities";
+
+// Community search result
+export interface CommunitySearchResult {
+  _id: string;
+  name: string;
+  description: string;
+  memberCount: number;
+  coverImage: string | null;
+  isMember: boolean;
+  type?: "community";
+}
+
+// Community search API response
+export interface CommunitySearchResponse {
+  success: boolean;
+  data: {
+    communities: CommunitySearchResult[];
+    pagination: PaginationMeta;
+    searchMeta: SearchMeta;
+  };
+  message?: string;
+}
 
 // Connection status between current user and search result
 export type ConnectionStatus =
@@ -72,6 +99,11 @@ export interface PostSearchResult {
   createdAt: string;
   updatedAt: string;
   type?: "post";
+  community?: {
+    _id: string;
+    name: string;
+    coverImage?: string | null;
+  } | null;
 }
 
 // Event search result
@@ -167,7 +199,11 @@ export interface UnifiedSearchResponse {
   data: {
     users: UserSearchResult[];
     posts: Pick<PostSearchResult, "_id" | "content" | "createdAt">[];
-    events: Pick<EventSearchResult, "_id" | "title" | "startDate" | "category">[];
+    events: Pick<
+      EventSearchResult,
+      "_id" | "title" | "startDate" | "category"
+    >[];
+    communities?: CommunitySearchResult[];
   };
   searchMeta: SearchMeta;
   message?: string;
@@ -212,14 +248,17 @@ export interface SearchState {
   userResults: UserSearchResult[];
   postResults: PostSearchResult[];
   eventResults: EventSearchResult[];
+  communityResults: CommunitySearchResult[];
   // Pagination per category
   userPagination: PaginationMeta | null;
   postPagination: PaginationMeta | null;
   eventPagination: PaginationMeta | null;
+  communityPagination: PaginationMeta | null;
   // Loading states
   loadingUsers: boolean;
   loadingPosts: boolean;
   loadingEvents: boolean;
+  loadingCommunities: boolean;
   // Error states
   error: string | null;
   // Recent & trending

@@ -1,3 +1,5 @@
+// app/components/Search/PostSearchResult.tsx
+
 import React, { useState } from "react";
 import { View, Text, TouchableOpacity, Image, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -13,31 +15,34 @@ interface PostSearchResultProps {
 
 const DEFAULT_AVATAR = require("../../../assets/images/default-avatar.png");
 
-/**
- * Compact post search result card.
- *
- * Features:
- * - Author avatar with fallback
- * - Content preview (truncated to 2 lines)
- * - Post image thumbnail (if available)
- * - Like and comment counts
- * - Timestamp
- * - Navigates to post detail on tap
- */
-
 export const PostSearchResult: React.FC<PostSearchResultProps> = ({ post }) => {
   const router = useRouter();
   const { colors } = useTheme();
   const [avatarError, setAvatarError] = useState(false);
   const [imageError, setImageError] = useState(false);
 
+  const isCommunityPost = !!post.community?.name;
+
+  const displayName = isCommunityPost
+    ? post.community!.name
+    : post.isAnonymous
+      ? "Anonymous"
+      : post.user?.name || "User";
+
+  const displayHandle = post.isAnonymous
+    ? "anonymous"
+    : post.user?.username || "user";
+
   const handlePress = () => {
     router.push({ pathname: "/post/[id]", params: { id: post._id } });
   };
-  const handleAuthorPress = (e: any) => {
+
+  const handleCommunityPress = (e: any) => {
     e.stopPropagation();
-    if (post.user._id) {
-      router.push(`/profile/${post.user._id}`);
+    if (post.community?._id) {
+      router.push(
+        `/screens/CommunityScreen?communityId=${post.community._id}` as any,
+      );
     }
   };
 
@@ -56,12 +61,6 @@ export const PostSearchResult: React.FC<PostSearchResultProps> = ({ post }) => {
   };
 
   const thumbnailSource = getPostThumbnail();
-  const displayName = post.isAnonymous
-    ? "Anonymous"
-    : post.user?.name || "User";
-  const displayHandle = post.isAnonymous
-    ? "anonymous"
-    : post.user?.username || "user";
 
   return (
     <TouchableOpacity
@@ -73,12 +72,31 @@ export const PostSearchResult: React.FC<PostSearchResultProps> = ({ post }) => {
       activeOpacity={0.7}
     >
       <View style={styles.authorRow}>
+        {/* Avatar */}
         <TouchableOpacity
-          onPress={handleAuthorPress}
-          disabled={post.isAnonymous}
+          onPress={isCommunityPost ? handleCommunityPress : undefined}
+          disabled={!isCommunityPost}
           style={styles.avatarContainer}
         >
-          {post.isAnonymous ? (
+          {isCommunityPost ? (
+            post.community?.coverImage ? (
+              <Image
+                source={{ uri: getFullImageUrl(post.community.coverImage) }}
+                style={[styles.avatar, { backgroundColor: colors.skeleton }]}
+                onError={() => setAvatarError(true)}
+              />
+            ) : (
+              <View
+                style={[
+                  styles.avatar,
+                  styles.communityAvatar,
+                  { backgroundColor: colors.primary + "30" },
+                ]}
+              >
+                <Ionicons name="people" size={18} color={colors.primary} />
+              </View>
+            )
+          ) : post.isAnonymous ? (
             <View
               style={[
                 styles.avatar,
@@ -103,11 +121,9 @@ export const PostSearchResult: React.FC<PostSearchResultProps> = ({ post }) => {
             />
           )}
         </TouchableOpacity>
-        <TouchableOpacity
-          onPress={handleAuthorPress}
-          disabled={post.isAnonymous}
-          style={styles.authorInfo}
-        >
+
+        {/* Author Info */}
+        <View style={styles.authorInfo}>
           <View style={styles.nameRow}>
             <Text
               style={[styles.authorName, { color: colors.text }]}
@@ -115,7 +131,21 @@ export const PostSearchResult: React.FC<PostSearchResultProps> = ({ post }) => {
             >
               {displayName}
             </Text>
-            {post.user?.verified && (
+            {isCommunityPost && (
+              <View
+                style={[
+                  styles.communityBadge,
+                  { backgroundColor: colors.primary + "15" },
+                ]}
+              >
+                <Text
+                  style={[styles.communityBadgeText, { color: colors.primary }]}
+                >
+                  Community
+                </Text>
+              </View>
+            )}
+            {!isCommunityPost && post.user?.verified && (
               <Ionicons
                 name="checkmark-circle"
                 size={14}
@@ -127,9 +157,12 @@ export const PostSearchResult: React.FC<PostSearchResultProps> = ({ post }) => {
             style={[styles.authorMeta, { color: colors.textSecondary }]}
             numberOfLines={1}
           >
-            @{displayHandle} • {formatTimeAgo(post.createdAt)}
+            {isCommunityPost
+              ? formatTimeAgo(post.createdAt)
+              : `@${displayHandle} • ${formatTimeAgo(post.createdAt)}`}
           </Text>
-        </TouchableOpacity>
+        </View>
+
         <TouchableOpacity
           style={styles.moreButton}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -227,6 +260,7 @@ const styles = StyleSheet.create({
   authorRow: { flexDirection: "row", alignItems: "center", marginBottom: 8 },
   avatarContainer: { marginRight: 10 },
   avatar: { width: 36, height: 36, borderRadius: 18 },
+  communityAvatar: { alignItems: "center", justifyContent: "center" },
   anonymousAvatar: {
     justifyContent: "center",
     alignItems: "center",
@@ -236,6 +270,15 @@ const styles = StyleSheet.create({
   authorInfo: { flex: 1 },
   nameRow: { flexDirection: "row", alignItems: "center", gap: 4 },
   authorName: { fontSize: 14, fontFamily: "SofiaSans-Bold" },
+  communityBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+  },
+  communityBadgeText: {
+    fontSize: 10,
+    fontFamily: "SofiaSans-SemiBold",
+  },
   authorMeta: { fontSize: 12, fontFamily: "SofiaSans-Regular", marginTop: 1 },
   moreButton: { padding: 4 },
   content: {

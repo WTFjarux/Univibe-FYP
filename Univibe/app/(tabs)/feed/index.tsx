@@ -117,6 +117,7 @@ export default function FeedScreen() {
     { id: "campus", label: "Campus" },
     { id: "connections", label: "Connections" },
     { id: "anonymous", label: "Anonymous" },
+    { id: "communities", label: "Communities" },
   ];
 
   const visiblePosts = currentFeed.posts;
@@ -239,7 +240,10 @@ export default function FeedScreen() {
   // Filter Change
   // ===========================================================================
   const handleFilterChange = (filterId: string) => {
-    if (token) switchFeed(filterId as "campus" | "connections" | "anonymous");
+    if (token)
+      switchFeed(
+        filterId as "campus" | "connections" | "anonymous" | "communities",
+      );
   };
 
   // ===========================================================================

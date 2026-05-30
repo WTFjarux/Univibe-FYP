@@ -84,6 +84,13 @@ const postSchema = new mongoose.Schema(
       default: "campus",
     },
 
+    community: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Community",
+      default: null,
+      index: true,
+    },
+    
     // === POST STATUS FLAGS ===
     isPinned: {
       type: Boolean,

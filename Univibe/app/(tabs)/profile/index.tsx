@@ -727,6 +727,26 @@ export default function ProfileScreen() {
           />
           <TouchableOpacity
             style={menuStyles.menuItem}
+            onPress={() => router.push("/screens/CommunitiesListScreen" as any)}
+            activeOpacity={0.7}
+          >
+            <View style={menuStyles.menuItemContent}>
+              <Ionicons name="people-outline" size={22} color={colors.icon} />
+              <Text style={[menuStyles.menuText, { color: colors.text }]}>
+                Communities
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={20}
+              color={colors.textMuted}
+            />
+          </TouchableOpacity>
+          <View
+            style={[menuStyles.divider, { backgroundColor: colors.border }]}
+          />
+          <TouchableOpacity
+            style={menuStyles.menuItem}
             onPress={handleOpenSettings}
             activeOpacity={0.7}
           >

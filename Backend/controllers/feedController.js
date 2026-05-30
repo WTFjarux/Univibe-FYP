@@ -3,6 +3,7 @@ const Post = require("../models/Post");
 const User = require("../models/User");
 const Profile = require("../models/Profile");
 const Comment = require("../models/Comment");
+const Community = require("../models/Community");
 const BlockService = require("../services/blockService");
 const { getAdminModel } = require("../config/database");
 
@@ -37,18 +38,66 @@ exports.getCampusFeed = async (req, res) => {
     const savedPostIds =
       currentUser?.savedPosts?.map((id) => id.toString()) || [];
     const userCampus = userProfile.campus;
-
     const excludedUserIds = [...new Set([...mutedUserIds, ...blockedUserIds])];
+
+    // ✅ Get IDs of private communities the user is a member of
+    const Community = require("../models/Community");
+    const userPrivateCommunities = await Community.find({
+      privacy: "private",
+      $or: [{ "members.user": currentUserId }, { admins: currentUserId }],
+    })
+      .select("_id")
+      .lean();
+
+    const userPrivateCommunityIds = userPrivateCommunities.map((c) => c._id);
+
+    // ✅ Get IDs of ALL private communities (to exclude posts from ones user hasn't joined)
+    const allPrivateCommunities = await Community.find({
+      privacy: "private",
+    })
+      .select("_id")
+      .lean();
+
+    const allPrivateCommunityIds = allPrivateCommunities.map((c) => c._id);
+
+    // ✅ Private communities the user is NOT a member of
+    const restrictedPrivateCommunityIds = allPrivateCommunityIds.filter(
+      (id) =>
+        !userPrivateCommunityIds.some(
+          (uid) => uid.toString() === id.toString(),
+        ),
+    );
+
+    console.log(
+      `🔒 User ${currentUserId}: member of ${userPrivateCommunityIds.length} private communities`,
+    );
+    console.log(
+      `🔒 Restricted private communities: ${restrictedPrivateCommunityIds.length}`,
+    );
 
     const query = {
       isDeleted: false,
       user: { $nin: excludedUserIds },
       _id: { $nin: hiddenPostIds },
+      // ✅ CRITICAL: Exclude posts from private communities the user hasn't joined
+      community: { $nin: restrictedPrivateCommunityIds },
       $or: [
-        { visibility: "campus", campus: userCampus },
-        { isAnonymous: true },
-        { visibility: "connections", user: { $in: connectionIds } },
-        { user: currentUserId },
+        // Non-community posts
+        {
+          community: null,
+          $or: [
+            { visibility: "campus", campus: userCampus },
+            { isAnonymous: true },
+            { visibility: "connections", user: { $in: connectionIds } },
+            { user: currentUserId },
+          ],
+        },
+        // Posts from communities (public or user's private) - now filtered by $nin above
+        {
+          community: { $ne: null },
+          visibility: "campus",
+          campus: userCampus,
+        },
       ],
     };
 
@@ -70,15 +119,43 @@ exports.getCampusFeed = async (req, res) => {
       ];
     }
 
+    console.log(
+      "🔍 Query:",
+      JSON.stringify({
+        community_nin_count: restrictedPrivateCommunityIds.length,
+      }),
+    );
+
     const posts = await Post.find(query)
       .sort({ createdAt: -1, _id: -1 })
       .limit(parseInt(limit) + 1)
       .populate("user", "name username email verified")
+      .populate("community", "name coverImage type privacy")
       .populate("likes", "name username")
       .lean();
 
-    const hasMore = posts.length > limit;
-    const paginatedPosts = hasMore ? posts.slice(0, limit) : posts;
+    // ✅ Double-check: filter out any private community posts the user shouldn't see
+    const filteredPosts = posts.filter((post) => {
+      if (!post.community) return true; // Not a community post
+      if (!post.community.privacy || post.community.privacy !== "private")
+        return true; // Public community
+
+      // Private community post - check if user is a member
+      const communityId = post.community._id.toString();
+      const isMember = userPrivateCommunityIds.some(
+        (id) => id.toString() === communityId,
+      );
+      return isMember;
+    });
+
+    console.log(
+      `📊 Posts: ${posts.length} total, ${filteredPosts.length} after filtering`,
+    );
+
+    const hasMore = filteredPosts.length > limit;
+    const paginatedPosts = hasMore
+      ? filteredPosts.slice(0, limit)
+      : filteredPosts;
 
     const [profilePictures, commentCounts, userReports] = await Promise.all([
       batchGetProfilePictures(paginatedPosts),
@@ -171,6 +248,7 @@ exports.getConnectionsFeed = async (req, res) => {
     const query = {
       isDeleted: false,
       isAnonymous: false,
+      community: null, // ✅ No community posts in connections feed
       user: { $in: validConnectionIds },
       _id: { $nin: hiddenPostIds },
       $or: [{ visibility: "campus" }, { visibility: "connections" }],
@@ -197,6 +275,7 @@ exports.getConnectionsFeed = async (req, res) => {
       .sort({ createdAt: -1, _id: -1 })
       .limit(parseInt(limit) + 1)
       .populate("user", "name username email verified")
+      .populate("community", "name coverImage")
       .populate("likes", "name username")
       .lean();
 
@@ -243,10 +322,9 @@ exports.getConnectionsFeed = async (req, res) => {
     });
   } catch (error) {
     console.error("Get connections feed error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch connections feed",
-    });
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to fetch connections feed" });
   }
 };
 
@@ -271,6 +349,7 @@ exports.getAnonymousFeed = async (req, res) => {
     const query = {
       isAnonymous: true,
       isDeleted: false,
+      community: null, // ✅ No community posts in anonymous feed
       _id: { $nin: hiddenPostIds },
       user: { $nin: blockedUserIds },
     };
@@ -292,6 +371,7 @@ exports.getAnonymousFeed = async (req, res) => {
       .sort({ createdAt: -1, _id: -1 })
       .limit(parseInt(limit) + 1)
       .populate("user", "name username email verified")
+      .populate("community", "name coverImage")
       .populate("likes", "name username")
       .lean();
 
@@ -338,10 +418,9 @@ exports.getAnonymousFeed = async (req, res) => {
     });
   } catch (error) {
     console.error("Get anonymous feed error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch anonymous feed",
-    });
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to fetch anonymous feed" });
   }
 };
 
@@ -423,7 +502,6 @@ function processPosts(
       const isLiked =
         post.likes?.some((like) => like._id?.toString() === currentUserIdStr) ||
         false;
-
       const isSaved = savedPostIds.includes(post._id.toString());
 
       return {
@@ -432,6 +510,7 @@ function processPosts(
         visibility: post.visibility,
         isAnonymous: post.isAnonymous,
         campus: post.campus,
+        community: post.community || null,
         images: post.images || [],
         tags: post.tags || [],
         likeCount: post.likes?.length || 0,

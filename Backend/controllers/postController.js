@@ -77,7 +77,7 @@ const getBlockFilter = async (userId) => {
 
 exports.createPost = async (req, res) => {
   try {
-    const { content, tags, visibility, isAnonymous } = req.body;
+    const { content, tags, visibility, isAnonymous, communityId } = req.body;
     const userId = req.user._id;
 
     const profile = await Profile.findOne({ user: userId });
@@ -104,7 +104,8 @@ exports.createPost = async (req, res) => {
       });
     }
 
-    const post = new Post({
+    // Build post data
+    let postData = {
       user: userId,
       content,
       images,
@@ -113,12 +114,25 @@ exports.createPost = async (req, res) => {
       visibility: visibility || "campus",
       isAnonymous: isAnonymous === "true" || isAnonymous === true,
       commentCount: 0,
-    });
+    };
 
+    // ✅ If community post, associate with community
+    if (communityId) {
+      const Community = require("../models/Community");
+      const community = await Community.findById(communityId);
+
+      if (community) {
+        postData.community = communityId;
+      }
+    }
+
+    const post = new Post(postData);
     await post.save();
 
+    // Populate the post for response
     const populatedPost = await Post.findById(post._id)
       .populate("user", "name username email verified")
+      .populate("community", "name coverImage type privacy memberCount")
       .lean();
 
     const userProfile = await Profile.findOne({ user: userId })
@@ -127,6 +141,20 @@ exports.createPost = async (req, res) => {
 
     populatedPost.user.profilePicture = userProfile?.profilePicture || null;
     populatedPost.isAnonymous = post.isAnonymous;
+
+    // ✅ Emit socket event if this is a community post
+    if (communityId) {
+      const io = req.app.get("io");
+      if (io) {
+        io.to(`community:${communityId}`).emit("community:new_post", {
+          communityId,
+          post: populatedPost,
+        });
+        console.log(
+          `📤 Emitted community:new_post to community:${communityId}`,
+        );
+      }
+    }
 
     res.status(201).json({
       success: true,
@@ -551,6 +579,7 @@ exports.getProfilePosts = async (req, res) => {
       user: userId,
       isAnonymous: false,
       isDeleted: false,
+      community: null,
     };
 
     if (!isOwnProfile && !isConnected) {
@@ -563,6 +592,7 @@ exports.getProfilePosts = async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit))
       .populate("user", "name username email verified")
+      .populate("community", "name coverImage")
       .populate("likes", "name username")
       .lean();
 
@@ -648,6 +678,7 @@ exports.getPostById = async (req, res) => {
 
     const post = await Post.findById(postId)
       .populate("user", "name username email verified")
+      .populate("community", "name coverImage")
       .populate("likes", "name username")
       .lean();
 

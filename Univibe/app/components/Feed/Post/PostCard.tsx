@@ -17,6 +17,7 @@ import {
   NativeSyntheticEvent,
   ImageSourcePropType,
   Pressable,
+  Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, usePathname } from "expo-router";
@@ -94,6 +95,9 @@ const PostCard: React.FC<PostCardProps> = ({
   const { user, profile } = useAuth();
   const { colors } = useTheme();
 
+  // Check if this is a community post
+  const isCommunityPost = !!post.community?.name;
+
   // ===== State Management =====
   const [optionsVisible, setOptionsVisible] = useState(false);
   const [isSaved, setIsSaved] = useState(post.isSaved || false);
@@ -149,7 +153,7 @@ const PostCard: React.FC<PostCardProps> = ({
     setIsReported(post.isReported || false);
   }, [post.isReported]);
 
-  // ===== Event Listeners with proper cleanup =====
+  // ===== Event Listeners =====
   useEffect(() => {
     const unsubComments = commentEvents.on(
       EVENTS.COMMENT_COUNT_CHANGED,
@@ -159,7 +163,6 @@ const PostCard: React.FC<PostCardProps> = ({
         }
       },
     );
-
     return () => {
       if (typeof unsubComments === "function") {
         unsubComments();
@@ -199,17 +202,25 @@ const PostCard: React.FC<PostCardProps> = ({
 
   const ownPost = isOwnPost();
 
-  const getUserNameForActions = useCallback((): string => {
+  const getDisplayName = useCallback((): string => {
+    if (isCommunityPost) return post.community!.name;
     if (post.isAnonymous) return "Anonymous";
     return post.user?.name || "User";
-  }, [post.isAnonymous, post.user?.name]);
+  }, [isCommunityPost, post.community, post.isAnonymous, post.user?.name]);
+
+  const getDisplayUsername = useCallback((): string => {
+    if (isCommunityPost) return post.community!.name;
+    if (post.isAnonymous) return "anonymous";
+    return post.user?.username || "user";
+  }, [isCommunityPost, post.community, post.isAnonymous, post.user?.username]);
 
   const getUserIdForNavigation = useCallback((): string | null => {
+    if (isCommunityPost) return null; // Community posts don't navigate to user profile
     if (post.isAnonymous && post.originalUser) {
       return String(post.originalUser._id);
     }
     return post.user?._id ? String(post.user._id) : null;
-  }, [post.isAnonymous, post.originalUser, post.user]);
+  }, [isCommunityPost, post.isAnonymous, post.originalUser, post.user]);
 
   // ===== Image Handling =====
   const postImages = useMemo(() => {
@@ -229,6 +240,7 @@ const PostCard: React.FC<PostCardProps> = ({
   }, [disableNavigation, isAlreadyOnPostDetail, post._id, router]);
 
   const handleUserPress = useCallback(() => {
+    if (isCommunityPost) return; // Don't navigate for community posts
     try {
       const userId = getUserIdForNavigation();
       if (!userId) return;
@@ -242,7 +254,20 @@ const PostCard: React.FC<PostCardProps> = ({
     } catch (error) {
       console.error("Navigation error in PostCard:", error);
     }
-  }, [currentUserId, getUserIdForNavigation, onProfilePress, router]);
+  }, [
+    isCommunityPost,
+    currentUserId,
+    getUserIdForNavigation,
+    onProfilePress,
+    router,
+  ]);
+
+  const handleCommunityPress = useCallback(() => {
+    if (!isCommunityPost || !post.community?._id) return;
+    router.push(
+      `/screens/CommunityScreen?communityId=${post.community._id}` as any,
+    );
+  }, [isCommunityPost, post.community?._id, router]);
 
   // ===== Image Carousel =====
   const handleScroll = useCallback(
@@ -268,31 +293,6 @@ const PostCard: React.FC<PostCardProps> = ({
     [containerWidth],
   );
 
-  // ===== Visibility Helpers =====
-  const visibilityIconName = useMemo((): IconName => {
-    const icons: Record<string, IconName> = {
-      campus: "school-outline",
-      connections: "people-outline",
-    };
-    return icons[post.visibility] || "globe-outline";
-  }, [post.visibility]);
-
-  const visibilityDisplayName = useMemo((): string => {
-    const names: Record<string, string> = {
-      campus: "Campus",
-      connections: "Connections",
-    };
-    return names[post.visibility] || "Public";
-  }, [post.visibility]);
-
-  const visibilityBadgeColor = useMemo((): string => {
-    const colors: Record<string, string> = {
-      campus: "#3b82f6",
-      connections: "#8b5cf6",
-    };
-    return colors[post.visibility] || "#9ca3af";
-  }, [post.visibility]);
-
   // ===== Action Handlers =====
   const handleMorePress = useCallback(() => {
     setOptionsVisible(true);
@@ -314,7 +314,7 @@ const PostCard: React.FC<PostCardProps> = ({
       isMuted: localIsMuted,
       isBlocked: localIsBlocked,
       userId: post.user?._id ?? undefined,
-      userName: getUserNameForActions(),
+      userName: getDisplayName(),
     }),
     [
       post._id,
@@ -325,7 +325,7 @@ const PostCard: React.FC<PostCardProps> = ({
       localIsHidden,
       localIsMuted,
       localIsBlocked,
-      getUserNameForActions,
+      getDisplayName,
     ],
   );
 
@@ -474,6 +474,57 @@ const PostCard: React.FC<PostCardProps> = ({
   const renderAvatar = useCallback(() => {
     const avatarSize = compact ? 28 : 40;
 
+    // Community post avatar
+    if (isCommunityPost) {
+      if (post.community?.coverImage) {
+        return (
+          <TouchableOpacity
+            onPress={(e) => {
+              e.stopPropagation();
+              handleCommunityPress();
+            }}
+            disabled={compact}
+          >
+            <Image
+              source={{ uri: getFullImageUrl(post.community.coverImage) }}
+              style={[
+                styles.postAvatar,
+                {
+                  width: avatarSize,
+                  height: avatarSize,
+                  borderRadius: avatarSize / 2,
+                },
+              ]}
+            />
+          </TouchableOpacity>
+        );
+      }
+      return (
+        <TouchableOpacity
+          onPress={(e) => {
+            e.stopPropagation();
+            handleCommunityPress();
+          }}
+          disabled={compact}
+        >
+          <View
+            style={[
+              styles.postAvatar,
+              styles.communityAvatar,
+              {
+                width: avatarSize,
+                height: avatarSize,
+                borderRadius: avatarSize / 2,
+              },
+            ]}
+          >
+            <Ionicons name="people" size={compact ? 14 : 20} color="#ffffff" />
+          </View>
+        </TouchableOpacity>
+      );
+    }
+
+    // Anonymous post avatar
     if (post.isAnonymous) {
       return (
         <View
@@ -496,6 +547,7 @@ const PostCard: React.FC<PostCardProps> = ({
       );
     }
 
+    // User avatar
     if (post.user) {
       if (post.user.profilePicture && !avatarError) {
         return (
@@ -552,6 +604,7 @@ const PostCard: React.FC<PostCardProps> = ({
       );
     }
 
+    // Default avatar
     return (
       <View
         style={[
@@ -569,17 +622,21 @@ const PostCard: React.FC<PostCardProps> = ({
         </Text>
       </View>
     );
-  }, [post.isAnonymous, post.user, avatarError, compact, handleUserPress]);
+  }, [
+    isCommunityPost,
+    post.isAnonymous,
+    post.user,
+    avatarError,
+    compact,
+    handleUserPress,
+  ]);
 
   // ===== MAIN RENDER =====
   return (
     <View
       style={[
         styles.postCard,
-        {
-          backgroundColor: colors.card,
-          borderBottomColor: colors.border,
-        },
+        { backgroundColor: colors.card, borderBottomColor: colors.border },
         compact && [styles.compactPostCard, { borderColor: colors.border }],
       ]}
       onLayout={(event) => setContainerWidth(event.nativeEvent.layout.width)}
@@ -591,52 +648,94 @@ const PostCard: React.FC<PostCardProps> = ({
             e.stopPropagation();
             handleUserPress();
           }}
-          disabled={compact}
+          disabled={compact || isCommunityPost}
         >
           {renderAvatar()}
         </Pressable>
 
         <View style={styles.postUserInfo}>
           <View style={styles.postUser}>
-            <Pressable
-              onPress={(e) => {
-                e.stopPropagation();
-                handleUserPress();
-              }}
-              disabled={compact || post.isAnonymous}
-            >
-              <Text
-                style={[
-                  styles.postUserName,
-                  { color: colors.text },
-                  compact && styles.compactUserName,
-                ]}
+            {isCommunityPost ? (
+              <Pressable
+                onPress={(e) => {
+                  e.stopPropagation();
+                  handleCommunityPress();
+                }}
               >
-                {getUserNameForActions()}
-              </Text>
-            </Pressable>
-            {post.user?.verified && !compact && (
+                <Text
+                  style={[
+                    styles.postUserName,
+                    { color: colors.text },
+                    compact && styles.compactUserName,
+                  ]}
+                >
+                  {getDisplayName()}
+                </Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={(e) => {
+                  e.stopPropagation();
+                  handleUserPress();
+                }}
+                disabled={compact || post.isAnonymous}
+              >
+                <Text
+                  style={[
+                    styles.postUserName,
+                    { color: colors.text },
+                    compact && styles.compactUserName,
+                  ]}
+                >
+                  {getDisplayName()}
+                </Text>
+              </Pressable>
+            )}
+            {post.user?.verified && !compact && !isCommunityPost && (
               <Ionicons name="checkmark-circle" size={16} color="#10b981" />
             )}
-            {!compact && (
+            {!compact && !isCommunityPost && (
               <View
                 style={[
                   styles.visibilityBadge,
-                  { backgroundColor: `${visibilityBadgeColor}15` },
+                  {
+                    backgroundColor: `${visibilityBadgeColor[post.visibility] || "#9ca3af"}15`,
+                  },
                 ]}
               >
                 <Ionicons
-                  name={visibilityIconName}
+                  name={visibilityIconName[post.visibility] || "globe-outline"}
                   size={12}
-                  color={visibilityBadgeColor}
+                  color={visibilityBadgeColor[post.visibility] || "#9ca3af"}
                 />
                 <Text
                   style={[
                     styles.visibilityBadgeText,
-                    { color: visibilityBadgeColor },
+                    {
+                      color: visibilityBadgeColor[post.visibility] || "#9ca3af",
+                    },
                   ]}
                 >
-                  {visibilityDisplayName}
+                  {visibilityDisplayName[post.visibility] || "Public"}
+                </Text>
+              </View>
+            )}
+            {isCommunityPost && (
+              <View
+                style={[
+                  styles.communityBadge,
+                  { backgroundColor: colors.primary + "15" },
+                ]}
+              >
+                <Ionicons
+                  name="people-outline"
+                  size={12}
+                  color={colors.primary}
+                />
+                <Text
+                  style={[styles.communityBadgeText, { color: colors.primary }]}
+                >
+                  Community
                 </Text>
               </View>
             )}
@@ -649,8 +748,9 @@ const PostCard: React.FC<PostCardProps> = ({
                 compact && styles.compactUserDetails,
               ]}
             >
-              @{post.isAnonymous ? "anonymous" : post.user?.username || "user"}
-              {!hideTime && ` • ${formatTimeAgo(post.createdAt)}`}
+              {isCommunityPost
+                ? `${formatTimeAgo(post.createdAt)}`
+                : `@${post.isAnonymous ? "anonymous" : post.user?.username || "user"}${!hideTime ? ` • ${formatTimeAgo(post.createdAt)}` : ""}`}
             </Text>
           </Pressable>
         </View>
@@ -800,6 +900,22 @@ const PostCard: React.FC<PostCardProps> = ({
   );
 };
 
+// ===== Visibility Helpers =====
+const visibilityIconName: Record<string, IconName> = {
+  campus: "school-outline",
+  connections: "people-outline",
+};
+
+const visibilityDisplayName: Record<string, string> = {
+  campus: "Campus",
+  connections: "Connections",
+};
+
+const visibilityBadgeColor: Record<string, string> = {
+  campus: "#3b82f6",
+  connections: "#8b5cf6",
+};
+
 // ===== Styles =====
 const styles = StyleSheet.create({
   postCard: {
@@ -851,6 +967,11 @@ const styles = StyleSheet.create({
     borderColor: "#e5e7eb",
     borderStyle: "dashed",
   },
+  communityAvatar: {
+    backgroundColor: "#8b5cf6",
+    justifyContent: "center",
+    alignItems: "center",
+  },
   postUserInfo: { flex: 1 },
   postUser: {
     flexDirection: "row",
@@ -881,6 +1002,19 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   visibilityBadgeText: { fontSize: 10, fontFamily: "SofiaSans-Regular" },
+  communityBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    marginLeft: 4,
+  },
+  communityBadgeText: {
+    fontSize: 11,
+    fontFamily: "SofiaSans-SemiBold",
+  },
   postContent: {
     fontSize: 15,
     lineHeight: 20,

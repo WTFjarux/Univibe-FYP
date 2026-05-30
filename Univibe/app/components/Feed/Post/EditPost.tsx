@@ -203,7 +203,6 @@ export default function EditPostScreen() {
         imageToRemove._id || imageToRemove.filename || imageToRemove.id;
       if (imageId && !imagesToRemove.includes(imageId)) {
         setImagesToRemove((prev) => [...prev, imageId]);
-        console.log("Marked for removal:", imageId);
       }
     }
 
@@ -233,7 +232,6 @@ export default function EditPostScreen() {
         imagesToRemove.forEach((imageId) => {
           formData.append("removeImages[]", imageId);
         });
-        console.log("Removing images:", imagesToRemove);
       }
 
       // Append new images
@@ -257,13 +255,6 @@ export default function EditPostScreen() {
         };
         formData.append("images", fileObject as any);
       }
-
-      console.log("Updating post with:", {
-        postId,
-        contentLength: content.length,
-        imagesToRemove: imagesToRemove.length,
-        newImagesCount: newImages.length,
-      });
 
       const response = await fetch(`${API_BASE_URL}/api/posts/${postId}`, {
         method: "PUT",

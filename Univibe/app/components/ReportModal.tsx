@@ -16,7 +16,7 @@ import { useTheme } from "../../lib/contexts/ThemeContext";
 interface ReportModalProps {
   visible: boolean;
   onClose: () => void;
-  targetType: "Post" | "Comment" | "User" | "Event";
+  targetType: "Post" | "Comment" | "User" | "Event" | "Community";
   targetId: string;
   targetName?: string;
   onReportSuccess?: () => void;
@@ -83,6 +83,7 @@ const TARGET_TYPE_LABELS: Record<string, string> = {
   Comment: "comment",
   User: "user",
   Event: "event",
+  Community: "community",
 };
 
 const ReportModal: React.FC<ReportModalProps> = ({

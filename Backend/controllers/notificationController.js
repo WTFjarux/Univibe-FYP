@@ -101,13 +101,16 @@ exports.getNotifications = async (req, res) => {
 
     const notifications = await Notification.find({ recipient: userId })
       .populate("sender", "name username email")
-      .sort({ lastInteractionAt: -1 }) // Changed from createdAt to lastInteractionAt
+      .sort({ lastInteractionAt: -1 })
       .skip(skip)
       .limit(parseInt(limit))
       .lean();
 
-    // Get profile pictures for senders
-    const senderIds = notifications.map((n) => n.sender._id);
+    // ✅ Get profile pictures for senders (handle null sender)
+    const senderIds = notifications
+      .filter((n) => n.sender != null && n.sender._id != null)
+      .map((n) => n.sender._id);
+
     const profiles = await Profile.find({ user: { $in: senderIds } })
       .select("user profilePicture fullName")
       .lean();
@@ -130,34 +133,42 @@ exports.getNotifications = async (req, res) => {
       }
     });
 
-    // Fetch profiles for likers
     let likerProfileMap = {};
     if (allLikerIds.length > 0) {
       const likerProfiles = await Profile.find({ user: { $in: allLikerIds } })
         .select("user profilePicture")
         .lean();
-
       likerProfiles.forEach((profile) => {
         likerProfileMap[profile.user.toString()] = profile.profilePicture;
       });
     }
 
     const enrichedNotifications = notifications.map((notification) => {
-      // Enrich sender
+      const senderId = notification.sender?._id?.toString();
+
+      // ✅ Handle null sender gracefully
       const enrichedNotification = {
         ...notification,
-        sender: {
-          ...notification.sender,
-          profilePicture:
-            profileMap[notification.sender._id.toString()]?.profilePicture ||
-            null,
-          fullName:
-            profileMap[notification.sender._id.toString()]?.fullName ||
-            notification.sender.name,
-        },
+        sender: notification.sender
+          ? {
+              ...notification.sender,
+              profilePicture: senderId
+                ? profileMap[senderId]?.profilePicture || null
+                : null,
+              fullName: senderId
+                ? profileMap[senderId]?.fullName || notification.sender.name
+                : notification.sender.name || "System",
+            }
+          : {
+              _id: null,
+              name: "System",
+              username: "system",
+              email: null,
+              profilePicture: null,
+              fullName: "System",
+            },
       };
 
-      // Enrich likers in metadata
       if (
         enrichedNotification.metadata?.isGrouped &&
         enrichedNotification.metadata?.likers
@@ -189,7 +200,7 @@ exports.getNotifications = async (req, res) => {
           page: parseInt(page),
           limit: parseInt(limit),
           total,
-          pages: Math.ceil(total / limit),
+          pages: Math.ceil(total / parseInt(limit)),
         },
       },
     });

@@ -6,8 +6,9 @@ import {
   PaginationInfo,
 } from "../lib/services/feedService";
 import { Post } from "../lib/services/postService";
+import { communityService } from "../lib/services/communityService";
 
-export type FeedType = "campus" | "connections" | "anonymous";
+export type FeedType = "campus" | "connections" | "anonymous" | "communities";
 
 interface FeedState {
   posts: Post[];
@@ -32,11 +33,11 @@ interface UseFeedReturn {
   refreshOnFocus: () => Promise<void>;
   forceRefresh: () => Promise<void>;
   markNeedsRefresh: () => void;
-  invalidateAllFeeds: () => Promise<void>; // ✅ ADD THIS to return type
+  invalidateAllFeeds: () => Promise<void>;
 }
 
-const REFRESH_COOLDOWN = 15 * 1000; // 15 seconds between refreshes
-const FOCUS_REFRESH_INTERVAL = 5 * 1000; // 5 seconds minimum between focus refreshes
+const REFRESH_COOLDOWN = 15 * 1000;
+const FOCUS_REFRESH_INTERVAL = 5 * 1000;
 
 export function useFeed(): UseFeedReturn {
   const [activeFeed, setActiveFeed] = useState<FeedType>("campus");
@@ -50,24 +51,28 @@ export function useFeed(): UseFeedReturn {
     campus: null,
     connections: null,
     anonymous: null,
+    communities: null,
   });
 
   const pagination = useRef<Record<FeedType, PaginationInfo>>({
     campus: { hasMore: true, nextCursor: null, limit: 10 },
     connections: { hasMore: true, nextCursor: null, limit: 10 },
     anonymous: { hasMore: true, nextCursor: null, limit: 10 },
+    communities: { hasMore: true, nextCursor: null, limit: 10 },
   });
 
   const lastRefreshTime = useRef<Record<FeedType, number>>({
     campus: 0,
     connections: 0,
     anonymous: 0,
+    communities: 0,
   });
 
   const [feeds, setFeeds] = useState<Record<FeedType, FeedState>>({
     campus: createInitialState(),
     connections: createInitialState(),
     anonymous: createInitialState(),
+    communities: createInitialState(),
   });
 
   useEffect(() => {
@@ -76,7 +81,6 @@ export function useFeed(): UseFeedReturn {
     };
   }, []);
 
-  // Initial fetch - runs once on mount
   useEffect(() => {
     if (!initialFetchDone.current) {
       initialFetchDone.current = true;
@@ -97,97 +101,160 @@ export function useFeed(): UseFeedReturn {
   }
 
   // ===========================================================================
-  // Silent fetch - no loading/refreshing indicators
+  // Fetch communities feed - combines posts from all joined communities
   // ===========================================================================
-  const fetchFeedSilent = useCallback(async (feedType: FeedType) => {
-    if (isFetching.current) return;
-    isFetching.current = true;
-
+  const fetchCommunitiesFeed = useCallback(async (): Promise<FeedResponse> => {
     try {
-      let response: FeedResponse;
-      switch (feedType) {
-        case "campus":
-          response = await feedService.getCampusFeed();
-          break;
-        case "connections":
-          response = await feedService.getConnectionsFeed();
-          break;
-        case "anonymous":
-          response = await feedService.getAnonymousFeed();
-          break;
-        default:
-          isFetching.current = false;
-          return;
+      const myCommunities = await communityService.getMyCommunities();
+      const communities = myCommunities.data || [];
+      const communityIds = communities.map((c: any) => c._id);
+
+      if (communityIds.length === 0) {
+        return {
+          success: true,
+          posts: [],
+          pagination: { hasMore: false, nextCursor: null, limit: 10 },
+        };
       }
 
-      if (!isMounted.current) {
-        isFetching.current = false;
-        return;
+      // Fetch posts from each community
+      const allPosts: Post[] = [];
+      for (const communityId of communityIds) {
+        try {
+          const feed = await communityService.getCommunityFeed(
+            communityId,
+            1,
+            10,
+          );
+          if (feed.success && feed.data) {
+            allPosts.push(...feed.data);
+          }
+        } catch (error) {
+          console.error(
+            `Error fetching feed for community ${communityId}:`,
+            error,
+          );
+        }
       }
 
-      cursors.current[feedType] = response.pagination.nextCursor;
-      pagination.current[feedType] = response.pagination;
-      lastRefreshTime.current[feedType] = Date.now();
+      // Sort by newest first
+      allPosts.sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
 
-      setFeeds((prev) => ({
-        ...prev,
-        [feedType]: {
-          ...prev[feedType],
-          posts: response.posts,
-          hasMore: response.pagination.hasMore,
-          error: null,
-          lastFetchedAt: Date.now(),
-          loading: false,
-          refreshing: false,
-          loadingMore: false,
-        },
-      }));
-    } catch (error: any) {
-      console.error(`❌ Error silent fetching ${feedType} feed:`, error);
-    } finally {
-      isFetching.current = false;
+      return {
+        success: true,
+        posts: allPosts,
+        pagination: { hasMore: false, nextCursor: null, limit: 10 },
+      };
+    } catch (error) {
+      console.error("fetchCommunitiesFeed error:", error);
+      return {
+        success: true,
+        posts: [],
+        pagination: { hasMore: false, nextCursor: null, limit: 10 },
+      };
     }
   }, []);
 
   // ===========================================================================
-  // Invalidate all feeds - called after content management actions
+  // Silent fetch
+  // ===========================================================================
+  const fetchFeedSilent = useCallback(
+    async (feedType: FeedType) => {
+      if (isFetching.current) return;
+      isFetching.current = true;
+
+      try {
+        let response: FeedResponse;
+
+        if (feedType === "communities") {
+          response = await fetchCommunitiesFeed();
+        } else {
+          switch (feedType) {
+            case "campus":
+              response = await feedService.getCampusFeed();
+              break;
+            case "connections":
+              response = await feedService.getConnectionsFeed();
+              break;
+            case "anonymous":
+              response = await feedService.getAnonymousFeed();
+              break;
+            default:
+              isFetching.current = false;
+              return;
+          }
+        }
+
+        if (!isMounted.current) {
+          isFetching.current = false;
+          return;
+        }
+
+        cursors.current[feedType] = response.pagination.nextCursor;
+        pagination.current[feedType] = response.pagination;
+        lastRefreshTime.current[feedType] = Date.now();
+
+        setFeeds((prev) => ({
+          ...prev,
+          [feedType]: {
+            ...prev[feedType],
+            posts: response.posts,
+            hasMore: response.pagination.hasMore,
+            error: null,
+            lastFetchedAt: Date.now(),
+            loading: false,
+            refreshing: false,
+            loadingMore: false,
+          },
+        }));
+      } catch (error: any) {
+        console.error(`Error silent fetching ${feedType} feed:`, error);
+      } finally {
+        isFetching.current = false;
+      }
+    },
+    [fetchCommunitiesFeed],
+  );
+
+  // ===========================================================================
+  // Invalidate all feeds
   // ===========================================================================
   const invalidateAllFeeds = useCallback(async () => {
-    console.log("🔄 Invalidating all feeds...");
     await feedService.invalidateCache();
 
-    // Reset cursors for all feed types
     cursors.current = {
       campus: null,
       connections: null,
       anonymous: null,
+      communities: null,
     };
 
-    // Reset pagination for all feed types
     pagination.current = {
       campus: { hasMore: true, nextCursor: null, limit: 10 },
       connections: { hasMore: true, nextCursor: null, limit: 10 },
       anonymous: { hasMore: true, nextCursor: null, limit: 10 },
+      communities: { hasMore: true, nextCursor: null, limit: 10 },
     };
 
-    // Mark needs refresh for all feeds
     needsRefresh.current = true;
 
-    // Also reset last refresh times to allow immediate refresh
     lastRefreshTime.current = {
       campus: 0,
       connections: 0,
       anonymous: 0,
+      communities: 0,
     };
 
-    // Force refresh the active feed silently
     if (activeFeed) {
       await fetchFeedSilent(activeFeed);
     }
   }, [activeFeed, fetchFeedSilent]);
 
   // ===========================================================================
-  // Normal fetch - with loading/refreshing indicators
+  // Normal fetch
   // ===========================================================================
   const fetchFeed = useCallback(
     async (
@@ -229,19 +296,23 @@ export function useFeed(): UseFeedReturn {
         let response: FeedResponse;
 
         if (mode === "refresh" || mode === "initial") {
-          switch (feedType) {
-            case "campus":
-              response = await feedService.getCampusFeed();
-              break;
-            case "connections":
-              response = await feedService.getConnectionsFeed();
-              break;
-            case "anonymous":
-              response = await feedService.getAnonymousFeed();
-              break;
-            default:
-              isFetching.current = false;
-              return;
+          if (feedType === "communities") {
+            response = await fetchCommunitiesFeed();
+          } else {
+            switch (feedType) {
+              case "campus":
+                response = await feedService.getCampusFeed();
+                break;
+              case "connections":
+                response = await feedService.getConnectionsFeed();
+                break;
+              case "anonymous":
+                response = await feedService.getAnonymousFeed();
+                break;
+              default:
+                isFetching.current = false;
+                return;
+            }
           }
 
           if (!isMounted.current) {
@@ -266,8 +337,21 @@ export function useFeed(): UseFeedReturn {
             },
           }));
         } else if (mode === "loadMore") {
-          const cursor = cursors.current[feedType];
+          // Communities doesn't support cursor pagination
+          if (feedType === "communities") {
+            setFeeds((prev) => ({
+              ...prev,
+              [feedType]: {
+                ...prev[feedType],
+                hasMore: false,
+                loadingMore: false,
+              },
+            }));
+            isFetching.current = false;
+            return;
+          }
 
+          const cursor = cursors.current[feedType];
           if (!cursor) {
             setFeeds((prev) => ({
               ...prev,
@@ -309,7 +393,6 @@ export function useFeed(): UseFeedReturn {
             const newPosts = response.posts.filter(
               (p) => !existingIds.has(p._id),
             );
-
             return {
               ...prev,
               [feedType]: {
@@ -325,13 +408,11 @@ export function useFeed(): UseFeedReturn {
           });
         }
       } catch (error: any) {
-        console.error(`❌ Error fetching ${feedType} feed:`, error);
-
+        console.error(`Error fetching ${feedType} feed:`, error);
         if (!isMounted.current) {
           isFetching.current = false;
           return;
         }
-
         setFeeds((prev) => ({
           ...prev,
           [feedType]: {
@@ -346,13 +427,12 @@ export function useFeed(): UseFeedReturn {
         isFetching.current = false;
       }
     },
-    [feeds],
+    [feeds, fetchCommunitiesFeed],
   );
 
   // ===========================================================================
   // Public API
   // ===========================================================================
-
   const switchFeed = useCallback(
     (feedType: FeedType) => {
       setActiveFeed(feedType);
@@ -368,14 +448,10 @@ export function useFeed(): UseFeedReturn {
     [feeds, fetchFeed],
   );
 
-  // Pull-to-refresh (visible indicator)
   const refresh = useCallback(async () => {
     const now = Date.now();
     const lastTime = lastRefreshTime.current[activeFeed];
-
-    if (now - lastTime < REFRESH_COOLDOWN) {
-      return;
-    }
+    if (now - lastTime < REFRESH_COOLDOWN) return;
 
     cursors.current[activeFeed] = null;
     pagination.current[activeFeed] = {
@@ -383,7 +459,9 @@ export function useFeed(): UseFeedReturn {
       nextCursor: null,
       limit: 10,
     };
-    await feedService.invalidateFeedCache(activeFeed);
+    if (activeFeed !== "communities") {
+      await feedService.invalidateFeedCache(activeFeed as any);
+    }
     await fetchFeed(activeFeed, "refresh");
   }, [activeFeed, fetchFeed]);
 
@@ -420,6 +498,12 @@ export function useFeed(): UseFeedReturn {
           posts: [post, ...updated.anonymous.posts],
         };
       }
+      if (post.community) {
+        updated.communities = {
+          ...updated.communities,
+          posts: [post, ...updated.communities.posts],
+        };
+      }
       return updated;
     });
   }, []);
@@ -453,11 +537,9 @@ export function useFeed(): UseFeedReturn {
     });
   }, []);
 
-  // Silent refresh on focus - no visible indicator
   const refreshOnFocus = useCallback(async () => {
     const now = Date.now();
     const lastTime = lastRefreshTime.current[activeFeed];
-
     if (now - lastTime > FOCUS_REFRESH_INTERVAL) {
       cursors.current[activeFeed] = null;
       pagination.current[activeFeed] = {
@@ -465,12 +547,13 @@ export function useFeed(): UseFeedReturn {
         nextCursor: null,
         limit: 10,
       };
-      await feedService.invalidateFeedCache(activeFeed);
+      if (activeFeed !== "communities") {
+        await feedService.invalidateFeedCache(activeFeed as any);
+      }
       await fetchFeedSilent(activeFeed);
     }
   }, [activeFeed, fetchFeedSilent]);
 
-  // Force refresh (visible indicator)
   const forceRefresh = useCallback(async () => {
     cursors.current[activeFeed] = null;
     pagination.current[activeFeed] = {
@@ -500,6 +583,6 @@ export function useFeed(): UseFeedReturn {
     refreshOnFocus,
     forceRefresh,
     markNeedsRefresh,
-    invalidateAllFeeds, // ✅ ADD THIS to return object
+    invalidateAllFeeds,
   };
 }
