@@ -1029,7 +1029,14 @@ exports.markRoomAsUnread = async (req, res) => {
 
 exports.sharePost = async (req, res) => {
   try {
-    const { postId, targetChatIds, comment } = req.body;
+    const {
+      postId,
+      targetChatIds,
+      comment,
+      postCommunityId,
+      postCommunityName,
+      postCommunityCoverImage,
+    } = req.body;
     const userId = req.user.id;
 
     if (
@@ -1128,15 +1135,19 @@ exports.sharePost = async (req, res) => {
             postAuthorId,
             postAuthorName: post.isAnonymous
               ? "Anonymous"
-              : post.user?.name || "Unknown",
+              : postCommunityName || post.user?.name || "Unknown",
             postAuthorUsername: post.isAnonymous
               ? "anonymous"
               : post.user?.username || "user",
             postAuthorAvatar: post.isAnonymous
               ? ""
-              : authorProfile?.profilePicture || "",
+              : postCommunityCoverImage || authorProfile?.profilePicture || "",
             isAnonymous: post.isAnonymous || false,
             postCreatedAt: post.createdAt,
+
+            postCommunityId: postCommunityId || null,
+            postCommunityName: postCommunityName || null,
+            postCommunityCoverImage: postCommunityCoverImage || null,
           },
           readBy: [{ user: userId, readAt: new Date() }],
           deliveredTo: [{ user: userId, deliveredAt: new Date() }],

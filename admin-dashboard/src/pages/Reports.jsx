@@ -16,6 +16,13 @@ import {
   AlertTriangle,
   MapPin,
   X,
+  Users,
+  Globe,
+  Lock,
+  Building2,
+  Image,
+  Hash,
+  BookOpen,
 } from "lucide-react";
 import {
   getReports,
@@ -169,9 +176,7 @@ function Reports() {
 
       const data = await response.json();
       if (data.success) {
-        // Refresh warnings
         await fetchUserWarnings(warnModal._id);
-        // Refresh reports and stats
         fetchReports();
         fetchStats();
         return data;
@@ -264,6 +269,20 @@ function Reports() {
         profilePicture: report.target.user.profilePicture || null,
         warningCount: report.target.user.warningCount || 0,
       };
+    }
+    // For Community reports, get the first admin
+    if (report.targetType === "Community") {
+      const admin = report.target?.admin || report.target?.admins?.[0];
+      if (admin) {
+        return {
+          _id: admin._id,
+          name: admin.name || "User",
+          username: admin.username || "",
+          email: admin.email || "",
+          profilePicture: admin.profilePicture || null,
+          warningCount: 0,
+        };
+      }
     }
     return {
       _id: report.targetId,
@@ -370,6 +389,7 @@ function Reports() {
       Comment: MessageSquare,
       User: User,
       Event: Calendar,
+      Community: Users,
     };
     const IconComponent = icons[type] || Flag;
     return <IconComponent size={16} />;
@@ -435,6 +455,8 @@ function Reports() {
     { value: "Post", label: "Posts" },
     { value: "Comment", label: "Comments" },
     { value: "User", label: "Users" },
+    { value: "Event", label: "Events" },
+    { value: "Community", label: "Communities" },
   ];
 
   return (
@@ -710,6 +732,7 @@ function Reports() {
               </button>
             </div>
             <div className="p-5 space-y-4">
+              {/* Post Target */}
               {selectedReport.targetType === "Post" && (
                 <div>
                   <p
@@ -735,6 +758,8 @@ function Reports() {
                   )}
                 </div>
               )}
+
+              {/* Comment Target */}
               {selectedReport.targetType === "Comment" && (
                 <div>
                   <p
@@ -759,6 +784,8 @@ function Reports() {
                   )}
                 </div>
               )}
+
+              {/* User Target */}
               {selectedReport.targetType === "User" &&
                 selectedReport.target && (
                   <div>
@@ -819,6 +846,330 @@ function Reports() {
                     </div>
                   </div>
                 )}
+
+              {/* Event Target */}
+              {selectedReport.targetType === "Event" &&
+                selectedReport.target && (
+                  <div>
+                    <p
+                      className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wider"
+                      style={{ fontFamily: "Sofia Sans" }}
+                    >
+                      REPORTED EVENT
+                    </p>
+                    <div className="bg-white rounded-xl border border-gray-200 p-4">
+                      <h3
+                        className="text-base font-bold text-gray-900 mb-2"
+                        style={{ fontFamily: "Sofia Sans" }}
+                      >
+                        {selectedReport.target.title}
+                      </h3>
+                      {selectedReport.target.description && (
+                        <p
+                          className="text-sm text-gray-600 mb-3 line-clamp-3"
+                          style={{ fontFamily: "Sofia Sans" }}
+                        >
+                          {selectedReport.target.description}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-4 text-xs text-gray-500">
+                        <span className="flex items-center gap-1">
+                          <Calendar size={12} />
+                          {new Date(
+                            selectedReport.target.startDate,
+                          ).toLocaleDateString()}
+                        </span>
+                        {selectedReport.target.location && (
+                          <span className="flex items-center gap-1">
+                            <MapPin size={12} />
+                            {selectedReport.target.location}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+              {/* Community Target */}
+              {selectedReport.targetType === "Community" &&
+                selectedReport.target && (
+                  <div>
+                    <p
+                      className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wider"
+                      style={{ fontFamily: "Sofia Sans" }}
+                    >
+                      REPORTED COMMUNITY
+                    </p>
+                    {!selectedReport.target.exists ? (
+                      <p
+                        className="text-sm text-gray-400 italic"
+                        style={{ fontFamily: "Sofia Sans" }}
+                      >
+                        This community has been deleted.
+                      </p>
+                    ) : (
+                      <div className="bg-white rounded-xl border border-gray-200 p-4">
+                        {/* Cover Image */}
+                        {selectedReport.target.coverImage ? (
+                          <div className="w-full h-32 rounded-lg overflow-hidden mb-3 bg-gray-100">
+                            <img
+                              src={
+                                selectedReport.target.coverImage.startsWith(
+                                  "http",
+                                )
+                                  ? selectedReport.target.coverImage
+                                  : `${API_BASE_URL}/${selectedReport.target.coverImage.replace(/^\/+/, "")}`
+                              }
+                              alt={selectedReport.target.name}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                e.target.style.display = "none";
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div className="w-full h-32 rounded-lg mb-3 bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center">
+                            <Users
+                              size={48}
+                              className="text-white opacity-50"
+                            />
+                          </div>
+                        )}
+
+                        {/* Community Info */}
+                        <div className="flex items-start gap-3">
+                          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center flex-shrink-0">
+                            <Users size={24} className="text-white" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              <p
+                                className="text-base font-bold text-gray-900"
+                                style={{ fontFamily: "Sofia Sans" }}
+                              >
+                                {selectedReport.target.name}
+                              </p>
+                              <span
+                                className={`text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1 ${
+                                  selectedReport.target.privacy === "private"
+                                    ? "bg-red-100 text-red-600"
+                                    : "bg-green-100 text-green-600"
+                                }`}
+                                style={{ fontFamily: "Sofia Sans" }}
+                              >
+                                {selectedReport.target.privacy === "private" ? (
+                                  <Lock size={10} />
+                                ) : (
+                                  <Globe size={10} />
+                                )}
+                                {selectedReport.target.privacy || "public"}
+                              </span>
+                              <span
+                                className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-600 capitalize font-medium flex items-center gap-1"
+                                style={{ fontFamily: "Sofia Sans" }}
+                              >
+                                <Building2 size={10} />
+                                {selectedReport.target.type || "general"}
+                              </span>
+                            </div>
+
+                            {/* Description */}
+                            {selectedReport.target.description && (
+                              <p
+                                className="text-sm text-gray-600 mt-2 line-clamp-3"
+                                style={{ fontFamily: "Sofia Sans" }}
+                              >
+                                {selectedReport.target.description}
+                              </p>
+                            )}
+
+                            {/* Tags */}
+                            {selectedReport.target.tags &&
+                              selectedReport.target.tags.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                  {selectedReport.target.tags.map(
+                                    (tag, idx) => (
+                                      <span
+                                        key={idx}
+                                        className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 flex items-center gap-0.5"
+                                        style={{ fontFamily: "Sofia Sans" }}
+                                      >
+                                        <Hash size={10} />#{tag}
+                                      </span>
+                                    ),
+                                  )}
+                                </div>
+                              )}
+
+                            {/* Rules count */}
+                            {selectedReport.target.rules &&
+                              selectedReport.target.rules.length > 0 && (
+                                <div className="flex items-center gap-1 mt-2 text-xs text-gray-500">
+                                  <BookOpen size={12} />
+                                  <span style={{ fontFamily: "Sofia Sans" }}>
+                                    {selectedReport.target.rules.length} rule
+                                    {selectedReport.target.rules.length > 1
+                                      ? "s"
+                                      : ""}
+                                  </span>
+                                </div>
+                              )}
+
+                            {/* Stats Row */}
+                            <div className="flex items-center gap-4 mt-3 text-xs text-gray-500">
+                              <span className="flex items-center gap-1">
+                                <Users size={12} />
+                                {selectedReport.target.memberCount || 0} members
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Shield size={12} />
+                                {selectedReport.target.approvalStatus ||
+                                  "approved"}
+                              </span>
+                            </div>
+
+                            {/* Admin Info */}
+                            {selectedReport.target.admin && (
+                              <div className="mt-3 pt-3 border-t border-gray-100">
+                                <p
+                                  className="text-xs font-semibold text-gray-500 mb-2"
+                                  style={{ fontFamily: "Sofia Sans" }}
+                                >
+                                  COMMUNITY ADMIN
+                                </p>
+                                <div className="flex items-center gap-3">
+                                  {/* Admin Avatar */}
+                                  {selectedReport.target.admin
+                                    .profilePicture ? (
+                                    <img
+                                      src={
+                                        selectedReport.target.admin.profilePicture.startsWith(
+                                          "http",
+                                        )
+                                          ? selectedReport.target.admin
+                                              .profilePicture
+                                          : `${API_BASE_URL}/${selectedReport.target.admin.profilePicture.replace(/^\/+/, "")}`
+                                      }
+                                      alt={selectedReport.target.admin.name}
+                                      className="w-10 h-10 rounded-full object-cover border-2 border-purple-200"
+                                      onError={(e) => {
+                                        e.target.style.display = "none";
+                                      }}
+                                    />
+                                  ) : (
+                                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center border-2 border-purple-200">
+                                      <span className="text-white text-sm font-bold">
+                                        {selectedReport.target.admin.name
+                                          ?.charAt(0)
+                                          ?.toUpperCase() || "A"}
+                                      </span>
+                                    </div>
+                                  )}
+                                  <div>
+                                    <span
+                                      className="text-sm font-medium text-gray-700"
+                                      style={{ fontFamily: "Sofia Sans" }}
+                                    >
+                                      {selectedReport.target.admin.name ||
+                                        "Unknown"}
+                                    </span>
+                                    <span
+                                      className="text-xs text-gray-400 ml-2"
+                                      style={{ fontFamily: "Sofia Sans" }}
+                                    >
+                                      @
+                                      {selectedReport.target.admin.username ||
+                                        "unknown"}
+                                    </span>
+                                    {selectedReport.target.admin.email && (
+                                      <p
+                                        className="text-xs text-gray-400 mt-0.5"
+                                        style={{ fontFamily: "Sofia Sans" }}
+                                      >
+                                        {selectedReport.target.admin.email}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Moderators */}
+                            {selectedReport.target.moderators &&
+                              selectedReport.target.moderators.length > 0 && (
+                                <div className="mt-3 pt-3 border-t border-gray-100">
+                                  <p
+                                    className="text-xs font-semibold text-gray-500 mb-2"
+                                    style={{ fontFamily: "Sofia Sans" }}
+                                  >
+                                    MODERATORS (
+                                    {selectedReport.target.moderators.length})
+                                  </p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {selectedReport.target.moderators
+                                      .slice(0, 5)
+                                      .map((mod, idx) => (
+                                        <div
+                                          key={idx}
+                                          className="flex items-center gap-2 bg-blue-50 rounded-full px-3 py-1.5"
+                                        >
+                                          {mod.profilePicture ? (
+                                            <img
+                                              src={
+                                                mod.profilePicture.startsWith(
+                                                  "http",
+                                                )
+                                                  ? mod.profilePicture
+                                                  : `${API_BASE_URL}/${mod.profilePicture.replace(/^\/+/, "")}`
+                                              }
+                                              alt={mod.name}
+                                              className="w-5 h-5 rounded-full object-cover"
+                                              onError={(e) => {
+                                                e.target.style.display = "none";
+                                              }}
+                                            />
+                                          ) : (
+                                            <div className="w-5 h-5 rounded-full bg-blue-200 flex items-center justify-center">
+                                              <span className="text-blue-600 text-xs font-bold">
+                                                {mod.name
+                                                  ?.charAt(0)
+                                                  ?.toUpperCase() || "M"}
+                                              </span>
+                                            </div>
+                                          )}
+                                          <span
+                                            className="text-xs text-blue-600 font-medium"
+                                            style={{ fontFamily: "Sofia Sans" }}
+                                          >
+                                            {mod.name ||
+                                              mod.username ||
+                                              "Moderator"}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    {selectedReport.target.moderators.length >
+                                      5 && (
+                                      <span
+                                        className="text-xs px-3 py-1.5 rounded-full bg-gray-100 text-gray-500 flex items-center"
+                                        style={{ fontFamily: "Sofia Sans" }}
+                                      >
+                                        +
+                                        {selectedReport.target.moderators
+                                          .length - 5}{" "}
+                                        more
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+              {/* Report Reason */}
               {selectedReport.description && (
                 <div className="p-3 bg-red-50 rounded-xl border border-red-100">
                   <p
@@ -835,6 +1186,8 @@ function Reports() {
                   </p>
                 </div>
               )}
+
+              {/* Resolution Info (for resolved/dismissed) */}
               {selectedReport.status === "resolved" ||
               selectedReport.status === "dismissed" ? (
                 <div className="p-4 bg-gray-50 rounded-xl border border-gray-200">

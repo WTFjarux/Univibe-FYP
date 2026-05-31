@@ -1,6 +1,7 @@
 // src/components/posts/PostCard.jsx
 
-import { Heart, MessageCircle, Flag, MapPin, Eye } from "lucide-react";
+import { Heart, MessageCircle, Flag, MapPin, Eye, Users } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import UserAvatar from "../users/UserAvatar";
 import API_BASE_URL from "../../config";
 
@@ -14,6 +15,7 @@ function PostCard({
   actionLoading = false,
   fallbackUser = null,
 }) {
+  const navigate = useNavigate();
   const effectiveUser = post.user?.name ? post.user : fallbackUser;
 
   const formatTimeAgo = (date) => {
@@ -160,12 +162,46 @@ function PostCard({
   };
 
   const isDeleted = post.isDeleted || false;
+  const hasCommunity =
+    post.community &&
+    (post.community._id ||
+      post.community.name ||
+      typeof post.community === "string");
+  const communityName =
+    typeof post.community === "object" ? post.community?.name : "Community";
+  const communityCoverImage =
+    typeof post.community === "object" ? post.community?.coverImage : null;
+  const communityId =
+    typeof post.community === "object" ? post.community?._id : post.community;
+
+  // For community posts, show community as the "author"
   const userName = post.isAnonymous
     ? "Anonymous"
-    : effectiveUser?.name || "Unknown User";
+    : hasCommunity
+      ? communityName || "Community"
+      : effectiveUser?.name || "Unknown User";
+
   const userUsername = post.isAnonymous
     ? "anonymous"
-    : effectiveUser?.username || "user";
+    : hasCommunity
+      ? ""
+      : effectiveUser?.username || "user";
+
+  const handleUserClick = (e) => {
+    e.stopPropagation();
+    if (post.isAnonymous) return;
+    if (hasCommunity && communityId) {
+      navigate(`/communities/${communityId}`);
+    } else if (effectiveUser?._id) {
+      navigate(`/users/${effectiveUser._id}`);
+    }
+  };
+
+  const getCommunityCoverUrl = (url) => {
+    if (!url) return null;
+    if (url.startsWith("http")) return url;
+    return `${API_BASE_URL}/${url.replace(/^\/+/, "")}`;
+  };
 
   return (
     <div
@@ -174,40 +210,84 @@ function PostCard({
       } ${
         isDeleted
           ? "border-red-200 bg-red-50/30"
-          : "border-gray-100 hover:border-gray-200"
+          : hasCommunity
+            ? "border-purple-200 bg-purple-50/10"
+            : "border-gray-100 hover:border-gray-200"
       }`}
     >
       <div className="flex items-start gap-4">
-        {/* Avatar */}
-        {post.isAnonymous ? (
-          <div
-            className={`${compact ? "w-9 h-9" : "w-10 h-10"} rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 border border-dashed border-gray-300`}
-          >
-            <Eye size={compact ? 16 : 18} className="text-gray-400" />
-          </div>
-        ) : (
-          <UserAvatar
-            user={effectiveUser}
-            size={compact ? "md" : "sm"}
-            gradient="from-purple-500 to-purple-600"
-          />
-        )}
+        {/* Avatar / Community Cover */}
+        <div
+          onClick={handleUserClick}
+          className={`${post.isAnonymous ? "" : "cursor-pointer"} flex-shrink-0`}
+        >
+          {post.isAnonymous ? (
+            <div
+              className={`${compact ? "w-9 h-9" : "w-10 h-10"} rounded-full bg-gray-100 flex items-center justify-center border border-dashed border-gray-300`}
+            >
+              <Eye size={compact ? 16 : 18} className="text-gray-400" />
+            </div>
+          ) : hasCommunity ? (
+            // ✅ Community Cover Image or Icon
+            communityCoverImage ? (
+              <img
+                src={getCommunityCoverUrl(communityCoverImage)}
+                alt={communityName}
+                className={`${compact ? "w-9 h-9" : "w-10 h-10"} rounded-full object-cover border-2 border-purple-300`}
+                onError={(e) => {
+                  e.target.style.display = "none";
+                  e.target.nextSibling.style.display = "flex";
+                }}
+              />
+            ) : null
+          ) : (
+            <UserAvatar
+              user={effectiveUser}
+              size={compact ? "md" : "sm"}
+              gradient="from-purple-500 to-purple-600"
+            />
+          )}
+          {/* Fallback for community when no cover image */}
+          {hasCommunity && !communityCoverImage && (
+            <div
+              className={`${compact ? "w-9 h-9" : "w-10 h-10"} rounded-full bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center border-2 border-purple-300`}
+              style={{ display: communityCoverImage ? "none" : "flex" }}
+            >
+              <Users size={compact ? 16 : 18} className="text-white" />
+            </div>
+          )}
+        </div>
 
         <div className="flex-1 min-w-0">
           {/* Header */}
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span
-              className={`font-semibold text-gray-900 ${compact ? "text-sm" : "text-sm"}`}
+              onClick={handleUserClick}
+              className={`font-semibold text-gray-900 hover:text-purple-600 transition-colors ${compact ? "text-sm" : "text-sm"} ${post.isAnonymous ? "" : "cursor-pointer"}`}
               style={{ fontFamily: "Sofia Sans" }}
             >
               {userName}
             </span>
-            <span
-              className={`text-gray-400 ${compact ? "text-xs" : "text-xs"}`}
-              style={{ fontFamily: "Sofia Sans" }}
-            >
-              @{userUsername}
-            </span>
+            {!post.isAnonymous && !hasCommunity && (
+              <span
+                onClick={handleUserClick}
+                className={`text-gray-400 hover:text-purple-500 transition-colors cursor-pointer ${compact ? "text-xs" : "text-xs"}`}
+                style={{ fontFamily: "Sofia Sans" }}
+              >
+                @{userUsername}
+              </span>
+            )}
+            {/* Community badge */}
+            {hasCommunity && (
+              <span
+                onClick={handleUserClick}
+                className={`${compact ? "text-[11px] px-1.5 py-0.5" : "text-xs px-2 py-0.5"} rounded-full bg-purple-100 text-purple-600 font-medium flex items-center gap-1 cursor-pointer hover:bg-purple-200 transition-colors`}
+                style={{ fontFamily: "Sofia Sans" }}
+              >
+                <Users size={compact ? 9 : 10} />
+                Community Post
+              </span>
+            )}
             {post.visibility && (
               <span
                 className={`${compact ? "text-[11px] px-1.5 py-0.5" : "text-xs px-2 py-0.5"} rounded-full flex items-center gap-1`}
@@ -234,6 +314,15 @@ function PostCard({
                 Deleted
               </span>
             )}
+            {/* Show actual author for community posts */}
+            {hasCommunity && !post.isAnonymous && effectiveUser?.name && (
+              <span
+                className={`text-gray-400 ${compact ? "text-[11px]" : "text-xs"}`}
+                style={{ fontFamily: "Sofia Sans" }}
+              >
+                by {effectiveUser.name}
+              </span>
+            )}
           </div>
 
           <div
@@ -241,6 +330,7 @@ function PostCard({
             style={{ fontFamily: "Sofia Sans" }}
           >
             <span>{formatTimeAgo(post.createdAt)}</span>
+            {post.isEdited && <span>• Edited</span>}
           </div>
 
           {/* Content */}

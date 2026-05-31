@@ -8,6 +8,7 @@ const Profile = require("../../models/Profile");
 const Post = require("../../models/Post");
 const Comment = require("../../models/Comment");
 const Event = require("../../models/Event");
+const Community = require("../../models/Community");
 const { getIO } = require("../../config/socketInstance");
 
 // GET REPORTS
@@ -352,6 +353,7 @@ async function fetchTargetDetails(reports) {
               "title description startDate endDate location organizer organizerName category status approvalStatus isFeatured",
             )
             .populate("organizer", "name username email")
+            
             .lean();
           const foundEventIds = new Set(events.map((e) => e._id.toString()));
 
@@ -388,6 +390,153 @@ async function fetchTargetDetails(reports) {
                 status: "cancelled",
                 approvalStatus: "rejected",
                 isFeatured: false,
+                exists: false,
+              });
+            }
+          });
+          break;
+        }
+
+        case "Community": {
+          const communities = await Community.find({ _id: { $in: idArray } })
+            .select(
+              "name description type privacy memberCount coverImage admins members approvalStatus rules tags createdAt isActive",
+            )
+            .lean();
+
+          const foundCommunityIds = new Set(
+            communities.map((c) => c._id.toString()),
+          );
+
+          // Fetch admin details
+          const adminIds = communities
+            .flatMap((c) => c.admins || [])
+            .filter(Boolean);
+
+          const [admins, adminProfiles] = await Promise.all([
+            adminIds.length > 0
+              ? User.find({ _id: { $in: adminIds } })
+                  .select("name username email")
+                  .lean()
+              : [],
+            adminIds.length > 0
+              ? Profile.find({ user: { $in: adminIds } })
+                  .select("user profilePicture")
+                  .lean()
+              : [],
+          ]);
+
+          const adminMap = {};
+          admins.forEach((admin) => {
+            adminMap[admin._id.toString()] = admin;
+          });
+
+          const adminProfileMap = {};
+          adminProfiles.forEach((p) => {
+            if (p.user)
+              adminProfileMap[p.user.toString()] = p.profilePicture || null;
+          });
+
+          // Get moderator details from members array
+          const moderatorUserIds = communities
+            .flatMap((c) =>
+              (c.members || [])
+                .filter((m) => m.role === "moderator")
+                .map((m) => m.user),
+            )
+            .filter(Boolean);
+
+          const [moderators, moderatorProfiles] = await Promise.all([
+            moderatorUserIds.length > 0
+              ? User.find({ _id: { $in: moderatorUserIds } })
+                  .select("name username email")
+                  .lean()
+              : [],
+            moderatorUserIds.length > 0
+              ? Profile.find({ user: { $in: moderatorUserIds } })
+                  .select("user profilePicture")
+                  .lean()
+              : [],
+          ]);
+
+          const moderatorMap = {};
+          moderators.forEach((mod) => {
+            moderatorMap[mod._id.toString()] = mod;
+          });
+
+          const moderatorProfileMap = {};
+          moderatorProfiles.forEach((p) => {
+            if (p.user)
+              moderatorProfileMap[p.user.toString()] = p.profilePicture || null;
+          });
+
+          communities.forEach((community) => {
+            // Map admin IDs to user objects with profile pictures
+            const communityAdmins = (community.admins || []).map((adminId) => {
+              const id = adminId.toString();
+              const user = adminMap[id];
+              return {
+                _id: adminId,
+                name: user?.name || "Unknown",
+                username: user?.username || "unknown",
+                email: user?.email || "",
+                profilePicture: adminProfileMap[id] || null,
+              };
+            });
+
+            // Map moderator user IDs to user objects with profile pictures
+            const communityModerators = (community.members || [])
+              .filter((m) => m.role === "moderator")
+              .map((m) => {
+                const userId = m.user.toString();
+                const user = moderatorMap[userId];
+                return {
+                  _id: m.user,
+                  name: user?.name || "Unknown",
+                  username: user?.username || "unknown",
+                  email: user?.email || "",
+                  profilePicture: moderatorProfileMap[userId] || null,
+                };
+              });
+
+            detailsMap.set(`Community_${community._id}`, {
+              _id: community._id,
+              name: community.name || "",
+              description: community.description || "",
+              type: community.type || "general",
+              privacy: community.privacy || "public",
+              memberCount: community.memberCount || 0,
+              coverImage: community.coverImage || null,
+              admin: communityAdmins[0] || null, // First admin
+              admins: communityAdmins, // All admins with profile pictures
+              moderators: communityModerators, // Moderators with profile pictures
+              rules: community.rules || [],
+              tags: community.tags || [],
+              approvalStatus: community.approvalStatus || "approved",
+              createdAt: community.createdAt,
+              isDeleted: !community.isActive,
+              exists: true,
+            });
+          });
+
+          idArray.forEach((id) => {
+            if (!foundCommunityIds.has(id.toString())) {
+              detailsMap.set(`Community_${id}`, {
+                _id: id,
+                name: "Deleted Community",
+                description: "",
+                type: "general",
+                privacy: "public",
+                memberCount: 0,
+                coverImage: null,
+                admin: null,
+                admins: [],
+                moderators: [],
+                rules: [],
+                tags: [],
+                approvalStatus: "deleted",
+                createdAt: null,
+                isDeleted: true,
                 exists: false,
               });
             }
@@ -465,6 +614,13 @@ const resolveReport = async (req, res) => {
             .lean();
           targetUserId = event?.organizer;
           break;
+        case "Community":
+          const community = await Community.findById(report.targetId)
+            .select("admins")
+            .lean();
+          // Get the first admin as the target user
+          targetUserId = community?.admins?.[0] || null;
+          break;
       }
     }
 
@@ -518,7 +674,7 @@ const resolveReport = async (req, res) => {
         title: "Report Resolved",
         message: `Your report has been reviewed and resolved.`,
         targetId: report._id,
-        targetModel: "Post",
+        targetModel: "Report",
         metadata: {
           reportId: report._id,
           resolution,
@@ -604,7 +760,6 @@ async function handleContentRemoval(report, req) {
         if (comment && !comment.isDeleted) {
           comment.isDeleted = true;
           comment.deletedAt = new Date();
-          // REMOVE: comment.content = "[removed by moderator]";
           await comment.save();
           const actualCount = await Comment.countDocuments({
             post: comment.post,
@@ -641,6 +796,51 @@ async function handleContentRemoval(report, req) {
             targetId: event._id,
             targetModel: "Event",
           });
+        }
+        break;
+      }
+      case "Community": {
+        const community = await Community.findById(report.targetId);
+        if (community) {
+          // Soft delete using isActive field
+          community.isActive = false;
+          community.approvalStatus = "rejected";
+          community.rejectionReason =
+            report.resolutionNote || "Removed due to report";
+          await community.save();
+
+          // Notify all admins
+          if (community.admins && community.admins.length > 0) {
+            const adminNotifications = community.admins.map((adminId) => ({
+              recipient: adminId,
+              sender: req.user._id,
+              type: "community_removed",
+              title: "Community Removed",
+              message: `Your community "${community.name}" was removed: ${report.resolutionNote || "Violation of community guidelines"}`,
+              targetId: community._id,
+              targetModel: "Community",
+            }));
+            await Notification.insertMany(adminNotifications);
+          }
+
+          // Get moderator IDs from members array
+          const moderatorIds = (community.members || [])
+            .filter((m) => m.role === "moderator")
+            .map((m) => m.user);
+
+          // Notify all moderators
+          if (moderatorIds.length > 0) {
+            const moderatorNotifications = moderatorIds.map((modId) => ({
+              recipient: modId,
+              sender: req.user._id,
+              type: "community_removed",
+              title: "Community Removed",
+              message: `The community "${community.name}" (where you were a moderator) was removed: ${report.resolutionNote || "Violation of community guidelines"}`,
+              targetId: community._id,
+              targetModel: "Community",
+            }));
+            await Notification.insertMany(moderatorNotifications);
+          }
         }
         break;
       }
@@ -828,7 +1028,7 @@ const dismissReport = async (req, res) => {
   try {
     const { id } = req.params;
     const { reason } = req.body;
-    console.log(`🔍 Dismissing report ${id} with reason: ${reason}`); // Debug
+    console.log(`🔍 Dismissing report ${id} with reason: ${reason}`);
 
     const Report = getAdminModel("Report");
     const report = await Report.findById(id);

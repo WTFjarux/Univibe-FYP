@@ -14,6 +14,7 @@ import Comments from "./pages/Comments";
 import Events from "./pages/Events";
 import Users from "./pages/Users";
 import Communities from "./pages/Communities";
+import CommunityDetailPage from "./pages/CommunityDetailPage"; // ✅ ADDED
 import UserDetailPage from "./pages/UserDetailPage";
 import Reports from "./pages/Reports";
 import AdminLayout from "./components/layout/AdminLayout";
@@ -128,6 +129,11 @@ function App() {
           <Route path="/users/:userId" element={<UserDetailPage />} />
           <Route path="/events" element={<Events />} />
           <Route path="/communities" element={<Communities />} />
+          <Route
+            path="/communities/:communityId"
+            element={<CommunityDetailPage />}
+          />{" "}
+          {/* ✅ ADDED */}
           <Route path="/reports" element={<Reports />} />
           <Route path="/settings" element={<Settings />} />
         </Route>

@@ -1,5 +1,5 @@
-// app/events/create.tsx - Simplified version
-import React, { useState } from "react";
+// app/events/create.tsx - Updated with communityId support and visibility logic
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -12,13 +12,13 @@ import {
   Platform,
   KeyboardAvoidingView,
   Keyboard,
-  TouchableWithoutFeedback,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/lib/contexts/ThemeContext";
 import { eventService } from "@/lib/services/eventService";
+import { communityService } from "@/lib/services/communityService";
 import {
   DatePickerModal,
   TimePickerModal,
@@ -42,6 +42,10 @@ export default function CreateEventScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const [loading, setLoading] = useState(false);
+  const [communityInfo, setCommunityInfo] = useState<any>(null);
+
+  // ✅ Get communityId from route params
+  const { communityId } = useLocalSearchParams<{ communityId?: string }>();
 
   // Form State
   const [title, setTitle] = useState("");
@@ -72,6 +76,49 @@ export default function CreateEventScreen() {
   );
   const [tempEndHour, setTempEndHour] = useState(endDate.getHours());
   const [tempEndMinute, setTempEndMinute] = useState(endDate.getMinutes());
+
+  // ✅ Fetch community info to determine visibility
+  useEffect(() => {
+    if (communityId) {
+      fetchCommunityInfo();
+    }
+  }, [communityId]);
+
+  const fetchCommunityInfo = async () => {
+    try {
+      console.log("🔍 Fetching community info for:", communityId);
+      const response = await communityService.getCommunity(
+        communityId as string,
+      );
+      console.log("📋 Community response:", JSON.stringify(response, null, 2));
+
+      if (response.success && response.data) {
+        const communityData = response.data as any; // Use type assertion
+        setCommunityInfo(communityData);
+        console.log("✅ Community info:", {
+          name: communityData.name,
+          type: communityData.type,
+          privacy: communityData.privacy,
+        });
+
+        // ✅ Set visibility based on community type and privacy
+        if (communityData.type === "department") {
+          console.log("📌 Department - setting visibility to campus");
+          setVisibility("campus");
+        } else if (communityData.privacy === "private") {
+          console.log("📌 Private community - setting visibility to community");
+          setVisibility("community");
+        } else {
+          console.log("📌 Public community - setting visibility to campus");
+          setVisibility("campus");
+        }
+      } else {
+        console.log("❌ Failed to fetch community:", response.message);
+      }
+    } catch (error) {
+      console.error("Error fetching community info:", error);
+    }
+  };
 
   const formatDate = (date: Date) =>
     date.toLocaleDateString("en-US", {
@@ -181,6 +228,16 @@ export default function CreateEventScreen() {
       formData.append("isOnline", String(isOnline));
       if (meetingLink) formData.append("meetingLink", meetingLink);
       if (tags) formData.append("tags", tags);
+
+      // ✅ Pass communityId if creating event for a community
+      if (communityId) {
+        formData.append("communityId", communityId);
+        console.log("📤 Creating community event:", {
+          communityId,
+          visibility,
+        });
+      }
+
       images.forEach((image) => {
         formData.append("images", {
           uri: image.uri,
@@ -203,6 +260,30 @@ export default function CreateEventScreen() {
     }
   };
 
+  // ✅ Get visibility options based on context
+  const getVisibilityOptions = () => {
+    if (communityId && communityInfo?.privacy === "private") {
+      // Private community - only community visibility
+      return [{ value: "community", label: "Community", icon: "people" }];
+    }
+    if (communityId && communityInfo?.type === "department") {
+      // Department - only campus visibility
+      return [{ value: "campus", label: "Campus", icon: "school-outline" }];
+    }
+    if (communityId) {
+      // Public community - campus and community visibility
+      return [
+        { value: "campus", label: "Campus", icon: "school-outline" },
+        { value: "community", label: "Community", icon: "people" },
+      ];
+    }
+    return [
+      { value: "campus", label: "Campus", icon: "school-outline" },
+      { value: "connections", label: "Connections", icon: "people-outline" },
+    ];
+  };
+  const visibilityOptions = getVisibilityOptions();
+
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: colors.background }]}
@@ -216,7 +297,7 @@ export default function CreateEventScreen() {
             <Ionicons name="close" size={28} color={colors.text} />
           </TouchableOpacity>
           <Text style={[styles.headerTitle, { color: colors.text }]}>
-            Create Event
+            {communityId ? "Create Community Event" : "Create Event"}
           </Text>
           <TouchableOpacity
             style={[
@@ -527,15 +608,7 @@ export default function CreateEventScreen() {
               Visibility
             </Text>
             <View style={styles.visibilityContainer}>
-              {[
-                { value: "campus", label: "Campus", icon: "business-outline" },
-                {
-                  value: "connections",
-                  label: "Connections",
-                  icon: "people-outline",
-                },
-                { value: "public", label: "Public", icon: "globe-outline" },
-              ].map((v) => (
+              {visibilityOptions.map((v) => (
                 <TouchableOpacity
                   key={v.value}
                   style={[
@@ -570,6 +643,17 @@ export default function CreateEventScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+            {communityId && (
+              <Text
+                style={[styles.visibilityNote, { color: colors.textMuted }]}
+              >
+                {communityInfo?.privacy === "private"
+                  ? "Events in private communities are only visible to community members"
+                  : communityInfo?.type === "department"
+                    ? "Department events are visible to the campus"
+                    : "Community events can be visible to the campus or community only"}
+              </Text>
+            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -705,4 +789,10 @@ const styles = StyleSheet.create({
   visibilityOptionActive: {},
   visibilityText: { fontSize: 14, fontFamily: "SofiaSans-Regular" },
   visibilityTextActive: { color: "#fff", fontFamily: "SofiaSans-Bold" },
+  visibilityNote: {
+    fontSize: 12,
+    marginTop: 8,
+    fontFamily: "SofiaSans-Regular",
+    textAlign: "center",
+  },
 });

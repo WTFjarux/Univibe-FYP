@@ -40,63 +40,84 @@ exports.getCampusFeed = async (req, res) => {
     const userCampus = userProfile.campus;
     const excludedUserIds = [...new Set([...mutedUserIds, ...blockedUserIds])];
 
-    // ✅ Get IDs of private communities the user is a member of
-    const Community = require("../models/Community");
-    const userPrivateCommunities = await Community.find({
-      privacy: "private",
+    // ✅ Get ALL communities the user is a member of
+    const userCommunities = await Community.find({
       $or: [{ "members.user": currentUserId }, { admins: currentUserId }],
     })
-      .select("_id")
+      .select("_id privacy")
       .lean();
 
-    const userPrivateCommunityIds = userPrivateCommunities.map((c) => c._id);
+    const userCommunityIds = userCommunities.map((c) => c._id);
+    const userPrivateCommunityIds = userCommunities
+      .filter((c) => c.privacy === "private")
+      .map((c) => c._id);
 
-    // ✅ Get IDs of ALL private communities (to exclude posts from ones user hasn't joined)
+    // ✅ Get private communities the user is NOT a member of
     const allPrivateCommunities = await Community.find({
       privacy: "private",
+      _id: {
+        $nin:
+          userPrivateCommunityIds.length > 0 ? userPrivateCommunityIds : [null],
+      },
     })
       .select("_id")
       .lean();
 
-    const allPrivateCommunityIds = allPrivateCommunities.map((c) => c._id);
-
-    // ✅ Private communities the user is NOT a member of
-    const restrictedPrivateCommunityIds = allPrivateCommunityIds.filter(
-      (id) =>
-        !userPrivateCommunityIds.some(
-          (uid) => uid.toString() === id.toString(),
-        ),
-    );
-
-    console.log(
-      `🔒 User ${currentUserId}: member of ${userPrivateCommunityIds.length} private communities`,
-    );
-    console.log(
-      `🔒 Restricted private communities: ${restrictedPrivateCommunityIds.length}`,
+    const restrictedPrivateCommunityIds = allPrivateCommunities.map(
+      (c) => c._id,
     );
 
     const query = {
       isDeleted: false,
       user: { $nin: excludedUserIds },
       _id: { $nin: hiddenPostIds },
-      // ✅ CRITICAL: Exclude posts from private communities the user hasn't joined
-      community: { $nin: restrictedPrivateCommunityIds },
-      $or: [
-        // Non-community posts
+      $and: [
+        // ✅ Global: Exclude posts from private communities user hasn't joined
         {
-          community: null,
           $or: [
-            { visibility: "campus", campus: userCampus },
-            { isAnonymous: true },
-            { visibility: "connections", user: { $in: connectionIds } },
-            { user: currentUserId },
+            { community: null },
+            {
+              community: {
+                $nin:
+                  restrictedPrivateCommunityIds.length > 0
+                    ? restrictedPrivateCommunityIds
+                    : [null],
+              },
+            },
           ],
         },
-        // Posts from communities (public or user's private) - now filtered by $nin above
+        // ✅ Visibility rules
         {
-          community: { $ne: null },
-          visibility: "campus",
-          campus: userCampus,
+          $or: [
+            // Non-community posts
+            {
+              community: null,
+              $or: [
+                { visibility: "campus", campus: userCampus },
+                { isAnonymous: true },
+                { visibility: "connections", user: { $in: connectionIds } },
+                { user: currentUserId },
+              ],
+            },
+            // Community posts - campus visibility
+            {
+              community: { $ne: null },
+              visibility: "campus",
+              campus: userCampus,
+            },
+            // Community posts - community visibility (only user's communities)
+            {
+              community: {
+                $in: userCommunityIds.length > 0 ? userCommunityIds : [null],
+              },
+              visibility: "community",
+            },
+            // User's own community posts (always visible to author)
+            {
+              community: { $ne: null },
+              user: currentUserId,
+            },
+          ],
         },
       ],
     };
@@ -109,22 +130,13 @@ exports.getCampusFeed = async (req, res) => {
           error: "Invalid cursor. Post not found.",
         });
       }
-      query.$and = [
-        {
-          $or: [
-            { createdAt: { $lt: cursorPost.createdAt } },
-            { createdAt: cursorPost.createdAt, _id: { $lt: cursor } },
-          ],
-        },
-      ];
+      query.$and.push({
+        $or: [
+          { createdAt: { $lt: cursorPost.createdAt } },
+          { createdAt: cursorPost.createdAt, _id: { $lt: cursor } },
+        ],
+      });
     }
-
-    console.log(
-      "🔍 Query:",
-      JSON.stringify({
-        community_nin_count: restrictedPrivateCommunityIds.length,
-      }),
-    );
 
     const posts = await Post.find(query)
       .sort({ createdAt: -1, _id: -1 })
@@ -134,28 +146,8 @@ exports.getCampusFeed = async (req, res) => {
       .populate("likes", "name username")
       .lean();
 
-    // ✅ Double-check: filter out any private community posts the user shouldn't see
-    const filteredPosts = posts.filter((post) => {
-      if (!post.community) return true; // Not a community post
-      if (!post.community.privacy || post.community.privacy !== "private")
-        return true; // Public community
-
-      // Private community post - check if user is a member
-      const communityId = post.community._id.toString();
-      const isMember = userPrivateCommunityIds.some(
-        (id) => id.toString() === communityId,
-      );
-      return isMember;
-    });
-
-    console.log(
-      `📊 Posts: ${posts.length} total, ${filteredPosts.length} after filtering`,
-    );
-
-    const hasMore = filteredPosts.length > limit;
-    const paginatedPosts = hasMore
-      ? filteredPosts.slice(0, limit)
-      : filteredPosts;
+    const hasMore = posts.length > limit;
+    const paginatedPosts = hasMore ? posts.slice(0, limit) : posts;
 
     const [profilePictures, commentCounts, userReports] = await Promise.all([
       batchGetProfilePictures(paginatedPosts),
@@ -248,7 +240,7 @@ exports.getConnectionsFeed = async (req, res) => {
     const query = {
       isDeleted: false,
       isAnonymous: false,
-      community: null, // ✅ No community posts in connections feed
+      community: null,
       user: { $in: validConnectionIds },
       _id: { $nin: hiddenPostIds },
       $or: [{ visibility: "campus" }, { visibility: "connections" }],
@@ -349,7 +341,7 @@ exports.getAnonymousFeed = async (req, res) => {
     const query = {
       isAnonymous: true,
       isDeleted: false,
-      community: null, // ✅ No community posts in anonymous feed
+      community: null,
       _id: { $nin: hiddenPostIds },
       user: { $nin: blockedUserIds },
     };

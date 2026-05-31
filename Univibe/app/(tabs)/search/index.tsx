@@ -425,8 +425,12 @@ export default function SearchScreen() {
         </View>
       );
     }
+    // Add bottom spacer when no more results
+    if (!hasMorePages() && currentResults.length > 0) {
+      return <View style={styles.endOfListSpacer} />;
+    }
     return null;
-  }, [isLoading, currentResults.length, colors]);
+  }, [isLoading, currentResults.length, hasMorePages, colors]);
 
   if (isInitialLoading) {
     return (
@@ -530,7 +534,7 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Bold",
   },
   listContent: {
-    paddingBottom: 40,
+    paddingBottom: 80, // Increased from 40 to 80 for better bottom spacing
   },
   emptyListContent: {
     flexGrow: 1,
@@ -617,6 +621,9 @@ const styles = StyleSheet.create({
   },
   categoriesWrapper: {
     marginBottom: 16,
+  },
+  endOfListSpacer: {
+    height: 80, // Extra spacer at the end of the list
   },
   bottomPadding: {
     height: 100,

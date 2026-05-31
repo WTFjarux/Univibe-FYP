@@ -35,12 +35,13 @@ const communitySchema = new mongoose.Schema(
       default: "public",
       validate: {
         validator: function (value) {
-          if (this.type === "department" && value !== "private") {
+          // ✅ Departments must be public
+          if (this.type === "department" && value !== "public") {
             return false;
           }
           return true;
         },
-        message: "Departments must be private",
+        message: "Departments must be public", 
       },
     },
 

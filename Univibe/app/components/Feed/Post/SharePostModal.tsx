@@ -17,7 +17,6 @@ import {
   Dimensions,
   Keyboard,
   Animated,
-  TouchableWithoutFeedback,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import chatApi from "../../../../lib/services/chatApi";
@@ -40,6 +39,10 @@ interface SharePostModalProps {
   postAuthorAvatar?: string;
   isAnonymous?: boolean;
   currentRoomId?: string;
+  // ✅ Community fields
+  postCommunityId?: string;
+  postCommunityName?: string;
+  postCommunityCoverImage?: string;
 }
 
 export default function SharePostModal({
@@ -53,6 +56,9 @@ export default function SharePostModal({
   postAuthorAvatar,
   isAnonymous = false,
   currentRoomId,
+  postCommunityId,
+  postCommunityName,
+  postCommunityCoverImage,
 }: SharePostModalProps) {
   const { token } = useAuth();
   const { colors } = useTheme();
@@ -80,11 +86,7 @@ export default function SharePostModal({
       setIsKeyboardVisible(false);
       setIsMessageFocused(false);
       fetchChats();
-
-      // Reset animations
       messageSlideAnim.setValue(0);
-
-      // Animate modal in
       Animated.spring(slideAnim, {
         toValue: 0,
         useNativeDriver: true,
@@ -92,7 +94,6 @@ export default function SharePostModal({
         friction: 11,
       }).start();
     } else {
-      // Animate modal out
       Animated.timing(slideAnim, {
         toValue: SCREEN_HEIGHT,
         duration: 250,
@@ -107,8 +108,6 @@ export default function SharePostModal({
       (e) => {
         setKeyboardHeight(e.endCoordinates.height);
         setIsKeyboardVisible(true);
-
-        // Only animate message input up if it's focused
         if (isMessageFocused) {
           Animated.timing(messageSlideAnim, {
             toValue: e.endCoordinates.height,
@@ -118,11 +117,9 @@ export default function SharePostModal({
         }
       },
     );
-
     const keyboardWillHide = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
       () => {
-        // Always animate message input back down
         Animated.timing(messageSlideAnim, {
           toValue: 0,
           duration: 250,
@@ -133,7 +130,6 @@ export default function SharePostModal({
         });
       },
     );
-
     return () => {
       keyboardWillShow.remove();
       keyboardWillHide.remove();
@@ -151,7 +147,6 @@ export default function SharePostModal({
           if (chat.type === "direct" && chat.lastMessage) return true;
           return false;
         });
-
         setChats(filteredChats || []);
       }
     } catch (error) {
@@ -194,10 +189,14 @@ export default function SharePostModal({
 
     setSharing(true);
     try {
+      // ✅ Pass community fields to the API
       const response = await chatApi.sharePost(
         postId,
         Array.from(selectedChats),
         message,
+        postCommunityId,
+        postCommunityName,
+        postCommunityCoverImage,
       );
 
       if (response.success) {
@@ -221,31 +220,19 @@ export default function SharePostModal({
 
   const getAvatarSource = (chat: ChatRoom) => {
     const isGroup = chat.type === "group";
-
     if (isGroup && chat.groupPhoto) {
       const uri = getFullImageUrl(chat.groupPhoto);
-      if (!avatarErrors.has(chat.roomId)) {
-        return { uri };
-      }
+      if (!avatarErrors.has(chat.roomId)) return { uri };
     }
-
     if (!isGroup && chat.otherUserAvatar) {
       const uri = getFullImageUrl(chat.otherUserAvatar);
-      if (!avatarErrors.has(chat.roomId)) {
-        return { uri };
-      }
+      if (!avatarErrors.has(chat.roomId)) return { uri };
     }
-
     return null;
-  };
-
-  const dismissKeyboard = () => {
-    Keyboard.dismiss();
   };
 
   const handleMessageFocus = () => {
     setIsMessageFocused(true);
-    // If keyboard is already visible (from search), animate message up
     if (isKeyboardVisible && keyboardHeight > 0) {
       Animated.timing(messageSlideAnim, {
         toValue: keyboardHeight,
@@ -255,9 +242,7 @@ export default function SharePostModal({
     }
   };
 
-  const handleMessageBlur = () => {
-    setIsMessageFocused(false);
-  };
+  const handleMessageBlur = () => setIsMessageFocused(false);
 
   const renderChat = ({ item }: { item: ChatRoom }) => {
     const isSelected = selectedChats.has(item.roomId);
@@ -279,7 +264,6 @@ export default function SharePostModal({
             </View>
           </View>
         )}
-
         <View
           style={[styles.avatarWrapper, isSelected && styles.avatarSelected]}
         >
@@ -307,7 +291,6 @@ export default function SharePostModal({
             </View>
           )}
         </View>
-
         <Text
           style={[styles.chatName, { color: colors.text }]}
           numberOfLines={1}
@@ -338,7 +321,6 @@ export default function SharePostModal({
           activeOpacity={1}
           onPress={onClose}
         />
-
         <Animated.View
           style={[
             styles.container,
@@ -364,7 +346,7 @@ export default function SharePostModal({
             </View>
           </View>
 
-          {/* Search Bar */}
+          {/* Search */}
           <View
             style={[styles.searchContainer, { backgroundColor: colors.card }]}
           >
@@ -391,7 +373,6 @@ export default function SharePostModal({
             )}
           </View>
 
-          {/* Selected count */}
           {selectedChats.size > 0 && (
             <View style={styles.selectedCount}>
               <Text
@@ -402,7 +383,6 @@ export default function SharePostModal({
             </View>
           )}
 
-          {/* Chat Grid */}
           {loading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color={colors.primary} />
@@ -436,7 +416,7 @@ export default function SharePostModal({
             />
           )}
 
-          {/* Message Input & Send Button */}
+          {/* Message Input & Send */}
           <Animated.View
             style={[
               styles.bottomSection,
@@ -468,7 +448,6 @@ export default function SharePostModal({
                 onBlur={handleMessageBlur}
               />
             </View>
-
             <TouchableOpacity
               style={[
                 styles.sendButton,

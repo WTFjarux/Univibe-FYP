@@ -26,21 +26,27 @@ import {
   Post,
   getFullImageUrl,
 } from "../../../../lib/services/postService";
+import {
+  communityService,
+  getFullImageUrl as getCommunityFullImageUrl,
+} from "../../../../lib/services/communityService";
 import { API_BASE_URL } from "../../../../constants/ipConstants";
 import DiscardChangesModal from "../../DiscardChangesModal";
 
 const { width } = Dimensions.get("window");
 
+type Visibility = "campus" | "connections" | "community";
+
 export default function EditPostScreen() {
   const router = useRouter();
   const { postId } = useLocalSearchParams<{ postId: string }>();
-  const { token } = useAuth();
+  const { token, profile, user } = useAuth();
   const { colors } = useTheme();
 
   // State
   const [post, setPost] = useState<Post | null>(null);
   const [content, setContent] = useState("");
-  const [visibility, setVisibility] = useState("campus");
+  const [visibility, setVisibility] = useState<Visibility>("campus");
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [images, setImages] = useState<any[]>([]);
   const [imagesToRemove, setImagesToRemove] = useState<string[]>([]);
@@ -48,23 +54,44 @@ export default function EditPostScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
 
-  // Track original values to detect changes
+  // Community state
+  const [community, setCommunity] = useState<any>(null);
+  const [loadingCommunity, setLoadingCommunity] = useState(false);
+
+  // Track original values
   const [originalContent, setOriginalContent] = useState("");
   const [originalVisibility, setOriginalVisibility] = useState("");
   const [originalIsAnonymous, setOriginalIsAnonymous] = useState(false);
   const [originalImageIds, setOriginalImageIds] = useState<string[]>([]);
 
-  // Visibility options
-  const visibilityOptions = [
-    { id: "campus", label: "Campus", icon: "school-outline" },
-    { id: "connections", label: "Connections", icon: "people-outline" },
-  ];
+  const isCommunityPost = !!post?.community?.name || !!post?.community;
 
   useEffect(() => {
     if (postId && token) {
       fetchPost();
     }
   }, [postId, token]);
+
+  // Fetch community info if community post
+  useEffect(() => {
+    if (post && isCommunityPost && post.community?._id) {
+      fetchCommunity(post.community._id);
+    }
+  }, [post, isCommunityPost]);
+
+  const fetchCommunity = async (communityId: string) => {
+    setLoadingCommunity(true);
+    try {
+      const result = await communityService.getCommunity(communityId);
+      if (result.success && result.data) {
+        setCommunity(result.data);
+      }
+    } catch (error) {
+      console.error("Failed to load community:", error);
+    } finally {
+      setLoadingCommunity(false);
+    }
+  };
 
   const fetchPost = async () => {
     try {
@@ -73,10 +100,9 @@ export default function EditPostScreen() {
 
       setPost(postData);
       setContent(postData.content);
-      setVisibility(postData.visibility);
+      setVisibility(postData.visibility as Visibility);
       setIsAnonymous(postData.isAnonymous || false);
 
-      // Process existing images with full URLs
       const processedImages = (postData.images || []).map(
         (img: any, index: number) => ({
           ...img,
@@ -89,11 +115,9 @@ export default function EditPostScreen() {
 
       setImages(processedImages);
 
-      // Store original image IDs for comparison
       const imageIds = processedImages.map((img) => img.id);
       setOriginalImageIds(imageIds);
 
-      // Store original values
       setOriginalContent(postData.content);
       setOriginalVisibility(postData.visibility);
       setOriginalIsAnonymous(postData.isAnonymous || false);
@@ -118,18 +142,15 @@ export default function EditPostScreen() {
     if (visibility !== originalVisibility) return true;
     if (isAnonymous !== originalIsAnonymous) return true;
 
-    // Check if images were removed
     const currentImageIds = images
       .filter((img) => img.isExisting)
       .map((img) => img.id);
     if (currentImageIds.length !== originalImageIds.length) return true;
 
-    // Check if image order or content changed
     for (let i = 0; i < currentImageIds.length; i++) {
       if (currentImageIds[i] !== originalImageIds[i]) return true;
     }
 
-    // Check if new images were added
     if (images.filter((img) => !img.isExisting).length > 0) return true;
 
     return false;
@@ -152,7 +173,6 @@ export default function EditPostScreen() {
     try {
       const { status } =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
-
       if (status !== "granted") {
         Alert.alert(
           "Permission needed",
@@ -195,18 +215,13 @@ export default function EditPostScreen() {
 
   const removeImage = (index: number) => {
     const imageToRemove = images[index];
-
-    // If it's an existing image, mark for removal from server
     if (imageToRemove.isExisting) {
-      // Use _id or filename to identify the image to remove
       const imageId =
         imageToRemove._id || imageToRemove.filename || imageToRemove.id;
       if (imageId && !imagesToRemove.includes(imageId)) {
         setImagesToRemove((prev) => [...prev, imageId]);
       }
     }
-
-    // Remove from local state
     setImages((prev) => prev.filter((_, i) => i !== index));
   };
 
@@ -220,21 +235,16 @@ export default function EditPostScreen() {
 
     try {
       const formData = new FormData();
-
-      // Append text data
       formData.append("content", content.trim());
       formData.append("visibility", visibility);
       formData.append("isAnonymous", isAnonymous.toString());
 
-      // Append images to remove - send as array
       if (imagesToRemove.length > 0) {
-        // Send each image ID separately or as JSON string
         imagesToRemove.forEach((imageId) => {
           formData.append("removeImages[]", imageId);
         });
       }
 
-      // Append new images
       const newImages = images.filter((img) => !img.isExisting);
       for (let i = 0; i < newImages.length; i++) {
         const image = newImages[i];
@@ -258,9 +268,7 @@ export default function EditPostScreen() {
 
       const response = await fetch(`${API_BASE_URL}/api/posts/${postId}`, {
         method: "PUT",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
 
@@ -281,29 +289,63 @@ export default function EditPostScreen() {
     }
   };
 
-  const getVisibilityIcon = (option: string) => {
+  // Visibility helpers
+  const getVisibilityIcon = (
+    option: Visibility,
+  ): keyof typeof Ionicons.glyphMap => {
     switch (option) {
       case "campus":
         return "school-outline";
       case "connections":
         return "people-outline";
+      case "community":
+        return "people";
       default:
         return "globe-outline";
     }
   };
 
-  const getVisibilityLabel = (option: string) => {
+  const getVisibilityLabel = (option: Visibility): string => {
     switch (option) {
       case "campus":
         return "Campus";
       case "connections":
         return "Connections";
+      case "community":
+        return "Community";
       default:
         return "Campus";
     }
   };
 
-  if (loading) {
+  const getVisibilityOptions = (): Visibility[] => {
+    if (isCommunityPost && community) {
+      if (community.privacy === "private" || community.type === "department") {
+        return community.privacy === "private" ? ["community"] : ["campus"];
+      }
+      return ["campus", "community"];
+    }
+    if (isAnonymous) return ["campus"];
+    return ["campus", "connections"];
+  };
+
+  const getDisplayName = (): string => {
+    if (isCommunityPost && community) return community.name;
+    if (post?.community?.name) return post.community.name;
+    if (isAnonymous) return "Anonymous";
+    if (profile?.fullName) return profile.fullName;
+    if (user?.name) return user.name;
+    return "You";
+  };
+
+  const getSubtitle = (): string => {
+    if (isCommunityPost) return `Posted by ${user?.name || "Admin"}`;
+    if (isAnonymous) return "Hidden identity";
+    if (profile?.username) return `@${profile.username}`;
+    return "@user";
+  };
+
+  if (loading || loadingCommunity) {
     return (
       <SafeAreaView
         style={[styles.container, { backgroundColor: colors.background }]}
@@ -333,7 +375,7 @@ export default function EditPostScreen() {
             <Ionicons name="close" size={28} color={colors.text} />
           </TouchableOpacity>
           <Text style={[styles.headerTitle, { color: colors.text }]}>
-            Edit Post
+            {isCommunityPost ? "Edit Community Post" : "Edit Post"}
           </Text>
           <TouchableOpacity
             style={[
@@ -355,8 +397,109 @@ export default function EditPostScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Content Area */}
+        {/* Content */}
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+          {/* User / Community Info Row */}
+          <View style={styles.userInfo}>
+            {isCommunityPost ? (
+              community?.coverImage ? (
+                <Image
+                  source={{
+                    uri: getCommunityFullImageUrl(community.coverImage),
+                  }}
+                  style={[styles.avatar, { backgroundColor: colors.skeleton }]}
+                />
+              ) : (
+                <View
+                  style={[
+                    styles.avatar,
+                    styles.communityAvatar,
+                    { backgroundColor: colors.primary + "30" },
+                  ]}
+                >
+                  <Ionicons name="people" size={20} color={colors.primary} />
+                </View>
+              )
+            ) : isAnonymous ? (
+              <View
+                style={[
+                  styles.avatar,
+                  styles.anonymousAvatar,
+                  {
+                    backgroundColor: colors.skeleton,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="eye-off"
+                  size={20}
+                  color={colors.textSecondary}
+                />
+              </View>
+            ) : null}
+
+            <View style={styles.userTextContainer}>
+              <Text style={[styles.userName, { color: colors.text }]}>
+                {getDisplayName()}
+              </Text>
+              <Text
+                style={[styles.userHandle, { color: colors.textSecondary }]}
+              >
+                {getSubtitle()}
+              </Text>
+            </View>
+
+            {/* Anonymous Toggle - Only for non-community posts */}
+            {!isCommunityPost && (
+              <TouchableOpacity
+                style={styles.anonymousToggleRight}
+                onPress={() => handleAnonymousToggle(!isAnonymous)}
+                disabled={submitting}
+              >
+                <View
+                  style={[
+                    styles.toggleContainerRight,
+                    { backgroundColor: colors.textMuted },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.toggleCircleRight,
+                      isAnonymous && styles.toggleCircleRightActive,
+                    ]}
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.toggleTextRight,
+                    { color: colors.textSecondary },
+                    isAnonymous && [
+                      styles.toggleTextRightActive,
+                      { color: colors.text },
+                    ],
+                  ]}
+                >
+                  {isAnonymous ? "Anonymous ON" : "Post anonymously"}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Anonymous warning */}
+          {isAnonymous && !isCommunityPost && (
+            <View style={styles.anonymousWarning}>
+              <Ionicons
+                name="information-circle-outline"
+                size={16}
+                color="#f59e0b"
+              />
+              <Text style={styles.anonymousWarningText}>
+                Your identity will be hidden from other users.
+              </Text>
+            </View>
+          )}
+
           {/* Text Input */}
           <TextInput
             style={[styles.input, { color: colors.text }]}
@@ -368,13 +511,11 @@ export default function EditPostScreen() {
             editable={!submitting}
             placeholderTextColor={colors.textMuted}
           />
-
-          {/* Character Count */}
           <Text style={[styles.charCount, { color: colors.textMuted }]}>
             {content.length}/500
           </Text>
 
-          {/* Images Section */}
+          {/* Images */}
           <View style={styles.imagesContainer}>
             <Text style={[styles.imagesTitle, { color: colors.text }]}>
               Photos ({images.length}/4)
@@ -393,16 +534,6 @@ export default function EditPostScreen() {
                   >
                     <Ionicons name="close-circle" size={24} color="#fff" />
                   </TouchableOpacity>
-                  {images.length > 1 && (
-                    <View style={styles.imageNumber}>
-                      <Text style={styles.imageNumberText}>{index + 1}</Text>
-                    </View>
-                  )}
-                  {image.isExisting && (
-                    <View style={styles.existingBadge}>
-                      <Text style={styles.existingBadgeText}>Existing</Text>
-                    </View>
-                  )}
                 </View>
               ))}
               {images.length < 4 && (
@@ -421,7 +552,7 @@ export default function EditPostScreen() {
             </View>
           </View>
 
-          {/* Visibility Options */}
+          {/* Visibility Section */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>
               Who can see this?
@@ -433,62 +564,45 @@ export default function EditPostScreen() {
                   ]}
                 >
                   {" "}
-                  (Campus only for anonymous posts)
+                  (Campus only)
                 </Text>
               )}
             </Text>
             <View style={styles.visibilityOptions}>
-              {visibilityOptions.map((option) => {
-                const isDisabled = isAnonymous && option.id === "connections";
-
+              {getVisibilityOptions().map((option) => {
+                const isActive = visibility === option;
+                const isDisabled =
+                  submitting || (isAnonymous && !isCommunityPost);
                 return (
                   <TouchableOpacity
-                    key={option.id}
+                    key={option}
                     style={[
                       styles.visibilityOption,
                       {
                         backgroundColor: colors.card,
                         borderColor: colors.border,
                       },
-                      visibility === option.id && [
-                        styles.visibilityOptionActive,
-                        {
-                          backgroundColor: colors.primary,
-                          borderColor: colors.primary,
-                        },
-                      ],
-                      isDisabled && styles.visibilityOptionDisabled,
+                      isActive && styles.visibilityOptionActive,
+                      isDisabled &&
+                        !isActive &&
+                        styles.visibilityOptionDisabled,
                     ]}
-                    onPress={() => {
-                      if (!isDisabled && !submitting) {
-                        setVisibility(option.id);
-                      }
-                    }}
-                    disabled={submitting || isDisabled}
+                    onPress={() => !isDisabled && setVisibility(option)}
+                    disabled={isDisabled}
                   >
                     <Ionicons
-                      name={getVisibilityIcon(option.id)}
+                      name={getVisibilityIcon(option)}
                       size={18}
-                      color={
-                        visibility === option.id
-                          ? "#fff"
-                          : isDisabled
-                            ? colors.textMuted
-                            : colors.textSecondary
-                      }
+                      color={isActive ? "#fff" : colors.textSecondary}
                     />
                     <Text
                       style={[
                         styles.visibilityText,
                         { color: colors.textSecondary },
-                        visibility === option.id && styles.visibilityTextActive,
-                        isDisabled && [
-                          styles.visibilityTextDisabled,
-                          { color: colors.textMuted },
-                        ],
+                        isActive && styles.visibilityTextActive,
                       ]}
                     >
-                      {getVisibilityLabel(option.id)}
+                      {getVisibilityLabel(option)}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -497,69 +611,20 @@ export default function EditPostScreen() {
             <Text
               style={[styles.visibilityDescription, { color: colors.primary }]}
             >
-              {isAnonymous
-                ? "Anonymous posts are always visible to everyone in your campus for maximum reach while protecting your identity."
-                : visibility === "campus"
-                  ? "Visible to all users in your campus"
-                  : "Visible to your connections only"}
+              {isCommunityPost
+                ? visibility === "community"
+                  ? `Only members of ${community?.name || "the community"} can see this post.`
+                  : "Visible to all users in your campus."
+                : isAnonymous
+                  ? "Anonymous posts are always visible to everyone in your campus."
+                  : visibility === "campus"
+                    ? "Visible to all users in your campus"
+                    : "Visible to your connections only"}
             </Text>
-          </View>
-
-          {/* Anonymous Toggle */}
-          <View style={styles.anonymousSection}>
-            <TouchableOpacity
-              style={styles.anonymousToggle}
-              onPress={() => handleAnonymousToggle(!isAnonymous)}
-              disabled={submitting}
-            >
-              <View style={styles.anonymousToggleLeft}>
-                <Ionicons
-                  name={isAnonymous ? "eye-off" : "eye-off-outline"}
-                  size={22}
-                  color={isAnonymous ? colors.primary : colors.textSecondary}
-                />
-                <Text
-                  style={[styles.anonymousToggleText, { color: colors.text }]}
-                >
-                  Post as Anonymous
-                </Text>
-              </View>
-              <View
-                style={[
-                  styles.checkbox,
-                  { borderColor: colors.textMuted },
-                  isAnonymous && [
-                    styles.checkboxActive,
-                    {
-                      backgroundColor: colors.primary,
-                      borderColor: colors.primary,
-                    },
-                  ],
-                ]}
-              >
-                {isAnonymous && (
-                  <Ionicons name="checkmark" size={16} color="#fff" />
-                )}
-              </View>
-            </TouchableOpacity>
-
-            {isAnonymous && (
-              <Text
-                style={[
-                  styles.anonymousNoteText,
-                  { color: colors.textSecondary },
-                ]}
-              >
-                Your identity will be hidden. Your name and profile picture
-                won't be visible. Anonymous posts are always visible to your
-                entire campus.
-              </Text>
-            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Discard Changes Modal */}
       <DiscardChangesModal
         visible={showDiscardModal}
         onClose={() => setShowDiscardModal(false)}
@@ -574,18 +639,9 @@ export default function EditPostScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#fff",
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  container: { flex: 1, backgroundColor: "#fff" },
+  keyboardView: { flex: 1 },
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -593,36 +649,86 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
   },
-  backButton: {
-    padding: 4,
-  },
+  backButton: { padding: 4 },
   headerTitle: {
     fontSize: 18,
     fontWeight: "600",
     fontFamily: "SofiaSans-Bold",
   },
   saveButton: {
-    backgroundColor: "#8b5cf6",
     paddingHorizontal: 20,
     paddingVertical: 8,
     borderRadius: 20,
     minWidth: 50,
     alignItems: "center",
   },
-  saveButtonDisabled: {
-    backgroundColor: "#d1d5db",
-  },
+  saveButtonDisabled: { backgroundColor: "#d1d5db" },
   saveButtonText: {
     color: "#fff",
     fontWeight: "600",
     fontSize: 14,
     fontFamily: "SofiaSans-Bold",
   },
-  content: {
+  content: { flex: 1, padding: 16 },
+  // User Info Row
+  userInfo: { flexDirection: "row", alignItems: "center", marginBottom: 16 },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#f0f0f0",
+  },
+  communityAvatar: { justifyContent: "center", alignItems: "center" },
+  anonymousAvatar: {
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderStyle: "dashed",
+  },
+  userTextContainer: { flex: 1, marginLeft: 12 },
+  userName: { fontSize: 16, fontFamily: "SofiaSans-Bold" },
+  userHandle: { fontSize: 13, fontFamily: "SofiaSans-Regular", marginTop: 1 },
+  // Anonymous Toggle
+  anonymousToggleRight: { flexDirection: "row", alignItems: "center" },
+  toggleContainerRight: {
+    width: 36,
+    height: 20,
+    borderRadius: 10,
+    justifyContent: "center",
+    paddingHorizontal: 2,
+  },
+  toggleCircleRight: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: "#fff",
+  },
+  toggleCircleRightActive: {
+    backgroundColor: "#000",
+    transform: [{ translateX: 16 }],
+  },
+  toggleTextRight: {
+    fontSize: 12,
+    fontFamily: "SofiaSans-Regular",
+    marginLeft: 8,
+  },
+  toggleTextRightActive: { fontWeight: "600" },
+  // Anonymous Warning
+  anonymousWarning: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
+    marginBottom: 16,
+    gap: 8,
+    backgroundColor: "#fef3c7",
+    borderRadius: 8,
+  },
+  anonymousWarningText: {
+    fontSize: 12,
+    fontFamily: "SofiaSans-Regular",
+    color: "#92400e",
     flex: 1,
-    padding: 16,
   },
   input: {
     fontSize: 16,
@@ -632,26 +738,18 @@ const styles = StyleSheet.create({
   },
   charCount: {
     textAlign: "right",
-    color: "#999",
     fontSize: 12,
     marginTop: 8,
     marginBottom: 20,
   },
-  imagesContainer: {
-    marginBottom: 20,
-  },
+  imagesContainer: { marginBottom: 20 },
   imagesTitle: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#333",
     marginBottom: 12,
     fontFamily: "SofiaSans-Bold",
   },
-  imagesGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
+  imagesGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   imageWrapper: {
     width: (width - 64) / 2,
     height: (width - 64) / 2,
@@ -659,46 +757,13 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     position: "relative",
   },
-  previewImage: {
-    width: "100%",
-    height: "100%",
-  },
+  previewImage: { width: "100%", height: "100%" },
   removeButton: {
     position: "absolute",
     top: 8,
     right: 8,
     backgroundColor: "rgba(0,0,0,0.5)",
     borderRadius: 12,
-  },
-  imageNumber: {
-    position: "absolute",
-    top: 8,
-    left: 8,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  imageNumberText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  existingBadge: {
-    position: "absolute",
-    bottom: 8,
-    left: 8,
-    backgroundColor: "rgba(0,0,0,0.7)",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  existingBadgeText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "500",
   },
   addMoreButton: {
     width: (width - 64) / 2,
@@ -710,113 +775,35 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  addImageButtonSimple: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  addImageTextSimple: {
-    marginLeft: 8,
-    fontSize: 16,
-    color: "#000000",
-    fontWeight: "500",
-    fontFamily: "SofiaSans-Regular",
-  },
-  section: {
-    marginBottom: 20,
-  },
+  // Visibility
+  section: { marginBottom: 20 },
   sectionTitle: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#333",
     marginBottom: 16,
     fontFamily: "SofiaSans-Bold",
   },
-  anonymousNote: {
-    fontSize: 12,
-    color: "#6b7280",
-    fontStyle: "italic",
-  },
-  visibilityOptions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
+  anonymousNote: { fontSize: 12, fontStyle: "italic" },
+  visibilityOptions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   visibilityOption: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    backgroundColor: "#f5f5f5",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: "#eee",
   },
   visibilityOptionActive: {
-    backgroundColor: "#8b5cf6",
-    borderColor: "#8b5cf6",
+    backgroundColor: "#8B5CF6",
+    borderColor: "#8B5CF6",
   },
-  visibilityOptionDisabled: {
-    backgroundColor: "#e5e7eb",
-    borderColor: "#e5e7eb",
-    opacity: 0.6,
-  },
-  visibilityText: {
-    fontSize: 12,
-    fontWeight: "500",
-    color: "#666",
-    fontFamily: "SofiaSans-Regular",
-  },
-  visibilityTextActive: {
-    color: "#fff",
-  },
-  visibilityTextDisabled: {
-    color: "#9ca3af",
-  },
+  visibilityOptionDisabled: { opacity: 0.5 },
+  visibilityText: { fontSize: 13, fontFamily: "SofiaSans-SemiBold" },
+  visibilityTextActive: { color: "#fff" },
   visibilityDescription: {
-    fontSize: 12,
-    color: "#8b5cf6",
+    fontSize: 13,
     marginTop: 10,
-    fontFamily: "SofiaSans-Regular",
-  },
-  anonymousSection: {
-    marginBottom: 20,
-  },
-  anonymousToggle: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 12,
-  },
-  anonymousToggleLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  anonymousToggleText: {
-    fontSize: 16,
-    color: "#111827",
-    fontFamily: "SofiaSans-Bold",
-  },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: "#d1d5db",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  checkboxActive: {
-    backgroundColor: "#8b5cf6",
-    borderColor: "#8b5cf6",
-  },
-  anonymousNoteText: {
-    fontSize: 12,
-    color: "#6b7280",
-    marginTop: 8,
-    fontStyle: "italic",
     fontFamily: "SofiaSans-Regular",
   },
 });

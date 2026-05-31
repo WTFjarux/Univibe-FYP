@@ -135,23 +135,27 @@ export default function HiddenPostsScreen() {
   };
 
   const renderPost = ({ item }: { item: Post }) => (
-
-      <PostCard
-        post={item}
-        compact={false}
-        hideActions={false}
-        isHidden={true}
-        onUnhide={handleUnhide}
-        onLikePress={() => {}}
-        onCommentPress={() => {}}
-        onSharePress={() => {}}
-        onSave={() => {}}
-        onReport={() => {}}
-        onCopyLink={() => {}}
-        onMuteUser={() => {}}
-        onBlockUser={() => {}}
-      />
-
+    <PostCard
+      post={item}
+      compact={false}
+      hideActions={false}
+      isHidden={true}
+      onUnhide={handleUnhide}
+      onLikePress={() => {}}
+      onCommentPress={() => {}}
+      onSharePress={() => {}}
+      onEdit={() => {}}
+      onDelete={() => {}}
+      onSave={() => {}}
+      onReport={() => {}}
+      onHide={() => {}}
+      onCopyLink={() => {}}
+      onMuteUser={() => {}}
+      onBlockUser={() => {}}
+      onProfilePress={(userId: string) => {
+        router.push(`/profile/${userId}`);
+      }}
+    />
   );
 
   const renderEmptyState = () => (
@@ -180,7 +184,10 @@ export default function HiddenPostsScreen() {
       <View
         style={[
           styles.header,
-          { backgroundColor: colors.background, borderBottomColor: colors.border },
+          {
+            backgroundColor: colors.background,
+            borderBottomColor: colors.border,
+          },
         ]}
       >
         <TouchableOpacity
@@ -278,7 +285,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    
   },
   backButton: { padding: 8, marginLeft: -8 },
   headerTitle: {

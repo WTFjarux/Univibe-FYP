@@ -82,6 +82,9 @@ interface Message {
     postAuthorAvatar?: string;
     isAnonymous?: boolean;
     postCreatedAt?: string;
+    postCommunityId?: string;
+    postCommunityName?: string;
+    postCommunityCoverImage?: string;
   };
   story?: {
     storyId: string;
@@ -385,16 +388,23 @@ export default function ChatBubble({
 
   const buildPostFromSharedData = (): Post | null => {
     if (!message.sharedPost || !message.sharedPost.postId) return null;
+
+    const hasCommunity = !!message.sharedPost.postCommunityName;
+
     return {
       _id: message.sharedPost.postId,
       user: {
         _id: message.sharedPost.postAuthorId || "",
-        name: message.sharedPost.postAuthorName || "Unknown",
+        name: hasCommunity
+          ? message.sharedPost.postCommunityName || "Community"
+          : message.sharedPost.postAuthorName || "Unknown",
         username: message.sharedPost.isAnonymous
           ? "anonymous"
           : message.sharedPost.postAuthorUsername || "user",
         email: null,
-        profilePicture: message.sharedPost.postAuthorAvatar || "",
+        profilePicture: hasCommunity
+          ? message.sharedPost.postCommunityCoverImage || ""
+          : message.sharedPost.postAuthorAvatar || "",
         verified: false,
       },
       content: message.sharedPost.postContent || "",
@@ -412,6 +422,14 @@ export default function ChatBubble({
       tags: [],
       campus: "",
       visibility: "campus" as const,
+      community:
+        hasCommunity && message.sharedPost.postCommunityId
+          ? {
+              _id: message.sharedPost.postCommunityId,
+              name: message.sharedPost.postCommunityName || "",
+              coverImage: message.sharedPost.postCommunityCoverImage || null,
+            }
+          : undefined,
       isAnonymous: message.sharedPost.isAnonymous || false,
       isEdited: false,
       editedAt: null,
@@ -422,7 +440,6 @@ export default function ChatBubble({
       commentCount: 0,
     };
   };
-
   const renderMessageContent = () => {
     // Post share
     if (isPostType) {

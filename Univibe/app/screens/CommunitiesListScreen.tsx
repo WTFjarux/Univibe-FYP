@@ -218,97 +218,112 @@ export default function CommunitiesListScreen() {
 
       {/* Filter Chips */}
       {activeCategory === "all" && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.filterChipsScroll}
-          contentContainerStyle={styles.filterChipsContent}
+        <View
+          style={[
+            styles.filterContainer,
+            { borderBottomColor: isDark ? "#334155" : "#e2e8f0" },
+          ]}
         >
-          {(["all", "community", "department"] as FilterType[]).map((type) => (
-            <TouchableOpacity
-              key={`type-${type}`}
-              style={[
-                styles.filterChip,
-                {
-                  backgroundColor:
-                    activeType === type
-                      ? colors.primary
-                      : isDark
-                        ? "#334155"
-                        : "#e2e8f0",
-                },
-              ]}
-              onPress={() => setActiveType(type)}
-            >
-              <Text
-                style={[
-                  styles.filterChipText,
-                  {
-                    color:
-                      activeType === type ? "#ffffff" : colors.textSecondary,
-                  },
-                ]}
-              >
-                {type === "all"
-                  ? "All Types"
-                  : type === "community"
-                    ? "Communities"
-                    : "Departments"}
-              </Text>
-            </TouchableOpacity>
-          ))}
-          <View
-            style={[styles.filterDivider, { backgroundColor: colors.border }]}
-          />
-          {(["all", "public", "private"] as FilterPrivacy[]).map((privacy) => (
-            <TouchableOpacity
-              key={`privacy-${privacy}`}
-              style={[
-                styles.filterChip,
-                {
-                  backgroundColor:
-                    activePrivacy === privacy
-                      ? colors.primary
-                      : isDark
-                        ? "#334155"
-                        : "#e2e8f0",
-                },
-              ]}
-              onPress={() => setActivePrivacy(privacy)}
-            >
-              {privacy !== "all" && (
-                <Ionicons
-                  name={
-                    privacy === "public"
-                      ? "globe-outline"
-                      : "lock-closed-outline"
-                  }
-                  size={12}
-                  color={
-                    activePrivacy === privacy ? "#ffffff" : colors.textSecondary
-                  }
-                />
-              )}
-              <Text
-                style={[
-                  styles.filterChipText,
-                  {
-                    color:
-                      activePrivacy === privacy
-                        ? "#ffffff"
-                        : colors.textSecondary,
-                  },
-                ]}
-              >
-                {privacy === "all"
-                  ? "All"
-                  : privacy === "public"
-                    ? "Public"
-                    : "Private"}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterChipsScroll}
+            contentContainerStyle={styles.filterChipsContent}
+          >
+            {(["all", "community", "department"] as FilterType[]).map(
+              (type) => (
+                <TouchableOpacity
+                  key={`type-${type}`}
+                  style={[
+                    styles.filterChip,
+                    {
+                      backgroundColor:
+                        activeType === type
+                          ? colors.primary
+                          : isDark
+                            ? "#334155"
+                            : "#e2e8f0",
+                    },
+                  ]}
+                  onPress={() => setActiveType(type)}
+                >
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      {
+                        color:
+                          activeType === type
+                            ? "#ffffff"
+                            : colors.textSecondary,
+                      },
+                    ]}
+                  >
+                    {type === "all"
+                      ? "All Types"
+                      : type === "community"
+                        ? "Communities"
+                        : "Departments"}
+                  </Text>
+                </TouchableOpacity>
+              ),
+            )}
+            <View
+              style={[styles.filterDivider, { backgroundColor: colors.border }]}
+            />
+            {(["all", "public", "private"] as FilterPrivacy[]).map(
+              (privacy) => (
+                <TouchableOpacity
+                  key={`privacy-${privacy}`}
+                  style={[
+                    styles.filterChip,
+                    {
+                      backgroundColor:
+                        activePrivacy === privacy
+                          ? colors.primary
+                          : isDark
+                            ? "#334155"
+                            : "#e2e8f0",
+                    },
+                  ]}
+                  onPress={() => setActivePrivacy(privacy)}
+                >
+                  {privacy !== "all" && (
+                    <Ionicons
+                      name={
+                        privacy === "public"
+                          ? "globe-outline"
+                          : "lock-closed-outline"
+                      }
+                      size={12}
+                      color={
+                        activePrivacy === privacy
+                          ? "#ffffff"
+                          : colors.textSecondary
+                      }
+                    />
+                  )}
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      {
+                        color:
+                          activePrivacy === privacy
+                            ? "#ffffff"
+                            : colors.textSecondary,
+                      },
+                    ]}
+                  >
+                    {privacy === "all"
+                      ? "All"
+                      : privacy === "public"
+                        ? "Public"
+                        : "Private"}
+                  </Text>
+                </TouchableOpacity>
+              ),
+            )}
+          </ScrollView>
+        </View>
       )}
 
       {/* Community List */}
@@ -403,6 +418,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   categoryCountText: { fontSize: 11, fontFamily: "SofiaSans-Bold" },
+  filterContainer: {
+    borderBottomWidth: 1,
+    paddingBottom: 8, // ✅ Added padding below filter chips
+  },
   filterChipsScroll: { maxHeight: 44 },
   filterChipsContent: {
     flexDirection: "row",
@@ -421,13 +440,17 @@ const styles = StyleSheet.create({
   },
   filterChipText: { fontSize: 12, fontFamily: "SofiaSans-SemiBold" },
   filterDivider: { width: 1, height: 20 },
-  listContent: { paddingBottom: 40 },
+  listContent: {
+    paddingBottom: 40, // ✅ Already had bottom padding
+    paddingTop: 8, // ✅ Added padding at top of list after tabs
+  },
   emptyList: { flexGrow: 1 },
   emptyContainer: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 32,
+    paddingBottom: 80, // ✅ Added extra bottom padding for empty state
   },
   emptyTitle: { fontSize: 20, fontFamily: "SofiaSans-Bold", marginTop: 16 },
   emptyText: {

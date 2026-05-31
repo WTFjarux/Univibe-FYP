@@ -297,8 +297,8 @@ export default function EditCommunityScreen() {
       return;
     }
 
-    // ✅ Warn about privacy change
-    if (privacy !== originalData?.privacy) {
+    // ✅ Warn about privacy change (only for non-department communities)
+    if (!isDepartment && privacy !== originalData?.privacy) {
       const message =
         privacy === "private"
           ? "Changing to private means new members will need admin approval to join. Existing members will not be affected."
@@ -323,9 +323,12 @@ export default function EditCommunityScreen() {
         tags: tags,
         rules: rules,
       };
+
+      // ✅ Departments are always public - don't include privacy in payload
       if (!isDepartment) {
         payload.privacy = privacy;
       }
+
       if (newCoverImage !== null) {
         if (newCoverImage) {
           const filename = newCoverImage.split("/").pop() || "cover.jpg";
@@ -599,7 +602,7 @@ export default function EditCommunityScreen() {
             {description.length}/500
           </Text>
 
-          {/* ✅ Privacy Selector (only for non-department communities) */}
+          {/* Privacy Selector (only for non-department communities) */}
           {!isDepartment && (
             <>
               <Text
@@ -733,7 +736,7 @@ export default function EditCommunityScreen() {
             </>
           )}
 
-          {/* Department note */}
+          {/* ✅ Department note - Updated for public departments */}
           {isDepartment && (
             <View
               style={[
@@ -752,8 +755,7 @@ export default function EditCommunityScreen() {
               <Text
                 style={[styles.departmentNoteText, { color: colors.primary }]}
               >
-                Departments are always private. Members need admin approval to
-                join.
+                Departments are always public. Anyone can join instantly.
               </Text>
             </View>
           )}
@@ -1065,7 +1067,6 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
     marginBottom: 4,
   },
-  // ✅ Privacy selector
   privacySelector: { gap: 10, marginBottom: 8 },
   privacyOption: {
     flexDirection: "row",
@@ -1093,7 +1094,6 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
     lineHeight: 18,
   },
-  // Tags
   tagInputRow: { flexDirection: "row", gap: 8, marginBottom: 8 },
   tagInput: {
     flex: 1,
@@ -1125,7 +1125,6 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   tagText: { fontSize: 13, fontFamily: "SofiaSans-SemiBold" },
-  // Rules
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",

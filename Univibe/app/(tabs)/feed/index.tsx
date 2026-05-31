@@ -356,24 +356,28 @@ export default function FeedScreen() {
     const postToDelete = visiblePosts.find((p: Post) => p._id === postId);
     if (!postToDelete) return;
 
+    // Optimistically remove from UI
     removePost(postId);
+
+    // Show info bar with UNDO - autoHide = true (3 seconds)
     showInfoBar(
       "Post deleted",
       "info",
       { type: "delete", postId, deletedPost: postToDelete },
-      false, // Don't auto-hide for delete to allow undo
+      true, // ✅ Change to true for auto-hide after 3 seconds
     );
 
     try {
       await deletePost(postId);
       await invalidateAllFeeds();
-      hideInfoBar();
+      // ✅ Don't call hideInfoBar() - let it auto-hide
     } catch (error: any) {
+      // Restore post on error
       addNewPost(postToDelete);
+      hideInfoBar(); // Hide the delete info bar
       showInfoBar(error.message || "Failed to delete post", "error");
     }
   };
-
   const handleSavePost = async (postId: string) => {
     if (!token) {
       showInfoBar("Please login to save posts", "info");
@@ -590,9 +594,16 @@ export default function FeedScreen() {
           : "",
         postAuthorName: sharePost.isAnonymous
           ? "Anonymous"
-          : sharePost.user?.name || "Unknown",
-        postAuthorAvatar: sharePost.user?.profilePicture || "",
+          : sharePost.community?.name || sharePost.user?.name || "Unknown",
+        postAuthorAvatar: sharePost.community?.coverImage
+          ? getFullImageUrl(sharePost.community.coverImage)
+          : sharePost.user?.profilePicture || "",
         isAnonymous: sharePost.isAnonymous || false,
+        postCommunityId: sharePost.community?._id || undefined,
+        postCommunityName: sharePost.community?.name || undefined,
+        postCommunityCoverImage: sharePost.community?.coverImage
+          ? getFullImageUrl(sharePost.community.coverImage)
+          : undefined,
       }
     : null;
 

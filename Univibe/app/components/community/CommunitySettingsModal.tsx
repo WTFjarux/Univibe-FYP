@@ -29,6 +29,7 @@ interface CommunitySettingsModalProps {
   onViewRules: () => void;
   onShareCommunity: () => void;
   onReportCommunity: () => void;
+  onDeleteCommunity: () => void;
 }
 
 const CommunitySettingsModal: React.FC<CommunitySettingsModalProps> = ({
@@ -46,6 +47,7 @@ const CommunitySettingsModal: React.FC<CommunitySettingsModalProps> = ({
   onViewRules,
   onShareCommunity,
   onReportCommunity,
+  onDeleteCommunity,
 }) => {
   const { colors } = useTheme();
   const canManage = isAdmin || isModerator;
@@ -66,6 +68,11 @@ const CommunitySettingsModal: React.FC<CommunitySettingsModalProps> = ({
     onClose();
     setTimeout(() => onLeaveCommunity(), 300);
   }, [isAdmin, onClose, onLeaveCommunity]);
+
+  const handleDeletePress = useCallback(() => {
+    onClose();
+    setTimeout(() => onDeleteCommunity(), 300);
+  }, [onClose, onDeleteCommunity]);
 
   return (
     <Modal
@@ -241,7 +248,7 @@ const CommunitySettingsModal: React.FC<CommunitySettingsModalProps> = ({
             GENERAL
           </Text>
 
-          {/* Invite Users - ✅ FIXED: visible for all members, admins, and moderators */}
+          {/* Invite Users */}
           {canInvite && (
             <TouchableOpacity
               style={styles.optionItem}
@@ -381,6 +388,8 @@ const CommunitySettingsModal: React.FC<CommunitySettingsModalProps> = ({
               <Text style={[styles.sectionTitle, { color: "#ef4444" }]}>
                 DANGER ZONE
               </Text>
+
+              {/* Leave Community */}
               <TouchableOpacity
                 style={styles.optionItem}
                 onPress={handleLeavePress}
@@ -403,6 +412,41 @@ const CommunitySettingsModal: React.FC<CommunitySettingsModalProps> = ({
                   </Text>
                 </View>
               </TouchableOpacity>
+
+              {/* Delete Community - Admin only */}
+              {isAdmin && (
+                <TouchableOpacity
+                  style={styles.optionItem}
+                  onPress={handleDeletePress}
+                >
+                  <View
+                    style={[
+                      styles.optionIcon,
+                      { backgroundColor: "#dc262620" },
+                    ]}
+                  >
+                    <Ionicons name="trash-outline" size={22} color="#dc2626" />
+                  </View>
+                  <View style={styles.optionInfo}>
+                    <Text style={[styles.optionTitle, { color: "#dc2626" }]}>
+                      Delete Community
+                    </Text>
+                    <Text
+                      style={[
+                        styles.optionDesc,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Permanently delete this community and all its data
+                    </Text>
+                  </View>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={18}
+                    color={colors.textSecondary}
+                  />
+                </TouchableOpacity>
+              )}
             </>
           )}
 
@@ -435,7 +479,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 5,
     elevation: 10,
-    maxHeight: "85%",
+    maxHeight: "92%",
   },
   modalHeader: {
     flexDirection: "row",

@@ -5,6 +5,8 @@ const ApprovalQueue = require("../../models/ApprovalQueue");
 const User = require("../../models/User");
 const Profile = require("../../models/Profile");
 const Notification = require("../../models/Notification");
+const Post = require("../../models/Post");
+const { getAdminModel } = require("../../config/database");
 
 // ============================================
 // HELPERS
@@ -57,7 +59,6 @@ const createAndEmitNotification = async (
   metadata = {},
 ) => {
   try {
-    // 1. Create notification in database
     const notification = await Notification.create({
       recipient: recipientId,
       sender: senderId,
@@ -69,7 +70,6 @@ const createAndEmitNotification = async (
       metadata,
     });
 
-    // 2. Populate sender with profile data
     const populatedNotification = await Notification.findById(notification._id)
       .populate("sender", "name username email")
       .lean();
@@ -90,12 +90,10 @@ const createAndEmitNotification = async (
       }
     }
 
-    // 3. Emit socket event
     await emitToUser(req, recipientId, "notification:new", {
       notification: populatedNotification,
     });
 
-    // 4. Emit unread count update
     const unreadCount = await Notification.countDocuments({
       recipient: recipientId,
       read: false,
@@ -287,11 +285,12 @@ exports.getPendingCount = async (req, res) => {
 };
 
 // ============================================
-// GET SINGLE COMMUNITY FOR REVIEW
+// GET SINGLE COMMUNITY FOR REVIEW (WITH MEMBERS, POSTS, REPORTS)
 // ============================================
 exports.getCommunityForReview = async (req, res) => {
   try {
     const { communityId } = req.params;
+    const mongoose = require("mongoose");
 
     const community = await Community.findById(communityId)
       .populate("admins", "name username email")
@@ -302,26 +301,315 @@ exports.getCommunityForReview = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Community not found" });
 
-    const adminIds = community.admins.map((a) => a._id);
-    const adminProfiles = await Profile.find({ user: { $in: adminIds } })
-      .select("user profilePicture fullName")
-      .lean();
-    const adminProfileMap = {};
-    adminProfiles.forEach((p) => {
-      adminProfileMap[p.user.toString()] = {
-        profilePicture: p.profilePicture,
-        fullName: p.fullName,
-      };
-    });
-    community.admins = community.admins.map((admin) => {
-      const profile = adminProfileMap[admin._id.toString()];
-      return {
-        ...admin,
-        name: profile?.fullName || admin.name,
-        profilePicture: profile?.profilePicture || null,
-      };
-    });
+    // ============================================
+    // ENRICH ADMINS WITH PROFILE PICTURES
+    // ============================================
+    const adminIds = (community.admins || []).map((a) => a._id);
+    if (adminIds.length > 0) {
+      const adminProfiles = await Profile.find({ user: { $in: adminIds } })
+        .select("user profilePicture fullName")
+        .lean();
+      const adminProfileMap = {};
+      adminProfiles.forEach((p) => {
+        adminProfileMap[p.user.toString()] = {
+          profilePicture: p.profilePicture,
+          fullName: p.fullName,
+        };
+      });
+      community.admins = community.admins.map((admin) => {
+        const profile =
+          adminProfileMap[admin._id?.toString() || admin.toString()];
+        return {
+          ...admin,
+          name: profile?.fullName || admin.name,
+          profilePicture: profile?.profilePicture || null,
+        };
+      });
+    }
 
+    // ============================================
+    // ENRICH MEMBERS WITH USER DETAILS & PROFILES
+    // ============================================
+    if (community.members && community.members.length > 0) {
+      const memberUserIds = community.members
+        .map((m) => m.user)
+        .filter(Boolean);
+
+      if (memberUserIds.length > 0) {
+        const [memberUsers, memberProfiles] = await Promise.all([
+          User.find({ _id: { $in: memberUserIds } })
+            .select("name username email")
+            .lean(),
+          Profile.find({ user: { $in: memberUserIds } })
+            .select("user profilePicture fullName")
+            .lean(),
+        ]);
+
+        const memberUserMap = {};
+        memberUsers.forEach((u) => {
+          memberUserMap[u._id.toString()] = u;
+        });
+
+        const memberProfileMap = {};
+        memberProfiles.forEach((p) => {
+          if (p.user) {
+            memberProfileMap[p.user.toString()] = {
+              profilePicture: p.profilePicture || null,
+              fullName: p.fullName || null,
+            };
+          }
+        });
+
+        community.members = community.members.map((member) => {
+          const userId = (member.user?._id || member.user).toString();
+          const user = memberUserMap[userId] || {};
+          const profile = memberProfileMap[userId] || {};
+
+          return {
+            ...member,
+            user: {
+              _id: member.user?._id || member.user,
+              name: profile.fullName || user.name || "Unknown",
+              username: user.username || "",
+              email: user.email || "",
+              profilePicture: profile.profilePicture || null,
+            },
+          };
+        });
+      }
+    }
+
+    // ============================================
+    // FETCH COMMUNITY POSTS - TRY BOTH STRING AND OBJECTID
+    // ============================================
+    console.log(
+      "🔍 [getCommunityForReview] Fetching posts for community:",
+      communityId,
+    );
+
+    // ✅ Use the mongoose that's already required at the top of the file
+    let communityObjectId;
+    try {
+      communityObjectId = new mongoose.Types.ObjectId(communityId);
+    } catch (e) {
+      communityObjectId = null;
+    }
+
+    // ✅ Try BOTH string and ObjectId queries to handle all cases
+    const postQuery = {
+      $or: [
+        { community: communityId }, // string version
+      ],
+      isDeleted: false,
+    };
+
+    // Add ObjectId version if conversion succeeded
+    if (communityObjectId) {
+      postQuery.$or.push({ community: communityObjectId });
+    }
+
+    console.log("📝 Post query $or:", postQuery.$or);
+
+    let posts = await Post.find(postQuery)
+      .populate("user", "name username email")
+      .populate("community", "name type coverImage")
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    console.log(`📝 [getCommunityForReview] Found ${posts.length} posts`);
+
+    // If still no posts, try with includeDeleted
+    if (posts.length === 0) {
+      console.log(
+        "📝 No posts found with isDeleted:false, trying includeDeleted...",
+      );
+      posts = await Post.find({
+        $or: postQuery.$or,
+      })
+        .includeDeleted()
+        .populate("user", "name username email")
+        .populate("community", "name type coverImage")
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .lean();
+
+      // Filter out deleted posts
+      posts = posts.filter((p) => !p.isDeleted);
+      console.log(`📝 Found ${posts.length} posts with includeDeleted`);
+    }
+
+    // If STILL no posts, debug what's in the database
+    if (posts.length === 0) {
+      console.log("📝 DEBUG: Checking all posts with community field...");
+      const anyCommunityPosts = await Post.find({
+        community: { $exists: true, $ne: null },
+      })
+        .includeDeleted()
+        .limit(5)
+        .lean();
+
+      console.log(
+        `📝 Total posts with community field: ${anyCommunityPosts.length}`,
+      );
+      anyCommunityPosts.forEach((p) => {
+        console.log(
+          `  - Post ${p._id}: community=${p.community} (type: ${typeof p.community}), isDeleted=${p.isDeleted}`,
+        );
+      });
+
+      // Try matching by comparing string values
+      const communityIdStr = communityId.toString();
+      const matchingPosts = anyCommunityPosts.filter(
+        (p) => p.community?.toString() === communityIdStr,
+      );
+      console.log(
+        `📝 Posts where community.toString() matches: ${matchingPosts.length}`,
+      );
+
+      if (matchingPosts.length > 0) {
+        posts = matchingPosts.filter((p) => !p.isDeleted);
+      }
+    }
+
+    // Debug: Log first post if any
+    if (posts.length > 0) {
+      console.log("📝 First post sample:", {
+        _id: posts[0]._id,
+        content: posts[0].content?.substring(0, 50),
+        user: posts[0].user?._id,
+        community: posts[0].community,
+        communityType: typeof posts[0].community,
+        isDeleted: posts[0].isDeleted,
+      });
+    }
+
+    // Enrich posts with profile pictures
+    if (posts.length > 0) {
+      const postUserIds = [
+        ...new Set(
+          posts
+            .map((p) => p.user?._id)
+            .filter(Boolean)
+            .map((id) => id.toString()),
+        ),
+      ];
+
+      if (postUserIds.length > 0) {
+        const postProfiles = await Profile.find({
+          user: { $in: postUserIds },
+        })
+          .select("user profilePicture")
+          .lean();
+
+        const postProfileMap = {};
+        postProfiles.forEach((p) => {
+          if (p.user)
+            postProfileMap[p.user.toString()] = p.profilePicture || null;
+        });
+
+        posts = posts.map((post) => ({
+          ...post,
+          user: post.user
+            ? {
+                ...post.user,
+                profilePicture: post.user._id
+                  ? postProfileMap[post.user._id.toString()] || null
+                  : null,
+              }
+            : null,
+        }));
+      }
+    }
+
+    // ============================================
+    // FETCH REPORTS FOR THIS COMMUNITY
+    // ============================================
+    console.log(
+      "🔍 [getCommunityForReview] Fetching reports for community:",
+      communityId,
+    );
+    let reports = [];
+
+    try {
+      const Report = getAdminModel("Report");
+      if (Report) {
+        try {
+          const reportTargetId = new mongoose.Types.ObjectId(communityId);
+          reports = await Report.find({
+            targetType: "Community",
+            targetId: reportTargetId,
+          })
+            .sort({ createdAt: -1 })
+            .lean();
+        } catch (e) {
+          reports = await Report.find({
+            targetType: "Community",
+            targetId: communityId,
+          })
+            .sort({ createdAt: -1 })
+            .lean();
+        }
+
+        console.log(
+          `📋 [getCommunityForReview] Found ${reports.length} reports`,
+        );
+
+        // Enrich reports with reporter info
+        if (reports.length > 0) {
+          const reporterIds = [
+            ...new Set(reports.map((r) => r.reportedBy).filter(Boolean)),
+          ];
+          if (reporterIds.length > 0) {
+            const [reporters, reporterProfiles] = await Promise.all([
+              User.find({ _id: { $in: reporterIds } })
+                .select("name username email")
+                .lean(),
+              Profile.find({ user: { $in: reporterIds } })
+                .select("user profilePicture")
+                .lean(),
+            ]);
+
+            const reporterMap = {};
+            reporters.forEach((u) => {
+              reporterMap[u._id.toString()] = u;
+            });
+
+            const reporterProfileMap = {};
+            reporterProfiles.forEach((p) => {
+              if (p.user)
+                reporterProfileMap[p.user.toString()] =
+                  p.profilePicture || null;
+            });
+
+            reports = reports.map((report) => ({
+              ...report,
+              reportedBy: report.reportedBy
+                ? {
+                    _id: report.reportedBy,
+                    name:
+                      reporterMap[report.reportedBy.toString()]?.name ||
+                      "Unknown",
+                    username:
+                      reporterMap[report.reportedBy.toString()]?.username || "",
+                    email:
+                      reporterMap[report.reportedBy.toString()]?.email || "",
+                    profilePicture:
+                      reporterProfileMap[report.reportedBy.toString()] || null,
+                  }
+                : null,
+            }));
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching reports:", err.message);
+      reports = [];
+    }
+
+    // ============================================
+    // GET APPROVAL ENTRY
+    // ============================================
     const approvalEntry = await ApprovalQueue.findOne({
       contentId: communityId,
       contentType: { $in: ["community", "department"] },
@@ -332,7 +620,23 @@ exports.getCommunityForReview = async (req, res) => {
 
     if (approvalEntry) await populateSubmitterProfiles([approvalEntry]);
 
-    res.json({ success: true, data: { community, approval: approvalEntry } });
+    // ============================================
+    // RETURN RESPONSE
+    // ============================================
+    res.json({
+      success: true,
+      data: {
+        community,
+        approval: approvalEntry,
+        posts,
+        reports,
+        stats: {
+          postCount: posts.length,
+          reportCount: reports.length,
+          memberCount: community.memberCount || community.members?.length || 0,
+        },
+      },
+    });
   } catch (error) {
     console.error("getCommunityForReview error:", error);
     res
@@ -379,7 +683,6 @@ exports.approveCommunity = async (req, res) => {
     const typeLabel =
       community.type === "department" ? "Department" : "Community";
 
-    // ✅ Notify admins with socket emit
     await notifyAdmins(
       req,
       community,
@@ -488,7 +791,6 @@ exports.rejectCommunity = async (req, res) => {
       ? " You may edit and resubmit for approval."
       : "";
 
-    // ✅ Notify admins with socket emit
     await notifyAdmins(
       req,
       community,
@@ -565,7 +867,6 @@ exports.bulkApproveCommunities = async (req, res) => {
         const typeLabel =
           community.type === "department" ? "Department" : "Community";
 
-        // ✅ Notify admins with socket emit
         await notifyAdmins(
           req,
           community,

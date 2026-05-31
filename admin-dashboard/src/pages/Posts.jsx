@@ -1,4 +1,4 @@
-// admin-frontend/src/pages/Posts.jsx
+// src/pages/Posts.jsx
 
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
@@ -218,6 +218,7 @@ function Posts() {
     { value: "all", label: "All Posts" },
     { value: "reported", label: "Reported" },
     { value: "anonymous", label: "Anonymous" },
+    { value: "community", label: "Community Posts" }, // ✅ ADDED
     { value: "deleted", label: "Deleted" },
   ];
 

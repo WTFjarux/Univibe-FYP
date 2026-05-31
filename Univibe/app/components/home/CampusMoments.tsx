@@ -12,16 +12,16 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useAuth } from "../../lib/contexts/AuthContext";
-import { useTheme } from "../../lib/contexts/ThemeContext";
-import storyApi from "../../lib/services/storyApi";
-import socketService from "../../lib/services/socketService";
-import { API_BASE_URL } from "../../constants/ipConstants";
-import type { StoryGroup } from "../../lib/services/storyApi";
+import { useAuth } from "../../../lib/contexts/AuthContext";
+import { useTheme } from "../../../lib/contexts/ThemeContext";
+import storyApi from "../../../lib/services/storyApi";
+import socketService from "../../../lib/services/socketService";
+import { API_BASE_URL } from "../../../constants/ipConstants";
+import type { StoryGroup } from "../../../lib/services/storyApi";
 
 interface CampusMomentsProps {
   onStoryPress?: (storyGroup: StoryGroup) => void;
-  initialLoading?: boolean; // Parent can control initial loading state
+  initialLoading?: boolean;
 }
 
 // Skeleton component for story loading
@@ -297,11 +297,6 @@ export default function CampusMoments({
         <Text style={[styles.sectionTitle, { color: colors.text }]}>
           Campus Moments
         </Text>
-        <TouchableOpacity onPress={handleSeeAllPress}>
-          <Text style={[styles.seeAllText, { color: colors.primary }]}>
-            See All
-          </Text>
-        </TouchableOpacity>
       </View>
 
       {loadingStories ? (
@@ -442,15 +437,11 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: "700",
+    fontSize: 20,
+    fontFamily: "SofiaSans-Bold",
     color: "#111827",
   },
-  seeAllText: {
-    fontSize: 14,
-    color: "#8b5cf6",
-    fontWeight: "600",
-  },
+
   storiesContainer: {
     flexDirection: "row",
   },

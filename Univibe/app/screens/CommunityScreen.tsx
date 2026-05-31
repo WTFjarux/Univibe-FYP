@@ -16,6 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "../../lib/contexts/ThemeContext";
 import { useAuth } from "../../lib/contexts/AuthContext";
 import { communityService } from "../../lib/services/communityService";
+import { eventService, Event } from "../../lib/services/eventService";
 import socketService from "../../lib/services/socketService";
 import { useCommunity } from "../../hooks/community/useCommunity";
 import { useCommunityPosts } from "../../hooks/community/useCommunityPosts";
@@ -26,10 +27,13 @@ import CommunityBadges from "../components/community/CommunityBadges";
 import JoinButton from "../components/community/JoinButton";
 import CommunityTabs from "../components/community/CommunityTabs";
 import PostList from "../components/community/PostList";
+import EventCard from "../components/Events/EventCard";
 import CreateModal from "../components/community/CreateModal";
 import InviteModal from "../components/community/InviteModal";
 import CommunitySettingsModal from "../components/community/CommunitySettingsModal";
+import ConfirmDeleteModal from "../components/community/ConfirmDeleteModal";
 import ReportModal from "../components/ReportModal";
+import { API_BASE_URL } from "../../constants/ipConstants";
 
 type TabType = "posts" | "events";
 
@@ -71,6 +75,12 @@ export default function CommunityScreen() {
   const [inviteModalVisible, setInviteModalVisible] = useState(false);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  // ✅ Community Events State
+  const [communityEvents, setCommunityEvents] = useState<Event[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(false);
 
   // Join/leave community socket room
   useEffect(() => {
@@ -82,7 +92,7 @@ export default function CommunityScreen() {
     }
   }, [communityId, isApproved, isMember]);
 
-  // Listen for community updates (member joined/left, settings changed)
+  // Listen for community updates
   useEffect(() => {
     if (!communityId || !isApproved) return;
 
@@ -94,6 +104,7 @@ export default function CommunityScreen() {
       if (data.communityId !== communityId) return;
       refresh();
       loadPosts();
+      fetchCommunityEvents(); // ✅ Refresh events too
     };
 
     socketService.on("community:updated", handleCommunityUpdate);
@@ -118,11 +129,120 @@ export default function CommunityScreen() {
     };
   }, [communityId, isApproved, isMember, loadPosts]);
 
-  // Pull-to-refresh: refresh community data and posts
+  // ✅ Fetch community events
+  const fetchCommunityEvents = useCallback(async () => {
+    if (!communityId || !isApproved) return;
+    setLoadingEvents(true);
+    try {
+      const response = await communityService.getCommunityEvents(communityId);
+      if (response.success && response.data) {
+        // Process image URLs
+        const processedEvents = response.data.map((event: Event) => ({
+          ...event,
+          coverImage: event.coverImage
+            ? event.coverImage.startsWith("http")
+              ? event.coverImage
+              : `${API_BASE_URL}/${event.coverImage.replace(/^\/+/, "")}`
+            : event.coverImage,
+          imageUrls: event.imageUrls?.map((url: string) =>
+            url.startsWith("http")
+              ? url
+              : `${API_BASE_URL}/${url.replace(/^\/+/, "")}`,
+          ),
+        }));
+        setCommunityEvents(processedEvents);
+      }
+    } catch (error) {
+      console.error("Error fetching community events:", error);
+    } finally {
+      setLoadingEvents(false);
+    }
+  }, [communityId, isApproved]);
+
+  // ✅ Fetch events when community loads
+  useEffect(() => {
+    if (isApproved) {
+      fetchCommunityEvents();
+    }
+  }, [isApproved, fetchCommunityEvents]);
+
+  // Pull-to-refresh
   const handleRefresh = useCallback(() => {
     refresh();
     loadPosts();
-  }, [refresh, loadPosts]);
+    fetchCommunityEvents(); // ✅ Refresh events
+  }, [refresh, loadPosts, fetchCommunityEvents]);
+
+  // Handle RSVP from EventCard
+  const handleRsvp = async (eventId: string) => {
+    try {
+      const response = await eventService.toggleRsvp(eventId);
+      if (response.success) {
+        // Update the event in the list
+        setCommunityEvents((prev) =>
+          prev.map((e) => {
+            if (e._id !== eventId) return e;
+            return {
+              ...e,
+              isRsvpd: response.isRsvpd ?? !e.isRsvpd,
+              rsvpCount: response.rsvpCount ?? e.rsvpCount ?? 0,
+            };
+          }),
+        );
+      }
+    } catch (error) {
+      console.error("Error toggling RSVP:", error);
+    }
+  };
+
+  // Handle Interest from EventCard
+  const handleInterest = async (eventId: string) => {
+    try {
+      const response = await eventService.toggleInterest(eventId);
+      if (response.success) {
+        setCommunityEvents((prev) =>
+          prev.map((e) => {
+            if (e._id !== eventId) return e;
+            return {
+              ...e,
+              isInterested: response.isInterested ?? !e.isInterested,
+              interestedCount:
+                response.interestedCount ?? e.interestedCount ?? 0,
+            };
+          }),
+        );
+      }
+    } catch (error) {
+      console.error("Error toggling interest:", error);
+    }
+  };
+
+  // ✅ Opens the confirmation modal
+  const handleDeleteCommunity = () => {
+    setDeleteConfirmVisible(true);
+  };
+
+  // ✅ Actual delete after confirmation
+  const handleConfirmDelete = async () => {
+    setDeleting(true);
+    try {
+      const result = await communityService.deleteCommunity(communityId!);
+      if (result.success) {
+        setDeleteConfirmVisible(false);
+        Alert.alert("Deleted", "Community has been permanently deleted.", [
+          { text: "OK", onPress: () => router.back() },
+        ]);
+      } else {
+        setDeleteConfirmVisible(false);
+        Alert.alert("Error", result.message || "Failed to delete community");
+      }
+    } catch (error: any) {
+      setDeleteConfirmVisible(false);
+      Alert.alert("Error", error?.message || "Something went wrong");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const navigateToCreatePost = () => {
     setCreateModalVisible(false);
@@ -341,13 +461,30 @@ export default function CommunityScreen() {
                 </Text>
               </View>
             )}
-            <TouchableOpacity
-              style={[styles.editButton, { backgroundColor: colors.primary }]}
-              onPress={navigateToEditDetails}
-            >
-              <Ionicons name="create-outline" size={18} color="#ffffff" />
-              <Text style={styles.editButtonText}>Edit & Resubmit</Text>
-            </TouchableOpacity>
+            <View style={styles.rejectedActions}>
+              <TouchableOpacity
+                style={[styles.editButton, { backgroundColor: colors.primary }]}
+                onPress={navigateToEditDetails}
+                disabled={deleting}
+              >
+                <Ionicons name="create-outline" size={18} color="#ffffff" />
+                <Text style={styles.editButtonText}>Edit & Resubmit</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.deleteButton, { borderColor: "#ef4444" }]}
+                onPress={handleDeleteCommunity}
+                disabled={deleting}
+              >
+                {deleting ? (
+                  <ActivityIndicator size="small" color="#ef4444" />
+                ) : (
+                  <>
+                    <Ionicons name="trash-outline" size={18} color="#ef4444" />
+                    <Text style={styles.deleteButtonText}>Delete</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -440,26 +577,49 @@ export default function CommunityScreen() {
             />
           )}
           {activeTab === "events" && (
-            <View style={styles.emptyTab}>
-              <Ionicons
-                name="calendar-outline"
-                size={48}
-                color={colors.textSecondary}
-              />
-              <Text style={[styles.emptyText, { color: colors.text }]}>
-                No events yet
-              </Text>
-              {canManage && (
-                <TouchableOpacity
-                  style={[
-                    styles.createFirstButton,
-                    { backgroundColor: "#10b981" },
-                  ]}
-                  onPress={navigateToCreateEvent}
-                >
-                  <Ionicons name="add" size={18} color="#ffffff" />
-                  <Text style={styles.createFirstText}>Create First Event</Text>
-                </TouchableOpacity>
+            <View style={styles.eventsContainer}>
+              {loadingEvents ? (
+                <ActivityIndicator
+                  size="large"
+                  color={colors.primary}
+                  style={{ paddingVertical: 40 }}
+                />
+              ) : communityEvents.length > 0 ? (
+                communityEvents.map((event) => (
+                  <EventCard
+                    key={event._id}
+                    event={event}
+                    currentUserId={user?.id}
+                    showActions={true}
+                    onInterestPress={handleInterest}
+                    onRsvpPress={handleRsvp}
+                  />
+                ))
+              ) : (
+                <View style={styles.emptyTab}>
+                  <Ionicons
+                    name="calendar-outline"
+                    size={48}
+                    color={colors.textSecondary}
+                  />
+                  <Text style={[styles.emptyText, { color: colors.text }]}>
+                    No events yet
+                  </Text>
+                  {canManage && (
+                    <TouchableOpacity
+                      style={[
+                        styles.createFirstButton,
+                        { backgroundColor: "#10b981" },
+                      ]}
+                      onPress={navigateToCreateEvent}
+                    >
+                      <Ionicons name="add" size={18} color="#ffffff" />
+                      <Text style={styles.createFirstText}>
+                        Create First Event
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               )}
             </View>
           )}
@@ -499,6 +659,7 @@ export default function CommunityScreen() {
         onViewRules={handleViewRules}
         onShareCommunity={handleShareCommunity}
         onReportCommunity={() => setReportModalVisible(true)}
+        onDeleteCommunity={handleDeleteCommunity}
       />
       <ReportModal
         visible={reportModalVisible}
@@ -506,13 +667,22 @@ export default function CommunityScreen() {
         targetType="Community"
         targetId={communityId!}
         targetName={community?.name}
-        onReportSuccess={() =>
-          Alert.alert(
-            "Reported",
-            "Thank you for your report. We'll review this community.",
-          )
-        }
+        onShowInfoBar={(message, type) => {
+          setTimeout(() => {
+            Alert.alert(type === "success" ? "Reported" : "Error", message);
+          }, 500);
+        }}
         reportFunction={communityService.reportCommunity}
+      />
+
+      <ConfirmDeleteModal
+        visible={deleteConfirmVisible}
+        communityName={community?.name || ""}
+        onClose={() => {
+          setDeleteConfirmVisible(false);
+          setDeleting(false);
+        }}
+        onConfirm={handleConfirmDelete}
       />
     </SafeAreaView>
   );
@@ -548,6 +718,10 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   tabContent: { minHeight: 300 },
+  eventsContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
   emptyTab: {
     alignItems: "center",
     justifyContent: "center",
@@ -608,9 +782,15 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
     lineHeight: 20,
   },
+  rejectedActions: {
+    width: "100%",
+    gap: 12,
+    marginTop: 8,
+  },
   editButton: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 20,
@@ -618,6 +798,21 @@ const styles = StyleSheet.create({
   },
   editButtonText: {
     color: "#ffffff",
+    fontSize: 15,
+    fontFamily: "SofiaSans-Bold",
+  },
+  deleteButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 20,
+    borderWidth: 2,
+    gap: 8,
+  },
+  deleteButtonText: {
+    color: "#ef4444",
     fontSize: 15,
     fontFamily: "SofiaSans-Bold",
   },

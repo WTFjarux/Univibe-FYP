@@ -47,36 +47,29 @@ const PostPreview: React.FC<PostPreviewProps> = ({
 }) => {
   const router = useRouter();
   const { user: currentUser } = useAuth();
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [avatarError, setAvatarError] = useState(false);
   const [postImageError, setPostImageError] = useState<boolean[]>([]);
   const [containerWidth, setContainerWidth] = useState(IMAGE_WIDTH);
   const scrollViewRef = useRef<ScrollView>(null);
-
-  // Share modal state
   const [shareModalVisible, setShareModalVisible] = useState(false);
 
-  // Check if community post
   const isCommunityPost = !!post.community?.name;
-
   const userDisplay = formatUserDisplay(post);
   const postImages = post.images?.map((img) => getFullImageUrl(img.url)) || [];
 
-  // Initialize image error array
   React.useEffect(() => {
     if (postImages.length > 0) {
       setPostImageError(new Array(postImages.length).fill(false));
     }
   }, [postImages.length]);
 
-  // Get display name
   const getDisplayName = useCallback(() => {
     if (isCommunityPost) return post.community!.name;
     return userDisplay.name;
   }, [isCommunityPost, post.community, userDisplay.name]);
 
-  // Handle profile navigation
   const handleProfilePress = useCallback(() => {
     if (isCommunityPost) return;
     if (post.isAnonymous) return;
@@ -95,7 +88,6 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     router,
   ]);
 
-  // Handle community navigation
   const handleCommunityPress = useCallback(() => {
     if (!isCommunityPost || !post.community?._id) return;
     router.push(
@@ -103,7 +95,6 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     );
   }, [isCommunityPost, post.community?._id, router]);
 
-  // Handle image scroll
   const handleScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const contentOffsetX = event.nativeEvent.contentOffset.x;
@@ -113,7 +104,6 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     [containerWidth],
   );
 
-  // Handle image error
   const handleImageError = useCallback((index: number) => {
     setPostImageError((prev) => {
       const newErrors = [...prev];
@@ -122,7 +112,6 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     });
   }, []);
 
-  // Go to specific image
   const goToImage = useCallback(
     (index: number) => {
       setCurrentImageIndex(index);
@@ -136,16 +125,9 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     [containerWidth],
   );
 
-  // Share handler
-  const handleSharePress = useCallback(() => {
-    setShareModalVisible(true);
-  }, []);
-
-  const handleShareClose = useCallback(() => {
-    setShareModalVisible(false);
-  }, []);
-
-  const handleShareSuccess = useCallback((data: any) => {
+  const handleSharePress = useCallback(() => setShareModalVisible(true), []);
+  const handleShareClose = useCallback(() => setShareModalVisible(false), []);
+  const handleShareSuccess = useCallback(() => {
     Alert.alert("Shared", "Post shared successfully!");
   }, []);
 
@@ -154,6 +136,7 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     const icons: Record<string, IconName> = {
       campus: "school-outline",
       connections: "people-outline",
+      community: "people",
     };
     return icons[post.visibility] || "globe-outline";
   }, [post.visibility]);
@@ -162,6 +145,7 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     const names: Record<string, string> = {
       campus: "Campus",
       connections: "Connections",
+      community: "Community",
     };
     return names[post.visibility] || "Public";
   }, [post.visibility]);
@@ -169,16 +153,19 @@ const PostPreview: React.FC<PostPreviewProps> = ({
   const getVisibilityBadgeColor = useCallback((): string => {
     const customColors: Record<string, string> = {
       campus: "#3b82f6",
-      connections: colors.primary,
+      connections: "#8b5cf6",
+      community: "#7c3aed",
     };
     return customColors[post.visibility] || colors.textMuted;
-  }, [post.visibility, colors.primary, colors.textMuted]);
+  }, [post.visibility, colors.textMuted]);
+
+  const visibilityIconName = getVisibilityIconName();
+  const visibilityBadgeColor = getVisibilityBadgeColor();
 
   // Render avatar
   const renderAvatar = () => {
     const avatarSize = 40;
 
-    // Community post
     if (isCommunityPost) {
       if (post.community?.coverImage) {
         return (
@@ -217,7 +204,6 @@ const PostPreview: React.FC<PostPreviewProps> = ({
       );
     }
 
-    // Anonymous post
     if (post.isAnonymous) {
       return (
         <View
@@ -238,7 +224,6 @@ const PostPreview: React.FC<PostPreviewProps> = ({
       );
     }
 
-    // Has profile picture and no error
     if (post.user?.profilePicture && !avatarError) {
       return (
         <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7}>
@@ -260,7 +245,6 @@ const PostPreview: React.FC<PostPreviewProps> = ({
       );
     }
 
-    // Fallback avatar with initials
     return (
       <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7}>
         <View
@@ -283,7 +267,6 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     );
   };
 
-  // Render image indicators (dots)
   const renderIndicators = () => {
     if (postImages.length <= 1) return null;
     return (
@@ -302,7 +285,6 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     );
   };
 
-  // Render image counter
   const renderCounter = () => {
     if (postImages.length <= 1) return null;
     return (
@@ -315,10 +297,6 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     );
   };
 
-  const visibilityIconName = getVisibilityIconName();
-  const visibilityBadgeColor = getVisibilityBadgeColor();
-
-  // Prepare share data
   const sharePostData = {
     postId: post._id,
     postContent: post.content || "",
@@ -336,51 +314,28 @@ const PostPreview: React.FC<PostPreviewProps> = ({
     isAnonymous: post.isAnonymous || false,
   };
 
-  // Dynamic Theme Mapping Matrix
   const dynamicStyles = {
     container: {
       backgroundColor: colors.card,
       borderBottomColor: colors.border,
     },
-    userName: {
-      color: colors.text,
-    },
-    timestamp: {
-      color: colors.textSecondary,
-    },
-    content: {
-      color: colors.text,
-    },
-    imageErrorContainer: {
-      backgroundColor: colors.border,
-    },
-    imageErrorText: {
-      color: colors.textSecondary,
-    },
-    postImage: {
-      backgroundColor: colors.border,
-    },
-    actions: {
-      borderTopColor: colors.border,
-    },
-    actionText: {
-      color: colors.textSecondary,
-    },
-    commentsHeader: {
-      borderTopColor: colors.border,
-    },
-    commentsTitle: {
-      color: colors.text,
-    },
+    userName: { color: colors.text },
+    timestamp: { color: colors.textSecondary },
+    content: { color: colors.text },
+    imageErrorContainer: { backgroundColor: colors.border },
+    imageErrorText: { color: colors.textSecondary },
+    postImage: { backgroundColor: colors.border },
+    actions: { borderTopColor: colors.border },
+    actionText: { color: colors.textSecondary },
+    commentsHeader: { borderTopColor: colors.border },
+    commentsTitle: { color: colors.text },
   };
 
   return (
     <>
       <View
         style={[styles.container, dynamicStyles.container]}
-        onLayout={(event) => {
-          setContainerWidth(event.nativeEvent.layout.width);
-        }}
+        onLayout={(event) => setContainerWidth(event.nativeEvent.layout.width)}
       >
         {/* Header */}
         <View style={styles.header}>
@@ -409,50 +364,27 @@ const PostPreview: React.FC<PostPreviewProps> = ({
                 </TouchableOpacity>
               )}
 
-              {/* Badge */}
-              {isCommunityPost ? (
-                <View
+              {/* ✅ Visibility Badge for ALL posts */}
+              <View
+                style={[
+                  styles.visibilityBadge,
+                  { backgroundColor: `${visibilityBadgeColor}15` },
+                ]}
+              >
+                <Ionicons
+                  name={visibilityIconName}
+                  size={12}
+                  color={visibilityBadgeColor}
+                />
+                <Text
                   style={[
-                    styles.communityBadge,
-                    { backgroundColor: colors.primary + "15" },
+                    styles.visibilityBadgeText,
+                    { color: visibilityBadgeColor },
                   ]}
                 >
-                  <Ionicons
-                    name="people-outline"
-                    size={12}
-                    color={colors.primary}
-                  />
-                  <Text
-                    style={[
-                      styles.communityBadgeText,
-                      { color: colors.primary },
-                    ]}
-                  >
-                    Community
-                  </Text>
-                </View>
-              ) : (
-                <View
-                  style={[
-                    styles.visibilityBadge,
-                    { backgroundColor: `${visibilityBadgeColor}15` },
-                  ]}
-                >
-                  <Ionicons
-                    name={visibilityIconName}
-                    size={12}
-                    color={visibilityBadgeColor}
-                  />
-                  <Text
-                    style={[
-                      styles.visibilityBadgeText,
-                      { color: visibilityBadgeColor },
-                    ]}
-                  >
-                    {getVisibilityDisplayName()}
-                  </Text>
-                </View>
-              )}
+                  {getVisibilityDisplayName()}
+                </Text>
+              </View>
             </View>
             <Text style={[styles.timestamp, dynamicStyles.timestamp]}>
               {isCommunityPost
@@ -630,7 +562,6 @@ const PostPreview: React.FC<PostPreviewProps> = ({
         </View>
       </View>
 
-      {/* Share Modal */}
       <SharePostModal
         visible={shareModalVisible}
         onClose={handleShareClose}
@@ -642,19 +573,14 @@ const PostPreview: React.FC<PostPreviewProps> = ({
 };
 
 const styles = StyleSheet.create({
-  container: {
-    paddingTop: 16,
-    borderBottomWidth: 1,
-  },
+  container: { paddingTop: 16, borderBottomWidth: 1 },
   header: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 20,
     marginBottom: 12,
   },
-  avatar: {
-    marginRight: 12,
-  },
+  avatar: { marginRight: 12 },
   anonymousAvatar: {
     justifyContent: "center",
     alignItems: "center",
@@ -666,19 +592,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  fallbackAvatar: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  fallbackAvatar: { justifyContent: "center", alignItems: "center" },
   fallbackAvatarText: {
     color: "#fff",
     fontSize: 16,
     fontWeight: "600",
     fontFamily: "SofiaSans-Bold",
   },
-  userInfo: {
-    flex: 1,
-  },
+  userInfo: { flex: 1 },
   nameRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -686,11 +607,7 @@ const styles = StyleSheet.create({
     gap: 4,
     marginBottom: 2,
   },
-  userName: {
-    fontSize: 15,
-    fontWeight: "600",
-    fontFamily: "SofiaSans-Bold",
-  },
+  userName: { fontSize: 15, fontWeight: "600", fontFamily: "SofiaSans-Bold" },
   visibilityBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -700,27 +617,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginLeft: 4,
   },
-  visibilityBadgeText: {
-    fontSize: 10,
-    fontFamily: "SofiaSans-Regular",
-  },
-  communityBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-    marginLeft: 4,
-  },
-  communityBadgeText: {
-    fontSize: 11,
-    fontFamily: "SofiaSans-SemiBold",
-  },
-  timestamp: {
-    fontSize: 13,
-    fontFamily: "SofiaSans-Regular",
-  },
+  visibilityBadgeText: { fontSize: 10, fontFamily: "SofiaSans-Regular" },
+  timestamp: { fontSize: 13, fontFamily: "SofiaSans-Regular" },
   content: {
     fontSize: 15,
     lineHeight: 20,
@@ -728,18 +626,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     fontFamily: "SofiaSans-Regular",
   },
-  imagesWrapper: {
-    marginBottom: 12,
-  },
+  imagesWrapper: { marginBottom: 12 },
   postImage: {},
-  imageErrorContainer: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  imageErrorText: {
-    fontSize: 14,
-    marginTop: 8,
-  },
+  imageErrorContainer: { justifyContent: "center", alignItems: "center" },
+  imageErrorText: { fontSize: 14, marginTop: 8 },
   indicatorsContainer: {
     position: "absolute",
     bottom: 16,
@@ -774,11 +664,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
   },
-  imageCounterText: {
-    color: "white",
-    fontSize: 12,
-    fontWeight: "600",
-  },
+  imageCounterText: { color: "white", fontSize: 12, fontWeight: "600" },
   actions: {
     flexDirection: "row",
     justifyContent: "space-around",
@@ -787,18 +673,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderTopWidth: 1,
   },
-  action: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  actionText: {
-    fontSize: 14,
-    fontFamily: "SofiaSans-Regular",
-  },
-  actionTextLiked: {
-    color: "#ef4444",
-  },
+  action: { flexDirection: "row", alignItems: "center", gap: 6 },
+  actionText: { fontSize: 14, fontFamily: "SofiaSans-Regular" },
+  actionTextLiked: { color: "#ef4444" },
   commentsHeader: {
     paddingHorizontal: 20,
     paddingTop: 16,

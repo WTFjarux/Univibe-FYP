@@ -1016,6 +1016,8 @@ export const getVisibilityLabel = (visibility: string): string => {
       return "Campus";
     case "connections":
       return "Connections";
+    case "community":
+      return "Community";
     default:
       return visibility;
   }
@@ -1072,6 +1074,8 @@ export const getVisibilityIcon = (visibility: string): string => {
       return "school-outline";
     case "connections":
       return "people-outline";
+    case "community":
+      return "people"; 
     default:
       return "globe-outline";
   }

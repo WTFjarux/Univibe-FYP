@@ -80,7 +80,7 @@ const postSchema = new mongoose.Schema(
     // SIMPLIFIED VISIBILITY - campus and connections
     visibility: {
       type: String,
-      enum: ["campus", "connections"],
+      enum: ["campus", "connections", "community"],
       default: "campus",
     },
 
@@ -90,7 +90,7 @@ const postSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
-    
+
     // === POST STATUS FLAGS ===
     isPinned: {
       type: Boolean,

@@ -26,6 +26,7 @@ const getEvents = async (req, res) => {
     const [events, total] = await Promise.all([
       Event.find(query)
         .populate("organizer", "name username email")
+        .populate("community", "name coverImage type privacy")
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(parseInt(limit))

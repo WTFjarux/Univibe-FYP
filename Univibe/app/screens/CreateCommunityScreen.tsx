@@ -353,7 +353,7 @@ export default function CreateCommunityScreen() {
         description: description.trim(),
         university,
         type,
-        privacy: type === "department" ? "private" : privacy,
+        privacy: type === "department" ? "public" : privacy,
         coverImage: coverFile,
         tags: tags,
         rules: rules,
@@ -636,7 +636,7 @@ export default function CreateCommunityScreen() {
               ]}
               onPress={() => {
                 setType("department");
-                setPrivacy("private");
+                setPrivacy("public"); // ✅ Departments are always public
               }}
             >
               <Ionicons
@@ -672,7 +672,7 @@ export default function CreateCommunityScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Privacy Selector */}
+          {/* Privacy Selector - Only for communities */}
           {type === "community" && (
             <>
               <Text
@@ -805,6 +805,7 @@ export default function CreateCommunityScreen() {
             </>
           )}
 
+          {/* Department Note - Updated */}
           {type === "department" && (
             <View
               style={[
@@ -823,8 +824,7 @@ export default function CreateCommunityScreen() {
               <Text
                 style={[styles.departmentNoteText, { color: colors.primary }]}
               >
-                Departments are always private. Members need admin approval to
-                join.
+                Departments are always public. Anyone can join instantly.
               </Text>
             </View>
           )}

@@ -76,6 +76,12 @@ const eventSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    community: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Community",
+      default: null,
+      index: true,
+    },
     organizerName: {
       type: String,
       required: true,
@@ -86,7 +92,7 @@ const eventSchema = new mongoose.Schema(
     rsvp: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     visibility: {
       type: String,
-      enum: ["campus", "connections", "public"],
+      enum: ["campus", "connections", "public", "community"],
       default: "campus",
     },
     // === APPROVAL FIELDS ===
@@ -94,8 +100,14 @@ const eventSchema = new mongoose.Schema(
       type: String,
       enum: ["pending", "approved", "rejected"],
       default: function () {
-        // Auto-approve connections events
-        return this.visibility === "connections" ? "approved" : "pending";
+        // Auto-approve connections and community events
+        if (
+          this.visibility === "connections" ||
+          this.visibility === "community"
+        ) {
+          return "approved";
+        }
+        return "pending";
       },
     },
     approvedBy: {
@@ -136,6 +148,7 @@ eventSchema.index({ startDate: -1 });
 eventSchema.index({ endDate: 1 });
 eventSchema.index({ campus: 1, startDate: -1 });
 eventSchema.index({ organizer: 1 });
+eventSchema.index({ community: 1, startDate: -1 });
 eventSchema.index({ category: 1 });
 eventSchema.index({ status: 1 });
 eventSchema.index({ visibility: 1 });

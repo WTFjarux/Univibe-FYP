@@ -1,5 +1,5 @@
 // app/components/Events/EventCard.tsx
-import React, { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -13,7 +13,11 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useTheme } from "@/lib/contexts/ThemeContext";
-import { Event, eventService } from "@/lib/services/eventService";
+import {
+  Event,
+  eventService,
+  getFullImageUrl,
+} from "@/lib/services/eventService";
 
 const { width } = Dimensions.get("window");
 
@@ -39,6 +43,12 @@ export default function EventCard({
   const flatListRef = useRef<FlatList>(null);
   const statusIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { colors } = useTheme();
+
+  // Check if event belongs to a community
+  const hasCommunity =
+    event.community &&
+    typeof event.community === "object" &&
+    "name" in event.community;
 
   useEffect(() => {
     const checkAndUpdateStatus = () => {
@@ -77,15 +87,6 @@ export default function EventCard({
     return false;
   })();
 
-  const formatDateFull = (dateString: string) =>
-    new Date(dateString).toLocaleDateString("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
   const formatDateShort = (dateString: string) =>
     new Date(dateString).toLocaleDateString("en-US", {
       month: "short",
@@ -150,6 +151,26 @@ export default function EventCard({
     }
   };
 
+  const getVisibilityDisplayName = (visibility: string) => {
+    const names: Record<string, string> = {
+      campus: "Campus",
+      connections: "Connections",
+      public: "Public",
+      community: "Community",
+    };
+    return names[visibility] || visibility || "Campus";
+  };
+
+  const getVisibilityBadgeColor = (visibility: string) => {
+    const colors: Record<string, string> = {
+      campus: "#3b82f6",
+      connections: "#8b5cf6",
+      public: "#10b981",
+      community: "#7c3aed",
+    };
+    return colors[visibility] || "#9ca3af";
+  };
+
   const getEventImages = () => {
     if (event.imageUrls && event.imageUrls.length > 0) return event.imageUrls;
     if (event.coverImage) return [event.coverImage];
@@ -204,53 +225,7 @@ export default function EventCard({
               viewabilityConfig={viewabilityConfig}
               style={styles.carousel}
             />
-            {hasMultipleImages && (
-              <>
-                <View style={styles.imageCounter}>
-                  <Ionicons name="images-outline" size={12} color="#fff" />
-                  <Text style={styles.imageCounterText}>
-                    {currentImageIndex + 1}/{images.length}
-                  </Text>
-                </View>
-                {currentImageIndex > 0 && (
-                  <TouchableOpacity
-                    style={[styles.navButton, styles.navButtonLeft]}
-                    onPress={() =>
-                      flatListRef.current?.scrollToIndex({
-                        index: currentImageIndex - 1,
-                        animated: true,
-                      })
-                    }
-                  >
-                    <Ionicons name="chevron-back" size={20} color="#fff" />
-                  </TouchableOpacity>
-                )}
-                {currentImageIndex < images.length - 1 && (
-                  <TouchableOpacity
-                    style={[styles.navButton, styles.navButtonRight]}
-                    onPress={() =>
-                      flatListRef.current?.scrollToIndex({
-                        index: currentImageIndex + 1,
-                        animated: true,
-                      })
-                    }
-                  >
-                    <Ionicons name="chevron-forward" size={20} color="#fff" />
-                  </TouchableOpacity>
-                )}
-                <View style={styles.dotsContainer}>
-                  {images.map((_, index) => (
-                    <View
-                      key={index}
-                      style={[
-                        styles.dot,
-                        currentImageIndex === index && styles.dotActive,
-                      ]}
-                    />
-                  ))}
-                </View>
-              </>
-            )}
+
             {currentStatus === "completed" && (
               <View style={styles.completedOverlay}>
                 <Ionicons name="checkmark-circle" size={48} color="#fff" />
@@ -277,6 +252,7 @@ export default function EventCard({
         )}
       </View>
 
+      {/* Status Badge - Right side */}
       <View
         style={[
           styles.statusBadge,
@@ -286,6 +262,27 @@ export default function EventCard({
         <Text style={styles.statusText}>{getStatusText(currentStatus)}</Text>
       </View>
 
+      {/* ✅ Visibility Badge - Left side (shows Campus/Community/Public/Connections) */}
+      <View style={styles.visibilityBadge}>
+        <Ionicons
+          name={
+            event.visibility === "community"
+              ? "people"
+              : event.visibility === "connections"
+                ? "people-outline"
+                : event.visibility === "public"
+                  ? "globe-outline"
+                  : "school-outline"
+          }
+          size={12}
+          color="#fff"
+        />
+        <Text style={styles.visibilityBadgeText}>
+          {getVisibilityDisplayName(event.visibility)}
+        </Text>
+      </View>
+
+      {/* Approval Badge - Below visibility if pending/rejected */}
       {isOrganizer &&
         event.approvalStatus &&
         event.approvalStatus !== "approved" && (
@@ -426,7 +423,40 @@ export default function EventCard({
           </View>
         )}
 
-        {isOrganizer ? (
+        {/* ✅ Community Event Info OR Organizer Info */}
+        {hasCommunity ? (
+          <View style={styles.communityInfoContainer}>
+            {event.community &&
+            typeof event.community === "object" &&
+            event.community.coverImage ? (
+              <Image
+                source={{ uri: getFullImageUrl(event.community.coverImage) }}
+                style={styles.communityAvatar}
+              />
+            ) : (
+              <View
+                style={[
+                  styles.communityAvatar,
+                  styles.communityAvatarPlaceholder,
+                ]}
+              >
+                <Ionicons name="people" size={16} color="#7c3aed" />
+              </View>
+            )}
+            <View style={styles.communityTextContainer}>
+              <Text style={[styles.communityName, { color: colors.text }]}>
+                {event.community && typeof event.community === "object"
+                  ? event.community.name
+                  : "Community"}
+              </Text>
+              <Text
+                style={[styles.communityLabel, { color: colors.textSecondary }]}
+              >
+                Community Event
+              </Text>
+            </View>
+          </View>
+        ) : isOrganizer ? (
           <View style={styles.organizerBadge}>
             <Ionicons name="star" size={12} color="#f59e0b" />
             <Text style={styles.organizerBadgeText}>You're the organizer</Text>
@@ -580,9 +610,29 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontFamily: "SofiaSans-Regular",
   },
-  approvalBadge: {
+  // ✅ Visibility Badge (replaces community badge)
+  visibilityBadge: {
     position: "absolute",
     top: 12,
+    left: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    zIndex: 10,
+  },
+  visibilityBadgeText: {
+    fontSize: 11,
+    fontWeight: "600",
+    fontFamily: "SofiaSans-Regular",
+    color: "#fff",
+  },
+  approvalBadge: {
+    position: "absolute",
+    top: 44,
     left: 12,
     flexDirection: "row",
     alignItems: "center",
@@ -702,6 +752,42 @@ const styles = StyleSheet.create({
     color: "#92400e",
     fontFamily: "SofiaSans-Regular",
     fontWeight: "500",
+  },
+  communityInfoContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: "#f5f3ff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#ede9fe",
+  },
+  communityAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    overflow: "hidden",
+  },
+  communityAvatarPlaceholder: {
+    backgroundColor: "#ede9fe",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  communityTextContainer: {
+    flex: 1,
+  },
+  communityName: {
+    fontSize: 14,
+    fontWeight: "600",
+    fontFamily: "SofiaSans-SemiBold",
+  },
+  communityLabel: {
+    fontSize: 11,
+    fontFamily: "SofiaSans-Regular",
+    marginTop: 1,
   },
   organizerBadge: {
     flexDirection: "row",

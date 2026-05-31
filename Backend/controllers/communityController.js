@@ -11,6 +11,7 @@ const Profile = require("../models/Profile");
 const ApprovalQueue = require("../models/ApprovalQueue");
 const Notification = require("../models/Notification");
 const Comment = require("../models/Comment");
+const { getAdminModel } = require("../config/database");
 
 // ============================================
 // SOCKET HELPERS
@@ -289,7 +290,7 @@ exports.createCommunity = async (req, res) => {
     }
 
     const communityPrivacy =
-      communityType === "department" ? "private" : privacy || "public";
+      communityType === "department" ? "public" : privacy || "public";
 
     const existing = await Community.findOne({ name: name.trim(), university });
     if (existing) {
@@ -324,6 +325,7 @@ exports.createCommunity = async (req, res) => {
       type: communityType,
       privacy: communityPrivacy,
       admins: [req.user.id],
+      members: [{ user: req.user.id, joinedAt: new Date() }],
       approvalStatus: "pending",
       tags: parsedTags,
       rules: parsedRules,
@@ -1064,8 +1066,12 @@ exports.updateCommunity = async (req, res) => {
     }
 
     // ✅ Update privacy - always set if provided
-    if (privacy && community.type !== "department") {
-      community.privacy = privacy;
+    if (privacy !== undefined) {
+      if (community.type === "department") {
+        community.privacy = "public"; // Always public for departments
+      } else {
+        community.privacy = privacy;
+      }
     }
 
     // Update tags
@@ -1650,6 +1656,206 @@ exports.removeModerator = async (req, res) => {
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
+// ============================================
+// ADD ADMIN
+// ============================================
+
+exports.addAdmin = async (req, res) => {
+  try {
+    const { communityId, userId } = req.params;
+    const currentUserId = req.user.id;
+
+    const community = await Community.findById(communityId);
+    if (!community)
+      return res
+        .status(404)
+        .json({ success: false, message: "Community not found" });
+
+    if (!community.isAdmin(currentUserId))
+      return res
+        .status(403)
+        .json({ success: false, message: "Only admins can add other admins" });
+
+    if (community.isAdmin(userId))
+      return res
+        .status(400)
+        .json({ success: false, message: "User is already an admin" });
+
+    if (!community.isMember(userId))
+      return res
+        .status(400)
+        .json({ success: false, message: "User is not a member" });
+
+    community.admins.push(userId);
+    await community.save();
+
+    const metadata = buildCommunityMetadata(community);
+    await createAndEmitNotification(
+      req,
+      userId,
+      currentUserId,
+      "role_updated",
+      "Promoted to Admin",
+      `You have been promoted to admin in "${community.name}"`,
+      community._id,
+      "Community",
+      metadata,
+    );
+
+    res.json({ success: true, message: "Admin added successfully" });
+  } catch (error) {
+    console.error("addAdmin error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// ============================================
+// REMOVE ADMIN
+// ============================================
+
+exports.removeAdmin = async (req, res) => {
+  try {
+    const { communityId, userId } = req.params;
+    const currentUserId = req.user.id;
+
+    const community = await Community.findById(communityId);
+    if (!community)
+      return res
+        .status(404)
+        .json({ success: false, message: "Community not found" });
+
+    if (!community.isAdmin(currentUserId))
+      return res.status(403).json({
+        success: false,
+        message: "Only admins can remove other admins",
+      });
+
+    if (!community.isAdmin(userId))
+      return res
+        .status(400)
+        .json({ success: false, message: "User is not an admin" });
+
+    if (community.admins.length <= 1)
+      return res
+        .status(400)
+        .json({ success: false, message: "Cannot remove the last admin" });
+
+    community.admins = community.admins.filter(
+      (id) => id.toString() !== userId,
+    );
+    await community.save();
+
+    const metadata = buildCommunityMetadata(community);
+    await createAndEmitNotification(
+      req,
+      userId,
+      currentUserId,
+      "role_updated",
+      "Admin Role Removed",
+      `Your admin role in "${community.name}" has been removed`,
+      community._id,
+      "Community",
+      metadata,
+    );
+
+    res.json({ success: true, message: "Admin removed successfully" });
+  } catch (error) {
+    console.error("removeAdmin error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// ============================================
+// TRANSFER ADMIN
+// ============================================
+
+exports.transferAdmin = async (req, res) => {
+  try {
+    const { communityId, userId } = req.params;
+    const currentUserId = req.user.id;
+
+    const community = await Community.findById(communityId);
+    if (!community)
+      return res
+        .status(404)
+        .json({ success: false, message: "Community not found" });
+
+    if (!community.isAdmin(currentUserId))
+      return res.status(403).json({
+        success: false,
+        message: "Only admins can transfer admin role",
+      });
+
+    if (currentUserId === userId)
+      return res.status(400).json({
+        success: false,
+        message: "You cannot transfer admin role to yourself",
+      });
+
+    if (!community.isMember(userId))
+      return res.status(400).json({
+        success: false,
+        message: "User is not a member of this community",
+      });
+
+    const targetUser = await User.findById(userId)
+      .select("name username")
+      .lean();
+    const currentUser = await User.findById(currentUserId)
+      .select("name username")
+      .lean();
+
+    // Remove current admin, add new admin
+    community.admins = community.admins.filter(
+      (id) => id.toString() !== currentUserId,
+    );
+
+    if (!community.isAdmin(userId)) {
+      community.admins.push(userId);
+    }
+
+    await community.save();
+
+    const metadata = buildCommunityMetadata(community);
+
+    await createAndEmitNotification(
+      req,
+      userId,
+      currentUserId,
+      "role_updated",
+      "Promoted to Admin",
+      `You have been promoted to admin in "${community.name}" by ${currentUser?.name || "the previous admin"}`,
+      community._id,
+      "Community",
+      metadata,
+    );
+
+    await createAndEmitNotification(
+      req,
+      currentUserId,
+      userId,
+      "role_updated",
+      "Admin Role Transferred",
+      `You have transferred admin role to ${targetUser?.name || "another member"} in "${community.name}"`,
+      community._id,
+      "Community",
+      metadata,
+    );
+
+    emitCommunityUpdate(req, communityId, "admin_transferred", {
+      oldAdmin: currentUserId,
+      newAdmin: userId,
+    });
+
+    res.json({
+      success: true,
+      message: `Admin role transferred to ${targetUser?.name || "member"} successfully`,
+    });
+  } catch (error) {
+    console.error("transferAdmin error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
 
 // ============================================
 // COMMUNITY FEED & EVENTS
@@ -1678,10 +1884,19 @@ exports.getCommunityFeed = async (req, res) => {
         .json({ success: false, message: "Join the community to view posts" });
     }
 
-    const posts = await Post.find({
+    // ✅ Build query based on membership
+    const query = {
       community: communityId,
       isDeleted: false,
-    })
+    };
+
+    // ✅ If NOT a member/admin, only show campus visibility posts
+    if (!isMember && !isAdmin) {
+      query.visibility = "campus";
+    }
+    // If IS a member/admin, show all posts (no visibility filter needed)
+
+    const posts = await Post.find(query)
       .sort({ createdAt: -1 })
       .skip((parseInt(page) - 1) * parseInt(limit))
       .limit(parseInt(limit))
@@ -1689,10 +1904,7 @@ exports.getCommunityFeed = async (req, res) => {
       .populate("community", "name coverImage type privacy")
       .lean();
 
-    const total = await Post.countDocuments({
-      community: communityId,
-      isDeleted: false,
-    });
+    const total = await Post.countDocuments(query);
 
     const userIds = posts.map((post) => post.user?._id).filter(Boolean);
     const profiles = await Profile.find({ user: { $in: userIds } })
@@ -1771,13 +1983,40 @@ exports.getCommunityEvents = async (req, res) => {
       .sort({ startDate: -1 })
       .skip((parseInt(page) - 1) * parseInt(limit))
       .limit(parseInt(limit))
-      .populate("organizer", "name username profilePicture")
+      .populate("organizer", "name username email") // ✅ Use email instead of profilePicture
+      .populate("community", "name coverImage type privacy") // ✅ ADD THIS
       .lean();
     const total = await Event.countDocuments({ community: communityId });
 
+    // ✅ Process image URLs
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const processedEvents = events.map((event) => ({
+      ...event,
+      coverImage: event.coverImage
+        ? event.coverImage.startsWith("http")
+          ? event.coverImage
+          : `${baseUrl}${event.coverImage}`
+        : null,
+      coverImageUrl: event.images?.find((img) => img.isCover)?.url
+        ? `${baseUrl}${event.images.find((img) => img.isCover).url}`
+        : event.images?.[0]?.url
+          ? `${baseUrl}${event.images[0].url}`
+          : null,
+      images:
+        event.images?.map((img) => ({
+          ...img,
+          url: img.url?.startsWith("http") ? img.url : `${baseUrl}${img.url}`,
+        })) || [],
+      imageUrls:
+        event.images?.map((img) =>
+          img.url?.startsWith("http") ? img.url : `${baseUrl}${img.url}`,
+        ) || [],
+      imageCount: event.images?.length || 0,
+    }));
+
     res.json({
       success: true,
-      data: events,
+      data: processedEvents,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -1833,5 +2072,165 @@ exports.searchCommunities = async (req, res) => {
   } catch (error) {
     console.error("searchCommunities error:", error);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// ============================================
+// DELETE COMMUNITY
+// ============================================
+
+exports.deleteCommunity = async (req, res) => {
+  try {
+    const { communityId } = req.params;
+    const userId = req.user.id;
+
+    const community = await Community.findById(communityId);
+
+    if (!community) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Community not found" });
+    }
+
+    // Only admins can delete
+    if (!community.isAdmin(userId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only admins can delete the community",
+      });
+    }
+
+    // Delete all associated posts
+    await Post.deleteMany({ community: communityId });
+
+    // Delete all associated events
+    await Event.deleteMany({ community: communityId });
+
+    // Delete approval queue entry
+    await ApprovalQueue.deleteOne({ contentId: communityId });
+
+    // Delete all notifications related to this community
+    await Notification.deleteMany({
+      targetId: communityId,
+      targetModel: "Community",
+    });
+
+    // Delete all comments on community posts
+    const communityPosts = await Post.find({ community: communityId }).select(
+      "_id",
+    );
+    const postIds = communityPosts.map((p) => p._id);
+    await Comment.deleteMany({ post: { $in: postIds } });
+
+    // Delete the community
+    await Community.findByIdAndDelete(communityId);
+
+    // Notify community room about deletion via socket
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`community:${communityId}`).emit("community:deleted", {
+        communityId,
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Community deleted successfully",
+    });
+  } catch (error) {
+    console.error("deleteCommunity error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// ============================================
+// REPORT COMMUNITY
+// ============================================
+
+exports.reportCommunity = async (req, res) => {
+  try {
+    const { communityId } = req.params;
+    const { reason, description } = req.body;
+    const userId = req.user.id; // or req.user._id depending on your auth middleware
+
+    // Validate community exists
+    const Community = require("../models/Community");
+    const community = await Community.findById(communityId);
+    if (!community) {
+      return res.status(404).json({
+        success: false,
+        message: "Community not found",
+      });
+    }
+
+    // Prevent self-report (admin reporting own community)
+    if (community.isAdmin(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "You cannot report your own community",
+      });
+    }
+
+    // Validate reason
+    const validReasons = [
+      "spam",
+      "harassment",
+      "hate_speech",
+      "inappropriate_content",
+      "violence",
+      "self_harm",
+      "misinformation",
+      "impersonation",
+      "copyright",
+      "other",
+    ];
+
+    if (!reason || !validReasons.includes(reason)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid report reason",
+      });
+    }
+
+    // ✅ Use getAdminModel like in postController
+    const Report = getAdminModel("Report");
+
+    // Check for duplicate report
+    const existingReport = await Report.findOne({
+      reportedBy: userId,
+      targetType: "Community",
+      targetId: communityId,
+      status: { $in: ["pending", "reviewing"] },
+    });
+
+    if (existingReport) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "You have already reported this community. It is being reviewed.",
+      });
+    }
+
+    // Create report
+    const report = await Report.create({
+      reportedBy: userId,
+      targetType: "Community",
+      targetId: communityId,
+      reason,
+      description: description?.trim() || "",
+      status: "pending",
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Community reported successfully. Our team will review it.",
+      data: report,
+    });
+  } catch (error) {
+    console.error("reportCommunity error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 };

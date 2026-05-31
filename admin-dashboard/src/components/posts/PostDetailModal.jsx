@@ -79,6 +79,10 @@ function PostDetailModal({
                     : post.user?.email || fallbackUser?.email || "-",
                 ],
                 ["Visibility", getVisibilityDisplayName(post.visibility)],
+                // ✅ Community info
+                ...(post.community
+                  ? [["Community", post.community?.name || "Yes"]]
+                  : []),
                 ["Status", isDeleted ? "Deleted" : "Active"],
                 [
                   "Created At",
@@ -86,6 +90,17 @@ function PostDetailModal({
                     ? new Date(post.createdAt).toLocaleString()
                     : "-",
                 ],
+                ...(isDeleted
+                  ? [
+                      [
+                        "Deleted At",
+                        post.deletedAt
+                          ? new Date(post.deletedAt).toLocaleString()
+                          : "-",
+                      ],
+                      ["Delete Reason", post.deleteReason || "-"],
+                    ]
+                  : []),
               ].map(([label, value]) => (
                 <div
                   key={label}

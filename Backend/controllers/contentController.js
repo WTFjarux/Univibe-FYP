@@ -92,10 +92,16 @@ exports.getSavedPosts = async (req, res) => {
         isDeleted: false,
         user: { $nin: blockedUserIds },
       },
-      populate: {
-        path: "user",
-        select: "name username email",
-      },
+      populate: [
+        {
+          path: "user",
+          select: "name username email",
+        },
+        {
+          path: "community",
+          select: "name coverImage type privacy",
+        },
+      ],
       options: {
         sort: { createdAt: -1 },
         skip: skip,
@@ -257,10 +263,16 @@ exports.getHiddenPosts = async (req, res) => {
         isDeleted: false,
         user: { $nin: blockedUserIds },
       },
-      populate: {
-        path: "user",
-        select: "name username email verified profilePicture",
-      },
+      populate: [
+        {
+          path: "user",
+          select: "name username email verified profilePicture",
+        },
+        {
+          path: "community",
+          select: "name coverImage type privacy",
+        },
+      ],
       options: {
         sort: { createdAt: -1 },
         skip: skip,

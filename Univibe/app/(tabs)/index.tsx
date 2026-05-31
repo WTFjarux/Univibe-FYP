@@ -23,12 +23,15 @@ import {
   listenForNotifications,
 } from "../../lib/services/notificationService";
 import socketService from "../../lib/services/socketService";
-import CampusMoments from "../components/CampusMoments";
+import CampusMoments from "../components/home/CampusMoments";
+import QuickActions from "../components/home/QuickActions";
+import MyCommunities from "../components/home/MyCommunities";
+import UpcomingEvents from "../components/home/UpcomingEvents";
+
 import type { StoryGroup } from "../../lib/services/storyApi";
 
 const { width } = Dimensions.get("window");
 
-// Skeleton component for the entire home screen
 const HomeScreenSkeleton = () => {
   const shimmerValue = useRef(new Animated.Value(0)).current;
   const { colors } = useTheme();
@@ -61,7 +64,6 @@ const HomeScreenSkeleton = () => {
     <View
       style={[styles.skeletonContainer, { backgroundColor: colors.background }]}
     >
-      {/* Header Skeleton */}
       <View style={styles.skeletonHeader}>
         <Animated.View
           style={[
@@ -82,8 +84,19 @@ const HomeScreenSkeleton = () => {
           ]}
         />
       </View>
-
-      {/* Stories Skeleton */}
+      <View style={styles.skeletonSection}>
+        <View style={styles.skeletonQuickActions}>
+          {[...Array(4)].map((_, i) => (
+            <Animated.View
+              key={i}
+              style={[
+                styles.skeletonActionBtn,
+                { opacity, backgroundColor: colors.skeleton },
+              ]}
+            />
+          ))}
+        </View>
+      </View>
       <View style={styles.skeletonSection}>
         <Animated.View
           style={[
@@ -96,8 +109,8 @@ const HomeScreenSkeleton = () => {
           showsHorizontalScrollIndicator={false}
           style={styles.skeletonStoriesContainer}
         >
-          {[...Array(6)].map((_, index) => (
-            <View key={index} style={styles.skeletonStoryCard}>
+          {[...Array(6)].map((_, i) => (
+            <View key={i} style={styles.skeletonStoryCard}>
               <Animated.View
                 style={[
                   styles.skeletonStoryRing,
@@ -125,8 +138,6 @@ const HomeScreenSkeleton = () => {
           ))}
         </ScrollView>
       </View>
-
-      {/* Events Skeleton */}
       <View style={styles.skeletonSection}>
         <Animated.View
           style={[
@@ -134,9 +145,28 @@ const HomeScreenSkeleton = () => {
             { opacity, backgroundColor: colors.skeleton },
           ]}
         />
-        {[...Array(3)].map((_, index) => (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          {[...Array(4)].map((_, i) => (
+            <Animated.View
+              key={i}
+              style={[
+                styles.skeletonCommunityCard,
+                { opacity, backgroundColor: colors.skeleton },
+              ]}
+            />
+          ))}
+        </ScrollView>
+      </View>
+      <View style={styles.skeletonSection}>
+        <Animated.View
+          style={[
+            styles.skeletonTitle,
+            { opacity, backgroundColor: colors.skeleton },
+          ]}
+        />
+        {[...Array(3)].map((_, i) => (
           <Animated.View
-            key={index}
+            key={i}
             style={[
               styles.skeletonEventCard,
               { opacity, backgroundColor: colors.card },
@@ -158,12 +188,6 @@ const HomeScreenSkeleton = () => {
               <Animated.View
                 style={[
                   styles.skeletonEventMeta,
-                  { opacity, backgroundColor: colors.skeleton },
-                ]}
-              />
-              <Animated.View
-                style={[
-                  styles.skeletonEventAttendees,
                   { opacity, backgroundColor: colors.skeleton },
                 ]}
               />
@@ -190,87 +214,59 @@ export default function HomeScreen() {
   const isMountedRef = useRef(true);
   const fetchInProgressRef = useRef(false);
 
-  // Handle initial loading state
   useEffect(() => {
     isMountedRef.current = true;
     initialLoadTimerRef.current = setTimeout(() => {
-      if (isMountedRef.current) {
-        setIsInitialLoading(false);
-      }
+      if (isMountedRef.current) setIsInitialLoading(false);
     }, 1500);
-
     return () => {
       isMountedRef.current = false;
-      if (initialLoadTimerRef.current) {
+      if (initialLoadTimerRef.current)
         clearTimeout(initialLoadTimerRef.current);
-      }
     };
   }, []);
 
-  // ===== REAL-TIME NOTIFICATION COUNT =====
   useEffect(() => {
     if (!token) return;
-
     const cleanup = listenForNotifications(
       () => {},
       (count: number) => {
-        if (isMountedRef.current) {
-          setUnreadCount(count);
-        }
+        if (isMountedRef.current) setUnreadCount(count);
       },
     );
-
     return () => cleanup();
   }, [token]);
 
-  // ===== REAL-TIME CHAT UNREAD COUNT =====
   useEffect(() => {
     if (!token) return;
-
-    // Initial fetch with debounce protection
     const fetchUnreadChatCount = async () => {
       if (fetchInProgressRef.current || !isMountedRef.current) return;
-
       fetchInProgressRef.current = true;
       try {
         const data = await chatApi.getUnreadChatCount();
-        if (isMountedRef.current && data.success && data.count !== undefined) {
+        if (isMountedRef.current && data.success && data.count !== undefined)
           setUnreadChatCount(data.count);
-        }
       } catch (error) {
-        // Silent fail - don't log to avoid console noise
       } finally {
         fetchInProgressRef.current = false;
       }
     };
-
-    // Immediate fetch on mount
     fetchUnreadChatCount();
-
-    // Handle real-time unread count updates from server
     const handleChatUnread = (data: { count: number }) => {
-      if (isMountedRef.current && data.count !== undefined) {
+      if (isMountedRef.current && data.count !== undefined)
         setUnreadChatCount(data.count);
-      }
     };
-
-    // Debounced refresh for events that don't provide exact count
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const debouncedFetch = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        fetchUnreadChatCount();
-      }, 800);
+      debounceTimer = setTimeout(() => fetchUnreadChatCount(), 800);
     };
-
-    // Socket event listeners
     socketService.on("chat:unreadCount", handleChatUnread);
     socketService.on("receive_message", debouncedFetch);
     socketService.on("messages_read", debouncedFetch);
     socketService.on("message_read", debouncedFetch);
     socketService.on("chat_cleared", debouncedFetch);
     socketService.on("message_deleted", debouncedFetch);
-
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       socketService.off("chat:unreadCount", handleChatUnread);
@@ -282,95 +278,47 @@ export default function HomeScreen() {
     };
   }, [token]);
 
-  // ===== REAL-TIME STORY REFRESH =====
-  // When a connected user posts a new story, refresh stories silently
   useEffect(() => {
     if (!token) return;
-
     const unsubscribe = storyApi.onNewStoryReceived(() => {
-      // Refresh stories silently (no loading indicator)
-      if (isMountedRef.current) {
-        setRefreshTrigger((prev) => prev + 1);
-      }
+      if (isMountedRef.current) setRefreshTrigger((prev) => prev + 1);
     });
-
     return () => {
       unsubscribe();
     };
   }, [token]);
 
-  // ===== REFRESH FUNCTIONS =====
   const refreshAll = useCallback(async (showIndicator = true) => {
-    if (showIndicator) {
-      setRefreshing(true);
-    }
-
-    // Trigger CampusMoments refresh by changing key
+    if (showIndicator) setRefreshing(true);
     setRefreshTrigger((prev) => prev + 1);
-
-    // Refresh notification count
     try {
-      const response = await notificationService.getUnreadCount();
-      if (
-        isMountedRef.current &&
-        response.success &&
-        response.count !== undefined
-      ) {
-        setUnreadCount(response.count);
-      }
-    } catch (error) {
-      // Silent fail
-    }
-
-    // Refresh chat unread count
+      const r = await notificationService.getUnreadCount();
+      if (isMountedRef.current && r.success && r.count !== undefined)
+        setUnreadCount(r.count);
+    } catch (error) {}
     try {
-      const chatData = await chatApi.getUnreadChatCount();
-      if (
-        isMountedRef.current &&
-        chatData.success &&
-        chatData.count !== undefined
-      ) {
-        setUnreadChatCount(chatData.count);
-      }
-    } catch (error) {
-      // Silent fail
-    }
-
-    if (showIndicator) {
+      const c = await chatApi.getUnreadChatCount();
+      if (isMountedRef.current && c.success && c.count !== undefined)
+        setUnreadChatCount(c.count);
+    } catch (error) {}
+    if (showIndicator)
       setTimeout(() => {
-        if (isMountedRef.current) {
-          setRefreshing(false);
-        }
+        if (isMountedRef.current) setRefreshing(false);
       }, 800);
-    }
   }, []);
 
-  // Refresh on screen focus
   useFocusEffect(
     useCallback(() => {
-      if (!isInitialLoading && isMountedRef.current) {
-        refreshAll(false);
-      } else if (!isInitialLoading && isMountedRef.current) {
-        // If badge was optimistically reset but not actually cleared,
-        // restore on back navigation
-        if (unreadChatCount === 0 && prevUnreadChatCount.current > 0) {
-          setUnreadChatCount(prevUnreadChatCount.current);
-          prevUnreadChatCount.current = 0;
-        }
-      }
-    }, [refreshAll, isInitialLoading, unreadChatCount]),
+      if (!isInitialLoading && isMountedRef.current) refreshAll(false);
+    }, [refreshAll, isInitialLoading]),
   );
 
   const prevUnreadChatCount = useRef(0);
-  // Handle chat button press - navigate and reset badge optimistically
   const handleChatPress = () => {
-    // Store current count before resetting
     prevUnreadChatCount.current = unreadChatCount;
-    // Optimistically reset the badge count
     setUnreadChatCount(0);
     router.push("/screens/ChatListScreen");
   };
-
   const handleStoryPress = (storyGroup: StoryGroup) => {
     router.push({
       pathname: "/screens/StoryViewerScreen",
@@ -382,37 +330,6 @@ export default function HomeScreen() {
     });
   };
 
-  // Mock data for events
-  const upcomingEvents = [
-    {
-      id: 1,
-      name: "Tech Symposium 2024",
-      date: "Tomorrow, 2 PM",
-      location: "Engineering Hall",
-      attendees: 45,
-    },
-    {
-      id: 2,
-      name: "Career Fair",
-      date: "Apr 10, 10 AM",
-      location: "Student Center",
-      attendees: 128,
-    },
-    {
-      id: 3,
-      name: "Spring Festival",
-      date: "Apr 15, 4 PM",
-      location: "Main Campus",
-      attendees: 234,
-    },
-  ];
-
-  const formatEventDate = (date: string) => {
-    const day = date.split(",")[0];
-    return day === "Tomorrow" ? "Tom" : day.slice(0, 3);
-  };
-
-  // Show full screen skeleton during initial load
   if (isInitialLoading) {
     return (
       <SafeAreaView
@@ -463,11 +380,9 @@ export default function HomeScreen() {
               </View>
             )}
           </TouchableOpacity>
-
           <Text style={[styles.logoText, { color: colors.logoText }]}>
             UNIVIBE
           </Text>
-
           <Link href="/screens/notifications" asChild>
             <TouchableOpacity style={styles.iconButton} activeOpacity={0.7}>
               <Ionicons
@@ -487,164 +402,21 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </Link>
         </View>
-
-        {/* Campus Moments Component */}
+        {/* Campus Moments */}
         <CampusMoments
           key={`campus-moments-${refreshTrigger}`}
           onStoryPress={handleStoryPress}
         />
 
-        {/* Events */}
-        <View style={styles.eventsSection}>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              Upcoming Events
-            </Text>
-            <Link href="/(tabs)/events" asChild>
-              <TouchableOpacity>
-                <Text style={[styles.seeAllText, { color: colors.primary }]}>
-                  View Calendar
-                </Text>
-              </TouchableOpacity>
-            </Link>
-          </View>
+        {/* Quick Actions */}
+        <QuickActions />
 
-          {upcomingEvents.map((event) => (
-            <TouchableOpacity
-              key={event.id}
-              style={[
-                styles.eventCard,
-                {
-                  backgroundColor: colors.eventCardBg,
-                  borderColor: colors.eventCardBorder,
-                  shadowColor: colors.shadow,
-                },
-              ]}
-              activeOpacity={0.7}
-            >
-              <View
-                style={[
-                  styles.eventDate,
-                  { backgroundColor: colors.primaryLight },
-                ]}
-              >
-                <Text style={[styles.eventDateDay, { color: colors.primary }]}>
-                  {formatEventDate(event.date)}
-                </Text>
-                <Text
-                  style={[styles.eventDateLabel, { color: colors.primary }]}
-                >
-                  Day
-                </Text>
-              </View>
+        {/* My Communities */}
+        <MyCommunities limit={5} />
 
-              <View style={styles.eventDetails}>
-                <Text style={[styles.eventName, { color: colors.text }]}>
-                  {event.name}
-                </Text>
+        {/* Upcoming Events */}
+        <UpcomingEvents key={`upcoming-events-${refreshTrigger}`} limit={3} />
 
-                <View style={styles.eventMeta}>
-                  <View style={styles.eventMetaItem}>
-                    <Ionicons
-                      name="time-outline"
-                      size={14}
-                      color={colors.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.eventMetaText,
-                        { color: colors.textSecondary },
-                      ]}
-                    >
-                      {event.date}
-                    </Text>
-                  </View>
-
-                  <View style={styles.eventMetaItem}>
-                    <Ionicons
-                      name="location-outline"
-                      size={14}
-                      color={colors.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.eventMetaText,
-                        { color: colors.textSecondary },
-                      ]}
-                    >
-                      {event.location}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.eventAttendees}>
-                  <Ionicons
-                    name="people-outline"
-                    size={12}
-                    color={colors.primary}
-                  />
-                  <Text
-                    style={[styles.attendeesText, { color: colors.primary }]}
-                  >
-                    {event.attendees} attending
-                  </Text>
-
-                  {/* Visual attendee avatars */}
-                  <View style={styles.attendeeAvatars}>
-                    {[...Array(Math.min(event.attendees, 3))].map((_, i) => (
-                      <View
-                        key={i}
-                        style={[
-                          styles.attendeeAvatar,
-                          { marginLeft: i > 0 ? -8 : 0 },
-                          {
-                            backgroundColor: colors.primaryLight,
-                            borderColor: colors.card,
-                          },
-                        ]}
-                      >
-                        <Ionicons
-                          name="person"
-                          size={10}
-                          color={colors.primary}
-                        />
-                      </View>
-                    ))}
-                    {event.attendees > 3 && (
-                      <View
-                        style={[
-                          styles.attendeeAvatar,
-                          {
-                            marginLeft: -8,
-                            backgroundColor: colors.primaryLight,
-                            borderColor: colors.card,
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.attendeeMoreText,
-                            { color: colors.primary },
-                          ]}
-                        >
-                          +{event.attendees - 3}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-              </View>
-
-              <Ionicons
-                name="chevron-forward"
-                size={20}
-                color={colors.textMuted}
-              />
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Bottom spacing */}
         <View style={styles.bottomSpacer} />
       </ScrollView>
     </SafeAreaView>
@@ -652,10 +424,7 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f8fafc",
-  },
+  container: { flex: 1, backgroundColor: "#f8fafc" },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -664,8 +433,6 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 20,
     backgroundColor: "#f8fafc",
-    borderBottomWidth: 1,
-    borderBottomColor: "#f8fafc",
   },
   logoText: {
     fontSize: 28,
@@ -674,11 +441,7 @@ const styles = StyleSheet.create({
     color: "#111827",
     letterSpacing: 1,
   },
-  iconButton: {
-    position: "relative",
-    padding: 8,
-    borderRadius: 12,
-  },
+  iconButton: { position: "relative", padding: 8, borderRadius: 12 },
   badge: {
     position: "absolute",
     top: 0,
@@ -693,128 +456,10 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#ffffff",
   },
-  badgeText: {
-    color: "white",
-    fontSize: 10,
-    fontWeight: "700",
-  },
-  eventsSection: {
-    paddingHorizontal: 20,
-    marginTop: 8,
-    marginBottom: 40,
-  },
-  sectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  seeAllText: {
-    fontSize: 14,
-    color: "#8b5cf6",
-    fontWeight: "600",
-  },
-  eventCard: {
-    backgroundColor: "white",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: "#f3f4f6",
-  },
-  eventDate: {
-    width: 60,
-    height: 60,
-    borderRadius: 12,
-    backgroundColor: "#f3e8ff",
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 14,
-  },
-  eventDateDay: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#8b5cf6",
-  },
-  eventDateLabel: {
-    fontSize: 10,
-    color: "#8b5cf6",
-    fontWeight: "500",
-  },
-  eventDetails: {
-    flex: 1,
-    marginRight: 8,
-  },
-  eventName: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#111827",
-    marginBottom: 6,
-  },
-  eventMeta: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 6,
-    gap: 12,
-  },
-  eventMetaItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  eventMetaText: {
-    fontSize: 12,
-    color: "#6b7280",
-  },
-  eventAttendees: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  attendeesText: {
-    fontSize: 12,
-    color: "#8b5cf6",
-    fontWeight: "500",
-  },
-  attendeeAvatars: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  attendeeAvatar: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: "#f3e8ff",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1.5,
-    borderColor: "#ffffff",
-  },
-  attendeeMoreText: {
-    fontSize: 8,
-    color: "#8b5cf6",
-    fontWeight: "600",
-  },
-  bottomSpacer: {
-    height: 40,
-  },
-  // Skeleton styles
-  skeletonContainer: {
-    flex: 1,
-    backgroundColor: "#f8fafc",
-  },
+  badgeText: { color: "white", fontSize: 10, fontWeight: "700" },
+  bottomSpacer: { height: 40 },
+  // Skeleton
+  skeletonContainer: { flex: 1, backgroundColor: "#f8fafc" },
   skeletonHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -835,9 +480,16 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: "#f3f4f6",
   },
-  skeletonSection: {
-    paddingHorizontal: 20,
-    marginTop: 24,
+  skeletonSection: { paddingHorizontal: 20, marginTop: 24 },
+  skeletonQuickActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  skeletonActionBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: 20,
+    backgroundColor: "#f3f4f6",
   },
   skeletonTitle: {
     width: 150,
@@ -846,14 +498,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#f3f4f6",
     marginBottom: 16,
   },
-  skeletonStoriesContainer: {
-    flexDirection: "row",
-  },
-  skeletonStoryCard: {
-    alignItems: "center",
-    marginRight: 16,
-    width: 90,
-  },
+  skeletonStoriesContainer: { flexDirection: "row" },
+  skeletonStoryCard: { alignItems: "center", marginRight: 16, width: 90 },
   skeletonStoryRing: {
     width: 90,
     height: 90,
@@ -876,6 +522,13 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: "#f3f4f6",
   },
+  skeletonCommunityCard: {
+    width: 140,
+    height: 130,
+    borderRadius: 16,
+    backgroundColor: "#f3f4f6",
+    marginRight: 12,
+  },
   skeletonEventCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -891,10 +544,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#f3f4f6",
     marginRight: 14,
   },
-  skeletonEventDetails: {
-    flex: 1,
-    gap: 8,
-  },
+  skeletonEventDetails: { flex: 1, gap: 8 },
   skeletonEventName: {
     width: "70%",
     height: 16,
@@ -903,12 +553,6 @@ const styles = StyleSheet.create({
   },
   skeletonEventMeta: {
     width: "90%",
-    height: 12,
-    borderRadius: 4,
-    backgroundColor: "#f3f4f6",
-  },
-  skeletonEventAttendees: {
-    width: "40%",
     height: 12,
     borderRadius: 4,
     backgroundColor: "#f3f4f6",

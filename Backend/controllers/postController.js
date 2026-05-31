@@ -118,11 +118,13 @@ exports.createPost = async (req, res) => {
 
     // ✅ If community post, associate with community
     if (communityId) {
+      const mongoose = require("mongoose");
       const Community = require("../models/Community");
       const community = await Community.findById(communityId);
 
       if (community) {
-        postData.community = communityId;
+        // ✅ Cast to ObjectId properly
+        postData.community = new mongoose.Types.ObjectId(communityId);
       }
     }
 
@@ -314,19 +316,20 @@ exports.getDeletedPosts = async (req, res) => {
     const posts = await Post.find({
       user: userId,
       isDeleted: true,
-      deletedByAdmin: { $ne: true }, // ✅ Exclude admin-deleted posts
+      deletedByAdmin: { $ne: true },
     })
       .includeDeleted()
       .sort({ deletedAt: -1, createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit))
       .populate("user", "name username email verified")
+      .populate("community", "name coverImage type privacy") // ✅ ADD THIS
       .lean();
 
     const total = await Post.find({
       user: userId,
       isDeleted: true,
-      deletedByAdmin: { $ne: true }, // ✅ Exclude admin-deleted posts
+      deletedByAdmin: { $ne: true },
     })
       .includeDeleted()
       .countDocuments();
@@ -1233,6 +1236,7 @@ exports.getUserPostCount = async (req, res) => {
       user: userId,
       isAnonymous: false,
       isDeleted: false,
+      community: null, 
     });
 
     res.json({ success: true, count: postCount });

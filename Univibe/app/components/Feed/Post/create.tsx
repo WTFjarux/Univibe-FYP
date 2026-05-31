@@ -36,7 +36,7 @@ import {
 const DEFAULT_AVATAR: ImageSourcePropType = require("../../../../assets/images/default-avatar.png");
 const { width } = Dimensions.get("window");
 
-type Visibility = "campus" | "connections";
+type Visibility = "campus" | "connections" | "community";
 
 // ============================================
 // COMPONENT
@@ -71,7 +71,17 @@ export default function CreatePostScreen() {
         try {
           const result = await communityService.getCommunity(communityId);
           if (result.success && result.data) {
-            setCommunity(result.data);
+            const communityData = result.data;
+            setCommunity(communityData);
+
+            // ✅ Set initial visibility based on community type
+            if (communityData.type === "department") {
+              setVisibility("campus");
+            } else if (communityData.privacy === "private") {
+              setVisibility("community");
+            } else {
+              setVisibility("campus");
+            }
           }
         } catch (error) {
           console.error("Failed to load community:", error);
@@ -84,14 +94,14 @@ export default function CreatePostScreen() {
   }, [communityId]);
 
   // ============================================
-  // ANONYMOUS → FORCE CAMPUS VISIBILITY
+  // ANONYMOUS → FORCE CAMPUS VISIBILITY (normal posts only)
   // ============================================
 
   useEffect(() => {
-    if (isAnonymous) {
+    if (isAnonymous && !isCommunityPost) {
       setVisibility("campus");
     }
-  }, [isAnonymous]);
+  }, [isAnonymous, isCommunityPost]);
 
   // ============================================
   // HELPERS
@@ -151,7 +161,7 @@ export default function CreatePostScreen() {
   };
 
   // ============================================
-  // VISIBILITY HELPERS (Normal Posts Only)
+  // VISIBILITY HELPERS
   // ============================================
 
   const getVisibilityIcon = (
@@ -162,6 +172,8 @@ export default function CreatePostScreen() {
         return "school-outline";
       case "connections":
         return "people-outline";
+      case "community":
+        return "people";
       default:
         return "globe-outline";
     }
@@ -173,6 +185,8 @@ export default function CreatePostScreen() {
         return "Campus";
       case "connections":
         return "Connections";
+      case "community":
+        return "Community";
       default:
         return "Public";
     }
@@ -180,6 +194,18 @@ export default function CreatePostScreen() {
 
   const getVisibilityOptions = (): Visibility[] => {
     if (isAnonymous) return ["campus"];
+
+    // ✅ Community post visibility options
+    if (isCommunityPost && community) {
+      if (community.privacy === "private" || community.type === "department") {
+        // Private community or department - only one option
+        return community.privacy === "private" ? ["community"] : ["campus"];
+      }
+      // Public community - both options
+      return ["campus", "community"];
+    }
+
+    // Normal post
     return ["campus", "connections"];
   };
 
@@ -214,7 +240,6 @@ export default function CreatePostScreen() {
     try {
       setLoading(true);
 
-      // Prepare image objects for upload
       const imageObjects =
         images.length > 0
           ? await Promise.all(
@@ -234,7 +259,6 @@ export default function CreatePostScreen() {
             )
           : [];
 
-      // Community posts use "community" visibility, normal posts use selected visibility
       const finalVisibility = isAnonymous ? "campus" : visibility;
 
       await createPost(
@@ -291,7 +315,7 @@ export default function CreatePostScreen() {
             <Ionicons name="close" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={[styles.headerTitle, { color: colors.text }]}>
-            Create Post
+            {isCommunityPost ? "Create Community Post" : "Create Post"}
           </Text>
           <TouchableOpacity
             onPress={handleSubmit}
@@ -333,7 +357,6 @@ export default function CreatePostScreen() {
                 </View>
               )
             ) : isAnonymous ? (
-              /* Anonymous → Show eye-off icon */
               <View
                 style={[
                   styles.avatar,
@@ -351,7 +374,6 @@ export default function CreatePostScreen() {
                 />
               </View>
             ) : (
-              /* Normal Post → Show user avatar */
               <Image
                 source={getUserAvatar()}
                 style={[styles.avatar, { backgroundColor: colors.skeleton }]}
@@ -370,7 +392,7 @@ export default function CreatePostScreen() {
               </Text>
             </View>
 
-            {/* Anonymous Toggle — Normal posts only */}
+            {/* Anonymous Toggle — Normal posts only, NOT for community posts */}
             {!isCommunityPost && (
               <TouchableOpacity
                 style={styles.anonymousToggleRight}
@@ -478,67 +500,27 @@ export default function CreatePostScreen() {
           )}
 
           {/* ── Visibility Section ───────────────── */}
-          {/* ✅ Community Post → Show simplified visibility info */}
-          {isCommunityPost && community ? (
-            <View style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                Visibility
-              </Text>
-              <View
-                style={[
-                  styles.communityVisibilityCard,
-                  { backgroundColor: colors.card, borderColor: colors.border },
-                ]}
-              >
-                <Ionicons
-                  name={
-                    community.privacy === "private"
-                      ? "lock-closed"
-                      : "school-outline"
-                  }
-                  size={20}
-                  color={colors.primary}
-                />
-                <View style={{ flex: 1 }}>
-                  <Text
-                    style={[styles.visibilityCardTitle, { color: colors.text }]}
-                  >
-                    {community.privacy === "private"
-                      ? "Community Members Only"
-                      : "Campus"}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.visibilityCardDesc,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    {community.privacy === "private"
-                      ? `Only members of ${community.name} can see this post.`
-                      : `Visible to everyone in your campus.`}
-                  </Text>
-                </View>
-              </View>
-            </View>
-          ) : (
-            /* ✅ Normal Post → Show visibility options */
-            <View style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                Who can see this?
-                {isAnonymous && (
-                  <Text
-                    style={[
-                      styles.anonymousNote,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    {" "}
-                    (Campus only)
-                  </Text>
-                )}
-              </Text>
-              <View style={styles.visibilityOptions}>
-                {getVisibilityOptions().map((option) => (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+              Who can see this?
+              {isAnonymous && (
+                <Text
+                  style={[
+                    styles.anonymousNote,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  {" "}
+                  (Campus only)
+                </Text>
+              )}
+            </Text>
+            <View style={styles.visibilityOptions}>
+              {getVisibilityOptions().map((option) => {
+                const isActive = visibility === option;
+                const isDisabled = loading || (isAnonymous && !isCommunityPost);
+
+                return (
                   <TouchableOpacity
                     key={option}
                     style={[
@@ -547,46 +529,46 @@ export default function CreatePostScreen() {
                         backgroundColor: colors.card,
                         borderColor: colors.border,
                       },
-                      visibility === option && styles.visibilityOptionActive,
-                      isAnonymous && styles.visibilityOptionDisabled,
+                      isActive && styles.visibilityOptionActive,
+                      isDisabled &&
+                        !isActive &&
+                        styles.visibilityOptionDisabled,
                     ]}
-                    onPress={() => !isAnonymous && setVisibility(option)}
-                    disabled={loading || isAnonymous}
+                    onPress={() => !isDisabled && setVisibility(option)}
+                    disabled={isDisabled}
                   >
                     <Ionicons
                       name={getVisibilityIcon(option)}
                       size={18}
-                      color={
-                        visibility === option ? "#fff" : colors.textSecondary
-                      }
+                      color={isActive ? "#fff" : colors.textSecondary}
                     />
                     <Text
                       style={[
                         styles.visibilityText,
                         { color: colors.textSecondary },
-                        visibility === option && styles.visibilityTextActive,
-                        isAnonymous && styles.visibilityTextDisabled,
+                        isActive && styles.visibilityTextActive,
                       ]}
                     >
                       {getVisibilityLabel(option)}
                     </Text>
                   </TouchableOpacity>
-                ))}
-              </View>
-              <Text
-                style={[
-                  styles.visibilityDescription,
-                  { color: colors.primary },
-                ]}
-              >
-                {isAnonymous
+                );
+              })}
+            </View>
+            <Text
+              style={[styles.visibilityDescription, { color: colors.primary }]}
+            >
+              {isCommunityPost
+                ? visibility === "community"
+                  ? `Only members of ${community?.name} can see this post.`
+                  : "Visible to all users in your campus."
+                : isAnonymous
                   ? "Anonymous posts are always visible to everyone in your campus."
                   : visibility === "campus"
                     ? "Visible to all users in your campus"
                     : "Visible to your connections only"}
-              </Text>
-            </View>
-          )}
+            </Text>
+          </View>
 
           {/* ── Add Image Button ─────────────────── */}
           {images.length < 4 && images.length === 0 && (
@@ -766,25 +748,6 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
     fontFamily: "SofiaSans-Regular",
   },
-
-  // Community visibility card (community posts)
-  communityVisibilityCard: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 12,
-  },
-  visibilityCardTitle: { fontSize: 14, fontFamily: "SofiaSans-SemiBold" },
-  visibilityCardDesc: {
-    fontSize: 12,
-    fontFamily: "SofiaSans-Regular",
-    marginTop: 4,
-    lineHeight: 16,
-  },
-
-  // Visibility options (normal posts)
   visibilityOptions: { flexDirection: "row", gap: 8, marginBottom: 8 },
   visibilityOption: {
     flexDirection: "row",
@@ -800,12 +763,10 @@ const styles = StyleSheet.create({
     borderColor: "#8B5CF6",
   },
   visibilityOptionDisabled: {
-    backgroundColor: "#8B5CF6",
-    borderColor: "#8B5CF6",
+    opacity: 0.5,
   },
   visibilityText: { fontSize: 13, fontFamily: "SofiaSans-SemiBold" },
   visibilityTextActive: { color: "#fff" },
-  visibilityTextDisabled: { color: "#fff" },
   visibilityDescription: {
     fontSize: 13,
     marginTop: 8,

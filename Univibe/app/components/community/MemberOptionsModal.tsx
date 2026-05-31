@@ -25,6 +25,8 @@ interface MemberOptionsModalProps {
   onAddModerator: (member: CommunityMember) => void;
   onRemoveModerator: (member: CommunityMember) => void;
   onViewProfile: (member: CommunityMember) => void;
+  onMakeAdmin: (member: CommunityMember) => void;
+  onRemoveAdmin: (member: CommunityMember) => void;
 }
 
 const MemberOptionsModal: React.FC<MemberOptionsModalProps> = ({
@@ -37,13 +39,15 @@ const MemberOptionsModal: React.FC<MemberOptionsModalProps> = ({
   onAddModerator,
   onRemoveModerator,
   onViewProfile,
+  onMakeAdmin,
+  onRemoveAdmin,
 }) => {
   const { colors } = useTheme();
 
   // Safely extract member data with fallbacks
   const memberName = member?.user?.name || "Unknown";
   const memberId = member?.user?._id || "";
-  const isCurrentUser = memberId === currentUserId;
+  const isCurrentUser = currentUserId === memberId;
   const isMemberAdmin = member?.isAdmin || false;
   const isModerator = member?.role === "moderator";
 
@@ -76,7 +80,7 @@ const MemberOptionsModal: React.FC<MemberOptionsModalProps> = ({
     });
   };
 
-  // ALL hooks must be called unconditionally
+  // Remove Member
   const handleRemoveMember = useCallback(() => {
     if (!member) return;
     Alert.alert(
@@ -96,6 +100,7 @@ const MemberOptionsModal: React.FC<MemberOptionsModalProps> = ({
     );
   }, [member, memberName, onClose, onRemoveMember]);
 
+  // Toggle Moderator
   const handleToggleModerator = useCallback(() => {
     if (!member) return;
     if (isModerator) {
@@ -139,6 +144,45 @@ const MemberOptionsModal: React.FC<MemberOptionsModalProps> = ({
     onRemoveModerator,
   ]);
 
+  // Toggle Admin
+  const handleToggleAdmin = useCallback(() => {
+    if (!member) return;
+
+    if (isMemberAdmin) {
+      Alert.alert(
+        "Remove Admin",
+        `Are you sure you want to remove admin privileges from ${memberName}? They will become a regular member.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Remove Admin",
+            style: "destructive",
+            onPress: () => {
+              onClose();
+              setTimeout(() => onRemoveAdmin(member), 300);
+            },
+          },
+        ],
+      );
+    } else {
+      Alert.alert(
+        "Transfer Admin Role",
+        `Are you sure you want to transfer admin role to ${memberName}? You will lose your admin privileges and become a regular member.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Transfer",
+            onPress: () => {
+              onClose();
+              setTimeout(() => onMakeAdmin(member), 300);
+            },
+          },
+        ],
+      );
+    }
+  }, [isMemberAdmin, member, memberName, onClose, onMakeAdmin, onRemoveAdmin]);
+
+  // View Profile
   const handleViewProfile = useCallback(() => {
     if (!member) return;
     onClose();
@@ -186,8 +230,8 @@ const MemberOptionsModal: React.FC<MemberOptionsModalProps> = ({
                 style={[styles.headerSubtitle, { color: colors.textSecondary }]}
               >
                 @{member?.user?.username || "user"}
-                {isModerator && " · Moderator"}
                 {isMemberAdmin && " · Admin"}
+                {isModerator && !isMemberAdmin && " · Moderator"}
               </Text>
             </View>
             <TouchableOpacity onPress={handleClose}>
@@ -219,19 +263,24 @@ const MemberOptionsModal: React.FC<MemberOptionsModalProps> = ({
             </View>
           </View>
 
-          {/* Remove Member - only for admins on non-admin, non-self members */}
-          {isAdmin && !isMemberAdmin && !isCurrentUser && (
+          {/* Make/Remove Admin - only for admins on non-self members */}
+          {isAdmin && !isCurrentUser && (
             <TouchableOpacity
               style={styles.optionItem}
-              onPress={handleRemoveMember}
+              onPress={handleToggleAdmin}
             >
               <Ionicons
-                name="person-remove-outline"
+                name={isMemberAdmin ? "shield-checkmark" : "shield-outline"}
                 size={22}
-                color="#ef4444"
+                color={isMemberAdmin ? "#ef4444" : "#8b5cf6"}
               />
-              <Text style={[styles.optionText, { color: "#ef4444" }]}>
-                Remove Member
+              <Text
+                style={[
+                  styles.optionText,
+                  { color: isMemberAdmin ? "#ef4444" : "#8b5cf6" },
+                ]}
+              >
+                {isMemberAdmin ? "Remove Admin" : "Make Admin"}
               </Text>
             </TouchableOpacity>
           )}
@@ -254,6 +303,23 @@ const MemberOptionsModal: React.FC<MemberOptionsModalProps> = ({
                 ]}
               >
                 {isModerator ? "Remove Moderator" : "Make Moderator"}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Remove Member - only for admins on non-admin, non-self members */}
+          {isAdmin && !isMemberAdmin && !isCurrentUser && (
+            <TouchableOpacity
+              style={styles.optionItem}
+              onPress={handleRemoveMember}
+            >
+              <Ionicons
+                name="person-remove-outline"
+                size={22}
+                color="#ef4444"
+              />
+              <Text style={[styles.optionText, { color: "#ef4444" }]}>
+                Remove Member
               </Text>
             </TouchableOpacity>
           )}

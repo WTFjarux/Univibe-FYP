@@ -446,6 +446,9 @@ class ChatApiService {
     postId: string,
     targetChatIds: string[],
     comment?: string,
+    postCommunityId?: string,
+    postCommunityName?: string,
+    postCommunityCoverImage?: string,
   ): Promise<{
     success: boolean;
     message: string;
@@ -458,6 +461,9 @@ class ChatApiService {
       postId,
       targetChatIds,
       comment,
+      postCommunityId,
+      postCommunityName,
+      postCommunityCoverImage,
     });
     return response.data;
   }

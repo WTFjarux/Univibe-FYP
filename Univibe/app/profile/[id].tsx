@@ -73,7 +73,7 @@ interface PublicProfile {
   stats: {
     posts: number;
     connections: number;
-    groups: number;
+    communities: number;
   };
 }
 
@@ -301,7 +301,7 @@ export default function PublicProfileScreen() {
               profilePicture: profileData.profilePicture || "",
               coverPhoto: profileData.coverPhoto || "",
               socialLinks: { instagram: "", linkedin: "", github: "" },
-              stats: { posts: 0, connections: 0, groups: 0 },
+              stats: { posts: 0, connections: 0, communities: 0 },
             });
           }
         }
@@ -840,7 +840,7 @@ export default function PublicProfileScreen() {
             stats={{
               posts: profile.stats?.posts || 0,
               connections: profile.stats?.connections || 0,
-              groups: profile.stats?.groups || 0,
+              communities: profile.stats?.communities || 0,
             }}
           />
           <View style={publicStyles.postsHeader}>
@@ -860,7 +860,7 @@ export default function PublicProfileScreen() {
             stats={{
               posts: profile.stats?.posts || 0,
               connections: profile.stats?.connections || 0,
-              groups: profile.stats?.groups || 0,
+              communities: profile.stats?.communities || 0,
             }}
           />
           <View style={publicStyles.postsHeader}>
@@ -878,7 +878,7 @@ export default function PublicProfileScreen() {
           stats={{
             posts: profile.stats?.posts || 0,
             connections: profile.stats?.connections || 0,
-            groups: profile.stats?.groups || 0,
+            communities: profile.stats?.communities || 0,
           }}
         />
         <View

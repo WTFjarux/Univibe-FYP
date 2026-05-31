@@ -294,7 +294,7 @@ export const useInAppNotifications = () => {
       showToastRef.current(toast);
     };
 
-    // ── 3. CONNECTION REQUEST ───────────────────────────
+    // ──  CONNECTION REQUEST ───────────────────────────
     const handleConnectionRequest = (data: any) => {
       const currentUserId = userIdRef.current;
       if (data.sender?._id === currentUserId) return;
@@ -318,38 +318,24 @@ export const useInAppNotifications = () => {
       showToastRef.current(toast);
     };
 
-    // ── 4. EVENT NOTIFICATIONS ──────────────────────────
-    const handleEventNotification = (data: any) => {
-      const toast: InAppNotification = {
-        id: generateToastId("event"),
-        type: ToastType.EVENT,
-        title: data.title || "Event Update",
-        body: data.message || "An event has been updated",
-        senderName: data.organizerName,
-        navigationTarget: {
-          screen: "/events/[id]",
-          params: { id: data.eventId },
-        },
-        timestamp: Date.now(),
-      };
-      showToastRef.current(toast);
-    };
+    // ──  Event UPDATES ────────────────────────────
+    const handleEventUpdate = (data: any) => {};
 
-    // ── 5. COMMUNITY UPDATES ────────────────────────────
+    // ──  COMMUNITY UPDATES ────────────────────────────
     const handleCommunityUpdate = (data: any) => {};
 
     // ── REGISTER ────────────────────────────────────────
     socketService.on("receive_message", handleNewMessage);
     socketService.on("notification:new", handleNewNotification);
     socketService.on("connection_request", handleConnectionRequest);
-    socketService.on("event:updated", handleEventNotification);
+    socketService.on("event:updated", handleEventUpdate);
     socketService.on("community:updated", handleCommunityUpdate);
 
     return () => {
       socketService.off("receive_message", handleNewMessage);
       socketService.off("notification:new", handleNewNotification);
       socketService.off("connection_request", handleConnectionRequest);
-      socketService.off("event:updated", handleEventNotification);
+      socketService.off("event:updated", handleEventUpdate);
       socketService.off("community:updated", handleCommunityUpdate);
     };
   }, [user?.id]);

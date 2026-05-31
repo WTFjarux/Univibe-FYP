@@ -10,7 +10,7 @@ interface ProfileStatsProps {
   stats: {
     posts: number;
     connections: number;
-    groups: number;
+    communities: number;
   };
   userId?: string;
 }
@@ -18,7 +18,7 @@ interface ProfileStatsProps {
 const STAT_ICONS = {
   posts: "chatbubble-outline" as const,
   connections: "people-outline" as const,
-  groups: "people-circle-outline" as const,
+  communities: "people-circle-outline" as const,
 };
 
 export default function ProfileStats({ stats, userId }: ProfileStatsProps) {
@@ -41,9 +41,9 @@ export default function ProfileStats({ stats, userId }: ProfileStatsProps) {
         : undefined,
     },
     {
-      key: "groups" as const,
-      label: "Groups",
-      value: stats?.groups || 0,
+      key: "communities" as const,
+      label: "Communities",
+      value: stats?.communities || 0,
       onPress: undefined,
     },
   ];

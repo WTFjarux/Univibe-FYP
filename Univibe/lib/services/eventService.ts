@@ -229,10 +229,19 @@ export interface Event {
     profilePicture?: string;
     fullName?: string;
   };
+  community?:
+    | {
+        _id: string;
+        name: string;
+        coverImage?: string;
+        type?: string;
+      }
+    | string
+    | null;
   organizerName: string;
   interestedCount: number;
   rsvpCount: number;
-  visibility: "campus" | "connections" | "public";
+  visibility: "campus" | "connections" | "public" | "community";
   maxAttendees: number | null;
   isOnline: boolean;
   meetingLink: string;
@@ -245,8 +254,8 @@ export interface Event {
   updatedAt: string;
   rsvp?: User[];
   interested?: User[];
-  approvalStatus?: "pending" | "approved" | "rejected"; 
-  isFeatured?: boolean; 
+  approvalStatus?: "pending" | "approved" | "rejected";
+  isFeatured?: boolean;
 }
 
 export interface EventsResponse {
@@ -747,7 +756,6 @@ export const eventService = {
 
       const data = await response.json();
 
-      console.log("🔍 RSVP API Response:", JSON.stringify(data, null, 2));
 
       if (data.success) {
         invalidateEventCache();

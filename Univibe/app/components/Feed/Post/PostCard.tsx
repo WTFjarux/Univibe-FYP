@@ -646,9 +646,13 @@ const PostCard: React.FC<PostCardProps> = ({
         <Pressable
           onPress={(e) => {
             e.stopPropagation();
-            handleUserPress();
+            if (isCommunityPost) {
+              handleCommunityPress();
+            } else {
+              handleUserPress();
+            }
           }}
-          disabled={compact || isCommunityPost}
+          disabled={compact}
         >
           {renderAvatar()}
         </Pressable>
@@ -694,7 +698,8 @@ const PostCard: React.FC<PostCardProps> = ({
             {post.user?.verified && !compact && !isCommunityPost && (
               <Ionicons name="checkmark-circle" size={16} color="#10b981" />
             )}
-            {!compact && !isCommunityPost && (
+            {/* ✅ Visibility badge for ALL posts */}
+            {!compact && (
               <View
                 style={[
                   styles.visibilityBadge,
@@ -717,25 +722,6 @@ const PostCard: React.FC<PostCardProps> = ({
                   ]}
                 >
                   {visibilityDisplayName[post.visibility] || "Public"}
-                </Text>
-              </View>
-            )}
-            {isCommunityPost && (
-              <View
-                style={[
-                  styles.communityBadge,
-                  { backgroundColor: colors.primary + "15" },
-                ]}
-              >
-                <Ionicons
-                  name="people-outline"
-                  size={12}
-                  color={colors.primary}
-                />
-                <Text
-                  style={[styles.communityBadgeText, { color: colors.primary }]}
-                >
-                  Community
                 </Text>
               </View>
             )}
@@ -904,16 +890,19 @@ const PostCard: React.FC<PostCardProps> = ({
 const visibilityIconName: Record<string, IconName> = {
   campus: "school-outline",
   connections: "people-outline",
+  community: "people",
 };
 
 const visibilityDisplayName: Record<string, string> = {
   campus: "Campus",
   connections: "Connections",
+  community: "Community",
 };
 
 const visibilityBadgeColor: Record<string, string> = {
   campus: "#3b82f6",
   connections: "#8b5cf6",
+  community: "#7c3aed",
 };
 
 // ===== Styles =====

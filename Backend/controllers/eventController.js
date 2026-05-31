@@ -73,14 +73,6 @@ const createEventNotification = async (
   }
 };
 
-let _ApprovalQueue = null;
-const getApprovalQueue = () => {
-  if (!_ApprovalQueue) {
-    _ApprovalQueue = getAdminModel("ApprovalQueue");
-  }
-  return _ApprovalQueue;
-};
-
 // ============================================
 // SOCKET HELPER
 // ============================================
@@ -258,6 +250,7 @@ exports.createEvent = async (req, res) => {
       isOnline,
       meetingLink,
       tags,
+      communityId,
     } = req.body;
 
     const userId = req.user._id;
@@ -323,10 +316,31 @@ exports.createEvent = async (req, res) => {
       });
     }
 
+    // ✅ Validate community if communityId provided
+    let communityObjectId = null;
+    if (communityId) {
+      const Community = require("../models/Community");
+      const community = await Community.findById(communityId);
+      if (!community) {
+        await cleanupUploadedFiles(uploadedFiles);
+        return res.status(404).json({
+          success: false,
+          message: "Community not found",
+        });
+      }
+      if (!community.isMember(userId) && !community.isAdmin(userId)) {
+        await cleanupUploadedFiles(uploadedFiles);
+        return res.status(403).json({
+          success: false,
+          message: "You must be a member of this community to create events",
+        });
+      }
+      communityObjectId = community._id;
+    }
+
     const organizerName = profile.fullName || user.name;
     const formattedImages = formatImageObjects(uploadedFiles);
 
-    // Calculate initial status based on dates
     const now = new Date();
     let initialStatus = "upcoming";
     if (end < now) {
@@ -352,7 +366,11 @@ exports.createEvent = async (req, res) => {
       tags: tags ? (Array.isArray(tags) ? tags : tags.split(",")) : [],
       images: formattedImages,
       status: initialStatus,
-      approvalStatus: visibility === "connections" ? "approved" : "pending",
+      approvalStatus:
+        visibility === "connections" || visibility === "community"
+          ? "approved"
+          : "pending",
+      community: communityObjectId,
     });
 
     if (formattedImages.length > 0) {
@@ -379,7 +397,6 @@ exports.createEvent = async (req, res) => {
         ],
       });
 
-      // Set the snapshot
       approvalEntry.contentSnapshot = {
         name: event.title,
         description: event.description || "",
@@ -388,14 +405,17 @@ exports.createEvent = async (req, res) => {
         eventLocation: event.location,
         eventOrganizer: organizerName,
         coverImage: event.coverImage || null,
+        communityId: communityObjectId,
       };
 
       await approvalEntry.save();
       console.log(`📋 Approval entry created for event: ${event.title}`);
     }
 
+    // ✅ Populate community
     const populatedEvent = await Event.findById(event._id)
       .populate("organizer", "name username email")
+      .populate("community", "name coverImage type privacy")
       .lean();
 
     const organizerWithProfile = await getUserWithProfile(
@@ -446,6 +466,15 @@ exports.getEvents = async (req, res) => {
     const userCampus = userProfile?.campus;
     const connectionIds = currentUser?.connections || [];
 
+    // ✅ Fetch user's community IDs (where user is a member)
+    const Community = require("../models/Community");
+    const userCommunities = await Community.find({
+      $or: [{ "members.user": userId }, { admins: userId }],
+    })
+      .select("_id")
+      .lean();
+    const userCommunityIds = userCommunities.map((c) => c._id);
+
     let query = {};
 
     if (campus) query.campus = campus;
@@ -467,22 +496,35 @@ exports.getEvents = async (req, res) => {
       ];
     }
 
-    // ✅ Only show approved events OR user's own non-rejected events
-    query.$and = [
-      {
-        $or: [
-          { visibility: "campus", approvalStatus: "approved" },
-          { visibility: "public", approvalStatus: "approved" },
-          { visibility: "connections", organizer: userId },
-          { visibility: "connections", organizer: { $in: connectionIds } },
-          { organizer: userId, approvalStatus: { $ne: "rejected" } },
-        ],
-      },
+    // ✅ Updated visibility rules
+    const visibilityRules = [
+      // Campus events - visible to everyone in the campus
+      { visibility: "campus", approvalStatus: "approved" },
+      // Public events - visible to everyone
+      { visibility: "public", approvalStatus: "approved" },
+      // Connections events - visible to creator and their connections
+      { visibility: "connections", organizer: userId },
+      { visibility: "connections", organizer: { $in: connectionIds } },
+      // User's own events (not rejected)
+      { organizer: userId, approvalStatus: { $ne: "rejected" } },
     ];
 
+    // ✅ Community events - only visible to community members
+    if (userCommunityIds.length > 0) {
+      visibilityRules.push({
+        visibility: "community",
+        approvalStatus: "approved",
+        community: { $in: userCommunityIds },
+      });
+    }
+
+    query.$and = [{ $or: visibilityRules }];
+
+    // ✅ Populate community
     const [events, total] = await Promise.all([
       Event.find(query)
         .populate("organizer", "name username email")
+        .populate("community", "name coverImage type privacy")
         .sort({ startDate: 1 })
         .skip(skip)
         .limit(parseInt(limit))
@@ -550,7 +592,6 @@ exports.getEventById = async (req, res) => {
       });
     }
 
-    // Fetch and update status if needed
     let event = await Event.findById(eventId);
     if (!event) {
       return res.status(404).json({
@@ -559,14 +600,14 @@ exports.getEventById = async (req, res) => {
       });
     }
 
-    // Update status if needed
     await event.updateStatusIfNeeded();
 
-    // Now fetch the fully populated event
+    // ✅ Populate community
     event = await Event.findById(eventId)
       .populate("organizer", "name username email")
       .populate("interested", "name username email")
       .populate("rsvp", "name username email")
+      .populate("community", "name coverImage type privacy")
       .lean();
 
     const [organizerWithProfile, interestedWithProfiles, rsvpWithProfiles] =
@@ -692,7 +733,7 @@ exports.updateEvent = async (req, res) => {
       "isOnline",
       "meetingLink",
       "tags",
-      "status", // Allow manual status update
+      "status",
     ];
 
     for (const field of allowedUpdates) {
@@ -719,11 +760,12 @@ exports.updateEvent = async (req, res) => {
       event.coverImage = "";
     }
 
-    // The pre-save middleware will handle status recalculation
     await event.save();
 
+    // ✅ Populate community
     const updatedEvent = await Event.findById(eventId)
       .populate("organizer", "name username email")
+      .populate("community", "name coverImage type privacy")
       .lean();
 
     const organizerWithProfile = await getUserWithProfile(
@@ -735,7 +777,6 @@ exports.updateEvent = async (req, res) => {
 
     const finalEvent = processEventImagesForResponse(req, updatedEvent);
 
-    // Emit update via socket
     const io = req.app.get("io");
     emitEventUpdate(io, eventId, {
       eventId,
@@ -802,7 +843,6 @@ exports.deleteEvent = async (req, res) => {
       }
     }
 
-    // Delete all associated notifications
     await Notification.deleteMany({ targetId: eventId, targetModel: "Event" });
 
     await Event.findByIdAndDelete(eventId);
@@ -977,7 +1017,7 @@ exports.removeEventImage = async (req, res) => {
 };
 
 // ============================================
-// REFRESH EVENT STATUS (NEW ENDPOINT)
+// REFRESH EVENT STATUS
 // ============================================
 exports.refreshEventStatus = async (req, res) => {
   try {
@@ -1001,7 +1041,6 @@ exports.refreshEventStatus = async (req, res) => {
     const oldStatus = event.status;
     await event.updateStatusIfNeeded();
 
-    // Emit update via socket if status changed
     if (oldStatus !== event.status) {
       const io = req.app.get("io");
       emitEventUpdate(io, eventId, {
@@ -1045,7 +1084,6 @@ exports.markInterested = async (req, res) => {
       });
     }
 
-    // Rate limiting
     if (isRateLimited(userId, eventId, "interest")) {
       return res.status(429).json({
         success: false,
@@ -1061,13 +1099,11 @@ exports.markInterested = async (req, res) => {
       });
     }
 
-    // Update status if needed before proceeding
     await event.updateStatusIfNeeded();
 
     const isInterested = event.isUserInterested(userId);
 
     if (isInterested) {
-      // REMOVING INTEREST - Delete the previous notification
       await event.removeInterested(userId);
 
       await Notification.deleteOne({
@@ -1078,7 +1114,6 @@ exports.markInterested = async (req, res) => {
         targetModel: "Event",
       });
     } else {
-      // ADDING INTEREST - Delete any existing notification first, then create new
       await event.addInterested(userId);
 
       if (event.organizer.toString() !== userId.toString()) {
@@ -1110,7 +1145,6 @@ exports.markInterested = async (req, res) => {
     }
 
     const updatedEvent = await Event.findById(eventId);
-    // Emit real-time update to all viewers of this event
     emitEventUpdate(io, eventId, {
       eventId,
       status: updatedEvent.status,
@@ -1149,7 +1183,6 @@ exports.rsvpEvent = async (req, res) => {
       });
     }
 
-    // Rate limiting
     if (isRateLimited(userId, eventId, "rsvp")) {
       return res.status(429).json({
         success: false,
@@ -1165,7 +1198,6 @@ exports.rsvpEvent = async (req, res) => {
       });
     }
 
-    // Update status if needed before proceeding
     await event.updateStatusIfNeeded();
 
     if (event.status === "completed") {
@@ -1185,7 +1217,6 @@ exports.rsvpEvent = async (req, res) => {
     const isRsvpd = event.isUserRsvpd(userId);
 
     if (isRsvpd) {
-      // CANCELLING RSVP - Delete the previous notification
       await event.removeRsvp(userId);
 
       await Notification.deleteOne({
@@ -1196,7 +1227,6 @@ exports.rsvpEvent = async (req, res) => {
         targetModel: "Event",
       });
     } else {
-      // ADDING RSVP - Delete any existing notification first, then create new
       await event.addRsvp(userId);
 
       if (event.organizer.toString() !== userId.toString()) {
@@ -1229,7 +1259,6 @@ exports.rsvpEvent = async (req, res) => {
 
     const updatedEvent = await Event.findById(eventId);
 
-    // Emit real-time update to all viewers of this event
     emitEventUpdate(io, eventId, {
       eventId,
       status: updatedEvent.status,
@@ -1271,13 +1300,14 @@ exports.getMyEvents = async (req, res) => {
     const [events, total] = await Promise.all([
       Event.find(query)
         .populate("organizer", "name username email")
+        .populate("community", "name coverImage type privacy")
         .sort({ startDate: -1 })
         .skip(skip)
         .limit(parseInt(limit))
         .lean(),
       Event.countDocuments(query),
     ]);
-    // Update status for each event if needed
+
     await Promise.all(
       events.map(async (event) => {
         const eventDoc = await Event.findById(event._id);
@@ -1291,6 +1321,7 @@ exports.getMyEvents = async (req, res) => {
 
     const updatedEvents = await Event.find(query)
       .populate("organizer", "name username email")
+      .populate("community", "name coverImage type privacy")
       .sort({ startDate: -1 })
       .skip(skip)
       .limit(parseInt(limit))
@@ -1339,6 +1370,7 @@ exports.getAttendingEvents = async (req, res) => {
     const [events, total] = await Promise.all([
       Event.find({ rsvp: userId })
         .populate("organizer", "name username email")
+        .populate("community", "name coverImage type privacy")
         .sort({ startDate: -1 })
         .skip(skip)
         .limit(parseInt(limit))
@@ -1346,7 +1378,6 @@ exports.getAttendingEvents = async (req, res) => {
       Event.countDocuments({ rsvp: userId }),
     ]);
 
-    // Update status for each event if needed
     await Promise.all(
       events.map(async (event) => {
         const eventDoc = await Event.findById(event._id);
@@ -1358,6 +1389,7 @@ exports.getAttendingEvents = async (req, res) => {
 
     const updatedEvents = await Event.find({ rsvp: userId })
       .populate("organizer", "name username email")
+      .populate("community", "name coverImage type privacy")
       .sort({ startDate: -1 })
       .skip(skip)
       .limit(parseInt(limit))

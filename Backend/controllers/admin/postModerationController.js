@@ -1,6 +1,10 @@
+// backend/controllers/admin/postModerationController.js
+
 const Post = require("../../models/Post");
 const User = require("../../models/User");
+const Community = require("../../models/Community");
 const Notification = require("../../models/Notification");
+const Profile = require("../../models/Profile");
 const { getAdminModel } = require("../../config/database");
 
 // ============================================
@@ -12,7 +16,7 @@ const getPosts = async (req, res) => {
       page = 1,
       limit = 20,
       search = "",
-      status = "all", // all, reported, deleted, anonymous
+      status = "all", // all, reported, deleted, anonymous, community
       sort = "newest",
       campus = "",
     } = req.query;
@@ -35,6 +39,16 @@ const getPosts = async (req, res) => {
         break;
       case "anonymous":
         query.isAnonymous = true;
+        query.isDeleted = false;
+        break;
+      case "community":
+        // ✅ Filter: Only community posts
+        query.community = { $ne: null };
+        query.isDeleted = false;
+        break;
+      case "regular":
+        // ✅ Filter: Only non-community posts
+        query.community = null;
         query.isDeleted = false;
         break;
       default:
@@ -72,6 +86,7 @@ const getPosts = async (req, res) => {
     const [posts, total] = await Promise.all([
       Post.find(query)
         .populate("user", "name username email")
+        .populate("community", "name type coverImage") // ✅ Populate community info
         .sort(sortOption)
         .skip(skip)
         .limit(parseInt(limit))
@@ -97,7 +112,6 @@ const getPosts = async (req, res) => {
       ...new Set(postsWithReportCount.map((p) => p.user?._id).filter(Boolean)),
     ];
     if (userIds.length > 0) {
-      const Profile = require("../../models/Profile");
       const profiles = await Profile.find({ user: { $in: userIds } })
         .select("user profilePicture")
         .lean();
@@ -145,6 +159,7 @@ const getPostDetails = async (req, res) => {
   try {
     const post = await Post.findById(req.params.id)
       .populate("user", "name username email")
+      .populate("community", "name type coverImage") // ✅ Populate community
       .lean();
 
     if (!post) {
@@ -213,16 +228,18 @@ const deletePost = async (req, res) => {
 
     // Log moderation action
     const ModerationLog = getAdminModel("ModerationLog");
-    await ModerationLog.logAction({
-      admin: req.user._id,
-      action: "post_deleted",
-      targetType: "Post",
-      targetId: post._id,
-      reason: reason || "Moderator action",
-      details: { postContent: post.content?.substring(0, 100) },
-      ipAddress: req.ip,
-      userAgent: req.headers["user-agent"],
-    });
+    if (ModerationLog?.logAction) {
+      await ModerationLog.logAction({
+        admin: req.user._id,
+        action: "post_deleted",
+        targetType: "Post",
+        targetId: post._id,
+        reason: reason || "Moderator action",
+        details: { postContent: post.content?.substring(0, 100) },
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -242,7 +259,6 @@ const deletePost = async (req, res) => {
 // ============================================
 const restorePost = async (req, res) => {
   try {
-    // Use includeDeleted() to bypass the soft delete filter
     const post = await Post.findById(req.params.id).includeDeleted();
 
     if (!post) {
@@ -252,21 +268,22 @@ const restorePost = async (req, res) => {
       });
     }
 
-    // Direct update using findByIdAndUpdate - bypasses validation
     await Post.findByIdAndUpdate(req.params.id, {
       isDeleted: false,
       deletedAt: null,
     }).includeDeleted();
 
     const ModerationLog = getAdminModel("ModerationLog");
-    await ModerationLog.logAction({
-      admin: req.user._id,
-      action: "post_restored",
-      targetType: "Post",
-      targetId: post._id,
-      ipAddress: req.ip,
-      userAgent: req.headers["user-agent"],
-    });
+    if (ModerationLog?.logAction) {
+      await ModerationLog.logAction({
+        admin: req.user._id,
+        action: "post_restored",
+        targetType: "Post",
+        targetId: post._id,
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -301,17 +318,19 @@ const bulkDeletePosts = async (req, res) => {
     );
 
     const ModerationLog = getAdminModel("ModerationLog");
-    await ModerationLog.logAction({
-      admin: req.user._id,
-      action: "bulk_action",
-      targetType: "Post",
-      targetId: req.user._id,
-      reason: reason || "Bulk moderation",
-      details: { postIds, count: postIds.length },
-      affectedCount: postIds.length,
-      ipAddress: req.ip,
-      userAgent: req.headers["user-agent"],
-    });
+    if (ModerationLog?.logAction) {
+      await ModerationLog.logAction({
+        admin: req.user._id,
+        action: "bulk_action",
+        targetType: "Post",
+        targetId: req.user._id,
+        reason: reason || "Bulk moderation",
+        details: { postIds, count: postIds.length },
+        affectedCount: postIds.length,
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+      });
+    }
 
     res.status(200).json({
       success: true,

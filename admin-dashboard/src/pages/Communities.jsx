@@ -17,6 +17,7 @@ import {
   BookOpen,
   Mail,
   Calendar,
+  Eye, // ✅ ADDED
 } from "lucide-react";
 import useAuthStore from "../store/authStore";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
@@ -553,7 +554,10 @@ function Communities() {
             return (
               <div
                 key={item._id}
-                className={`bg-white rounded-2xl border-2 ${currentStatus.border} overflow-hidden transition-shadow hover:shadow-lg`}
+                onClick={() =>
+                  navigate(`/communities/${item.contentId || item._id}`)
+                }
+                className={`bg-white rounded-2xl border-2 ${currentStatus.border} overflow-hidden transition-all hover:shadow-lg cursor-pointer group`}
               >
                 <div className="relative h-56">
                   {snapshot.coverImage ? (
@@ -572,6 +576,18 @@ function Communities() {
                     </div>
                   )}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
+
+                  {/* View Details overlay on hover */}
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <span
+                      className="text-white text-sm font-semibold flex items-center gap-2 px-4 py-2 rounded-xl bg-white/20 backdrop-blur-sm"
+                      style={{ fontFamily: "Sofia Sans" }}
+                    >
+                      <Eye size={16} />
+                      View Details
+                    </span>
+                  </div>
+
                   <span
                     className={`absolute top-3 right-3 text-xs font-semibold px-3 py-1.5 rounded-full shadow-lg ${currentStatus.badge}`}
                     style={{ fontFamily: "Sofia Sans" }}
@@ -712,7 +728,10 @@ function Communities() {
                   )}
 
                   {status === "pending" && (
-                    <div className="flex gap-2 pt-3 border-t border-gray-100">
+                    <div
+                      className="flex gap-2 pt-3 border-t border-gray-100"
+                      onClick={(e) => e.stopPropagation()} // ✅ Prevent navigation when clicking buttons
+                    >
                       <button
                         onClick={() =>
                           confirmApprove(item.contentId || item._id)
@@ -736,6 +755,24 @@ function Communities() {
                         style={{ fontFamily: "Sofia Sans" }}
                       >
                         <XCircle size={16} /> Reject
+                      </button>
+                    </div>
+                  )}
+
+                  {/* View Details button for non-pending communities */}
+                  {status !== "pending" && (
+                    <div
+                      className="flex gap-2 pt-3 border-t border-gray-100"
+                      onClick={(e) => e.stopPropagation()} // ✅ Prevent navigation when clicking button
+                    >
+                      <button
+                        onClick={() =>
+                          navigate(`/communities/${item.contentId || item._id}`)
+                        }
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-purple-500 text-white text-sm font-semibold hover:bg-purple-600 transition-colors"
+                        style={{ fontFamily: "Sofia Sans" }}
+                      >
+                        <Eye size={16} /> View Details
                       </button>
                     </div>
                   )}

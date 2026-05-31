@@ -18,6 +18,7 @@ router.put(
   uploadCommunityPhoto,
   communityCtrl.updateCommunity,
 );
+router.delete("/:communityId", communityCtrl.deleteCommunity);
 
 // ============================================
 // BROWSE & SEARCH
@@ -72,11 +73,27 @@ router.put(
 // ============================================
 router.get("/:communityId/members", communityCtrl.getMembers);
 router.delete("/:communityId/members/:userId", communityCtrl.removeMember);
+
+// ============================================
+// MODERATOR MANAGEMENT
+// ============================================
 router.put("/:communityId/moderators/:userId", communityCtrl.addModerator);
 router.delete(
   "/:communityId/moderators/:userId",
   communityCtrl.removeModerator,
 );
+
+// ============================================
+// ADMIN MANAGEMENT
+// ============================================
+router.put("/:communityId/admins/:userId", communityCtrl.addAdmin);
+router.delete("/:communityId/admins/:userId", communityCtrl.removeAdmin);
+router.put("/:communityId/transfer-admin/:userId", communityCtrl.transferAdmin);
+
+// ============================================
+// REPORT
+// ============================================
+router.post("/:communityId/report", communityCtrl.reportCommunity);
 
 // ============================================
 // CONTENT

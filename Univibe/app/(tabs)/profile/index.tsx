@@ -695,7 +695,7 @@ export default function ProfileScreen() {
           stats={{
             posts: postCount,
             connections: connectionCount,
-            groups: profile?.stats?.groups || 0,
+            communities: profile?.stats?.communities || 0,
           }}
           userId={user?.id || profile?.user?._id}
         />

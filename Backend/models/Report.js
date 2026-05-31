@@ -13,7 +13,15 @@ const reportSchema = new mongoose.Schema(
     // What was reported (polymorphic reference)
     targetType: {
       type: String,
-      enum: ["Post", "Comment", "User", "Event", "Group", "Message"],
+      enum: [
+        "Post",
+        "Comment",
+        "User",
+        "Event",
+        "Group",
+        "Message",
+        "Community",
+      ],
       required: true,
     },
     targetId: {

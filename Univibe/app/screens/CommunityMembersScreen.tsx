@@ -32,7 +32,6 @@ export default function CommunityMembersScreen() {
   const { communityId } = useLocalSearchParams<{ communityId: string }>();
   const { colors, isDark } = useTheme();
   const { user } = useAuth();
-
   const [members, setMembers] = useState<CommunityMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -89,7 +88,8 @@ export default function CommunityMembersScreen() {
       if (
         data.type === "member_joined" ||
         data.type === "member_removed" ||
-        data.type === "community_updated"
+        data.type === "community_updated" ||
+        data.type === "admin_transferred"
       ) {
         loadMembers();
       }
@@ -162,6 +162,43 @@ export default function CommunityMembersScreen() {
       }
     } catch (error) {
       Alert.alert("Error", "Failed to remove moderator");
+    }
+  };
+
+  const handleMakeAdmin = async (member: CommunityMember) => {
+    try {
+      const result = await communityService.transferAdmin(
+        communityId!,
+        member.user._id,
+      );
+      if (result.success) {
+        Alert.alert(
+          "Admin Role Transferred",
+          `${member.user?.name} is now the admin. You are now a regular member.`,
+        );
+        loadMembers();
+      } else {
+        Alert.alert("Error", result.message || "Failed to transfer admin role");
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to transfer admin role");
+    }
+  };
+
+  const handleRemoveAdmin = async (member: CommunityMember) => {
+    try {
+      const result = await communityService.removeAdmin(
+        communityId!,
+        member.user._id,
+      );
+      if (result.success) {
+        Alert.alert("Success", `${member.user?.name} is no longer an admin`);
+        loadMembers();
+      } else {
+        Alert.alert("Error", result.message || "Failed to remove admin");
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to remove admin");
     }
   };
 
@@ -340,6 +377,7 @@ export default function CommunityMembersScreen() {
           }
         />
       )}
+
       <MemberOptionsModal
         visible={optionsModalVisible}
         member={selectedMember}
@@ -353,6 +391,8 @@ export default function CommunityMembersScreen() {
         onRemoveMember={handleRemoveMember}
         onAddModerator={isAdmin ? handleAddModerator : () => {}}
         onRemoveModerator={isAdmin ? handleRemoveModerator : () => {}}
+        onMakeAdmin={isAdmin ? handleMakeAdmin : () => {}}
+        onRemoveAdmin={isAdmin ? handleRemoveAdmin : () => {}} // ✅ ADD THIS
         onViewProfile={(member) => {
           if (member.user?._id)
             router.push(`/profile/${member.user._id}` as any);

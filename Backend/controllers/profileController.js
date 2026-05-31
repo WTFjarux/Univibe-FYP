@@ -582,10 +582,25 @@ exports.getMyProfile = async (req, res) => {
 
     const currentUser = await User.findById(userId).select("connectionCount");
     const Post = require("../models/Post");
-    const postCount = await Post.countDocuments({
-      user: userId,
-      isAnonymous: false,
-      isDeleted: { $ne: true },
+    const Community = require("../models/Community");
+
+    const [postCount, communityCount] = await Promise.all([
+      Post.countDocuments({
+        user: userId,
+        isAnonymous: false,
+        isDeleted: { $ne: true },
+        community: null,
+      }),
+      Community.countDocuments({
+        $or: [{ "members.user": userId }, { admins: userId }],
+      }),
+    ]);
+
+    // ✅ Move console.log here after variables are defined
+    console.log(`📊 Stats for user ${userId}:`, {
+      postCount,
+      connectionCount: currentUser?.connectionCount || 0,
+      communityCount,
     });
 
     profile.profilePicture = getFullImageUrl(profile.profilePicture, req);
@@ -608,6 +623,7 @@ exports.getMyProfile = async (req, res) => {
             posts: postCount,
             connections: currentUser?.connectionCount || 0,
             groups: profile.stats?.groups || 0,
+            communities: communityCount,
           },
           createdAt: profile.createdAt,
           updatedAt: profile.updatedAt,
@@ -684,6 +700,10 @@ exports.getPublicProfile = async (req, res) => {
     const { userId } = req.params;
     const currentUserId = req.user.id;
 
+    // ✅ Import models
+    const Post = require("../models/Post");
+    const Community = require("../models/Community");
+
     if (userId === currentUserId) {
       const user = await User.findById(userId).select(
         "name username profileComplete",
@@ -720,12 +740,19 @@ exports.getPublicProfile = async (req, res) => {
       profile.coverPhoto = getFullImageUrl(profile.coverPhoto, req);
 
       const targetUser = await User.findById(userId).select("connectionCount");
-      const Post = require("../models/Post");
-      const postCount = await Post.countDocuments({
-        user: userId,
-        isAnonymous: false,
-        isDeleted: { $ne: true },
-      });
+
+      // ✅ Fetch post count and community count in parallel
+      const [postCount, communityCount] = await Promise.all([
+        Post.countDocuments({
+          user: userId,
+          isAnonymous: false,
+          isDeleted: { $ne: true },
+          community: null, // Exclude community posts from personal count
+        }),
+        Community.countDocuments({
+          $or: [{ "members.user": userId }, { admins: userId }],
+        }),
+      ]);
 
       const profileResponse = {
         ...profile,
@@ -733,6 +760,7 @@ exports.getPublicProfile = async (req, res) => {
           posts: postCount,
           connections: targetUser?.connectionCount || 0,
           groups: profile.stats?.groups || 0,
+          communities: communityCount, // ✅ Added
         },
       };
 
@@ -763,6 +791,7 @@ exports.getPublicProfile = async (req, res) => {
       });
     }
 
+    // Other user's profile
     const isBlocked = await Block.areUsersBlocked(currentUserId, userId);
 
     if (isBlocked) {
@@ -808,12 +837,19 @@ exports.getPublicProfile = async (req, res) => {
     profile.coverPhoto = getFullImageUrl(profile.coverPhoto, req);
 
     const targetUser = await User.findById(userId).select("connectionCount");
-    const Post = require("../models/Post");
-    const postCount = await Post.countDocuments({
-      user: userId,
-      isAnonymous: false,
-      isDeleted: { $ne: true },
-    });
+
+    // ✅ Fetch post count and community count in parallel
+    const [postCount, communityCount] = await Promise.all([
+      Post.countDocuments({
+        user: userId,
+        isAnonymous: false,
+        isDeleted: { $ne: true },
+        community: null, // Exclude community posts from personal count
+      }),
+      Community.countDocuments({
+        $or: [{ "members.user": userId }, { admins: userId }],
+      }),
+    ]);
 
     const profileResponse = {
       ...profile,
@@ -821,6 +857,7 @@ exports.getPublicProfile = async (req, res) => {
         posts: postCount,
         connections: targetUser?.connectionCount || 0,
         groups: profile.stats?.groups || 0,
+        communities: communityCount, // ✅ Added
       },
     };
 

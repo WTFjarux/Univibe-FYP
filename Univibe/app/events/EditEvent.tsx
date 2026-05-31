@@ -45,6 +45,7 @@ export default function EditEventScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { colors } = useTheme();
+  const [isCommunityEvent, setIsCommunityEvent] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
@@ -144,6 +145,14 @@ export default function EditEventScreen() {
       const response = await eventService.getEventById(id);
       if (response.success && response.event) {
         const event = response.event;
+        if (
+          event.community &&
+          (typeof event.community === "object"
+            ? event.community._id
+            : event.community)
+        ) {
+          setIsCommunityEvent(true);
+        }
         if (event.organizer._id !== user?.id) {
           Alert.alert(
             "Unauthorized",
@@ -245,11 +254,8 @@ export default function EditEventScreen() {
       newDate.getMonth(),
       newDate.getDate(),
     );
-    if (endDay >= startDay) {
-      setEndDate(newDate);
-    } else {
-      Alert.alert("Invalid Date", "End date must be after start date");
-    }
+    if (endDay >= startDay) setEndDate(newDate);
+    else Alert.alert("Invalid Date", "End date must be after start date");
     setShowEndDate(false);
   };
   const onStartTimeConfirm = () => {
@@ -267,11 +273,8 @@ export default function EditEventScreen() {
   const onEndTimeConfirm = () => {
     const newDate = new Date(endDate);
     newDate.setHours(tempEndHour, tempEndMinute);
-    if (newDate > startDate) {
-      setEndDate(newDate);
-    } else {
-      Alert.alert("Invalid Time", "End time must be after start time");
-    }
+    if (newDate > startDate) setEndDate(newDate);
+    else Alert.alert("Invalid Time", "End time must be after start time");
     setShowEndTime(false);
   };
 
@@ -282,9 +285,7 @@ export default function EditEventScreen() {
         text: "Remove",
         style: "destructive",
         onPress: () => {
-          if (imageUrl === existingCoverImage) {
-            setExistingCoverImage("");
-          }
+          if (imageUrl === existingCoverImage) setExistingCoverImage("");
           setExistingImages((prev) => prev.filter((img) => img !== imageUrl));
           setRemovedImages((prev) => [...prev, imageUrl]);
         },
@@ -306,18 +307,15 @@ export default function EditEventScreen() {
       id: `${Date.now()}_cover_${Math.random()}`,
       uri: newCoverUri,
       fileName: filename,
-      type: type,
+      type,
       isCover: true,
     };
     setImages([newCoverImage, ...images]);
   };
 
   const handleBackPress = () => {
-    if (hasChanges) {
-      setShowDiscardModal(true);
-    } else {
-      router.back();
-    }
+    if (hasChanges) setShowDiscardModal(true);
+    else router.back();
   };
   const handleDiscardChanges = () => {
     setShowDiscardModal(false);
@@ -343,7 +341,7 @@ export default function EditEventScreen() {
       return;
     }
     if (images.length === 0 && existingImages.length === 0) {
-      Alert.alert("Error", "Please add at least one image for your event");
+      Alert.alert("Error", "Please add at least one image");
       return;
     }
     setSubmitting(true);
@@ -360,9 +358,8 @@ export default function EditEventScreen() {
       formData.append("isOnline", String(isOnline));
       if (meetingLink) formData.append("meetingLink", meetingLink);
       if (tags) formData.append("tags", tags);
-      if (removedImages.length > 0) {
+      if (removedImages.length > 0)
         formData.append("removedImages", JSON.stringify(removedImages));
-      }
       images.forEach((image) => {
         formData.append("images", {
           uri: image.uri,
@@ -714,57 +711,110 @@ export default function EditEventScreen() {
                 {description.length}/2000
               </Text>
             </View>
+
+            {/* ✅ Visibility - No public option */}
             <View style={styles.inputGroup}>
               <Text style={[styles.label, { color: colors.text }]}>
                 Visibility
               </Text>
               <View style={styles.visibilityContainer}>
-                {[
-                  {
-                    value: "campus",
-                    label: "Campus",
-                    icon: "business-outline",
-                  },
-                  {
-                    value: "connections",
-                    label: "Connections",
-                    icon: "people-outline",
-                  },
-                  { value: "public", label: "Public", icon: "globe-outline" },
-                ].map((v) => (
-                  <TouchableOpacity
-                    key={v.value}
-                    style={[
-                      styles.visibilityOption,
-                      { borderColor: colors.border },
-                      visibility === v.value && [
-                        styles.visibilityOptionActive,
-                        {
-                          backgroundColor: colors.primary,
-                          borderColor: colors.primary,
-                        },
-                      ],
-                    ]}
-                    onPress={() => setVisibility(v.value)}
-                  >
-                    <Ionicons
-                      name={v.icon as any}
-                      size={20}
-                      color={
-                        visibility === v.value ? "#fff" : colors.textSecondary
-                      }
-                    />
-                    <Text
-                      style={[
-                        styles.visibilityText,
-                        { color: colors.textSecondary },
-                        visibility === v.value && styles.visibilityTextActive,
-                      ]}
-                    >
-                      {v.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                {isCommunityEvent
+                  ? [
+                      {
+                        value: "campus",
+                        label: "Campus",
+                        icon: "school-outline" as const,
+                      },
+                      {
+                        value: "community",
+                        label: "Community",
+                        icon: "people" as const,
+                      },
+                    ].map((v) => (
+                      <TouchableOpacity
+                        key={v.value}
+                        style={[
+                          styles.visibilityOption,
+                          { borderColor: colors.border },
+                          visibility === v.value && [
+                            styles.visibilityOptionActive,
+                            {
+                              backgroundColor: colors.primary,
+                              borderColor: colors.primary,
+                            },
+                          ],
+                        ]}
+                        onPress={() => setVisibility(v.value)}
+                      >
+                        <Ionicons
+                          name={v.icon}
+                          size={20}
+                          color={
+                            visibility === v.value
+                              ? "#fff"
+                              : colors.textSecondary
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.visibilityText,
+                            { color: colors.textSecondary },
+                            visibility === v.value &&
+                              styles.visibilityTextActive,
+                          ]}
+                        >
+                          {v.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))
+                  : [
+                      {
+                        value: "campus",
+                        label: "Campus",
+                        icon: "school-outline" as const,
+                      },
+                      {
+                        value: "connections",
+                        label: "Connections",
+                        icon: "people-outline" as const,
+                      },
+                    ].map((v) => (
+                      <TouchableOpacity
+                        key={v.value}
+                        style={[
+                          styles.visibilityOption,
+                          { borderColor: colors.border },
+                          visibility === v.value && [
+                            styles.visibilityOptionActive,
+                            {
+                              backgroundColor: colors.primary,
+                              borderColor: colors.primary,
+                            },
+                          ],
+                        ]}
+                        onPress={() => setVisibility(v.value)}
+                      >
+                        <Ionicons
+                          name={v.icon}
+                          size={20}
+                          color={
+                            visibility === v.value
+                              ? "#fff"
+                              : colors.textSecondary
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.visibilityText,
+                            { color: colors.textSecondary },
+                            visibility === v.value &&
+                              styles.visibilityTextActive,
+                          ]}
+                        >
+                          {v.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
               </View>
             </View>
           </ScrollView>

@@ -64,11 +64,14 @@ export const communityService = {
       formData.append("description", payload.description);
     formData.append("university", payload.university);
     formData.append("type", payload.type);
+
+    // ✅ Departments are always public now
     if (payload.type === "department") {
-      formData.append("privacy", "private");
+      formData.append("privacy", "public");
     } else if (payload.privacy) {
       formData.append("privacy", payload.privacy);
     }
+
     if (payload.tags?.length)
       formData.append("tags", JSON.stringify(payload.tags));
     if (payload.rules?.length)
@@ -96,7 +99,6 @@ export const communityService = {
     if (payload.name) formData.append("name", payload.name);
     if (payload.description !== undefined)
       formData.append("description", payload.description);
-    // ✅ Always append privacy as a string
     if (payload.privacy) formData.append("privacy", payload.privacy);
     if (payload.tags) formData.append("tags", JSON.stringify(payload.tags));
     if (payload.rules) formData.append("rules", JSON.stringify(payload.rules));
@@ -107,6 +109,19 @@ export const communityService = {
       method: "PUT",
       headers: { Authorization: `Bearer ${token}` },
       body: formData,
+    });
+    if (res.status === 401) return handleUnauthorized();
+    return res.json();
+  },
+
+  // ✅ NEW: Delete community
+  deleteCommunity: async (communityId: string): Promise<CommunityResponse> => {
+    const token = await getToken();
+    if (!token) return { success: false, message: "Authentication required" };
+
+    const res = await fetch(`${BASE_URL}/api/communities/${communityId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
     });
     if (res.status === 401) return handleUnauthorized();
     return res.json();
@@ -452,6 +467,46 @@ export const communityService = {
   },
 
   // ============================================
+  // ADMIN MANAGEMENT
+  // ============================================
+
+  transferAdmin: async (
+    communityId: string,
+    userId: string,
+  ): Promise<MessageResponse> => {
+    const token = await getToken();
+    if (!token) return { success: false, message: "Authentication required" };
+
+    const res = await fetch(
+      `${BASE_URL}/api/communities/${communityId}/transfer-admin/${userId}`,
+      {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+    if (res.status === 401) return handleUnauthorized();
+    return res.json();
+  },
+
+  removeAdmin: async (
+    communityId: string,
+    userId: string,
+  ): Promise<MessageResponse> => {
+    const token = await getToken();
+    if (!token) return { success: false, message: "Authentication required" };
+
+    const res = await fetch(
+      `${BASE_URL}/api/communities/${communityId}/admins/${userId}`,
+      {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+    if (res.status === 401) return handleUnauthorized();
+    return res.json();
+  },
+
+  // ============================================
   // REPORT COMMUNITY
   // ============================================
 
@@ -462,14 +517,17 @@ export const communityService = {
     const token = await getToken();
     if (!token) return { success: false, message: "Authentication required" };
 
-    const res = await fetch(`${BASE_URL}/api/content/report/${communityId}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+    const res = await fetch(
+      `${BASE_URL}/api/communities/${communityId}/report`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ reason }),
       },
-      body: JSON.stringify({ reason, contentType: "Community" }),
-    });
+    );
     if (res.status === 401) return handleUnauthorized();
     return res.json();
   },

@@ -38,6 +38,12 @@ export const EventDetailsTab = ({
     event.interestedCount ?? 0,
   );
 
+  // ✅ Check if event belongs to a community
+  const hasCommunity =
+    event.community &&
+    typeof event.community === "object" &&
+    "name" in event.community;
+
   useEffect(() => {
     setLocalRsvpCount(event.rsvpCount ?? 0);
     setLocalInterestedCount(event.interestedCount ?? 0);
@@ -85,6 +91,20 @@ export const EventDetailsTab = ({
     }
   }, [event.organizer._id, onOrganizerPress]);
 
+  // ✅ Handle community press - navigate to community screen
+  const handleCommunityPress = useCallback(() => {
+    if (
+      hasCommunity &&
+      event.community &&
+      typeof event.community === "object"
+    ) {
+      router.push({
+        pathname: "/screens/CommunityScreen",
+        params: { communityId: event.community._id },
+      });
+    }
+  }, [hasCommunity, event.community]);
+
   const getFullImageUrl = (url: string | undefined): string | undefined => {
     if (!url) return undefined;
     if (url.startsWith("http://") || url.startsWith("https://")) return url;
@@ -100,7 +120,21 @@ export const EventDetailsTab = ({
     return DEFAULT_AVATAR;
   };
 
+  const getCommunityCoverImage = () => {
+    if (
+      hasCommunity &&
+      event.community &&
+      typeof event.community === "object" &&
+      event.community.coverImage
+    ) {
+      const fullUrl = getFullImageUrl(event.community.coverImage);
+      if (fullUrl) return { uri: fullUrl };
+    }
+    return null;
+  };
+
   const profileImage = getProfileImage();
+  const communityCoverImage = getCommunityCoverImage();
 
   const handleImageLoad = () => {
     setIsLoading(false);
@@ -189,66 +223,131 @@ export const EventDetailsTab = ({
         </View>
       </View>
 
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>
-          Organizer
-        </Text>
-        <TouchableOpacity
-          style={styles.organizerContainer}
-          onPress={handleOrganizerPress}
-          activeOpacity={0.7}
-        >
-          <View
+      {/* ✅ COMMUNITY EVENT - Show Community as Organizer */}
+      {hasCommunity ? (
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+            Organizer
+          </Text>
+          <TouchableOpacity
             style={[
-              styles.organizerAvatar,
+              styles.communityOrganizerContainer,
               {
                 backgroundColor: isDark
-                  ? "rgba(167, 139, 250, 0.2)"
-                  : "#f3e8ff",
+                  ? "rgba(167, 139, 250, 0.15)"
+                  : "#f5f3ff",
+                borderColor: isDark ? "rgba(167, 139, 250, 0.3)" : "#ede9fe",
               },
             ]}
+            onPress={handleCommunityPress}
+            activeOpacity={0.7}
           >
-            {isLoading && (
-              <View
-                style={[
-                  styles.loadingOverlay,
-                  {
-                    backgroundColor: isDark
-                      ? "rgba(30, 30, 30, 0.8)"
-                      : "rgba(243, 232, 255, 0.8)",
-                  },
-                ]}
-              >
-                <ActivityIndicator size="small" color={colors.primary} />
-              </View>
-            )}
-            <Image
-              source={profileImage}
-              style={styles.organizerAvatarImage}
-              onLoad={handleImageLoad}
-              onError={handleImageError}
-            />
-          </View>
-          <View style={styles.organizerInfo}>
-            <Text style={[styles.organizerName, { color: colors.text }]}>
-              {(event.organizer as any).fullName || event.organizerName}
-            </Text>
-            <Text
+            <View
               style={[
-                styles.organizerUsername,
-                { color: colors.textSecondary },
+                styles.communityOrganizerAvatar,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(167, 139, 250, 0.3)"
+                    : "#ede9fe",
+                },
               ]}
             >
-              @
-              {event.organizer.username ||
-                (event.organizer as any).fullName
-                  ?.toLowerCase()
-                  .replace(/\s/g, "") ||
-                event.organizerName.toLowerCase().replace(/\s/g, "")}
-            </Text>
-          </View>
-        </TouchableOpacity>
-      </View>
+              {communityCoverImage ? (
+                <Image
+                  source={communityCoverImage}
+                  style={styles.communityOrganizerAvatarImage}
+                />
+              ) : (
+                <Ionicons name="people" size={26} color="#7c3aed" />
+              )}
+            </View>
+            <View style={styles.organizerInfo}>
+              <Text style={[styles.organizerName, { color: colors.text }]}>
+                {hasCommunity &&
+                event.community &&
+                typeof event.community === "object"
+                  ? event.community.name
+                  : "Community"}
+              </Text>
+              <Text
+                style={[
+                  styles.organizerUsername,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                Community Event
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={20}
+              color={colors.textSecondary}
+            />
+          </TouchableOpacity>
+        </View>
+      ) : (
+        /* REGULAR EVENT - Show individual Organizer */
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+            Organizer
+          </Text>
+          <TouchableOpacity
+            style={styles.organizerContainer}
+            onPress={handleOrganizerPress}
+            activeOpacity={0.7}
+          >
+            <View
+              style={[
+                styles.organizerAvatar,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(167, 139, 250, 0.2)"
+                    : "#f3e8ff",
+                },
+              ]}
+            >
+              {isLoading && (
+                <View
+                  style={[
+                    styles.loadingOverlay,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(30, 30, 30, 0.8)"
+                        : "rgba(243, 232, 255, 0.8)",
+                    },
+                  ]}
+                >
+                  <ActivityIndicator size="small" color={colors.primary} />
+                </View>
+              )}
+              <Image
+                source={profileImage}
+                style={styles.organizerAvatarImage}
+                onLoad={handleImageLoad}
+                onError={handleImageError}
+              />
+            </View>
+            <View style={styles.organizerInfo}>
+              <Text style={[styles.organizerName, { color: colors.text }]}>
+                {(event.organizer as any).fullName || event.organizerName}
+              </Text>
+              <Text
+                style={[
+                  styles.organizerUsername,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                @
+                {event.organizer.username ||
+                  (event.organizer as any).fullName
+                    ?.toLowerCase()
+                    .replace(/\s/g, "") ||
+                  event.organizerName.toLowerCase().replace(/\s/g, "")}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.text }]}>
@@ -324,6 +423,28 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     fontFamily: "SofiaSans-Bold",
   },
+  // ✅ Community Organizer Styles
+  communityOrganizerContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1.5,
+  },
+  communityOrganizerAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+  },
+  communityOrganizerAvatarImage: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
+  },
   detailItem: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   detailTextContainer: { flex: 1 },
   detailText: { fontSize: 16, fontFamily: "SofiaSans-Regular", lineHeight: 22 },
@@ -360,6 +481,7 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
   },
   getDirectionsText: { fontSize: 14, fontFamily: "SofiaSans-Bold" },
+  // Organizer styles (for regular events)
   organizerContainer: {
     flexDirection: "row",
     alignItems: "center",
