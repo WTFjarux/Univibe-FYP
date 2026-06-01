@@ -1,5 +1,3 @@
-// backend/controllers/commentController.js
-
 const Post = require("../models/Post");
 const Comment = require("../models/Comment");
 const User = require("../models/User");
@@ -24,13 +22,32 @@ async function canUserViewPost(userId, post) {
 
   const connectionIds = (user.connections || []).map((id) => id.toString());
 
+  // ✅ Handle community visibility
+  if (post.visibility === "community" && post.community) {
+    try {
+      const Community = require("../models/Community");
+      const community = await Community.findById(post.community);
+      if (community) {
+        // Check if user is a community member
+        const isMember = community.members.some(
+          (member) => member.user.toString() === userId.toString(),
+        );
+        if (isMember) return true;
+      }
+    } catch (err) {
+      console.error(
+        "Error checking community membership in canUserViewPost:",
+        err,
+      );
+    }
+    return false;
+  }
+
   switch (post.visibility) {
     case "campus":
       return post.campus === userCampus;
-
     case "connections":
       return connectionIds.includes(post.user.toString());
-
     default:
       return false;
   }
@@ -178,6 +195,7 @@ const handleCommentNotification = async (
   commentPreview,
   io,
   isAnonymous = false,
+  communityId = null,
 ) => {
   try {
     // Don't notify if commenting on own post
@@ -189,11 +207,22 @@ const handleCommentNotification = async (
     const commenter = await User.findById(commenterId).select("name");
     if (!commenter) return;
 
+    // ✅ Get community info if this is a community post
+    let community = null;
+    let communityContext = "";
+    if (communityId) {
+      const Community = require("../models/Community");
+      community = await Community.findById(communityId);
+      if (community) {
+        communityContext = ` in "${community.name}"`;
+      }
+    }
+
     // If anonymous, use "Someone" as the display name
     const displayName = isAnonymous ? "Someone" : commenter.name;
     const displayMessage = isAnonymous
-      ? "Someone commented anonymously on your post"
-      : `${commenter.name} commented on your post`;
+      ? `Someone commented anonymously on your post${communityContext}`
+      : `${commenter.name} commented on your post${communityContext}`;
     const displayPreview = isAnonymous
       ? "Someone commented anonymously on your post"
       : commentPreview
@@ -215,6 +244,18 @@ const handleCommentNotification = async (
       targetModel: "Post",
       "metadata.isGrouped": true,
     });
+
+    // ✅ Update message format for grouped notifications
+    const getGroupedCommentMessage = (commenters) => {
+      if (!commenters || commenters.length === 0) return "";
+      if (commenters.length === 1) {
+        return `${commenters[0].name} commented on your post${communityContext}`;
+      } else if (commenters.length === 2) {
+        return `${commenters[0].name} and ${commenters[1].name} commented on your post${communityContext}`;
+      } else {
+        return `${commenters[0].name}, ${commenters[1].name} and ${commenters.length - 2} others commented on your post${communityContext}`;
+      }
+    };
 
     if (notification) {
       const notificationAge =
@@ -243,7 +284,7 @@ const handleCommentNotification = async (
         currentCommenters = currentCommenters.slice(0, 10);
       }
 
-      notification.message = getCommentMessage(currentCommenters);
+      notification.message = getGroupedCommentMessage(currentCommenters);
       notification.read = false;
       notification.lastInteractionAt = new Date();
       notification.sender = commenterId;
@@ -251,6 +292,8 @@ const handleCommentNotification = async (
         isGrouped: true,
         count: currentCommenters.length,
         commenters: currentCommenters,
+        isCommunityPost: !!community,
+        communityName: community?.name,
       };
 
       notification.markModified("metadata");
@@ -270,7 +313,7 @@ const handleCommentNotification = async (
         recipient: postOwnerId,
         sender: commenterId,
         type: "comment",
-        title: "New Comment",
+        title: community ? "New Comment in Community" : "New Comment",
         message: displayMessage,
         targetId: postId,
         targetModel: "Post",
@@ -287,11 +330,36 @@ const handleCommentNotification = async (
               preview: displayPreview,
             },
           ],
+          isCommunityPost: !!community,
+          communityName: community?.name,
         },
       });
     }
 
-    // Emit socket event
+    // ✅ For community posts, also notify all admins (except post owner and commenter)
+    if (community && community.admins && community.admins.length > 0) {
+      for (const adminId of community.admins) {
+        const adminIdStr = adminId.toString();
+        if (
+          adminIdStr !== postOwnerId.toString() &&
+          adminIdStr !== commenterIdStr
+        ) {
+          await createCommentNotificationForAdmin(
+            adminIdStr,
+            commenterId,
+            displayName,
+            isAnonymous,
+            profilePicture,
+            displayPreview,
+            postId,
+            io,
+            community,
+          );
+        }
+      }
+    }
+
+    // Emit socket event to post owner
     if (io && notification) {
       const populatedNotification = await Notification.findById(
         notification._id,
@@ -332,6 +400,157 @@ const handleCommentNotification = async (
     }
   } catch (error) {
     console.error("Handle comment notification error:", error);
+  }
+};
+
+// ✅ Helper function for admin notifications
+const createCommentNotificationForAdmin = async (
+  recipientId,
+  commenterId,
+  displayName,
+  isAnonymous,
+  profilePicture,
+  commentPreview,
+  postId,
+  io,
+  community,
+) => {
+  const recipientIdStr = recipientId.toString();
+  const commenterIdStr = commenterId.toString();
+  const communityContext = ` in "${community.name}"`;
+
+  const displayMessage = isAnonymous
+    ? `Someone commented anonymously on a post${communityContext}`
+    : `${displayName} commented on a post${communityContext}`;
+
+  // Find existing grouped notification for this admin
+  let notification = await Notification.findOne({
+    recipient: recipientIdStr,
+    type: "comment",
+    targetId: postId,
+    targetModel: "Post",
+    "metadata.isGrouped": true,
+  });
+
+  const getGroupedAdminMessage = (commenters) => {
+    if (!commenters || commenters.length === 0) return "";
+    if (commenters.length === 1) {
+      return `${commenters[0].name} commented on a post${communityContext}`;
+    } else if (commenters.length === 2) {
+      return `${commenters[0].name} and ${commenters[1].name} commented on a post${communityContext}`;
+    } else {
+      return `${commenters[0].name}, ${commenters[1].name} and ${commenters.length - 2} others commented on a post${communityContext}`;
+    }
+  };
+
+  if (notification) {
+    const notificationAge =
+      Date.now() - new Date(notification.createdAt).getTime();
+    const isStale = notificationAge > 24 * 60 * 60 * 1000;
+
+    let currentCommenters = isStale
+      ? []
+      : notification.metadata?.commenters || [];
+
+    currentCommenters = currentCommenters.filter(
+      (c) => c.userId.toString() !== commenterIdStr,
+    );
+
+    currentCommenters.unshift({
+      userId: commenterIdStr,
+      name: displayName,
+      profilePicture: isAnonymous ? null : profilePicture,
+      preview: commentPreview,
+    });
+
+    if (currentCommenters.length > 10) {
+      currentCommenters = currentCommenters.slice(0, 10);
+    }
+
+    notification.message = getGroupedAdminMessage(currentCommenters);
+    notification.read = false;
+    notification.lastInteractionAt = new Date();
+    notification.sender = commenterId;
+    notification.metadata = {
+      isGrouped: true,
+      count: currentCommenters.length,
+      commenters: currentCommenters,
+      isCommunityPost: true,
+      communityName: community.name,
+    };
+
+    notification.markModified("metadata");
+    await notification.save();
+  } else {
+    await Notification.deleteMany({
+      recipient: recipientIdStr,
+      type: "comment",
+      targetId: postId,
+      targetModel: "Post",
+      "metadata.isGrouped": { $ne: true },
+    });
+
+    notification = await Notification.create({
+      recipient: recipientIdStr,
+      sender: commenterId,
+      type: "comment",
+      title: "New Comment in Community",
+      message: displayMessage,
+      targetId: postId,
+      targetModel: "Post",
+      read: false,
+      lastInteractionAt: new Date(),
+      metadata: {
+        isGrouped: true,
+        count: 1,
+        commenters: [
+          {
+            userId: commenterIdStr,
+            name: displayName,
+            profilePicture: isAnonymous ? null : profilePicture,
+            preview: commentPreview,
+          },
+        ],
+        isCommunityPost: true,
+        communityName: community.name,
+      },
+    });
+  }
+
+  // Emit socket event for admin
+  if (io && notification) {
+    const populatedNotification = await Notification.findById(notification._id)
+      .populate("sender", "name username email")
+      .lean();
+
+    if (populatedNotification) {
+      const senderProfile = await Profile.findOne({
+        user: populatedNotification.sender?._id || populatedNotification.sender,
+      })
+        .select("profilePicture fullName")
+        .lean();
+
+      if (senderProfile) {
+        populatedNotification.sender = {
+          ...populatedNotification.sender,
+          profilePicture: senderProfile.profilePicture || null,
+          fullName: senderProfile.fullName || populatedNotification.sender.name,
+        };
+      }
+
+      const roomId = `user_${recipientIdStr}`;
+      io.to(roomId).emit("notification:new", {
+        notification: populatedNotification,
+      });
+
+      const unreadCount = await Notification.countDocuments({
+        recipient: recipientIdStr,
+        read: false,
+      });
+      io.to(roomId).emit("notification:unreadCount", {
+        count: unreadCount,
+      });
+    }
   }
 };
 
@@ -426,7 +645,7 @@ exports.addComment = async (req, res) => {
       select: "name username email verified",
     });
 
-    // Use grouped comment notification
+    // ✅ FIXED: Use grouped comment notification with proper conditional logic
     if (post.user.toString() !== userId.toString() && !post.isAnonymous) {
       const io = req.app.get("io");
 
@@ -469,7 +688,8 @@ exports.addComment = async (req, res) => {
           }
         }
       } else {
-        // Regular comments: use grouped notification
+        // ✅ Regular (non-anonymous) comments: use grouped notification with community context
+        const communityId = post.community ? post.community.toString() : null;
         await handleCommentNotification(
           postId,
           post.user,
@@ -477,6 +697,7 @@ exports.addComment = async (req, res) => {
           content,
           io,
           false,
+          communityId,
         );
       }
     }

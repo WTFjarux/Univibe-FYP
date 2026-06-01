@@ -681,7 +681,7 @@ exports.getPostById = async (req, res) => {
 
     const post = await Post.findById(postId)
       .populate("user", "name username email verified")
-      .populate("community", "name coverImage")
+      .populate("community", "name coverImage type privacy memberCount")
       .populate("likes", "name username")
       .lean();
 
@@ -692,6 +692,7 @@ exports.getPostById = async (req, res) => {
       });
     }
 
+    // Check block status
     if (post.user._id.toString() !== currentUserId.toString()) {
       const isBlocked = await Block.areUsersBlocked(
         currentUserId,
@@ -710,12 +711,47 @@ exports.getPostById = async (req, res) => {
     const currentUserCampus = currentUserProfile?.campus || "Unknown Campus";
     const connectionIds = currentUser?.connections || [];
 
-    const canViewPost =
-      post.user._id.toString() === currentUserId.toString() ||
-      (post.visibility === "campus" && post.campus === currentUserCampus) ||
-      (post.visibility === "connections" &&
-        connectionIds.includes(post.user._id.toString())) ||
-      post.isAnonymous;
+    // ✅ Check if user is a community member (for community posts)
+    let isCommunityMember = false;
+    if (post.community) {
+      try {
+        const Community = require("../models/Community");
+        const communityId = post.community._id || post.community;
+        const community = await Community.findById(communityId);
+        if (community) {
+          // ✅ Check members array of objects
+          isCommunityMember = community.members.some(
+            (member) => member.user.toString() === currentUserId.toString(),
+          );
+        }
+      } catch (err) {
+        console.error(
+          "Error checking community membership in getPostById:",
+          err,
+        );
+      }
+    }
+
+    // ✅ Updated permission check to include community posts
+    let canViewPost = false;
+
+    if (post.user._id.toString() === currentUserId.toString()) {
+      canViewPost = true;
+    } else if (
+      post.visibility === "campus" &&
+      post.campus === currentUserCampus
+    ) {
+      canViewPost = true;
+    } else if (
+      post.visibility === "connections" &&
+      connectionIds.includes(post.user._id.toString())
+    ) {
+      canViewPost = true;
+    } else if (post.visibility === "community" && isCommunityMember) {
+      canViewPost = true;
+    } else if (post.isAnonymous) {
+      canViewPost = true;
+    }
 
     if (!canViewPost) {
       return res.status(403).json({
@@ -783,7 +819,6 @@ exports.getPostById = async (req, res) => {
       };
     }
 
-    // ✅ Check if current user reported this post
     const Report = getAdminModel("Report");
     const userReport = await Report.findOne({
       reportedBy: currentUserId,
@@ -913,7 +948,13 @@ exports.searchPosts = async (req, res) => {
 
 // ===================== INTERACTIONS =====================
 
-const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
+const handleLikeNotification = async (
+  postId,
+  postOwnerId,
+  likerId,
+  io,
+  communityId = null,
+) => {
   try {
     const isBlocked = await Block.areUsersBlocked(postOwnerId, likerId);
     if (isBlocked) return;
@@ -925,8 +966,18 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
       .select("profilePicture")
       .lean();
     const profilePicture = profile?.profilePicture || null;
-
     const likerIdStr = likerId.toString();
+
+    // Get community info if this is a community post
+    let community = null;
+    let communityContext = "";
+    if (communityId) {
+      const Community = require("../models/Community");
+      community = await Community.findById(communityId);
+      if (community) {
+        communityContext = ` in "${community.name}"`;
+      }
+    }
 
     // Find existing grouped notification
     let notification = await Notification.findOne({
@@ -938,31 +989,27 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
     });
 
     if (notification) {
-      // Check if notification is older than 24 hours — if so, start fresh
       const notificationAge =
         Date.now() - new Date(notification.createdAt).getTime();
-      const isStale = notificationAge > 24 * 60 * 60 * 1000; // 24 hours
+      const isStale = notificationAge > 24 * 60 * 60 * 1000;
 
       let currentLikers = isStale ? [] : notification.metadata?.likers || [];
 
-      // Remove existing entry for this liker (to re-add at top)
       currentLikers = currentLikers.filter(
         (l) => l.userId.toString() !== likerIdStr,
       );
 
-      // Add current liker at the front
       currentLikers.unshift({
         userId: likerIdStr,
         name: liker.name,
         profilePicture: profilePicture,
       });
 
-      // Keep max 10 recent likers
       if (currentLikers.length > 10) {
         currentLikers = currentLikers.slice(0, 10);
       }
 
-      notification.message = getLikeMessage(currentLikers);
+      notification.message = getLikeMessage(currentLikers, communityContext);
       notification.read = false;
       notification.lastInteractionAt = new Date();
       notification.sender = likerId;
@@ -970,18 +1017,28 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
         isGrouped: true,
         count: currentLikers.length,
         likers: currentLikers,
+        isCommunityPost: !!community,
+        communityName: community?.name,
       };
 
       notification.markModified("metadata");
       await notification.save();
     } else {
-      // Create fresh notification
+      // Delete any old non-grouped like notifications for this post
+      await Notification.deleteMany({
+        recipient: postOwnerId,
+        type: "like",
+        targetId: postId,
+        targetModel: "Post",
+        "metadata.isGrouped": { $ne: true },
+      });
+
       notification = await Notification.create({
         recipient: postOwnerId,
         sender: likerId,
         type: "like",
-        title: "New Like",
-        message: `${liker.name} liked your post`,
+        title: community ? "New Like in Community" : "New Like",
+        message: `${liker.name} liked your post${communityContext}`,
         targetId: postId,
         targetModel: "Post",
         read: false,
@@ -996,6 +1053,8 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
               profilePicture: profilePicture,
             },
           ],
+          isCommunityPost: !!community,
+          communityName: community?.name,
         },
       });
     }
@@ -1011,7 +1070,7 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
       if (populatedNotification) {
         const senderProfile = await Profile.findOne({
           user:
-            populatedNotification.sender._id || populatedNotification.sender,
+            populatedNotification.sender?._id || populatedNotification.sender,
         })
           .select("profilePicture fullName")
           .lean();
@@ -1039,8 +1098,159 @@ const handleLikeNotification = async (postId, postOwnerId, likerId, io) => {
         });
       }
     }
+
+    // ✅ For community posts, also notify all admins (except post owner and liker)
+    if (community && community.admins && community.admins.length > 0) {
+      for (const adminId of community.admins) {
+        const adminIdStr = adminId.toString();
+        if (
+          adminIdStr !== postOwnerId.toString() &&
+          adminIdStr !== likerIdStr
+        ) {
+          await createLikeNotificationForAdmin(
+            adminIdStr,
+            likerId,
+            liker,
+            profilePicture,
+            postId,
+            io,
+            community,
+          );
+        }
+      }
+    }
   } catch (error) {
     console.error("Handle like notification error:", error);
+  }
+};
+
+// Helper function for admin notifications
+const createLikeNotificationForAdmin = async (
+  recipientId,
+  likerId,
+  liker,
+  profilePicture,
+  postId,
+  io,
+  community,
+) => {
+  const recipientIdStr = recipientId.toString();
+  const likerIdStr = likerId.toString();
+  const communityContext = ` in "${community.name}"`;
+
+  // Find existing grouped notification for this admin
+  let notification = await Notification.findOne({
+    recipient: recipientIdStr,
+    type: "like",
+    targetId: postId,
+    targetModel: "Post",
+    "metadata.isGrouped": true,
+  });
+
+  if (notification) {
+    const notificationAge =
+      Date.now() - new Date(notification.createdAt).getTime();
+    const isStale = notificationAge > 24 * 60 * 60 * 1000;
+
+    let currentLikers = isStale ? [] : notification.metadata?.likers || [];
+
+    currentLikers = currentLikers.filter(
+      (l) => l.userId.toString() !== likerIdStr,
+    );
+
+    currentLikers.unshift({
+      userId: likerIdStr,
+      name: liker.name,
+      profilePicture: profilePicture,
+    });
+
+    if (currentLikers.length > 10) {
+      currentLikers = currentLikers.slice(0, 10);
+    }
+
+    notification.message = getLikeMessage(currentLikers, communityContext);
+    notification.read = false;
+    notification.lastInteractionAt = new Date();
+    notification.sender = likerId;
+    notification.metadata = {
+      isGrouped: true,
+      count: currentLikers.length,
+      likers: currentLikers,
+      isCommunityPost: true,
+      communityName: community.name,
+    };
+
+    notification.markModified("metadata");
+    await notification.save();
+  } else {
+    await Notification.deleteMany({
+      recipient: recipientIdStr,
+      type: "like",
+      targetId: postId,
+      targetModel: "Post",
+      "metadata.isGrouped": { $ne: true },
+    });
+
+    notification = await Notification.create({
+      recipient: recipientIdStr,
+      sender: likerId,
+      type: "like",
+      title: "New Like in Community",
+      message: `${liker.name} liked a post${communityContext}`,
+      targetId: postId,
+      targetModel: "Post",
+      read: false,
+      lastInteractionAt: new Date(),
+      metadata: {
+        isGrouped: true,
+        count: 1,
+        likers: [
+          {
+            userId: likerIdStr,
+            name: liker.name,
+            profilePicture: profilePicture,
+          },
+        ],
+        isCommunityPost: true,
+        communityName: community.name,
+      },
+    });
+  }
+
+  // Emit socket event for admin
+  if (io && notification) {
+    const populatedNotification = await Notification.findById(notification._id)
+      .populate("sender", "name username email")
+      .lean();
+
+    if (populatedNotification) {
+      const senderProfile = await Profile.findOne({
+        user: populatedNotification.sender?._id || populatedNotification.sender,
+      })
+        .select("profilePicture fullName")
+        .lean();
+
+      if (senderProfile) {
+        populatedNotification.sender = {
+          ...populatedNotification.sender,
+          profilePicture: senderProfile.profilePicture || null,
+          fullName: senderProfile.fullName || populatedNotification.sender.name,
+        };
+      }
+
+      const roomId = `user_${recipientIdStr}`;
+      io.to(roomId).emit("notification:new", {
+        notification: populatedNotification,
+      });
+
+      const unreadCount = await Notification.countDocuments({
+        recipient: recipientIdStr,
+        read: false,
+      });
+      io.to(roomId).emit("notification:unreadCount", {
+        count: unreadCount,
+      });
+    }
   }
 };
 
@@ -1083,14 +1293,14 @@ const handleUnlikeNotification = async (postId, postOwnerId, unlikerId) => {
   }
 };
 
-const getLikeMessage = (likers) => {
+const getLikeMessage = (likers, communityContext = "") => {
   if (!likers || likers.length === 0) return "";
   if (likers.length === 1) {
-    return `${likers[0].name} liked your post`;
+    return `${likers[0].name} liked your post${communityContext}`;
   } else if (likers.length === 2) {
-    return `${likers[0].name} and ${likers[1].name} liked your post`;
+    return `${likers[0].name} and ${likers[1].name} liked your post${communityContext}`;
   } else {
-    return `${likers[0].name}, ${likers[1].name} and ${likers.length - 2} others liked your post`;
+    return `${likers[0].name}, ${likers[1].name} and ${likers.length - 2} others liked your post${communityContext}`;
   }
 };
 
@@ -1105,6 +1315,13 @@ exports.toggleLike = async (req, res) => {
     }
 
     const currentUserId = req.user._id;
+
+    console.log("========== TOGGLE LIKE DEBUG ==========");
+    console.log("Post ID:", post._id);
+    console.log("Post Visibility:", post.visibility);
+    console.log("Post Community:", post.community);
+    console.log("Current User ID:", currentUserId);
+    console.log("Post User ID:", post.user);
 
     if (post.user.toString() !== currentUserId.toString()) {
       const isBlocked = await Block.areUsersBlocked(currentUserId, post.user);
@@ -1122,12 +1339,92 @@ exports.toggleLike = async (req, res) => {
     const currentUser = await User.findById(currentUserId);
     const connectionIds = currentUser?.connections || [];
 
-    const canViewPost =
-      post.user.toString() === currentUserId.toString() ||
-      (post.visibility === "campus" && post.campus === currentUserCampus) ||
-      (post.visibility === "connections" &&
-        connectionIds.includes(post.user.toString())) ||
-      post.isAnonymous;
+    console.log("Current User Campus:", currentUserCampus);
+    console.log("Post Campus:", post.campus);
+    console.log(
+      "Connection IDs:",
+      connectionIds.map((id) => id.toString()),
+    );
+    console.log(
+      "Is Connected to Post Owner:",
+      connectionIds.includes(post.user.toString()),
+    );
+
+    // ✅ FIX: Check if user is a community member (for community posts)
+    let isCommunityMember = false;
+    if (post.community) {
+      try {
+        const Community = require("../models/Community");
+        const community = await Community.findById(post.community);
+        if (community) {
+          console.log("Community Found:", community.name);
+          console.log("Community Members Count:", community.members.length);
+          console.log(
+            "Community Members:",
+            community.members.map((m) => m.user.toString()),
+          );
+
+          // ✅ Properly check members array of objects
+          isCommunityMember = community.members.some(
+            (member) => member.user.toString() === currentUserId.toString(),
+          );
+          console.log("Is Community Member:", isCommunityMember);
+        } else {
+          console.log("Community NOT Found for ID:", post.community);
+        }
+      } catch (err) {
+        console.error("Error checking community membership:", err);
+      }
+    }
+
+    // Updated permission check to include community posts
+    let canViewPost = false;
+
+    if (post.user.toString() === currentUserId.toString()) {
+      canViewPost = true;
+      console.log("✓ User is post owner");
+    } else if (
+      post.visibility === "campus" &&
+      post.campus === currentUserCampus
+    ) {
+      canViewPost = true;
+      console.log("✓ Campus visibility - same campus");
+    } else if (
+      post.visibility === "connections" &&
+      connectionIds.includes(post.user.toString())
+    ) {
+      canViewPost = true;
+      console.log("✓ Connections visibility - connected to author");
+    } else if (post.visibility === "community" && isCommunityMember) {
+      canViewPost = true;
+      console.log("✓ Community visibility - member of community");
+    } else if (post.isAnonymous) {
+      canViewPost = true;
+      console.log("✓ Anonymous post");
+    } else {
+      console.log("✗ No permission - conditions not met");
+      console.log(
+        "  - Is post owner:",
+        post.user.toString() === currentUserId.toString(),
+      );
+      console.log(
+        "  - Campus match:",
+        post.visibility === "campus" && post.campus === currentUserCampus,
+      );
+      console.log(
+        "  - Connections match:",
+        post.visibility === "connections" &&
+          connectionIds.includes(post.user.toString()),
+      );
+      console.log(
+        "  - Community member:",
+        post.visibility === "community" && isCommunityMember,
+      );
+      console.log("  - Is anonymous:", post.isAnonymous);
+    }
+
+    console.log("Final canViewPost:", canViewPost);
+    console.log("=====================================");
 
     if (!canViewPost) {
       return res.status(403).json({
@@ -1151,7 +1448,15 @@ exports.toggleLike = async (req, res) => {
         post.user.toString() !== currentUserId.toString() &&
         !post.isAnonymous
       ) {
-        await handleLikeNotification(post._id, post.user, currentUserId, io);
+        // ✅ Pass community ID
+        const communityId = post.community ? post.community.toString() : null;
+        await handleLikeNotification(
+          post._id,
+          post.user,
+          currentUserId,
+          io,
+          communityId,
+        );
       }
     } else {
       post.likes.splice(likeIndex, 1);
@@ -1236,7 +1541,7 @@ exports.getUserPostCount = async (req, res) => {
       user: userId,
       isAnonymous: false,
       isDeleted: false,
-      community: null, 
+      community: null,
     });
 
     res.json({ success: true, count: postCount });

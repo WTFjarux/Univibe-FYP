@@ -1,4 +1,3 @@
-// Univibe/app/events/EditEvent.tsx
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -19,6 +18,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/lib/contexts/ThemeContext";
 import { eventService } from "@/lib/services/eventService";
+import { communityService } from "@/lib/services/communityService";
 import { useAuth } from "@/lib/contexts/AuthContext";
 import {
   ImagePickerComponent,
@@ -46,6 +46,7 @@ export default function EditEventScreen() {
   const { user } = useAuth();
   const { colors } = useTheme();
   const [isCommunityEvent, setIsCommunityEvent] = useState(false);
+  const [communityInfo, setCommunityInfo] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
@@ -145,6 +146,8 @@ export default function EditEventScreen() {
       const response = await eventService.getEventById(id);
       if (response.success && response.event) {
         const event = response.event;
+
+        // Check if event belongs to a community
         if (
           event.community &&
           (typeof event.community === "object"
@@ -152,7 +155,19 @@ export default function EditEventScreen() {
             : event.community)
         ) {
           setIsCommunityEvent(true);
+
+          // ✅ Fetch community info to check privacy
+          const communityId =
+            typeof event.community === "object"
+              ? event.community._id
+              : event.community;
+          const communityResponse =
+            await communityService.getCommunity(communityId);
+          if (communityResponse.success && communityResponse.data) {
+            setCommunityInfo(communityResponse.data);
+          }
         }
+
         if (event.organizer._id !== user?.id) {
           Alert.alert(
             "Unauthorized",
@@ -161,6 +176,7 @@ export default function EditEventScreen() {
           router.back();
           return;
         }
+
         setTitle(event.title);
         setDescription(event.description);
         setCategory(event.category);
@@ -172,6 +188,7 @@ export default function EditEventScreen() {
         setIsOnline(event.isOnline || false);
         setMeetingLink(event.meetingLink || "");
         setTags(event.tags?.join(", ") || "");
+
         let imagesList: string[] = [];
         let coverImage = "";
         if (event.imageUrls && event.imageUrls.length > 0) {
@@ -183,6 +200,7 @@ export default function EditEventScreen() {
         }
         setExistingImages(imagesList);
         setExistingCoverImage(coverImage);
+
         setOriginalData({
           title: event.title,
           description: event.description,
@@ -198,6 +216,7 @@ export default function EditEventScreen() {
           existingImages: imagesList,
           existingCoverImage: coverImage,
         });
+
         setTempStartDate(new Date(event.startDate));
         setTempEndDate(new Date(event.endDate));
         setTempStartHour(new Date(event.startDate).getHours());
@@ -332,7 +351,7 @@ export default function EditEventScreen() {
       Alert.alert("Error", "Please enter event description");
       return;
     }
-    if (!location.trim() && !isOnline) {
+    if (!isOnline && !location.trim()) {
       Alert.alert("Error", "Please enter event location");
       return;
     }
@@ -381,6 +400,40 @@ export default function EditEventScreen() {
       setSubmitting(false);
     }
   };
+
+  // ✅ Get visibility options based on community type and privacy
+  const getVisibilityOptions = () => {
+    // If event belongs to a private community, only show Community visibility
+    if (isCommunityEvent && communityInfo?.privacy === "private") {
+      return [
+        { value: "community", label: "Community", icon: "people" as const },
+      ];
+    }
+    // If event belongs to a department, only show Campus visibility
+    if (isCommunityEvent && communityInfo?.type === "department") {
+      return [
+        { value: "campus", label: "Campus", icon: "school-outline" as const },
+      ];
+    }
+    // If event belongs to a public community, show Campus and Community
+    if (isCommunityEvent) {
+      return [
+        { value: "campus", label: "Campus", icon: "school-outline" as const },
+        { value: "community", label: "Community", icon: "people" as const },
+      ];
+    }
+    // Regular event (not in community)
+    return [
+      { value: "campus", label: "Campus", icon: "school-outline" as const },
+      {
+        value: "connections",
+        label: "Connections",
+        icon: "people-outline" as const,
+      },
+    ];
+  };
+
+  const visibilityOptions = getVisibilityOptions();
 
   if (loading) {
     return (
@@ -712,110 +765,62 @@ export default function EditEventScreen() {
               </Text>
             </View>
 
-            {/* ✅ Visibility - No public option */}
+            {/* ✅ Visibility - Dynamically determined based on community type and privacy */}
             <View style={styles.inputGroup}>
               <Text style={[styles.label, { color: colors.text }]}>
                 Visibility
               </Text>
               <View style={styles.visibilityContainer}>
-                {isCommunityEvent
-                  ? [
-                      {
-                        value: "campus",
-                        label: "Campus",
-                        icon: "school-outline" as const,
-                      },
-                      {
-                        value: "community",
-                        label: "Community",
-                        icon: "people" as const,
-                      },
-                    ].map((v) => (
-                      <TouchableOpacity
-                        key={v.value}
-                        style={[
-                          styles.visibilityOption,
-                          { borderColor: colors.border },
-                          visibility === v.value && [
-                            styles.visibilityOptionActive,
-                            {
-                              backgroundColor: colors.primary,
-                              borderColor: colors.primary,
-                            },
-                          ],
-                        ]}
-                        onPress={() => setVisibility(v.value)}
-                      >
-                        <Ionicons
-                          name={v.icon}
-                          size={20}
-                          color={
-                            visibility === v.value
-                              ? "#fff"
-                              : colors.textSecondary
-                          }
-                        />
-                        <Text
-                          style={[
-                            styles.visibilityText,
-                            { color: colors.textSecondary },
-                            visibility === v.value &&
-                              styles.visibilityTextActive,
-                          ]}
-                        >
-                          {v.label}
-                        </Text>
-                      </TouchableOpacity>
-                    ))
-                  : [
-                      {
-                        value: "campus",
-                        label: "Campus",
-                        icon: "school-outline" as const,
-                      },
-                      {
-                        value: "connections",
-                        label: "Connections",
-                        icon: "people-outline" as const,
-                      },
-                    ].map((v) => (
-                      <TouchableOpacity
-                        key={v.value}
-                        style={[
-                          styles.visibilityOption,
-                          { borderColor: colors.border },
-                          visibility === v.value && [
-                            styles.visibilityOptionActive,
-                            {
-                              backgroundColor: colors.primary,
-                              borderColor: colors.primary,
-                            },
-                          ],
-                        ]}
-                        onPress={() => setVisibility(v.value)}
-                      >
-                        <Ionicons
-                          name={v.icon}
-                          size={20}
-                          color={
-                            visibility === v.value
-                              ? "#fff"
-                              : colors.textSecondary
-                          }
-                        />
-                        <Text
-                          style={[
-                            styles.visibilityText,
-                            { color: colors.textSecondary },
-                            visibility === v.value &&
-                              styles.visibilityTextActive,
-                          ]}
-                        >
-                          {v.label}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
+                {visibilityOptions.map((v) => (
+                  <TouchableOpacity
+                    key={v.value}
+                    style={[
+                      styles.visibilityOption,
+                      { borderColor: colors.border },
+                      visibility === v.value && [
+                        styles.visibilityOptionActive,
+                        {
+                          backgroundColor: colors.primary,
+                          borderColor: colors.primary,
+                        },
+                      ],
+                    ]}
+                    onPress={() => setVisibility(v.value)}
+                  >
+                    <Ionicons
+                      name={v.icon}
+                      size={20}
+                      color={
+                        visibility === v.value ? "#fff" : colors.textSecondary
+                      }
+                    />
+                    <Text
+                      style={[
+                        styles.visibilityText,
+                        { color: colors.textSecondary },
+                        visibility === v.value && styles.visibilityTextActive,
+                      ]}
+                    >
+                      {v.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
+              {isCommunityEvent && communityInfo?.privacy === "private" && (
+                <Text
+                  style={[styles.visibilityNote, { color: colors.textMuted }]}
+                >
+                  Events in private communities are only visible to community
+                  members
+                </Text>
+              )}
+              {isCommunityEvent && communityInfo?.type === "department" && (
+                <Text
+                  style={[styles.visibilityNote, { color: colors.textMuted }]}
+                >
+                  Department events are visible to the campus
+                </Text>
+              )}
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -957,4 +962,10 @@ const styles = StyleSheet.create({
   visibilityOptionActive: {},
   visibilityText: { fontSize: 14, fontFamily: "SofiaSans-Regular" },
   visibilityTextActive: { color: "#fff", fontFamily: "SofiaSans-Bold" },
+  visibilityNote: {
+    fontSize: 12,
+    marginTop: 8,
+    fontFamily: "SofiaSans-Regular",
+    textAlign: "center",
+  },
 });

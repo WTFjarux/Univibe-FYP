@@ -1,5 +1,4 @@
-// app/screens/JoinRequestsScreen.tsx
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -10,6 +9,8 @@ import {
   RefreshControl,
   ActivityIndicator,
   Alert,
+  Animated,
+  Platform,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -26,6 +27,58 @@ export default function JoinRequestsScreen() {
   const { communityId } = useLocalSearchParams<{ communityId: string }>();
   const { colors, isDark } = useTheme();
 
+  // Info Bar State
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [infoType, setInfoType] = useState<"success" | "error" | "info">(
+    "info",
+  );
+  const slideAnim = useRef(new Animated.Value(100)).current;
+
+  // Info Bar Management
+  const showInfoBar = (
+    message: string,
+    type: "success" | "error" | "info" = "info",
+    autoHide = true,
+  ) => {
+    setInfoMessage(message);
+    setInfoType(type);
+
+    Animated.sequence([
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      ...(autoHide
+        ? [
+            Animated.delay(3000),
+            Animated.timing(slideAnim, {
+              toValue: 100,
+              duration: 300,
+              useNativeDriver: true,
+            }),
+          ]
+        : []),
+    ]).start(() => {
+      if (autoHide) {
+        setInfoMessage(null);
+        slideAnim.setValue(100);
+      }
+    });
+  };
+
+  const hideInfoBar = () => {
+    Animated.timing(slideAnim, {
+      toValue: 100,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      setInfoMessage(null);
+      slideAnim.setValue(100);
+    });
+  };
+
+  // ✅ Updated hook with callbacks for Info Bar
   const {
     requests,
     loading,
@@ -34,7 +87,15 @@ export default function JoinRequestsScreen() {
     loadRequests,
     approveRequest,
     rejectRequest,
-  } = useJoinRequests(communityId);
+  } = useJoinRequests(communityId, {
+    onSuccess: (message) => {
+      showInfoBar(message, "success");
+    },
+    onError: (message) => {
+      showInfoBar(message, "error");
+    },
+  });
+
   const [activeFilter, setActiveFilter] = useState<FilterType>("pending");
   const [refreshing, setRefreshing] = useState(false);
 
@@ -49,7 +110,9 @@ export default function JoinRequestsScreen() {
       { text: "Cancel", style: "cancel" },
       {
         text: "Approve",
-        onPress: () => approveRequest(userId),
+        onPress: async () => {
+          await approveRequest(userId);
+        },
       },
     ]);
   };
@@ -63,12 +126,12 @@ export default function JoinRequestsScreen() {
         {
           text: "Reject",
           style: "destructive",
-          onPress: (reason?: string) => {
+          onPress: async (reason?: string) => {
             if (!reason?.trim()) {
-              Alert.alert("Error", "Please provide a reason");
+              showInfoBar("Please provide a reason", "error");
               return;
             }
-            rejectRequest(userId, reason.trim());
+            await rejectRequest(userId, reason.trim());
           },
         },
       ],
@@ -82,6 +145,35 @@ export default function JoinRequestsScreen() {
     if (!requests) return [];
     if (activeFilter === "pending") return requests.pending;
     return requests.processed.filter((r) => r.status === activeFilter);
+  };
+
+  const renderInfoBar = () => {
+    if (!infoMessage) return null;
+
+    const bg =
+      infoType === "success"
+        ? "#10b981"
+        : infoType === "error"
+          ? "#ef4444"
+          : colors.primary;
+    const icon =
+      infoType === "success"
+        ? "checkmark-circle"
+        : infoType === "error"
+          ? "alert-circle"
+          : "information-circle";
+
+    return (
+      <Animated.View
+        style={[
+          styles.infoBar,
+          { backgroundColor: bg, transform: [{ translateY: slideAnim }] },
+        ]}
+      >
+        <Ionicons name={icon} size={20} color="#fff" />
+        <Text style={styles.infoBarText}>{infoMessage}</Text>
+      </Animated.View>
+    );
   };
 
   const renderRequest = ({ item }: { item: JoinRequest }) => {
@@ -382,11 +474,13 @@ export default function JoinRequestsScreen() {
           </View>
         }
       />
+
+      {/* Info Bar */}
+      {renderInfoBar()}
     </SafeAreaView>
   );
 }
 
-// Styles remain the same as original
 const styles = StyleSheet.create({
   container: { flex: 1 },
   loadingContainer: { flex: 1, alignItems: "center", justifyContent: "center" },
@@ -512,5 +606,33 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-Regular",
     textAlign: "center",
     marginTop: 8,
+  },
+  infoBar: {
+    position: "absolute",
+    bottom: Platform.OS === "ios" ? 50 : 80,
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    gap: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 45,
+    zIndex: 9999,
+  },
+  infoBarText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "500",
+    fontFamily: "SofiaSans-Regular",
+    flex: 1,
+    textAlign: "left",
+    lineHeight: 20,
   },
 });

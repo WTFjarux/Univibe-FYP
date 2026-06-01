@@ -80,7 +80,6 @@ export const useImageUpload = () => {
       return false;
       
     } finally {
-      console.log('🏁 Upload process completed');
       setUploading(false);
     }
   }, []);

@@ -1,4 +1,4 @@
-// app/components/CampusMoments.tsx - Professional loading with skeleton states
+// app/components/CampusMoments.tsx 
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
@@ -18,6 +18,8 @@ import storyApi from "../../../lib/services/storyApi";
 import socketService from "../../../lib/services/socketService";
 import { API_BASE_URL } from "../../../constants/ipConstants";
 import type { StoryGroup } from "../../../lib/services/storyApi";
+
+const DEFAULT_AVATAR = require("../../../assets/images/default-avatar.png");
 
 interface CampusMomentsProps {
   onStoryPress?: (storyGroup: StoryGroup) => void;
@@ -68,7 +70,7 @@ const StorySkeleton = () => {
       >
         <View
           style={[
-            styles.storyAvatar,
+            styles.storyAvatarImage,
             styles.skeletonAvatar,
             { backgroundColor: colors.skeletonHighlight },
           ]}
@@ -84,7 +86,6 @@ const StorySkeleton = () => {
   );
 };
 
-// Skeleton grid for initial loading
 const StoriesSkeleton = () => (
   <ScrollView
     horizontal
@@ -111,40 +112,25 @@ export default function CampusMoments({
   const [otherStories, setOtherStories] = useState<StoryGroup[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // Refs to prevent race conditions
   const isFetchingRef = useRef(false);
   const fetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
 
   const fetchStories = useCallback(
     async (showLoading = true) => {
-      // Prevent multiple simultaneous fetches
-      if (isFetchingRef.current) {
-        console.log("Fetch already in progress, skipping...");
-        return;
-      }
-
+      if (isFetchingRef.current) return;
       if (!token) {
         setLoadingStories(false);
         return;
       }
-
       isFetchingRef.current = true;
-
-      if (showLoading) {
-        setLoadingStories(true);
-      }
-
+      if (showLoading) setLoadingStories(true);
       setError(null);
-
       try {
         const response = await storyApi.getStories(1, 20, false);
-
         if (!mountedRef.current) return;
-
         if (response.success) {
           setStories(response.data || []);
-
           const userStory = response.data?.find(
             (group: StoryGroup) => group.userId === user?.id,
           );
@@ -152,74 +138,47 @@ export default function CampusMoments({
             response.data?.filter(
               (group: StoryGroup) => group.userId !== user?.id,
             ) || [];
-
           setUserStoryGroup(userStory || null);
           setOtherStories(otherUsersStories);
         } else {
-          console.error("Failed to fetch stories");
           setError("Failed to load stories");
         }
       } catch (error: any) {
-        // Ignore cancelled requests
         if (
           error?.statusCode !== 499 &&
           error?.message !== "Request cancelled"
         ) {
-          console.error("Error fetching stories:", error);
           setError("Unable to load stories");
         }
       } finally {
-        if (mountedRef.current) {
-          setLoadingStories(false);
-        }
+        if (mountedRef.current) setLoadingStories(false);
         isFetchingRef.current = false;
       }
     },
     [token, user?.id],
   );
 
-  // Debounced fetch to prevent rapid successive calls
   const debouncedFetch = useCallback(() => {
-    if (fetchTimeoutRef.current) {
-      clearTimeout(fetchTimeoutRef.current);
-    }
-
-    fetchTimeoutRef.current = setTimeout(() => {
-      fetchStories(false); // Don't show loading for real-time updates
-    }, 300);
+    if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
+    fetchTimeoutRef.current = setTimeout(() => fetchStories(false), 300);
   }, [fetchStories]);
 
-  // Initial fetch - ensure it runs properly
   useEffect(() => {
     mountedRef.current = true;
-
-    // Small delay to ensure component is fully mounted
-    const initTimer = setTimeout(() => {
-      fetchStories(true);
-    }, 100);
-
+    const initTimer = setTimeout(() => fetchStories(true), 100);
     return () => {
       mountedRef.current = false;
       clearTimeout(initTimer);
-      if (fetchTimeoutRef.current) {
-        clearTimeout(fetchTimeoutRef.current);
-      }
+      if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
     };
   }, [fetchStories]);
 
-  // Listen for real-time story updates via socket
   useEffect(() => {
     if (!token) return;
-
-    const handleStoryUpdate = (data: any) => {
-      console.log("Story update received, refreshing...", data);
-      debouncedFetch();
-    };
-
+    const handleStoryUpdate = () => debouncedFetch();
     socketService.on("story_created", handleStoryUpdate);
     socketService.on("story_viewed", handleStoryUpdate);
     socketService.on("story_deleted", handleStoryUpdate);
-
     return () => {
       socketService.off("story_created", handleStoryUpdate);
       socketService.off("story_viewed", handleStoryUpdate);
@@ -227,23 +186,12 @@ export default function CampusMoments({
     };
   }, [token, debouncedFetch]);
 
-  const handleCreateStoryPress = () => {
+  const handleCreateStoryPress = () =>
     router.push("/screens/CreateStoryScreen");
-  };
-
   const handleStoryPress = (storyGroup: StoryGroup) => {
-    if (onStoryPress) {
-      onStoryPress(storyGroup);
-    }
+    if (onStoryPress) onStoryPress(storyGroup);
   };
 
-  const handleSeeAllPress = () => {
-    // If you have a dedicated stories screen, navigate there
-    // Otherwise, you can expand the current view
-    console.log("See all stories pressed");
-  };
-
-  // Helper functions
   const getProfilePictureUrl = (
     profilePicture: string | null,
   ): string | undefined => {
@@ -251,9 +199,8 @@ export default function CampusMoments({
     if (
       profilePicture.startsWith("http://") ||
       profilePicture.startsWith("https://")
-    ) {
+    )
       return profilePicture;
-    }
     return `${API_BASE_URL}${profilePicture}`;
   };
 
@@ -262,29 +209,10 @@ export default function CampusMoments({
     return getProfilePictureUrl(profilePic || null);
   };
 
-  const getUserDisplayName = (): string => {
-    return user?.name || user?.username || "User";
-  };
-
-  const getUserInitial = (): string => {
-    return getUserDisplayName().charAt(0).toUpperCase();
-  };
-
-  const getInitials = (name: string) => {
-    if (!name) return "?";
-    const parts = name.split(" ");
-    if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
-    return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
-  };
-
-  const hasActiveStories = (): boolean => {
-    return !!userStoryGroup && userStoryGroup.stories.length > 0;
-  };
-
-  const hasUnseenStories = (storyGroup: StoryGroup): boolean => {
-    return storyGroup.hasUnseen === true;
-  };
-
+  const hasActiveStories = (): boolean =>
+    !!userStoryGroup && userStoryGroup.stories.length > 0;
+  const hasUnseenStories = (storyGroup: StoryGroup): boolean =>
+    storyGroup.hasUnseen === true;
   const truncateName = (name: string, maxLength: number = 12): string => {
     if (!name) return "User";
     if (name.length <= maxLength) return name;
@@ -322,15 +250,12 @@ export default function CampusMoments({
           style={styles.storiesContainer}
           contentContainerStyle={styles.storiesContentContainer}
         >
-          {/* User's Own Story - Always visible like Instagram */}
+          {/* User's Own Story */}
           <TouchableOpacity
             style={styles.storyCard}
             onPress={() => {
-              if (userStoryGroup) {
-                handleStoryPress(userStoryGroup);
-              } else {
-                handleCreateStoryPress();
-              }
+              if (userStoryGroup) handleStoryPress(userStoryGroup);
+              else handleCreateStoryPress();
             }}
             activeOpacity={0.7}
           >
@@ -344,18 +269,15 @@ export default function CampusMoments({
                     : [styles.addStoryRing, { borderColor: colors.border }],
                 ]}
               >
-                {getUserProfilePictureUrl() ? (
-                  <Image
-                    source={{ uri: getUserProfilePictureUrl() }}
-                    style={styles.storyAvatarImage}
-                  />
-                ) : (
-                  <View style={[styles.storyAvatar, styles.userAvatar]}>
-                    <Text style={styles.avatarText}>{getUserInitial()}</Text>
-                  </View>
-                )}
+                <Image
+                  source={
+                    getUserProfilePictureUrl()
+                      ? { uri: getUserProfilePictureUrl() }
+                      : DEFAULT_AVATAR
+                  }
+                  style={styles.storyAvatarImage}
+                />
               </View>
-
               <TouchableOpacity
                 style={[styles.addButtonOverlay, { borderColor: colors.card }]}
                 onPress={handleCreateStoryPress}
@@ -364,7 +286,6 @@ export default function CampusMoments({
                 <Ionicons name="add" size={20} color="white" />
               </TouchableOpacity>
             </View>
-
             <Text
               style={[styles.storyName, { color: colors.textSecondary }]}
               numberOfLines={1}
@@ -379,8 +300,6 @@ export default function CampusMoments({
               storyGroup.profilePicture,
             );
             const hasUnseen = hasUnseenStories(storyGroup);
-            const displayName = truncateName(storyGroup.userName || "User");
-
             return (
               <TouchableOpacity
                 key={storyGroup.userId}
@@ -397,24 +316,20 @@ export default function CampusMoments({
                       : [styles.viewedRing, { borderColor: colors.border }],
                   ]}
                 >
-                  {profilePictureUrl ? (
-                    <Image
-                      source={{ uri: profilePictureUrl }}
-                      style={styles.storyAvatarImage}
-                    />
-                  ) : (
-                    <View style={styles.storyAvatar}>
-                      <Text style={styles.avatarText}>
-                        {getInitials(storyGroup.userName)}
-                      </Text>
-                    </View>
-                  )}
+                  <Image
+                    source={
+                      profilePictureUrl
+                        ? { uri: profilePictureUrl }
+                        : DEFAULT_AVATAR
+                    }
+                    style={styles.storyAvatarImage}
+                  />
                 </View>
                 <Text
                   style={[styles.storyName, { color: colors.textSecondary }]}
                   numberOfLines={1}
                 >
-                  {displayName}
+                  {truncateName(storyGroup.userName || "User")}
                 </Text>
               </TouchableOpacity>
             );
@@ -426,33 +341,17 @@ export default function CampusMoments({
 }
 
 const styles = StyleSheet.create({
-  momentsSection: {
-    marginBottom: 24,
-    paddingHorizontal: 20,
-  },
+  momentsSection: { marginBottom: 24, paddingHorizontal: 20 },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 16,
   },
-  sectionTitle: {
-    fontSize: 20,
-    fontFamily: "SofiaSans-Bold",
-    color: "#111827",
-  },
-
-  storiesContainer: {
-    flexDirection: "row",
-  },
-  storiesContentContainer: {
-    paddingRight: 20,
-  },
-  storyCard: {
-    alignItems: "center",
-    marginRight: 16,
-    width: 90,
-  },
+  sectionTitle: { fontSize: 20, fontFamily: "SofiaSans-Bold" },
+  storiesContainer: { flexDirection: "row" },
+  storiesContentContainer: { paddingRight: 20 },
+  storyCard: { alignItems: "center", marginRight: 16, width: 90 },
   storyRing: {
     width: 90,
     height: 90,
@@ -461,54 +360,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#f0f0f0",
     marginBottom: 8,
+    overflow: "hidden",
   },
-  unviewedRing: {
-    borderWidth: 3,
-    borderColor: "#8b5cf6",
-    padding: 3,
-  },
-  viewedRing: {
-    borderWidth: 3,
-    borderColor: "#e5e7eb",
-    padding: 3,
-  },
-  addStoryRing: {
-    borderWidth: 3,
-    borderColor: "#e5e7eb",
-    padding: 3,
-  },
-  storyAvatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: "#8b5cf6",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  userAvatar: {
-    backgroundColor: "#7c3aed", // Slightly different shade for user's avatar
-  },
-  storyAvatarImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-  },
-  avatarText: {
-    color: "white",
-    fontSize: 32,
-    fontWeight: "600",
-  },
+  unviewedRing: { borderWidth: 3, borderColor: "#8b5cf6", padding: 3 },
+  viewedRing: { borderWidth: 3, borderColor: "#e5e7eb", padding: 3 },
+  addStoryRing: { borderWidth: 3, borderColor: "#e5e7eb", padding: 3 },
+  storyAvatarImage: { width: 80, height: 80, borderRadius: 40 },
   storyName: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#374151",
     textAlign: "center",
     width: 90,
+    fontFamily: "SofiaSans-Medium",
   },
-  userStoryContainer: {
-    position: "relative",
-    marginBottom: 8,
-  },
+  userStoryContainer: { position: "relative", marginBottom: 8 },
   addButtonOverlay: {
     position: "absolute",
     bottom: 0,
@@ -527,7 +392,6 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 3,
   },
-  // Error state styles
   errorContainer: {
     justifyContent: "center",
     alignItems: "center",
@@ -540,27 +404,15 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 12,
   },
-  retryButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: "#fee2e2",
-    borderRadius: 8,
-  },
-  retryText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#ef4444",
-  },
-  // Skeleton styles
+  retryButton: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
+  retryText: { fontSize: 14, fontWeight: "600", color: "#ef4444" },
   skeletonRing: {
     borderWidth: 3,
     borderColor: "#e5e7eb",
     padding: 3,
     backgroundColor: "#f3f4f6",
   },
-  skeletonAvatar: {
-    backgroundColor: "#e5e7eb",
-  },
+  skeletonAvatar: { backgroundColor: "#e5e7eb" },
   skeletonText: {
     width: 70,
     height: 12,

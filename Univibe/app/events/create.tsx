@@ -1,4 +1,4 @@
-// app/events/create.tsx - Updated with communityId support and visibility logic
+// app/events/create.tsx
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -86,34 +86,23 @@ export default function CreateEventScreen() {
 
   const fetchCommunityInfo = async () => {
     try {
-      console.log("🔍 Fetching community info for:", communityId);
       const response = await communityService.getCommunity(
         communityId as string,
       );
-      console.log("📋 Community response:", JSON.stringify(response, null, 2));
 
       if (response.success && response.data) {
-        const communityData = response.data as any; // Use type assertion
+        const communityData = response.data as any;
         setCommunityInfo(communityData);
-        console.log("✅ Community info:", {
-          name: communityData.name,
-          type: communityData.type,
-          privacy: communityData.privacy,
-        });
 
-        // ✅ Set visibility based on community type and privacy
+        // Set visibility based on community type and privacy
         if (communityData.type === "department") {
-          console.log("📌 Department - setting visibility to campus");
           setVisibility("campus");
         } else if (communityData.privacy === "private") {
-          console.log("📌 Private community - setting visibility to community");
           setVisibility("community");
         } else {
-          console.log("📌 Public community - setting visibility to campus");
           setVisibility("campus");
         }
       } else {
-        console.log("❌ Failed to fetch community:", response.message);
       }
     } catch (error) {
       console.error("Error fetching community info:", error);
@@ -202,7 +191,7 @@ export default function CreateEventScreen() {
       Alert.alert("Error", "Please enter event description");
       return;
     }
-    if (!location.trim() && !isOnline) {
+    if (!isOnline && !location.trim()) {
       Alert.alert("Error", "Please enter event location");
       return;
     }
@@ -232,10 +221,6 @@ export default function CreateEventScreen() {
       // ✅ Pass communityId if creating event for a community
       if (communityId) {
         formData.append("communityId", communityId);
-        console.log("📤 Creating community event:", {
-          communityId,
-          visibility,
-        });
       }
 
       images.forEach((image) => {

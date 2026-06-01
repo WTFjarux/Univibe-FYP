@@ -464,7 +464,6 @@ class SocketService {
     // Stories - Real-time updates
 
     this.socket.on("new_story", (data: { userId: string; story: any }) => {
-      console.log("📢 new_story event received:", data.userId);
       // Forward to storyApi to invalidate cache and notify UI
       storyApi.handleNewStoryEvent(data);
       // Also emit for any other listeners
@@ -475,7 +474,6 @@ class SocketService {
     this.socket.on(
       "story_deleted",
       (data: { storyId: string; userId: string }) => {
-        console.log("🗑️ story_deleted event received:", data.storyId);
         storyApi.invalidateStoriesListCache();
         this.emitEvent("story_deleted", data);
       },
@@ -496,11 +494,25 @@ class SocketService {
       this.emitEvent("community:updated", data);
     });
 
-    // ✅ Add this
     this.socket.on("community:new_post", (data: any) => {
       this.emitEvent("community:new_post", data);
     });
 
+    this.socket.on("community:joined", (data: any) => {
+      this.emitEvent("community:joined", data);
+    });
+
+    this.socket.on("community:left", (data: any) => {
+      this.emitEvent("community:left", data);
+    });
+
+    this.socket.on("community:member_added", (data: any) => {
+      this.emitEvent("community:member_added", data);
+    });
+
+    this.socket.on("community:member_removed", (data: any) => {
+      this.emitEvent("community:member_removed", data);
+    });
     // Errors
     this.socket.on("error", (error: Error) => {
       console.error("Socket error:", error.message);

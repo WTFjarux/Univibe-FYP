@@ -421,6 +421,15 @@ exports.requestToJoin = async (req, res) => {
     community.addJoinRequest(userId);
     await community.save();
 
+    // ✅ Emit socket event to the user about pending request
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`user_${userId}`).emit("community:request_pending", {
+        communityId: community._id,
+        communityName: community.name,
+      });
+    }
+
     await notifyCommunityAdmins(
       req,
       community,
@@ -595,6 +604,35 @@ exports.handleJoinRequest = async (req, res) => {
         "Community",
         metadata,
       );
+
+      // ✅ Emit socket events when request is approved
+      const io = req.app.get("io");
+      if (io) {
+        // Notify the user that their request was approved
+        io.to(`user_${userId}`).emit("community:join_request_approved", {
+          communityId: community._id,
+          communityName: community.name,
+          communityData: {
+            _id: community._id,
+            name: community.name,
+            coverImage: community.coverImage,
+            memberCount: community.memberCount,
+          },
+        });
+
+        // Also emit community:joined so the UI updates immediately
+        io.to(`user_${userId}`).emit("community:joined", {
+          communityId: community._id,
+          communityName: community.name,
+          communityData: {
+            _id: community._id,
+            name: community.name,
+            coverImage: community.coverImage,
+            memberCount: community.memberCount,
+          },
+        });
+      }
+
       emitCommunityUpdate(req, communityId, "member_joined", {
         userId,
         memberCount: community.memberCount,
@@ -965,9 +1003,6 @@ exports.handleInvitation = async (req, res) => {
     const metadata = buildCommunityMetadata(community);
 
     if (action === "approve") {
-      // Admin approves the invitation → Send invitation to the user
-      // The invitation stays as "pending" for the user to accept
-      // But we mark it as approved by admin
       invitation.status = "pending"; // Still pending for user acceptance
       invitation.processedAt = new Date();
       await community.save();
@@ -1356,6 +1391,10 @@ exports.joinCommunity = async (req, res) => {
     const { communityId } = req.params;
     const userId = req.user.id;
 
+    // ✅ Fetch user name directly from database
+    const user = await User.findById(userId).select("name");
+    const userName = user?.name || "User";
+
     const community = await Community.findById(communityId);
     if (!community)
       return res
@@ -1379,13 +1418,35 @@ exports.joinCommunity = async (req, res) => {
     community.join(userId);
     await community.save();
 
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`user_${userId}`).emit("community:joined", {
+        communityId: community._id,
+        communityName: community.name,
+        communityData: {
+          _id: community._id,
+          name: community.name,
+          coverImage: community.coverImage,
+          memberCount: community.memberCount,
+          privacy: community.privacy,
+        },
+      });
+
+      io.to(`community:${communityId}`).emit("community:member_added", {
+        communityId: community._id,
+        userId: userId,
+        userName: userName, 
+        memberCount: community.memberCount,
+      });
+    }
+
     await notifyCommunityAdmins(
       req,
       community,
       userId,
       "member_joined",
       "New Member",
-      `A new member joined "${community.name}"`,
+      `${userName} joined "${community.name}"`,
     );
 
     res.json({
@@ -1419,6 +1480,25 @@ exports.leaveCommunity = async (req, res) => {
 
     community.leave(userId);
     await community.save();
+
+    //  Emit socket event for real-time update
+    const io = req.app.get("io");
+    if (io) {
+      // Notify the user who left
+      io.to(`user_${userId}`).emit("community:left", {
+        communityId: community._id,
+        communityName: community.name,
+      });
+
+      // Notify community room about member leaving
+      io.to(`community:${communityId}`).emit("community:member_removed", {
+        communityId: community._id,
+        userId: userId,
+        userName: req.user.name,
+        memberCount: community.memberCount,
+      });
+    }
+
     res.json({ success: true, message: "Left community" });
   } catch (error) {
     console.error("leaveCommunity error:", error);

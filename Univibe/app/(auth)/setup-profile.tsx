@@ -209,7 +209,7 @@ export default function SetupProfileScreen() {
         universityEmail: formData.universityEmail,
       };
 
-      console.log("📤 Submitting profile data:", submitData);
+      console.log("Submitting profile data:", submitData);
 
       const response = await profileService.setupProfile(submitData);
 

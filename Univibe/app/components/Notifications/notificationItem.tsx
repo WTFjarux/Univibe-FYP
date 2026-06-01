@@ -1,5 +1,3 @@
-// app/components/Notifications/notificationItem.tsx
-
 import React, { useState } from "react";
 import {
   View,
@@ -46,6 +44,7 @@ interface NotificationMetadata {
   communityId?: string;
   communityName?: string;
   communityImage?: string | null;
+  isCommunityPost?: boolean; // ✅ Added for community post likes
 }
 
 interface NotificationData {
@@ -94,6 +93,7 @@ const COMMUNITY_NOTIFICATION_TYPES = [
   "member_joined",
   "member_removed",
   "role_updated",
+  "like", // ✅ Added for community post likes
 ];
 
 /** Show COMMUNITY IMAGE for these types */
@@ -111,7 +111,7 @@ const COMMUNITY_IMAGE_TYPES = [
 ];
 
 /** Show USER AVATAR for these types */
-const USER_AVATAR_TYPES = ["member_joined", "join_request"];
+const USER_AVATAR_TYPES = ["member_joined", "join_request", "like"];
 
 // ============================================
 // HELPER FUNCTIONS
@@ -155,6 +155,7 @@ export default function NotificationItem({
   // ── Community metadata ─────────────────────────────
   const communityName = notification.metadata?.communityName || "";
   const communityImage = notification.metadata?.communityImage || null;
+  const isCommunityPost = notification.metadata?.isCommunityPost || false;
 
   // ── Avatar display logic ───────────────────────────
   const showCommunityImage = COMMUNITY_IMAGE_TYPES.includes(notification.type);
@@ -315,7 +316,11 @@ export default function NotificationItem({
           color: "#fff",
           bg: "#10b981",
         },
-        event_rejected: { name: "close-circle", color: "#fff", bg: "#ef4444" },
+        event_rejected: {
+          name: "close-circle",
+          color: "#fff",
+          bg: "#ef4444",
+        },
         community_approved: {
           name: "checkmark-circle",
           color: "#fff",
@@ -457,6 +462,10 @@ export default function NotificationItem({
     switch (notification.type) {
       // ── Like ──────────────────────────────────────
       case "like": {
+        // ✅ Get community context for community post likes
+        const communityContext =
+          isCommunityPost && communityName ? ` in "${communityName}"` : "";
+
         if (notification.metadata?.isGrouped) {
           const likers = notification.metadata?.likers || [];
           return (
@@ -473,14 +482,14 @@ export default function NotificationItem({
                   {likers.length === 1 ? (
                     <>
                       <Text style={styles.boldName}>{likers[0].name}</Text>
-                      <Text> liked your post</Text>
+                      <Text> liked your post{communityContext}</Text>
                     </>
                   ) : likers.length === 2 ? (
                     <>
                       <Text style={styles.boldName}>{likers[0].name}</Text>
                       <Text> and </Text>
                       <Text style={styles.boldName}>{likers[1].name}</Text>
-                      <Text> liked your post</Text>
+                      <Text> liked your post{communityContext}</Text>
                     </>
                   ) : (
                     <>
@@ -490,6 +499,7 @@ export default function NotificationItem({
                       <Text>
                         {" "}
                         and {likers.length - 2} others liked your post
+                        {communityContext}
                       </Text>
                     </>
                   )}
@@ -512,13 +522,16 @@ export default function NotificationItem({
         return (
           <Text style={[styles.messageText, { color: colors.text }]}>
             <Text style={styles.boldName}>{senderName}</Text>
-            <Text> liked your post</Text>
+            <Text> liked your post{communityContext}</Text>
           </Text>
         );
       }
 
       // ── Comment ───────────────────────────────────
       case "comment": {
+        const communityContext =
+          isCommunityPost && communityName ? ` in "${communityName}"` : "";
+
         if (notification.metadata?.isGrouped) {
           const commenters = notification.metadata?.commenters || [];
           return (
@@ -535,14 +548,14 @@ export default function NotificationItem({
                   {commenters.length === 1 ? (
                     <>
                       <Text style={styles.boldName}>{commenters[0].name}</Text>
-                      <Text> commented on your post</Text>
+                      <Text> commented on your post{communityContext}</Text>
                     </>
                   ) : commenters.length === 2 ? (
                     <>
                       <Text style={styles.boldName}>{commenters[0].name}</Text>
                       <Text> and </Text>
                       <Text style={styles.boldName}>{commenters[1].name}</Text>
-                      <Text> commented on your post</Text>
+                      <Text> commented on your post{communityContext}</Text>
                     </>
                   ) : (
                     <>
@@ -553,6 +566,7 @@ export default function NotificationItem({
                         {" "}
                         and {commenters.length - 2} others commented on your
                         post
+                        {communityContext}
                       </Text>
                     </>
                   )}
@@ -583,7 +597,7 @@ export default function NotificationItem({
                 ? " replied to your comment: "
                 : isAnon
                   ? " commented anonymously on your post"
-                  : " commented on your post: "}
+                  : ` commented on your post${communityContext}: `}
             </Text>
             {!isAnon && (
               <Text
@@ -905,7 +919,7 @@ export default function NotificationItem({
       return renderCommunityImageAvatar();
     }
 
-    // 3. User avatar types (member_joined, join_request, community_invite from member)
+    // 3. User avatar types (member_joined, join_request, community_invite from member, like)
     if (showUserAvatar || isCommunityInvite) {
       return renderUserAvatar();
     }

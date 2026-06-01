@@ -1,5 +1,4 @@
-// app/screens/CommunityScreen.tsx
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -9,6 +8,8 @@ import {
   RefreshControl,
   ActivityIndicator,
   Alert,
+  Animated,
+  Platform,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -43,6 +44,13 @@ export default function CommunityScreen() {
   const { colors, isDark } = useTheme();
   const { user } = useAuth();
 
+  // Info Bar State
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [infoType, setInfoType] = useState<"success" | "error" | "info">(
+    "info",
+  );
+  const slideAnim = useRef(new Animated.Value(100)).current;
+
   const {
     community,
     loading,
@@ -65,10 +73,17 @@ export default function CommunityScreen() {
     loadPosts,
   } = useCommunityPosts(isApproved ? communityId : undefined, isMember);
 
-  const { joining, joinRequested, join, leave } = useCommunityJoin(
-    community,
-    () => refresh(),
-  );
+  const { joining, joinRequested, join, leave } = useCommunityJoin(community, {
+    onSuccess: (message) => {
+      showInfoBar(message, "success");
+    },
+    onError: (message) => {
+      showInfoBar(message, "error");
+    },
+    onRefresh: () => {
+      refresh();
+    },
+  });
 
   const [activeTab, setActiveTab] = useState<TabType>("posts");
   const [createModalVisible, setCreateModalVisible] = useState(false);
@@ -81,6 +96,108 @@ export default function CommunityScreen() {
   // ✅ Community Events State
   const [communityEvents, setCommunityEvents] = useState<Event[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
+
+  // Info Bar Management
+  const showInfoBar = (
+    message: string,
+    type: "success" | "error" | "info" = "info",
+    autoHide = true,
+  ) => {
+    setInfoMessage(message);
+    setInfoType(type);
+
+    Animated.sequence([
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      ...(autoHide
+        ? [
+            Animated.delay(3000),
+            Animated.timing(slideAnim, {
+              toValue: 100,
+              duration: 300,
+              useNativeDriver: true,
+            }),
+          ]
+        : []),
+    ]).start(() => {
+      if (autoHide) {
+        setInfoMessage(null);
+        slideAnim.setValue(100);
+      }
+    });
+  };
+
+  const hideInfoBar = () => {
+    Animated.timing(slideAnim, {
+      toValue: 100,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      setInfoMessage(null);
+      slideAnim.setValue(100);
+    });
+  };
+
+  const renderInfoBar = () => {
+    if (!infoMessage) return null;
+
+    const bg =
+      infoType === "success"
+        ? "#10b981"
+        : infoType === "error"
+          ? "#ef4444"
+          : colors.primary;
+    const icon =
+      infoType === "success"
+        ? "checkmark-circle"
+        : infoType === "error"
+          ? "alert-circle"
+          : "information-circle";
+
+    return (
+      <Animated.View
+        style={[
+          styles.infoBar,
+          { backgroundColor: bg, transform: [{ translateY: slideAnim }] },
+        ]}
+      >
+        <Ionicons name={icon} size={20} color="#fff" />
+        <Text style={styles.infoBarText}>{infoMessage}</Text>
+      </Animated.View>
+    );
+  };
+
+  // ✅ Fetch community events - MOVED UP BEFORE useEffect that uses it
+  const fetchCommunityEvents = useCallback(async () => {
+    if (!communityId || !isApproved) return;
+    setLoadingEvents(true);
+    try {
+      const response = await communityService.getCommunityEvents(communityId);
+      if (response.success && response.data) {
+        const processedEvents = response.data.map((event: Event) => ({
+          ...event,
+          coverImage: event.coverImage
+            ? event.coverImage.startsWith("http")
+              ? event.coverImage
+              : `${API_BASE_URL}/${event.coverImage.replace(/^\/+/, "")}`
+            : event.coverImage,
+          imageUrls: event.imageUrls?.map((url: string) =>
+            url.startsWith("http")
+              ? url
+              : `${API_BASE_URL}/${url.replace(/^\/+/, "")}`,
+          ),
+        }));
+        setCommunityEvents(processedEvents);
+      }
+    } catch (error) {
+      console.error("Error fetching community events:", error);
+    } finally {
+      setLoadingEvents(false);
+    }
+  }, [communityId, isApproved]);
 
   // Join/leave community socket room
   useEffect(() => {
@@ -104,14 +221,14 @@ export default function CommunityScreen() {
       if (data.communityId !== communityId) return;
       refresh();
       loadPosts();
-      fetchCommunityEvents(); // ✅ Refresh events too
+      fetchCommunityEvents();
     };
 
     socketService.on("community:updated", handleCommunityUpdate);
     return () => {
       socketService.off("community:updated", handleCommunityUpdate);
     };
-  }, [communityId, isApproved, refresh, loadPosts]);
+  }, [communityId, isApproved, refresh, loadPosts, fetchCommunityEvents]);
 
   // Listen for new posts in this community
   useEffect(() => {
@@ -129,35 +246,49 @@ export default function CommunityScreen() {
     };
   }, [communityId, isApproved, isMember, loadPosts]);
 
-  // ✅ Fetch community events
-  const fetchCommunityEvents = useCallback(async () => {
+  // Listen for community leave events
+  useEffect(() => {
     if (!communityId || !isApproved) return;
-    setLoadingEvents(true);
-    try {
-      const response = await communityService.getCommunityEvents(communityId);
-      if (response.success && response.data) {
-        // Process image URLs
-        const processedEvents = response.data.map((event: Event) => ({
-          ...event,
-          coverImage: event.coverImage
-            ? event.coverImage.startsWith("http")
-              ? event.coverImage
-              : `${API_BASE_URL}/${event.coverImage.replace(/^\/+/, "")}`
-            : event.coverImage,
-          imageUrls: event.imageUrls?.map((url: string) =>
-            url.startsWith("http")
-              ? url
-              : `${API_BASE_URL}/${url.replace(/^\/+/, "")}`,
-          ),
-        }));
-        setCommunityEvents(processedEvents);
+
+    const handleCommunityLeft = (data: {
+      communityId: string;
+      userId: string;
+    }) => {
+      console.log("community:left event received:", data);
+      if (data.communityId === communityId && data.userId === user?.id) {
+        refresh();
+        loadPosts();
+        fetchCommunityEvents();
       }
-    } catch (error) {
-      console.error("Error fetching community events:", error);
-    } finally {
-      setLoadingEvents(false);
-    }
-  }, [communityId, isApproved]);
+    };
+
+    const handleMemberRemoved = (data: {
+      communityId: string;
+      userId: string;
+    }) => {
+      console.log("community:member_removed event received:", data);
+      if (data.communityId === communityId && data.userId === user?.id) {
+        refresh();
+        loadPosts();
+        fetchCommunityEvents();
+      }
+    };
+
+    socketService.on("community:left", handleCommunityLeft);
+    socketService.on("community:member_removed", handleMemberRemoved);
+
+    return () => {
+      socketService.off("community:left", handleCommunityLeft);
+      socketService.off("community:member_removed", handleMemberRemoved);
+    };
+  }, [
+    communityId,
+    isApproved,
+    user?.id,
+    refresh,
+    loadPosts,
+    fetchCommunityEvents,
+  ]);
 
   // ✅ Fetch events when community loads
   useEffect(() => {
@@ -170,7 +301,7 @@ export default function CommunityScreen() {
   const handleRefresh = useCallback(() => {
     refresh();
     loadPosts();
-    fetchCommunityEvents(); // ✅ Refresh events
+    fetchCommunityEvents();
   }, [refresh, loadPosts, fetchCommunityEvents]);
 
   // Handle RSVP from EventCard
@@ -178,7 +309,6 @@ export default function CommunityScreen() {
     try {
       const response = await eventService.toggleRsvp(eventId);
       if (response.success) {
-        // Update the event in the list
         setCommunityEvents((prev) =>
           prev.map((e) => {
             if (e._id !== eventId) return e;
@@ -189,9 +319,14 @@ export default function CommunityScreen() {
             };
           }),
         );
+        showInfoBar(
+          response.isRsvpd ? "You RSVP'd to the event" : "RSVP cancelled",
+          "success",
+        );
       }
     } catch (error) {
       console.error("Error toggling RSVP:", error);
+      showInfoBar("Failed to update RSVP", "error");
     }
   };
 
@@ -211,10 +346,26 @@ export default function CommunityScreen() {
             };
           }),
         );
+        showInfoBar(
+          response.isInterested
+            ? "You marked interest in the event"
+            : "Interest removed",
+          "success",
+        );
       }
     } catch (error) {
       console.error("Error toggling interest:", error);
+      showInfoBar("Failed to update interest", "error");
     }
+  };
+
+  // Handle join/leave from JoinButton
+  const handleJoin = async () => {
+    await join();
+  };
+
+  const handleLeave = async () => {
+    await leave();
   };
 
   // ✅ Opens the confirmation modal
@@ -229,16 +380,15 @@ export default function CommunityScreen() {
       const result = await communityService.deleteCommunity(communityId!);
       if (result.success) {
         setDeleteConfirmVisible(false);
-        Alert.alert("Deleted", "Community has been permanently deleted.", [
-          { text: "OK", onPress: () => router.back() },
-        ]);
+        showInfoBar("Community deleted successfully", "success");
+        setTimeout(() => router.back(), 1500);
       } else {
         setDeleteConfirmVisible(false);
-        Alert.alert("Error", result.message || "Failed to delete community");
+        showInfoBar(result.message || "Failed to delete community", "error");
       }
     } catch (error: any) {
       setDeleteConfirmVisible(false);
-      Alert.alert("Error", error?.message || "Something went wrong");
+      showInfoBar(error?.message || "Something went wrong", "error");
     } finally {
       setDeleting(false);
     }
@@ -311,6 +461,7 @@ export default function CommunityScreen() {
   const handleInviteComplete = () => {
     setInviteModalVisible(false);
     refresh();
+    showInfoBar("Invitation sent successfully", "success");
   };
 
   // Loading state
@@ -387,6 +538,7 @@ export default function CommunityScreen() {
             )}
           </View>
         </ScrollView>
+        {renderInfoBar()}
       </SafeAreaView>
     );
   }
@@ -487,6 +639,7 @@ export default function CommunityScreen() {
             </View>
           </View>
         </ScrollView>
+        {renderInfoBar()}
       </SafeAreaView>
     );
   }
@@ -556,9 +709,9 @@ export default function CommunityScreen() {
             privacy={community.privacy}
             joinRequested={joinRequested}
             joining={joining}
-            onJoin={join}
-            onLeave={leave}
-            onRequestToJoin={join}
+            onJoin={handleJoin}
+            onLeave={handleLeave}
+            onRequestToJoin={handleJoin}
           />
         </View>
 
@@ -655,7 +808,7 @@ export default function CommunityScreen() {
           setSettingsModalVisible(false);
           setTimeout(() => setInviteModalVisible(true), 300);
         }}
-        onLeaveCommunity={leave}
+        onLeaveCommunity={handleLeave}
         onViewRules={handleViewRules}
         onShareCommunity={handleShareCommunity}
         onReportCommunity={() => setReportModalVisible(true)}
@@ -668,9 +821,7 @@ export default function CommunityScreen() {
         targetId={communityId!}
         targetName={community?.name}
         onShowInfoBar={(message, type) => {
-          setTimeout(() => {
-            Alert.alert(type === "success" ? "Reported" : "Error", message);
-          }, 500);
+          showInfoBar(message, type);
         }}
         reportFunction={communityService.reportCommunity}
       />
@@ -684,6 +835,9 @@ export default function CommunityScreen() {
         }}
         onConfirm={handleConfirmDelete}
       />
+
+      {/* Info Bar */}
+      {renderInfoBar()}
     </SafeAreaView>
   );
 }
@@ -815,5 +969,34 @@ const styles = StyleSheet.create({
     color: "#ef4444",
     fontSize: 15,
     fontFamily: "SofiaSans-Bold",
+  },
+  // Info Bar Styles
+  infoBar: {
+    position: "absolute",
+    bottom: Platform.OS === "ios" ? 50 : 80,
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    gap: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 45,
+    zIndex: 9999,
+  },
+  infoBarText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "500",
+    fontFamily: "SofiaSans-Regular",
+    flex: 1,
+    textAlign: "left",
+    lineHeight: 20,
   },
 });

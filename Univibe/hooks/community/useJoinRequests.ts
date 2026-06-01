@@ -1,13 +1,18 @@
-// hooks/community/useJoinRequests.ts
-
 import { useState, useCallback, useEffect } from "react";
-import { Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { communityService } from "../../lib/services/communityService";
 import { JoinRequest } from "../../lib/types/community";
 import * as SecureStore from "expo-secure-store";
 
-export function useJoinRequests(communityId: string | undefined) {
+interface UseJoinRequestsOptions {
+  onSuccess?: (message: string) => void;
+  onError?: (message: string) => void;
+}
+
+export function useJoinRequests(
+  communityId: string | undefined,
+  options?: UseJoinRequestsOptions,
+) {
   const router = useRouter();
   const [requests, setRequests] = useState<{
     pending: JoinRequest[];
@@ -19,6 +24,8 @@ export function useJoinRequests(communityId: string | undefined) {
   const [error, setError] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [adminIds, setAdminIds] = useState<string[]>([]);
+
+  const { onSuccess, onError } = options || {};
 
   const loadRequests = useCallback(async () => {
     if (!communityId) return;
@@ -82,25 +89,27 @@ export function useJoinRequests(communityId: string | undefined) {
           },
         );
         if (result.success) {
-          Alert.alert("Success", result.message);
+          // ✅ Use callback instead of Alert
+          onSuccess?.(result.message || "Request approved successfully");
           await loadRequests();
           return true;
         }
-        Alert.alert("Error", result.message || "Failed to approve");
+        // ✅ Use callback instead of Alert
+        onError?.(result.message || "Failed to approve request");
         return false;
       } catch (error: any) {
         if (error?.response?.status === 401) {
-          Alert.alert("Session Expired", "Please login again.");
+          onError?.("Session expired. Please login again.");
           router.replace("/(auth)/login");
         } else {
-          Alert.alert("Error", "Failed to process request");
+          onError?.("Failed to process request");
         }
         return false;
       } finally {
         setProcessingId(null);
       }
     },
-    [communityId, loadRequests],
+    [communityId, loadRequests, onSuccess, onError],
   );
 
   const rejectRequest = useCallback(
@@ -116,25 +125,27 @@ export function useJoinRequests(communityId: string | undefined) {
           },
         );
         if (result.success) {
-          Alert.alert("Success", result.message);
+          // ✅ Use callback instead of Alert
+          onSuccess?.(result.message || "Request rejected successfully");
           await loadRequests();
           return true;
         }
-        Alert.alert("Error", result.message || "Failed to reject");
+        // ✅ Use callback instead of Alert
+        onError?.(result.message || "Failed to reject request");
         return false;
       } catch (error: any) {
         if (error?.response?.status === 401) {
-          Alert.alert("Session Expired", "Please login again.");
+          onError?.("Session expired. Please login again.");
           router.replace("/(auth)/login");
         } else {
-          Alert.alert("Error", "Failed to process request");
+          onError?.("Failed to process request");
         }
         return false;
       } finally {
         setProcessingId(null);
       }
     },
-    [communityId, loadRequests],
+    [communityId, loadRequests, onSuccess, onError],
   );
 
   useEffect(() => {

@@ -9,7 +9,6 @@ export const useCoverPhotoUpload = () => {
   const [coverUploading, setCoverUploading] = useState(false);
 
   const openCoverModal = useCallback(() => {
-    console.log("📱 Opening cover photo upload modal");
     setCoverModal(true);
   }, []);
 
@@ -88,7 +87,6 @@ export const useCoverPhotoUpload = () => {
         Alert.alert("Upload Failed", errorMessage);
         return false;
       } finally {
-        console.log("🏁 Cover photo upload process completed");
         setCoverUploading(false);
       }
     },

@@ -1,13 +1,19 @@
-// app/hooks/community/useCommunityJoin.ts
 import { useState, useCallback } from "react";
 import { Alert } from "react-native";
 import { communityService } from "../../lib/services/communityService";
 import { Community } from "../../lib/types/community";
 
+interface UseCommunityJoinOptions {
+  onSuccess?: (message: string) => void;
+  onError?: (message: string) => void;
+  onRefresh?: () => void;
+}
+
 export function useCommunityJoin(
   community: Community | null,
-  onSuccess?: () => void,
+  options?: UseCommunityJoinOptions,
 ) {
+  const { onSuccess, onError, onRefresh } = options || {};
   const [joining, setJoining] = useState(false);
   const [joinRequested, setJoinRequested] = useState(false);
 
@@ -20,26 +26,34 @@ export function useCommunityJoin(
         result = await communityService.requestToJoin(community._id);
         if (result.success) {
           setJoinRequested(true);
-          Alert.alert("Request Sent", result.message);
+          onSuccess?.(result.message || "Join request sent to admins");
+        } else {
+          onError?.(result.message || "Failed to send join request");
         }
       } else {
         result = await communityService.joinCommunity(community._id);
+        if (result.success) {
+          onSuccess?.(
+            result.message || `Joined ${community.name} successfully`,
+          );
+        } else {
+          onError?.(result.message || "Failed to join community");
+        }
       }
 
       if (result.success) {
-        onSuccess?.();
-      } else {
-        Alert.alert("Error", result.message || "Failed to join");
+        onRefresh?.();
       }
-    } catch (error) {
-      Alert.alert("Error", "Failed to join community");
+    } catch (error: any) {
+      onError?.(error?.message || "Failed to join community");
     } finally {
       setJoining(false);
     }
-  }, [community, onSuccess]);
+  }, [community, onSuccess, onError, onRefresh]);
 
   const leave = useCallback(async () => {
     if (!community) return;
+
     return new Promise<void>((resolve) => {
       Alert.alert("Leave Community", "Are you sure you want to leave?", [
         { text: "Cancel", style: "cancel", onPress: () => resolve() },
@@ -47,19 +61,27 @@ export function useCommunityJoin(
           text: "Leave",
           style: "destructive",
           onPress: async () => {
-            const result = await communityService.leaveCommunity(community._id);
-            if (result.success) {
-              Alert.alert("Success", "Left community");
-              onSuccess?.();
-            } else {
-              Alert.alert("Error", "Failed to leave");
+            try {
+              const result = await communityService.leaveCommunity(
+                community._id,
+              );
+              if (result.success) {
+                // Reset joinRequested state when leaving
+                setJoinRequested(false);
+                onSuccess?.(result.message || "Left community");
+                onRefresh?.();
+              } else {
+                onError?.(result.message || "Failed to leave community");
+              }
+            } catch (error: any) {
+              onError?.(error?.message || "Failed to leave community");
             }
             resolve();
           },
         },
       ]);
     });
-  }, [community, onSuccess]);
+  }, [community, onSuccess, onError, onRefresh]);
 
   return {
     joining,

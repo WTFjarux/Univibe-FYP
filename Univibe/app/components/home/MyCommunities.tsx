@@ -1,5 +1,3 @@
-// app/components/Home/MyCommunities.tsx
-
 import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
@@ -11,10 +9,11 @@ import {
   Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { useTheme } from "../../../lib/contexts/ThemeContext";
 import { useAuth } from "../../../lib/contexts/AuthContext";
 import { communityService } from "../../../lib/services/communityService";
+import socketService from "../../../lib/services/socketService";
 import { API_BASE_URL } from "../../../constants/ipConstants";
 
 interface MyCommunitiesProps {
@@ -37,15 +36,66 @@ export default function MyCommunities({ limit = 5 }: MyCommunitiesProps) {
         setCommunities(response.data.slice(0, limit));
       }
     } catch (err) {
-      // Silent fail
+      console.error("Error fetching communities:", err);
     } finally {
       setLoading(false);
     }
   }, [token, limit]);
 
+  // Initial fetch
   useEffect(() => {
     fetchCommunities();
   }, [fetchCommunities]);
+
+  // Refresh when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchCommunities();
+    }, [fetchCommunities]),
+  );
+
+  // Listen for real-time community events via socket
+  useEffect(() => {
+    if (!token) return;
+
+    // Handle community joined event
+    const handleCommunityJoined = (data: any) => {
+      console.log("Community joined event in MyCommunities:", data);
+      fetchCommunities();
+    };
+
+    // Handle community left event
+    const handleCommunityLeft = (data: any) => {
+      console.log("Community left event in MyCommunities:", data);
+      fetchCommunities();
+    };
+
+    // Handle member added event (when added by someone else)
+    const handleMemberAdded = (data: any) => {
+      console.log("Member added event in MyCommunities:", data);
+      fetchCommunities();
+    };
+
+    // Handle member removed event
+    const handleMemberRemoved = (data: any) => {
+      console.log("Member removed event in MyCommunities:", data);
+      fetchCommunities();
+    };
+
+    // Register socket event listeners
+    socketService.on("community:joined", handleCommunityJoined);
+    socketService.on("community:left", handleCommunityLeft);
+    socketService.on("community:member_added", handleMemberAdded);
+    socketService.on("community:member_removed", handleMemberRemoved);
+
+    // Cleanup
+    return () => {
+      socketService.off("community:joined", handleCommunityJoined);
+      socketService.off("community:left", handleCommunityLeft);
+      socketService.off("community:member_added", handleMemberAdded);
+      socketService.off("community:member_removed", handleMemberRemoved);
+    };
+  }, [token, fetchCommunities]);
 
   const getFullImageUrl = (url: string) => {
     if (!url) return "";
@@ -210,8 +260,6 @@ const styles = StyleSheet.create({
     fontFamily: "SofiaSans-SemiBold",
   },
   loadingContainer: { paddingVertical: 30, alignItems: "center" },
-
-  // Empty state
   emptyContainer: {
     alignItems: "center",
     paddingVertical: 24,
@@ -249,8 +297,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontFamily: "SofiaSans-SemiBold",
   },
-
-  // Community cards
   communitiesScroll: { paddingHorizontal: 16, gap: 12 },
   communityCard: {
     width: 140,
