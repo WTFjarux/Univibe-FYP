@@ -17,34 +17,51 @@ import PostCard from "../Feed/Post/PostCard";
 import { Post } from "../../../lib/services/postService";
 
 interface ProfilePostsProps {
+  // Data props
   posts: Post[];
   loading: boolean;
   refreshing: boolean;
+  hasMore: boolean;
+
+  // Action callbacks
   onRefresh: () => void;
   onLoadMore: () => void;
-  hasMore: boolean;
   onLikePress: (postId: string) => void;
   onCommentPress: (postId: string) => void;
   onSharePress: (postId: string) => void;
+
+  // Optional callbacks for post management
   onEdit?: (postId: string) => void;
   onDelete?: (postId: string) => void;
   onSave?: (postId: string) => void;
   onReport?: (postId: string) => void;
   onHide?: (postId: string) => void;
   onCopyLink?: (postId: string) => void;
-  onMuteUser?: (userId: string) => void;
-  onBlockUser?: (userId: string) => void;
+  onMuteUser?: (userId: string, userName?: string) => void;
+  onBlockUser?: (userId: string, userName?: string) => void;
+
+  // Options modal callbacks (for tracking)
+  onOptionsOpen?: () => void;
+  onOptionsClose?: () => void;
+
+  // Custom component injection
   listHeaderComponent?: React.ReactElement;
   listFooterComponent?: React.ReactElement | null;
 }
 
+/**
+ * ProfilePosts Component
+ *
+ * Renders a list of user's posts with FlatList for performance.
+ * Supports infinite scroll, pull-to-refresh, and all post interactions.
+ */
 export default function ProfilePosts({
   posts,
   loading,
   refreshing,
+  hasMore,
   onRefresh,
   onLoadMore,
-  hasMore,
   onLikePress,
   onCommentPress,
   onSharePress,
@@ -56,12 +73,17 @@ export default function ProfilePosts({
   onCopyLink,
   onMuteUser,
   onBlockUser,
+  onOptionsOpen,
+  onOptionsClose,
   listHeaderComponent,
   listFooterComponent,
 }: ProfilePostsProps) {
   const router = useRouter();
   const { colors } = useTheme();
 
+  /**
+   * Render empty state when user has no posts
+   */
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
       <Ionicons
@@ -84,6 +106,9 @@ export default function ProfilePosts({
     </View>
   );
 
+  /**
+   * Render footer loading indicator
+   */
   const renderFooter = () => {
     if (!loading) return null;
     return (
@@ -92,6 +117,30 @@ export default function ProfilePosts({
       </View>
     );
   };
+
+  /**
+   * Render individual post item
+   */
+  const renderPostItem = ({ item }: { item: Post }) => (
+    <View style={styles.postCardWrapper}>
+      <PostCard
+        post={item}
+        onLikePress={onLikePress}
+        onCommentPress={onCommentPress}
+        onSharePress={onSharePress}
+        onEdit={onEdit}
+        onDelete={onDelete}
+        onSave={onSave}
+        onReport={onReport}
+        onHide={onHide}
+        onCopyLink={onCopyLink}
+        onMuteUser={onMuteUser}
+        onBlockUser={onBlockUser}
+        onOptionsOpen={onOptionsOpen}
+        onOptionsClose={onOptionsClose}
+      />
+    </View>
+  );
 
   // Show skeleton loading state when loading and no posts
   if (loading && posts.length === 0) {
@@ -122,24 +171,7 @@ export default function ProfilePosts({
     <FlatList
       data={posts}
       keyExtractor={(item) => item._id}
-      renderItem={({ item }) => (
-        <View style={styles.postCardWrapper}>
-          <PostCard
-            post={item}
-            onLikePress={onLikePress}
-            onCommentPress={onCommentPress}
-            onSharePress={onSharePress}
-            onEdit={onEdit}
-            onDelete={onDelete}
-            onSave={onSave}
-            onReport={onReport}
-            onHide={onHide}
-            onCopyLink={onCopyLink}
-            onMuteUser={onMuteUser}
-            onBlockUser={onBlockUser}
-          />
-        </View>
-      )}
+      renderItem={renderPostItem}
       ListHeaderComponent={listHeaderComponent}
       ListEmptyComponent={!loading ? renderEmptyState() : null}
       ListFooterComponent={
@@ -154,7 +186,7 @@ export default function ProfilePosts({
           progressBackgroundColor={colors.card}
         />
       }
-      onEndReached={onLoadMore}
+      onEndReached={hasMore && !loading ? onLoadMore : undefined}
       onEndReachedThreshold={0.3}
       showsVerticalScrollIndicator={true}
       contentContainerStyle={styles.contentContainer}

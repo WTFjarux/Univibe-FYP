@@ -45,7 +45,7 @@ class FeedService {
   }
 
   private async fetchFeed(
-    feedType: "campus" | "connections" | "anonymous",
+    feedType: "campus" | "connections" | "anonymous" | "communities",
     cursor?: string,
     limit: number = 10,
   ): Promise<FeedResponse> {

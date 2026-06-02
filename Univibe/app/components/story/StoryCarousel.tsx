@@ -1,5 +1,3 @@
-// app/components/story/StoryCarousel.tsx
-
 import React, { memo, useCallback, useRef, useEffect } from "react";
 import { View, StyleSheet, Dimensions, Platform } from "react-native";
 import Animated, {
@@ -9,6 +7,7 @@ import Animated, {
   runOnJS,
   interpolate,
   Extrapolate,
+  SharedValue, // ✅ Add this import
 } from "react-native-reanimated";
 import { StoryGroup } from "../../../lib/services/storyApi";
 
@@ -22,6 +21,46 @@ interface StoryCarouselProps {
 }
 
 const AnimatedScrollView = Animated.ScrollView;
+
+// ✅ Create a separate component for each page to properly use hooks
+interface CarouselPageProps {
+  index: number;
+  scrollX: SharedValue<number>;
+  children: React.ReactNode;
+}
+
+const CarouselPage = memo(({ index, scrollX, children }: CarouselPageProps) => {
+  const inputRange = [(index - 1) * width, index * width, (index + 1) * width];
+
+  const animatedStyle = useAnimatedStyle(() => {
+    const opacity = interpolate(
+      scrollX.value,
+      inputRange,
+      [0.85, 1, 0.85],
+      Extrapolate.CLAMP,
+    );
+
+    const scale = interpolate(
+      scrollX.value,
+      inputRange,
+      [0.95, 1, 0.95],
+      Extrapolate.CLAMP,
+    );
+
+    return {
+      opacity,
+      transform: [{ scale }],
+    };
+  });
+
+  return (
+    <Animated.View style={[styles.page, animatedStyle]}>
+      {children}
+    </Animated.View>
+  );
+});
+
+CarouselPage.displayName = "CarouselPage";
 
 const StoryCarousel = memo(
   ({
@@ -85,45 +124,15 @@ const StoryCarousel = memo(
           snapToAlignment="center"
           disableIntervalMomentum={false}
         >
-          {storyGroups.map((group, index) => {
-            const inputRange = [
-              (index - 1) * width,
-              index * width,
-              (index + 1) * width,
-            ];
-
-            // eslint-disable-next-line react-hooks/rules-of-hooks
-            const animatedStyle = useAnimatedStyle(() => {
-              const opacity = interpolate(
-                scrollX.value,
-                inputRange,
-                [0.85, 1, 0.85],
-                Extrapolate.CLAMP,
-              );
-
-              const scale = interpolate(
-                scrollX.value,
-                inputRange,
-                [0.95, 1, 0.95],
-                Extrapolate.CLAMP,
-              );
-
-              return {
-                opacity,
-                transform: [{ scale }],
-              };
-            });
-
-            return (
-              <Animated.View
-                key={group.userId}
-                style={[styles.page, animatedStyle]}
-              >
-                {/* Render the specific child for this index */}
-                {childrenArray[index] || null}
-              </Animated.View>
-            );
-          })}
+          {storyGroups.map((group, index) => (
+            <CarouselPage
+              key={group.userId || `page-${index}`}
+              index={index}
+              scrollX={scrollX}
+            >
+              {childrenArray[index] || null}
+            </CarouselPage>
+          ))}
         </AnimatedScrollView>
       </View>
     );

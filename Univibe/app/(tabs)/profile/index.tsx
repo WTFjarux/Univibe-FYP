@@ -35,8 +35,18 @@ import {
   getProfilePosts,
   toggleLike,
   deletePost,
+  restorePost,
   Post,
+  getFullImageUrl,
+  toggleBlockUser,
 } from "../../../lib/services/postService";
+import {
+  toggleSavePost,
+  hidePost,
+  unhidePost,
+  toggleMuteUser,
+  reportContent,
+} from "../../../lib/services/contentService";
 import { API_BASE_URL } from "../../../constants/ipConstants";
 import { profileCache } from "../../../lib/cache/profileCache";
 
@@ -48,13 +58,32 @@ import ProfilePosts from "@/app/components/Profile/ProfilePosts";
 import UploadModal from "@/app/components/Profile/UploadModal";
 import ImageViewModal from "@/app/components/Profile/ImageViewModal";
 import SettingsScreen from "@/app/settings";
+import SharePostModal from "@/app/components/Feed/Post/SharePostModal";
+import ReportModal from "@/app/components/ReportModal";
 import { styles } from "@/app/components/Profile/profileStyles";
 import OwnProfilePageSkeleton, {
   OwnPostsLoadingSkeleton,
   OwnLoadingMorePostsSkeleton,
 } from "@/app/components/Profile/OwnProfileSkeleton";
 
+// ============================================
+// TYPES
+// ============================================
+
 type TabType = "posts" | "about";
+
+interface UndoAction {
+  type: "mute" | "block" | "hide" | "save" | "delete";
+  userId?: string;
+  postId?: string;
+  post?: Post;
+  userName?: string;
+  deletedPost?: Post;
+}
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
 
 const getAuthToken = async (): Promise<string | null> => {
   try {
@@ -64,8 +93,7 @@ const getAuthToken = async (): Promise<string | null> => {
   }
 };
 
-const MemoizedProfilePosts = React.memo(ProfilePosts);
-
+// Enable layout animations for Android
 if (
   Platform.OS === "android" &&
   UIManager.setLayoutAnimationEnabledExperimental
@@ -73,7 +101,17 @@ if (
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
+// Memoized components for performance
+const MemoizedProfilePosts = React.memo(ProfilePosts);
+
+// ============================================
+// MAIN COMPONENT
+// ============================================
+
 export default function ProfileScreen() {
+  // ============================================
+  // AUTH & THEME HOOKS
+  // ============================================
   const {
     user,
     profile,
@@ -83,31 +121,61 @@ export default function ProfileScreen() {
     refreshUserProfile,
     token,
   } = useAuth();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+  const router = useRouter();
+
+  // ============================================
+  // LOCAL STATE - Profile Data
+  // ============================================
   const [postCount, setPostCount] = useState(0);
   const [connectionCount, setConnectionCount] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>("about");
   const [showSettings, setShowSettings] = useState(false);
 
+  // ============================================
+  // LOCAL STATE - Posts Management
+  // ============================================
   const [posts, setPosts] = useState<Post[]>([]);
   const [postsLoading, setPostsLoading] = useState(false);
   const [postsPage, setPostsPage] = useState(1);
   const [hasMorePosts, setHasMorePosts] = useState(true);
   const [postsRefreshing, setPostsRefreshing] = useState(false);
   const [postsLoaded, setPostsLoaded] = useState(false);
-
   const [postsInitialLoading, setPostsInitialLoading] = useState(false);
   const [loadingMorePosts, setLoadingMorePosts] = useState(false);
-
   const [isCached, setIsCached] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
 
+  // ============================================
+  // LOCAL STATE - Modals
+  // ============================================
+  // Share Modal
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [sharePost, setSharePost] = useState<Post | null>(null);
+
+  // Report Modal
+  const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [reportTargetId, setReportTargetId] = useState("");
+  const [reportTargetType, setReportTargetType] = useState<
+    "Post" | "Comment" | "User" | "Event"
+  >("Post");
+
+  // Options Modal (for tracking)
+  const [isOptionsModalOpen, setIsOptionsModalOpen] = useState(false);
+
+  // ============================================
+  // REFS
+  // ============================================
   const isMounted = useRef(true);
   const refreshInProgress = useRef(false);
   const initialLoadDone = useRef(false);
   const mainScrollViewRef = useRef<ScrollView>(null);
+  const pickerActiveRef = useRef(false);
 
+  // ============================================
+  // IMAGE UPLOAD HOOKS
+  // ============================================
   const {
     uploadModal,
     viewPhotoModal,
@@ -132,20 +200,24 @@ export default function ProfileScreen() {
     deleteCoverPhoto,
   } = useCoverPhotoUpload();
 
-  const pickerActiveRef = useRef(false);
-  const router = useRouter();
-
+  // ============================================
+  // LIFECYCLE - Mount/Unmount
+  // ============================================
   useEffect(() => {
     return () => {
       isMounted.current = false;
     };
   }, []);
 
+  // ============================================
+  // TAB HANDLING
+  // ============================================
   const handleTabChange = useCallback(
     (tab: TabType) => {
       if (tab === activeTab) return;
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setActiveTab(tab);
+      // Fetch posts when switching to posts tab and not loaded
       if (tab === "posts" && !postsLoaded && user?.id && !postsLoading) {
         fetchUserPosts(1, false);
       }
@@ -153,12 +225,16 @@ export default function ProfileScreen() {
     [activeTab, postsLoaded, user?.id, postsLoading],
   );
 
+  // ============================================
+  // DATA FETCHING - Post Count
+  // ============================================
   const fetchPostCount = useCallback(async () => {
     if (!user?.id) return;
     try {
       const cacheKey = `post_count_${user.id}`;
       const cached = profileCache.getFromMemory(cacheKey);
       if (cached && isMounted.current) setPostCount(cached);
+
       const token = await getAuthToken();
       const response = await fetch(
         `${API_BASE_URL}/api/posts/user/${user.id}/count`,
@@ -169,31 +245,47 @@ export default function ProfileScreen() {
         setPostCount(data.count);
         profileCache.saveToMemory(cacheKey, data.count);
       }
-    } catch (error) {}
+    } catch (error) {
+      console.error("Error fetching post count:", error);
+    }
   }, [user?.id]);
 
+  // ============================================
+  // DATA FETCHING - Connection Count
+  // ============================================
   const fetchConnectionCount = useCallback(async () => {
     if (!user?.id) return;
     try {
       const cacheKey = `connection_count_${user.id}`;
       const cached = profileCache.getFromMemory(cacheKey);
       if (cached && isMounted.current) setConnectionCount(cached);
+
       const response = await connectionService.getConnectionCount(user.id);
       if (response.success && response.data && isMounted.current) {
         setConnectionCount(response.data.connectionCount);
         profileCache.saveToMemory(cacheKey, response.data.connectionCount);
       }
-    } catch (error) {}
+    } catch (error) {
+      console.error("Error fetching connection count:", error);
+    }
   }, [user?.id]);
 
+  // ============================================
+  // DATA FETCHING - User Posts
+  // ============================================
   const fetchUserPosts = useCallback(
     async (page = 1, shouldAppend = false, forceRefresh = false) => {
       if (!user?.id) return;
       if (postsLoading && !forceRefresh) return;
+
       const cacheKey = `user_posts_${user.id}_page_${page}`;
+
+      // Set loading states
       if (shouldAppend) setLoadingMorePosts(true);
       else if (!forceRefresh) setPostsInitialLoading(true);
       setPostsLoading(true);
+
+      // Check cache for first page
       if (
         !forceRefresh &&
         page === 1 &&
@@ -218,18 +310,22 @@ export default function ProfileScreen() {
           return;
         }
       }
+
       try {
         const response = await getProfilePosts(user.id, page, 10);
         if (response.success && response.data && isMounted.current) {
           const newPosts = response.data.posts;
-          if (shouldAppend) setPosts((prev) => [...prev, ...newPosts]);
-          else {
+          if (shouldAppend) {
+            setPosts((prev) => [...prev, ...newPosts]);
+          } else {
             setPosts(newPosts);
-            if (page === 1)
+            // Cache first page results
+            if (page === 1) {
               profileCache.saveToMemory(cacheKey, {
                 posts: newPosts,
                 hasMore: response.data.pagination.pages > page,
               });
+            }
           }
           setHasMorePosts(response.data.pagination.pages > page);
           setPostsPage(page);
@@ -250,89 +346,362 @@ export default function ProfileScreen() {
     [user?.id, postsLoading, posts.length],
   );
 
-  const loadMorePosts = () => {
+  // ============================================
+  // POST ACTIONS - Load More
+  // ============================================
+  const loadMorePosts = useCallback(() => {
     if (!postsLoading && hasMorePosts && postsLoaded && !postsRefreshing) {
       fetchUserPosts(postsPage + 1, true);
     }
-  };
+  }, [
+    postsLoading,
+    hasMorePosts,
+    postsLoaded,
+    postsRefreshing,
+    postsPage,
+    fetchUserPosts,
+  ]);
 
-  const refreshPosts = () => {
+  // ============================================
+  // POST ACTIONS - Refresh
+  // ============================================
+  const refreshPosts = useCallback(() => {
     if (postsRefreshing) return;
     setPostsRefreshing(true);
     if (user?.id) profileCache.clear(`user_posts_${user.id}_page_1`);
     fetchUserPosts(1, false, true);
-  };
+  }, [postsRefreshing, user?.id, fetchUserPosts]);
 
-  const handleLike = async (postId: string) => {
-    if (!token) {
-      Alert.alert("Login Required", "Please login to like posts");
-      return;
-    }
-    try {
-      const response = await toggleLike(postId);
+  // ============================================
+  // POST ACTIONS - Like
+  // ============================================
+  const handleLike = useCallback(
+    async (postId: string) => {
+      if (!token) {
+        Alert.alert("Login Required", "Please login to like posts");
+        return;
+      }
+
+      // Optimistic update
+      const post = posts.find((p) => p._id === postId);
+      if (post) {
+        setPosts((prev) =>
+          prev.map((p) =>
+            p._id === postId
+              ? {
+                  ...p,
+                  isLiked: !p.isLiked,
+                  likeCount: p.isLiked ? p.likeCount - 1 : p.likeCount + 1,
+                }
+              : p,
+          ),
+        );
+      }
+
+      try {
+        const response = await toggleLike(postId);
+        // Sync with server response
+        setPosts((prev) =>
+          prev.map((p) =>
+            p._id === postId
+              ? { ...p, isLiked: response.isLiked, likeCount: response.likes }
+              : p,
+          ),
+        );
+        // Invalidate cache
+        if (user?.id) profileCache.clear(`user_posts_${user.id}_page_1`);
+      } catch (error: any) {
+        // Revert on error
+        if (post) {
+          setPosts((prev) =>
+            prev.map((p) =>
+              p._id === postId
+                ? { ...p, isLiked: post.isLiked, likeCount: post.likeCount }
+                : p,
+            ),
+          );
+        }
+        Alert.alert("Error", error.message || "Failed to like post");
+      }
+    },
+    [token, posts, user?.id],
+  );
+
+  // ============================================
+  // POST ACTIONS - Comment
+  // ============================================
+  const handleComment = useCallback(
+    (postId: string) => {
+      router.push({
+        pathname: "/components/Feed/Comment/CommentsScreen",
+        params: { postId },
+      });
+    },
+    [router],
+  );
+
+  // ============================================
+  // POST ACTIONS - Share
+  // ============================================
+  const handleShare = useCallback(
+    (postId: string) => {
+      if (!token) {
+        Alert.alert("Login Required", "Please login to share posts");
+        return;
+      }
+      const post = posts.find((p) => p._id === postId);
+      if (post) {
+        setSharePost(post);
+        setShareModalVisible(true);
+      }
+    },
+    [token, posts],
+  );
+
+  // ============================================
+  // POST ACTIONS - Edit
+  // ============================================
+  const handleEditPost = useCallback(
+    (postId: string) => {
+      router.push({
+        pathname: "/components/Feed/Post/EditPost",
+        params: { postId },
+      });
+    },
+    [router],
+  );
+
+  // ============================================
+  // POST ACTIONS - Delete with Undo
+  // ============================================
+  const handleDeletePost = useCallback(
+    async (postId: string) => {
+      const postToDelete = posts.find((p) => p._id === postId);
+      if (!postToDelete) return;
+
+      // Optimistically remove from UI
+      setPosts((prev) => prev.filter((p) => p._id !== postId));
+      setPostCount((prev) => Math.max(0, prev - 1));
+
+      // Show undo alert
+      Alert.alert(
+        "Post Deleted",
+        "Your post has been deleted. You can undo this action.",
+        [
+          { text: "Undo", onPress: () => restoreDeletedPost(postToDelete) },
+          { text: "OK", style: "cancel" },
+        ],
+      );
+
+      try {
+        await deletePost(postId);
+        if (user?.id) profileCache.clear(`user_posts_${user.id}_page_1`);
+      } catch (error: any) {
+        // Restore on error
+        setPosts((prev) => [...prev, postToDelete]);
+        setPostCount((prev) => prev + 1);
+        Alert.alert("Error", error.message || "Failed to delete post");
+      }
+    },
+    [posts, user?.id],
+  );
+
+  // Helper to restore deleted post
+  const restoreDeletedPost = useCallback(
+    async (post: Post) => {
+      try {
+        await restorePost(post._id);
+        setPosts((prev) => [...prev, post]);
+        setPostCount((prev) => prev + 1);
+        if (user?.id) profileCache.clear(`user_posts_${user.id}_page_1`);
+        Alert.alert("Success", "Post restored successfully");
+      } catch (error: any) {
+        Alert.alert("Error", error.message || "Failed to restore post");
+      }
+    },
+    [user?.id],
+  );
+
+  // ============================================
+  // POST ACTIONS - Save
+  // ============================================
+  const handleSavePost = useCallback(
+    async (postId: string) => {
+      if (!token) {
+        Alert.alert("Login Required", "Please login to save posts");
+        return;
+      }
+
+      const post = posts.find((p) => p._id === postId);
+      const wasSaved = post?.isSaved;
+
+      // Optimistic update
       setPosts((prev) =>
-        prev.map((post) =>
-          post._id === postId
-            ? { ...post, isLiked: response.isLiked, likeCount: response.likes }
-            : post,
+        prev.map((p) => (p._id === postId ? { ...p, isSaved: !wasSaved } : p)),
+      );
+
+      try {
+        const response = await toggleSavePost(postId);
+        setPosts((prev) =>
+          prev.map((p) =>
+            p._id === postId ? { ...p, isSaved: response.saved } : p,
+          ),
+        );
+        Alert.alert(
+          "Success",
+          response.saved ? "Post saved" : "Post removed from saved",
+        );
+      } catch (error: any) {
+        // Revert on error
+        setPosts((prev) =>
+          prev.map((p) => (p._id === postId ? { ...p, isSaved: wasSaved } : p)),
+        );
+        Alert.alert("Error", error.message || "Failed to save post");
+      }
+    },
+    [token, posts],
+  );
+
+  // ============================================
+  // POST ACTIONS - Report
+  // ============================================
+  const handleReportPost = useCallback(
+    (postId: string) => {
+      if (!token) {
+        Alert.alert("Login Required", "Please login to report posts");
+        return;
+      }
+
+      const post = posts.find((p) => p._id === postId);
+      if (post?.isReported) {
+        Alert.alert("Already Reported", "You have already reported this post");
+        return;
+      }
+
+      setReportTargetId(postId);
+      setReportTargetType("Post");
+      setReportModalVisible(true);
+    },
+    [token, posts],
+  );
+
+  // ============================================
+  // REPORT SUCCESS HANDLER
+  // ============================================
+  const handleReportSuccess = useCallback(() => {
+    if (reportTargetType === "Post" && reportTargetId) {
+      setPosts((prev) =>
+        prev.map((p) =>
+          p._id === reportTargetId ? { ...p, isReported: true } : p,
         ),
       );
-      if (user?.id) profileCache.clear(`user_posts_${user.id}_page_1`);
-    } catch (error: any) {
-      Alert.alert("Error", error.message || "Failed to like post");
     }
-  };
+  }, [reportTargetType, reportTargetId]);
 
-  const handleComment = (postId: string) =>
-    router.push({
-      pathname: "/components/Feed/Comment/CommentsScreen",
-      params: { postId },
-    });
-  const handleShare = () => Alert.alert("Share", "Share feature coming soon!");
-  const handleEditPost = (postId: string) =>
-    router.push({
-      pathname: "/components/Feed/Post/EditPost",
-      params: { postId },
-    });
-  const handleDeletePost = async (postId: string) => {
-    try {
-      await deletePost(postId);
-      setPosts((prev) => prev.filter((post) => post._id !== postId));
-      setPostCount((prev) => Math.max(0, prev - 1));
-      if (user?.id) profileCache.clear(`user_posts_${user.id}_page_1`);
-      Alert.alert("Success", "Post deleted successfully");
-    } catch (error: any) {
-      Alert.alert("Error", error.message || "Failed to delete post");
-    }
-  };
-  const handleSavePost = () =>
-    Alert.alert("Saved", "Post saved to your bookmarks");
+  // ============================================
+  // POST ACTIONS - Hide
+  // ============================================
+  const handleHidePost = useCallback(
+    async (postId: string) => {
+      if (!token) {
+        Alert.alert("Login Required", "Please login to hide posts");
+        return;
+      }
 
-  const handleReportPost = (postId: string) => {
-    setPosts((prev) =>
-      prev.map((p) => (p._id === postId ? { ...p, isReported: true } : p)),
-    );
-    Alert.alert("Report Submitted", "Thank you for reporting this post.");
-  };
+      // Optimistically remove from UI
+      const hiddenPost = posts.find((p) => p._id === postId);
+      setPosts((prev) => prev.filter((p) => p._id !== postId));
 
-  const handleHidePost = (postId: string) => {
-    setPosts((prev) => prev.filter((post) => post._id !== postId));
-    Alert.alert("Post Hidden", "You won't see this post anymore");
-  };
+      try {
+        await hidePost(postId);
+        Alert.alert("Post Hidden", "You won't see this post anymore");
+      } catch (error: any) {
+        // Restore on error
+        if (hiddenPost) setPosts((prev) => [...prev, hiddenPost]);
+        Alert.alert("Error", error.message || "Failed to hide post");
+      }
+    },
+    [token, posts],
+  );
 
-  const handleCopyLink = () =>
+  // ============================================
+  // POST ACTIONS - Copy Link
+  // ============================================
+  const handleCopyLink = useCallback(() => {
     Alert.alert("Link Copied", "Post link copied to clipboard");
+  }, []);
 
-  const handleMuteUser = () =>
-    Alert.alert("User Muted", "You won't see posts from this user anymore");
+  // ============================================
+  // POST ACTIONS - Mute User
+  // ============================================
+  const handleMuteUser = useCallback(
+    async (userId: string, userName?: string) => {
+      if (!token) return;
 
-  const handleBlockUser = () =>
-    Alert.alert("User Blocked", "You won't see posts from this user anymore");
+      // Remove user's posts from feed
+      const postsToRemove = posts.filter((p) => p.user?._id === userId);
+      setPosts((prev) => prev.filter((p) => p.user?._id !== userId));
 
+      try {
+        await toggleMuteUser(userId);
+        Alert.alert(
+          "User Muted",
+          `You won't see posts from ${userName || "this user"} anymore`,
+        );
+      } catch (error: any) {
+        // Restore posts on error
+        setPosts((prev) => [...prev, ...postsToRemove]);
+        Alert.alert("Error", error.message || "Failed to mute user");
+      }
+    },
+    [token, posts],
+  );
+
+  // ============================================
+  // POST ACTIONS - Block User
+  // ============================================
+  const handleBlockUser = useCallback(
+    async (userId: string, userName?: string) => {
+      if (!token) return;
+
+      // Remove user's posts from feed
+      const postsToRemove = posts.filter((p) => p.user?._id === userId);
+      setPosts((prev) => prev.filter((p) => p.user?._id !== userId));
+
+      try {
+        await toggleBlockUser(userId);
+        Alert.alert(
+          "User Blocked",
+          `You won't see posts from ${userName || "this user"} anymore`,
+        );
+      } catch (error: any) {
+        // Restore posts on error
+        setPosts((prev) => [...prev, ...postsToRemove]);
+        Alert.alert("Error", error.message || "Failed to block user");
+      }
+    },
+    [token, posts],
+  );
+
+  // ============================================
+  // OPTIONS MODAL HANDLERS
+  // ============================================
+  const handleOptionsModalOpen = useCallback(() => {
+    setIsOptionsModalOpen(true);
+  }, []);
+
+  const handleOptionsModalClose = useCallback(() => {
+    setIsOptionsModalOpen(false);
+  }, []);
+
+  // ============================================
+  // INITIAL DATA LOADING
+  // ============================================
   const loadInitialData = useCallback(async () => {
     if (refreshInProgress.current || initialLoadDone.current) return;
     refreshInProgress.current = true;
     setInitialLoading(true);
+
     try {
       await loadProfile();
       await Promise.all([fetchPostCount(), fetchConnectionCount()]);
@@ -347,10 +716,14 @@ export default function ProfileScreen() {
     }
   }, [loadProfile, fetchPostCount, fetchConnectionCount]);
 
-  const onRefresh = async () => {
+  // ============================================
+  // PULL TO REFRESH HANDLER
+  // ============================================
+  const onRefresh = useCallback(async () => {
     if (refreshing || refreshInProgress.current) return;
     setRefreshing(true);
     setIsCached(false);
+
     try {
       await profileCache.clear("my_profile");
       if (user?.id) {
@@ -358,26 +731,52 @@ export default function ProfileScreen() {
         await profileCache.clear(`connection_count_${user.id}`);
         await profileCache.clear(`user_posts_${user.id}_page_1`);
       }
+
       await loadProfile();
       await refreshUserProfile();
       await Promise.all([fetchPostCount(), fetchConnectionCount()]);
-      if (activeTab === "posts") await fetchUserPosts(1, false, true);
+
+      if (activeTab === "posts") {
+        await fetchUserPosts(1, false, true);
+      }
     } catch (error) {
       console.error("Error refreshing:", error);
     } finally {
       if (isMounted.current) setRefreshing(false);
     }
-  };
+  }, [
+    refreshing,
+    user?.id,
+    loadProfile,
+    refreshUserProfile,
+    fetchPostCount,
+    fetchConnectionCount,
+    activeTab,
+    fetchUserPosts,
+  ]);
 
+  // ============================================
+  // EFFECTS - Initial Load
+  // ============================================
   useEffect(() => {
-    if (user?.id && !initialLoadDone.current && !authLoading) loadInitialData();
+    if (user?.id && !initialLoadDone.current && !authLoading) {
+      loadInitialData();
+    }
   }, [user?.id, authLoading, loadInitialData]);
+
+  // ============================================
+  // EFFECTS - Refresh Counts on Profile Change
+  // ============================================
   useEffect(() => {
     if (profile && initialLoadDone.current) {
       fetchPostCount();
       fetchConnectionCount();
     }
   }, [profile, fetchPostCount, fetchConnectionCount]);
+
+  // ============================================
+  // EFFECTS - Fetch Posts on Tab Change
+  // ============================================
   useEffect(() => {
     if (
       activeTab === "posts" &&
@@ -385,8 +784,9 @@ export default function ProfileScreen() {
       user?.id &&
       !postsLoading &&
       initialLoadDone.current
-    )
+    ) {
       fetchUserPosts(1, false);
+    }
   }, [
     activeTab,
     postsLoaded,
@@ -396,6 +796,9 @@ export default function ProfileScreen() {
     fetchUserPosts,
   ]);
 
+  // ============================================
+  // FOCUS EFFECT - Refresh Data on Screen Focus
+  // ============================================
   useFocusEffect(
     useCallback(() => {
       if (user?.id && initialLoadDone.current && !refreshInProgress.current) {
@@ -410,7 +813,10 @@ export default function ProfileScreen() {
     ]),
   );
 
-  const handleLogoutConfirm = () => {
+  // ============================================
+  // LOGOUT HANDLERS
+  // ============================================
+  const handleLogoutConfirm = useCallback(() => {
     Alert.alert("Logout", "Are you sure you want to logout?", [
       { text: "Cancel", style: "cancel" },
       {
@@ -424,14 +830,18 @@ export default function ProfileScreen() {
         },
       },
     ]);
-  };
+  }, [logout, router]);
 
-  const handleOpenSettings = () => setShowSettings(true);
-  const handleCloseSettings = () => setShowSettings(false);
+  const handleOpenSettings = useCallback(() => setShowSettings(true), []);
+  const handleCloseSettings = useCallback(() => setShowSettings(false), []);
 
-  const handleGalleryPick = async () => {
+  // ============================================
+  // IMAGE PICKER HANDLERS - Profile Picture
+  // ============================================
+  const handleGalleryPick = useCallback(async () => {
     if (pickerActiveRef.current) return;
     pickerActiveRef.current = true;
+
     try {
       const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
       if (status !== "granted") {
@@ -445,12 +855,14 @@ export default function ProfileScreen() {
           return;
         }
       }
+
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: "images",
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
       });
+
       closeUploadModal();
       if (!result.canceled && result.assets?.[0]?.uri) {
         const success = await uploadProfileImage(result.assets[0].uri);
@@ -467,11 +879,19 @@ export default function ProfileScreen() {
     } finally {
       pickerActiveRef.current = false;
     }
-  };
+  }, [
+    closeUploadModal,
+    uploadProfileImage,
+    loadProfile,
+    refreshUserProfile,
+    fetchPostCount,
+    fetchConnectionCount,
+  ]);
 
-  const handleCameraPick = async () => {
+  const handleCameraPick = useCallback(async () => {
     if (pickerActiveRef.current) return;
     pickerActiveRef.current = true;
+
     try {
       const { status } = await ImagePicker.getCameraPermissionsAsync();
       if (status !== "granted") {
@@ -485,12 +905,14 @@ export default function ProfileScreen() {
           return;
         }
       }
+
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: "images",
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
       });
+
       closeUploadModal();
       if (!result.canceled && result.assets?.[0]?.uri) {
         const success = await uploadProfileImage(result.assets[0].uri);
@@ -507,9 +929,16 @@ export default function ProfileScreen() {
     } finally {
       pickerActiveRef.current = false;
     }
-  };
+  }, [
+    closeUploadModal,
+    uploadProfileImage,
+    loadProfile,
+    refreshUserProfile,
+    fetchPostCount,
+    fetchConnectionCount,
+  ]);
 
-  const handleDeleteProfileImage = async () => {
+  const handleDeleteProfileImage = useCallback(async () => {
     const success = await deleteProfileImage();
     if (success) {
       closeUploadModal();
@@ -519,13 +948,27 @@ export default function ProfileScreen() {
       await fetchPostCount();
       await fetchConnectionCount();
     }
-  };
+  }, [
+    deleteProfileImage,
+    closeUploadModal,
+    loadProfile,
+    refreshUserProfile,
+    fetchPostCount,
+    fetchConnectionCount,
+  ]);
 
-  const handleImagePress = () => openUploadModal();
+  const handleImagePress = useCallback(
+    () => openUploadModal(),
+    [openUploadModal],
+  );
 
-  const handleCoverGalleryPick = async () => {
+  // ============================================
+  // IMAGE PICKER HANDLERS - Cover Photo
+  // ============================================
+  const handleCoverGalleryPick = useCallback(async () => {
     if (pickerActiveRef.current) return;
     pickerActiveRef.current = true;
+
     try {
       const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
       if (status !== "granted") {
@@ -539,12 +982,14 @@ export default function ProfileScreen() {
           return;
         }
       }
+
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: "images",
         allowsEditing: true,
         aspect: [16, 9],
         quality: 0.8,
       });
+
       closeCoverModal();
       if (!result.canceled && result.assets?.[0]?.uri) {
         const success = await uploadCoverPhoto(result.assets[0].uri);
@@ -561,11 +1006,19 @@ export default function ProfileScreen() {
     } finally {
       pickerActiveRef.current = false;
     }
-  };
+  }, [
+    closeCoverModal,
+    uploadCoverPhoto,
+    loadProfile,
+    refreshUserProfile,
+    fetchPostCount,
+    fetchConnectionCount,
+  ]);
 
-  const handleCoverCameraPick = async () => {
+  const handleCoverCameraPick = useCallback(async () => {
     if (pickerActiveRef.current) return;
     pickerActiveRef.current = true;
+
     try {
       const { status } = await ImagePicker.getCameraPermissionsAsync();
       if (status !== "granted") {
@@ -579,12 +1032,14 @@ export default function ProfileScreen() {
           return;
         }
       }
+
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: "images",
         allowsEditing: true,
         aspect: [16, 9],
         quality: 0.8,
       });
+
       closeCoverModal();
       if (!result.canceled && result.assets?.[0]?.uri) {
         const success = await uploadCoverPhoto(result.assets[0].uri);
@@ -601,9 +1056,16 @@ export default function ProfileScreen() {
     } finally {
       pickerActiveRef.current = false;
     }
-  };
+  }, [
+    closeCoverModal,
+    uploadCoverPhoto,
+    loadProfile,
+    refreshUserProfile,
+    fetchPostCount,
+    fetchConnectionCount,
+  ]);
 
-  const handleDeleteCoverPhoto = async () => {
+  const handleDeleteCoverPhoto = useCallback(async () => {
     const success = await deleteCoverPhoto();
     if (success) {
       closeCoverModal();
@@ -613,18 +1075,37 @@ export default function ProfileScreen() {
       await fetchPostCount();
       await fetchConnectionCount();
     }
-  };
+  }, [
+    deleteCoverPhoto,
+    closeCoverModal,
+    loadProfile,
+    refreshUserProfile,
+    fetchPostCount,
+    fetchConnectionCount,
+  ]);
 
-  const handleCoverPhotoPress = () => openCoverModal();
+  const handleCoverPhotoPress = useCallback(
+    () => openCoverModal(),
+    [openCoverModal],
+  );
 
-  const formattedUser = {
-    _id: user?.id,
-    name: user?.name || profile?.fullName,
-    email: user?.email,
-    username: user?.username || profile?.username,
-    profileComplete: user?.profileComplete,
-  };
+  // ============================================
+  // FORMATTED USER OBJECT
+  // ============================================
+  const formattedUser = useMemo(
+    () => ({
+      _id: user?.id,
+      name: user?.name || profile?.fullName,
+      email: user?.email,
+      username: user?.username || profile?.username,
+      profileComplete: user?.profileComplete,
+    }),
+    [user, profile],
+  );
 
+  // ============================================
+  // MEMOIZED COMPONENT PROPS
+  // ============================================
   const profileHeader = useMemo(
     () => (
       <ProfileHeader
@@ -642,6 +1123,8 @@ export default function ProfileScreen() {
       uploading,
       pickerActiveRef.current,
       coverUploading,
+      handleImagePress,
+      handleCoverPhotoPress,
     ],
   );
 
@@ -653,7 +1136,7 @@ export default function ProfileScreen() {
         postCount={postCount}
       />
     ),
-    [activeTab, postCount],
+    [activeTab, handleTabChange, postCount],
   );
 
   const postsProps = useMemo(
@@ -675,8 +1158,30 @@ export default function ProfileScreen() {
       onCopyLink: handleCopyLink,
       onMuteUser: handleMuteUser,
       onBlockUser: handleBlockUser,
+      onOptionsOpen: handleOptionsModalOpen,
+      onOptionsClose: handleOptionsModalClose,
     }),
-    [posts, postsInitialLoading, postsRefreshing, hasMorePosts],
+    [
+      posts,
+      postsInitialLoading,
+      postsRefreshing,
+      refreshPosts,
+      loadMorePosts,
+      hasMorePosts,
+      handleLike,
+      handleComment,
+      handleShare,
+      handleEditPost,
+      handleDeletePost,
+      handleSavePost,
+      handleReportPost,
+      handleHidePost,
+      handleCopyLink,
+      handleMuteUser,
+      handleBlockUser,
+      handleOptionsModalOpen,
+      handleOptionsModalClose,
+    ],
   );
 
   const aboutContentOnly = useMemo(
@@ -807,11 +1312,48 @@ export default function ProfileScreen() {
         </View>
       </View>
     ),
-    [profile, user, postCount, connectionCount, isCached, colors],
+    [
+      isCached,
+      colors,
+      profile,
+      user,
+      postCount,
+      connectionCount,
+      router,
+      handleOpenSettings,
+      handleLogoutConfirm,
+    ],
   );
 
-  // ============ RENDER ============
+  // ============================================
+  // SHARE POST DATA
+  // ============================================
+  const sharePostData = useMemo(() => {
+    if (!sharePost) return null;
+    return {
+      postId: sharePost._id,
+      postContent: sharePost.content || "",
+      postImage: sharePost.images?.[0]?.url
+        ? getFullImageUrl(sharePost.images[0].url)
+        : "",
+      postAuthorName: sharePost.isAnonymous
+        ? "Anonymous"
+        : sharePost.community?.name || sharePost.user?.name || "Unknown",
+      postAuthorAvatar: sharePost.community?.coverImage
+        ? getFullImageUrl(sharePost.community.coverImage)
+        : sharePost.user?.profilePicture || "",
+      isAnonymous: sharePost.isAnonymous || false,
+      postCommunityId: sharePost.community?._id || undefined,
+      postCommunityName: sharePost.community?.name || undefined,
+      postCommunityCoverImage: sharePost.community?.coverImage
+        ? getFullImageUrl(sharePost.community.coverImage)
+        : undefined,
+    };
+  }, [sharePost]);
 
+  // ============================================
+  // RENDER - Loading State
+  // ============================================
   if ((authLoading || initialLoading) && !profile) {
     return (
       <SafeAreaView
@@ -823,6 +1365,9 @@ export default function ProfileScreen() {
     );
   }
 
+  // ============================================
+  // RENDER - No Profile State
+  // ============================================
   if (!profile && !authLoading && !initialLoading) {
     return (
       <SafeAreaView
@@ -857,7 +1402,9 @@ export default function ProfileScreen() {
     );
   }
 
-  // ✅ SINGLE RETURN - modals rendered ONCE outside tab conditions
+  // ============================================
+  // RENDER - Main Profile Screen
+  // ============================================
   return (
     <>
       <SafeAreaView
@@ -927,7 +1474,10 @@ export default function ProfileScreen() {
         )}
       </SafeAreaView>
 
-      {/* Modals - rendered ONCE */}
+      {/* ============================================ */}
+      {/* MODALS - Image Upload */}
+      {/* ============================================ */}
+
       <UploadModal
         visible={uploadModal}
         onClose={closeUploadModal}
@@ -943,6 +1493,7 @@ export default function ProfileScreen() {
         viewLabel="View Profile Picture"
         deleteLabel="Remove Profile Picture"
       />
+
       <UploadModal
         visible={coverModal}
         onClose={closeCoverModal}
@@ -954,6 +1505,7 @@ export default function ProfileScreen() {
         title="Cover Photo"
         viewLabel="View Cover Photo"
       />
+
       <ImageViewModal
         visible={viewPhotoModal}
         imageUri={profile?.profilePicture}
@@ -961,6 +1513,7 @@ export default function ProfileScreen() {
         title="Profile Picture"
         isCoverPhoto={false}
       />
+
       <ImageViewModal
         visible={coverViewModal}
         imageUri={profile?.coverPhoto}
@@ -968,6 +1521,10 @@ export default function ProfileScreen() {
         title="Cover Photo"
         isCoverPhoto={true}
       />
+
+      {/* ============================================ */}
+      {/* MODALS - Settings */}
+      {/* ============================================ */}
 
       <Modal
         visible={showSettings}
@@ -984,9 +1541,49 @@ export default function ProfileScreen() {
           onClose={handleCloseSettings}
         />
       </Modal>
+
+      {/* ============================================ */}
+      {/* MODALS - Share Post */}
+      {/* ============================================ */}
+
+      {sharePostData && (
+        <SharePostModal
+          visible={shareModalVisible}
+          onClose={() => {
+            setShareModalVisible(false);
+            setTimeout(() => setSharePost(null), 300);
+          }}
+          onSuccess={() => {
+            Alert.alert("Success", "Post shared successfully");
+          }}
+          {...sharePostData}
+        />
+      )}
+
+      {/* ============================================ */}
+      {/* MODALS - Report Content */}
+      {/* ============================================ */}
+
+      <ReportModal
+        visible={reportModalVisible}
+        onClose={() => setReportModalVisible(false)}
+        targetType={reportTargetType}
+        targetId={reportTargetId}
+        onReportSuccess={handleReportSuccess}
+        onShowInfoBar={(message, type) => {
+          Alert.alert(type === "success" ? "Success" : "Info", message);
+        }}
+        reportFunction={(targetId: string, reason: string) =>
+          reportContent(reportTargetType, targetId, reason)
+        }
+      />
     </>
   );
 }
+
+// ============================================
+// STYLES
+// ============================================
 
 const menuStyles = StyleSheet.create({
   menuSection: {
@@ -1008,7 +1605,11 @@ const menuStyles = StyleSheet.create({
     paddingHorizontal: 18,
     alignItems: "center",
   },
-  menuItemContent: { flexDirection: "row", alignItems: "center", flex: 1 },
+  menuItemContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
   menuText: {
     fontSize: 18,
     color: "#374151",
@@ -1016,11 +1617,17 @@ const menuStyles = StyleSheet.create({
     marginLeft: 12,
     fontFamily: "SofiaSans-Regular",
   },
-  divider: { height: 1, backgroundColor: "#f3f4f6", marginLeft: 52 },
+  divider: {
+    height: 1,
+    backgroundColor: "#f3f4f6",
+    marginLeft: 52,
+  },
 });
 
 const scrollStyles = StyleSheet.create({
-  scrollContent: { paddingBottom: Platform.OS === "ios" ? 90 : 80 },
+  scrollContent: {
+    paddingBottom: Platform.OS === "ios" ? 90 : 80,
+  },
 });
 
 const cacheStyles = StyleSheet.create({

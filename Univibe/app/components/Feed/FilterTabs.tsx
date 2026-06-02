@@ -64,7 +64,7 @@ const FilterTabs: React.FC<FilterTabsProps> = ({
 
 const styles = StyleSheet.create({
   filtersContainer: {
-    marginHorizontal: 2,
+    marginHorizontal: 8,
     marginBottom: 12,
     flexGrow: 0,
   },
@@ -75,7 +75,7 @@ const styles = StyleSheet.create({
 
   },
   filterButton: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 20,
     backgroundColor: "white",

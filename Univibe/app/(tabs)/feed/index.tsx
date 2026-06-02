@@ -1,6 +1,13 @@
-// app/(tabs)/feed.tsx - COMPLETE WORKING VERSION WITH DARK MODE
+// app/(tabs)/feed/index.tsx
 
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, {
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  memo,
+  useMemo,
+} from "react";
 import {
   View,
   Text,
@@ -10,6 +17,7 @@ import {
   Alert,
   Animated,
   Platform,
+  StyleSheet,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -43,9 +51,13 @@ import {
   reportContent,
 } from "../../../lib/services/contentService";
 
-import { useFeed } from "../../../hooks/useFeed";
+import { useFeed, FeedType } from "../../../hooks/useFeed";
 
 import styles from "@/app/components/Feed/styles";
+
+// ============================================================================
+// TYPES
+// ============================================================================
 
 interface UndoAction {
   type: "mute" | "block" | "hide" | "save" | "delete";
@@ -56,39 +68,73 @@ interface UndoAction {
   deletedPost?: Post;
 }
 
+interface SharePostData {
+  postId: string;
+  postContent: string;
+  postImage: string;
+  postAuthorName: string;
+  postAuthorAvatar: string;
+  isAnonymous: boolean;
+  postCommunityId?: string;
+  postCommunityName?: string;
+  postCommunityCoverImage?: string;
+}
+
+// ============================================================================
+// MEMOIZED COMPONENTS
+// ============================================================================
+
+const MemoizedFeedHeader = memo(FeedHeader);
+const MemoizedCreatePostButton = memo(CreatePostButton);
+const MemoizedFilterTabs = memo(FilterTabs);
+const MemoizedPostCard = memo(PostCard);
+const MemoizedSharePostModal = memo(SharePostModal);
+const MemoizedReportModal = memo(ReportModal);
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
+
+/**
+ * FeedScreen Component
+ *
+ * Displays the main social feed with support for multiple feed types,
+ * infinite scrolling, post interactions, and real-time updates.
+ *
+ * Features:
+ * - Multiple feed types (Campus, Connections, Anonymous, Communities)
+ * - Infinite scroll pagination
+ * - Pull-to-refresh with cooldown
+ * - Optimistic updates for all interactions
+ * - Undo functionality for destructive actions
+ * - Dark mode support
+ * - Offline/error handling
+ */
 export default function FeedScreen() {
+  // ==========================================================================
+  // HOOKS
+  // ==========================================================================
   const router = useRouter();
   const { token, user } = useAuth();
   const { colors, isDark } = useTheme();
+  const feed = useFeed();
 
-  const {
-    activeFeed,
-    currentFeed,
-    switchFeed,
-    refresh: refreshFeed,
-    loadMore: loadMoreFeed,
-    addNewPost,
-    removePost,
-    updatePost,
-    refreshOnFocus,
-    markNeedsRefresh,
-    invalidateAllFeeds,
-  } = useFeed();
-
-  // ===========================================================================
-  // Share Modal State
-  // ===========================================================================
-  const [shareModalVisible, setShareModalVisible] = useState(false);
+  // ==========================================================================
+  // MODAL STATES
+  // ==========================================================================
+  const [shareModalVisible, setShareModalVisible] = useState<boolean>(false);
   const [sharePost, setSharePost] = useState<Post | null>(null);
+  const [reportModalVisible, setReportModalVisible] = useState<boolean>(false);
+  const [reportTargetId, setReportTargetId] = useState<string>("");
+  const [reportTargetType, setReportTargetType] = useState<
+    "Post" | "Comment" | "User" | "Event"
+  >("Post");
+  const [isOptionsModalOpen, setIsOptionsModalOpen] = useState<boolean>(false);
+  const [loadingMorePosts, setLoadingMorePosts] = useState<boolean>(false);
 
-  // ===========================================================================
-  // Loading State
-  // ===========================================================================
-  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
-
-  // ===========================================================================
-  // InfoBar State - EXACT PATTERN FROM NOTIFICATIONS
-  // ===========================================================================
+  // ==========================================================================
+  // INFO BAR STATE
+  // ==========================================================================
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [infoType, setInfoType] = useState<"success" | "error" | "info">(
     "info",
@@ -96,82 +142,97 @@ export default function FeedScreen() {
   const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
   const slideAnim = useRef(new Animated.Value(100)).current;
 
-  // ===========================================================================
-  // Report Modal State
-  // ===========================================================================
-  const [reportModalVisible, setReportModalVisible] = useState(false);
-  const [reportTargetId, setReportTargetId] = useState("");
-  const [reportTargetType, setReportTargetType] = useState<
-    "Post" | "Comment" | "User" | "Event"
-  >("Post");
+  // ==========================================================================
+  // DERIVED VALUES
+  // ==========================================================================
+  const visiblePosts = feed.currentFeed.posts;
 
-  // ===========================================================================
-  // Options Modal State
-  // ===========================================================================
-  const [isOptionsModalOpen, setIsOptionsModalOpen] = useState(false);
-
-  // ===========================================================================
-  // Filters
-  // ===========================================================================
-  const filters = [
-    { id: "campus", label: "Campus" },
-    { id: "connections", label: "Connections" },
-    { id: "anonymous", label: "Anonymous" },
-    { id: "communities", label: "Communities" },
-  ];
-
-  const visiblePosts = currentFeed.posts;
-
-  // ===========================================================================
-  // Focus Effect
-  // ===========================================================================
-  useFocusEffect(
-    useCallback(() => {
-      if (token) {
-        refreshOnFocus();
-      }
-    }, [token, refreshOnFocus]),
+  const filters = useMemo<Array<{ id: FeedType; label: string }>>(
+    () => [
+      { id: "campus", label: "Campus" },
+      { id: "connections", label: "Connections" },
+      { id: "anonymous", label: "Anonymous" },
+      { id: "communities", label: "Communities" },
+    ],
+    [],
   );
 
-  // ===========================================================================
-  // InfoBar Management - EXACT COPY FROM NOTIFICATIONS
-  // ===========================================================================
-  const showInfoBar = (
-    message: string,
-    type: "success" | "error" | "info" = "info",
-    action?: UndoAction,
-    autoHide = true,
-  ) => {
-    setInfoMessage(message);
-    setInfoType(type);
-    setUndoAction(action || null);
+  const sharePostData = useMemo<SharePostData | null>(() => {
+    if (!sharePost) return null;
 
-    Animated.sequence([
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-      ...(autoHide
-        ? [
-            Animated.delay(3000),
-            Animated.timing(slideAnim, {
-              toValue: 100,
-              duration: 300,
-              useNativeDriver: true,
-            }),
-          ]
-        : []),
-    ]).start(() => {
+    return {
+      postId: sharePost._id,
+      postContent: sharePost.content || "",
+      postImage: sharePost.images?.[0]?.url
+        ? getFullImageUrl(sharePost.images[0].url)
+        : "",
+      postAuthorName: sharePost.isAnonymous
+        ? "Anonymous"
+        : sharePost.community?.name || sharePost.user?.name || "Unknown",
+      postAuthorAvatar: sharePost.community?.coverImage
+        ? getFullImageUrl(sharePost.community.coverImage)
+        : sharePost.user?.profilePicture || "",
+      isAnonymous: sharePost.isAnonymous || false,
+      postCommunityId: sharePost.community?._id,
+      postCommunityName: sharePost.community?.name,
+      postCommunityCoverImage: sharePost.community?.coverImage
+        ? getFullImageUrl(sharePost.community.coverImage)
+        : undefined,
+    };
+  }, [sharePost]);
+
+  // ==========================================================================
+  // INFO BAR METHODS
+  // ==========================================================================
+
+  /**
+   * Displays a temporary notification bar with optional undo action
+   */
+  const showInfoBar = useCallback(
+    (
+      message: string,
+      type: "success" | "error" | "info" = "info",
+      action?: UndoAction,
+      autoHide = true,
+    ) => {
+      setInfoMessage(message);
+      setInfoType(type);
+      setUndoAction(action || null);
+
+      const animations: Animated.CompositeAnimation[] = [
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ];
+
       if (autoHide) {
-        setInfoMessage(null);
-        setUndoAction(null);
-        slideAnim.setValue(100);
+        animations.push(
+          Animated.delay(3000),
+          Animated.timing(slideAnim, {
+            toValue: 100,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+        );
       }
-    });
-  };
 
-  const hideInfoBar = () => {
+      Animated.sequence(animations).start(() => {
+        if (autoHide) {
+          setInfoMessage(null);
+          setUndoAction(null);
+          slideAnim.setValue(100);
+        }
+      });
+    },
+    [slideAnim],
+  );
+
+  /**
+   * Hides the info bar immediately
+   */
+  const hideInfoBar = useCallback(() => {
     Animated.timing(slideAnim, {
       toValue: 100,
       duration: 300,
@@ -181,43 +242,47 @@ export default function FeedScreen() {
       setUndoAction(null);
       slideAnim.setValue(100);
     });
-  };
+  }, [slideAnim]);
 
-  // ===========================================================================
-  // Undo Handler
-  // ===========================================================================
-  const handleUndo = async () => {
+  /**
+   * Handles undo action for destructive operations
+   */
+  const handleUndo = useCallback(async () => {
     if (!undoAction) return;
-
-    // Hide immediately
     hideInfoBar();
 
     switch (undoAction.type) {
       case "mute":
         if (undoAction.userId) {
           await toggleMuteUser(undoAction.userId);
-          await invalidateAllFeeds();
-          showInfoBar(`User ${undoAction.userName || "unmuted"}`, "success");
+          await feed.invalidateAllFeeds();
+          showInfoBar(
+            `User ${undoAction.userName || "unmuted"} unmuted`,
+            "success",
+          );
         }
         break;
       case "block":
         if (undoAction.userId) {
           await toggleBlockUser(undoAction.userId);
-          await invalidateAllFeeds();
-          showInfoBar(`User ${undoAction.userName || "unblocked"}`, "success");
+          await feed.invalidateAllFeeds();
+          showInfoBar(
+            `User ${undoAction.userName || "unblocked"} unblocked`,
+            "success",
+          );
         }
         break;
       case "hide":
         if (undoAction.postId) {
           await unhidePost(undoAction.postId);
-          await invalidateAllFeeds();
+          await feed.invalidateAllFeeds();
           showInfoBar("Post restored to feed", "success");
         }
         break;
       case "save":
         if (undoAction.postId) {
           await toggleSavePost(undoAction.postId);
-          updatePost(undoAction.postId, { isSaved: false });
+          feed.updatePost(undoAction.postId, { isSaved: false });
           showInfoBar("Post removed from saved items", "info");
         }
         break;
@@ -225,8 +290,8 @@ export default function FeedScreen() {
         if (undoAction.postId && undoAction.deletedPost) {
           try {
             await restorePost(undoAction.postId);
-            addNewPost(undoAction.deletedPost);
-            await invalidateAllFeeds();
+            feed.addNewPost(undoAction.deletedPost);
+            await feed.invalidateAllFeeds();
             showInfoBar("Post restored successfully", "success");
           } catch (error: any) {
             showInfoBar(error.message || "Failed to restore post", "error");
@@ -234,184 +299,255 @@ export default function FeedScreen() {
         }
         break;
     }
-  };
+  }, [undoAction, hideInfoBar, feed, showInfoBar]);
 
-  // ===========================================================================
-  // Filter Change
-  // ===========================================================================
-  const handleFilterChange = (filterId: string) => {
-    if (token)
-      switchFeed(
-        filterId as "campus" | "connections" | "anonymous" | "communities",
-      );
-  };
+  // ==========================================================================
+  // FEED NAVIGATION & REFRESH
+  // ==========================================================================
 
-  // ===========================================================================
-  // Refresh & Load More
-  // ===========================================================================
+  /**
+   * Handles feed type switching
+   */
+  const handleFilterChange = useCallback(
+    (filterId: string) => {
+      if (token) feed.switchFeed(filterId as FeedType);
+    },
+    [token, feed],
+  );
+
+  /**
+   * Handles pull-to-refresh action
+   */
   const onRefresh = useCallback(() => {
-    if (token) refreshFeed();
-  }, [token, refreshFeed]);
+    if (token) feed.refresh();
+  }, [token, feed]);
 
+  /**
+   * Handles infinite scroll with throttle protection
+   */
   const handleScroll = useCallback(
     ({ nativeEvent }: any) => {
       const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
       const isCloseToBottom =
         layoutMeasurement.height + contentOffset.y >= contentSize.height - 100;
+
       if (
         isCloseToBottom &&
-        currentFeed.hasMore &&
-        !currentFeed.loadingMore &&
+        feed.currentFeed.hasMore &&
+        !feed.currentFeed.loadingMore &&
         !loadingMorePosts
       ) {
         setLoadingMorePosts(true);
-        loadMoreFeed().finally(() => {
-          setLoadingMorePosts(false);
-        });
+        feed.loadMore().finally(() => setLoadingMorePosts(false));
       }
     },
-    [
-      currentFeed.hasMore,
-      currentFeed.loadingMore,
-      loadMoreFeed,
-      loadingMorePosts,
-    ],
+    [feed, loadingMorePosts],
   );
 
-  // ===========================================================================
-  // Post Actions
-  // ===========================================================================
-  const handleLike = async (postId: string) => {
-    if (!token) {
-      showInfoBar("Please login to like posts", "info");
-      return;
-    }
+  // ==========================================================================
+  // POST INTERACTION HANDLERS
+  // ==========================================================================
 
-    const post = visiblePosts.find((p: Post) => p._id === postId);
-    if (post) {
-      updatePost(postId, {
-        isLiked: !post.isLiked,
-        likeCount: post.isLiked ? post.likeCount - 1 : post.likeCount + 1,
-      });
-    }
-
-    try {
-      const response = await toggleLike(postId);
-      updatePost(postId, {
-        isLiked: response.isLiked,
-        likeCount: response.likes,
-      });
-    } catch (error: any) {
-      if (error.isBlocked) {
-        removePost(postId);
-        showInfoBar("You cannot interact with this post", "info");
+  /**
+   * Handles post like/unlike with optimistic update
+   */
+  const handleLike = useCallback(
+    async (postId: string) => {
+      if (!token) {
+        showInfoBar("Please login to like posts", "info");
         return;
       }
-      if (post)
-        updatePost(postId, {
-          isLiked: post.isLiked,
-          likeCount: post.likeCount,
+
+      const post = visiblePosts.find((p) => p._id === postId);
+      if (post) {
+        feed.updatePost(postId, {
+          isLiked: !post.isLiked,
+          likeCount: post.isLiked ? post.likeCount - 1 : post.likeCount + 1,
         });
-      showInfoBar(error.message || "Failed to like post", "error");
-    }
-  };
-
-  const handleComment = (postId: string) => {
-    if (!token) {
-      showInfoBar("Please login to comment", "info");
-      return;
-    }
-    router.push({
-      pathname: "/components/Feed/Comment/CommentsScreen",
-      params: { postId },
-    });
-  };
-
-  const handleShare = (postId: string) => {
-    if (!token) {
-      showInfoBar("Please login to share posts", "info");
-      return;
-    }
-    const post = visiblePosts.find((p: Post) => p._id === postId);
-    if (post) {
-      setSharePost(post);
-      setShareModalVisible(true);
-    }
-  };
-
-  const handleProfilePress = (userId: string) => {
-    if (!token || !userId) return;
-    router.push(userId === user?.id ? "/(tabs)/profile" : `/profile/${userId}`);
-  };
-
-  const handleEditPost = (postId: string) => {
-    markNeedsRefresh();
-    router.push({
-      pathname: "/components/Feed/Post/EditPost",
-      params: { postId },
-    });
-  };
-
-  const handleDeletePost = async (postId: string) => {
-    const postToDelete = visiblePosts.find((p: Post) => p._id === postId);
-    if (!postToDelete) return;
-
-    // Optimistically remove from UI
-    removePost(postId);
-
-    // Show info bar with UNDO - autoHide = true (3 seconds)
-    showInfoBar(
-      "Post deleted",
-      "info",
-      { type: "delete", postId, deletedPost: postToDelete },
-      true, // ✅ Change to true for auto-hide after 3 seconds
-    );
-
-    try {
-      await deletePost(postId);
-      await invalidateAllFeeds();
-      // ✅ Don't call hideInfoBar() - let it auto-hide
-    } catch (error: any) {
-      // Restore post on error
-      addNewPost(postToDelete);
-      hideInfoBar(); // Hide the delete info bar
-      showInfoBar(error.message || "Failed to delete post", "error");
-    }
-  };
-  const handleSavePost = async (postId: string) => {
-    if (!token) {
-      showInfoBar("Please login to save posts", "info");
-      return;
-    }
-
-    const post = visiblePosts.find((p: Post) => p._id === postId);
-    const wasSaved = post?.isSaved;
-
-    updatePost(postId, { isSaved: !wasSaved });
-
-    try {
-      const response = await toggleSavePost(postId);
-      updatePost(postId, { isSaved: response.saved });
-
-      if (response.saved) {
-        showInfoBar("Post saved", "success", { type: "save", postId }, true);
-      } else {
-        showInfoBar("Post removed from saved", "info");
       }
-    } catch (error: any) {
-      if (error.isBlocked) {
-        updatePost(postId, { isSaved: wasSaved });
-        showInfoBar("You cannot interact with this post", "info");
+
+      try {
+        const response = await toggleLike(postId);
+        feed.updatePost(postId, {
+          isLiked: response.isLiked,
+          likeCount: response.likes,
+        });
+      } catch (error: any) {
+        if (error.isBlocked) {
+          feed.removePost(postId);
+          showInfoBar("You cannot interact with this post", "info");
+          return;
+        }
+        if (post) {
+          feed.updatePost(postId, {
+            isLiked: post.isLiked,
+            likeCount: post.likeCount,
+          });
+        }
+        showInfoBar(error.message || "Failed to like post", "error");
+      }
+    },
+    [token, visiblePosts, feed, showInfoBar],
+  );
+
+  /**
+   * Navigates to comments screen
+   */
+  const handleComment = useCallback(
+    (postId: string) => {
+      if (!token) {
+        showInfoBar("Please login to comment", "info");
         return;
       }
-      updatePost(postId, { isSaved: wasSaved });
-      showInfoBar(error.message || "Failed to save post", "error");
-    }
-  };
+      router.push({
+        pathname: "/components/Feed/Comment/CommentsScreen",
+        params: { postId },
+      });
+    },
+    [token, router, showInfoBar],
+  );
 
-  // ===========================================================================
-  // REPORT FLOW
-  // ===========================================================================
+  /**
+   * Opens share modal for a post
+   */
+  const handleShare = useCallback(
+    (postId: string) => {
+      if (!token) {
+        showInfoBar("Please login to share posts", "info");
+        return;
+      }
+      const post = visiblePosts.find((p) => p._id === postId);
+      if (post) {
+        setSharePost(post);
+        setShareModalVisible(true);
+      }
+    },
+    [token, visiblePosts, showInfoBar],
+  );
+
+  /**
+   * Navigates to user profile
+   */
+  const handleProfilePress = useCallback(
+    (userId: string) => {
+      if (!token || !userId) return;
+      const targetRoute =
+        userId === user?.id ? "/(tabs)/profile" : `/profile/${userId}`;
+      router.push(targetRoute as any);
+    },
+    [token, user?.id, router],
+  );
+
+  /**
+   * Navigates to edit post screen
+   */
+  const handleEditPost = useCallback(
+    (postId: string) => {
+      feed.markNeedsRefresh();
+      router.push({
+        pathname: "/components/Feed/Post/EditPost",
+        params: { postId },
+      });
+    },
+    [feed, router],
+  );
+
+  /**
+   * Handles post deletion with undo option
+   */
+  const handleDeletePost = useCallback(
+    async (postId: string) => {
+      const postToDelete = visiblePosts.find((p) => p._id === postId);
+      if (!postToDelete) return;
+
+      feed.removePost(postId);
+      showInfoBar(
+        "Post deleted",
+        "info",
+        { type: "delete", postId, deletedPost: postToDelete },
+        true,
+      );
+
+      try {
+        await deletePost(postId);
+        await feed.invalidateAllFeeds();
+      } catch (error: any) {
+        feed.addNewPost(postToDelete);
+        hideInfoBar();
+        showInfoBar(error.message || "Failed to delete post", "error");
+      }
+    },
+    [visiblePosts, feed, showInfoBar, hideInfoBar],
+  );
+
+  /**
+   * Handles post save/unsave with optimistic update
+   */
+  const handleSavePost = useCallback(
+    async (postId: string) => {
+      if (!token) {
+        showInfoBar("Please login to save posts", "info");
+        return;
+      }
+
+      const post = visiblePosts.find((p) => p._id === postId);
+      const wasSaved = post?.isSaved;
+
+      feed.updatePost(postId, { isSaved: !wasSaved });
+
+      try {
+        const response = await toggleSavePost(postId);
+        feed.updatePost(postId, { isSaved: response.saved });
+
+        if (response.saved) {
+          showInfoBar("Post saved", "success", { type: "save", postId }, true);
+        } else {
+          showInfoBar("Post removed from saved", "info");
+        }
+      } catch (error: any) {
+        if (error.isBlocked) {
+          feed.updatePost(postId, { isSaved: wasSaved });
+          showInfoBar("You cannot interact with this post", "info");
+          return;
+        }
+        feed.updatePost(postId, { isSaved: wasSaved });
+        showInfoBar(error.message || "Failed to save post", "error");
+      }
+    },
+    [token, visiblePosts, feed, showInfoBar],
+  );
+
+  /**
+   * Handles post hiding
+   */
+  const handleHidePost = useCallback(
+    async (postId: string) => {
+      if (!token) {
+        showInfoBar("Please login to hide posts", "info");
+        return;
+      }
+
+      feed.removePost(postId);
+      showInfoBar("Post hidden", "info", { type: "hide", postId }, true);
+
+      try {
+        await hidePost(postId);
+        await feed.invalidateAllFeeds();
+      } catch (error: any) {
+        if (error.isBlocked) {
+          showInfoBar("You cannot interact with this post", "info");
+          return;
+        }
+        await feed.invalidateAllFeeds();
+        showInfoBar(error.message || "Failed to hide post", "error");
+      }
+    },
+    [token, feed, showInfoBar],
+  );
+
+  /**
+   * Handles post reporting flow
+   */
   const handleReportPost = useCallback(
     (postId: string) => {
       if (!token) {
@@ -419,7 +555,7 @@ export default function FeedScreen() {
         return;
       }
 
-      const post = visiblePosts.find((p: Post) => p._id === postId);
+      const post = visiblePosts.find((p) => p._id === postId);
       if (post?.isReported) {
         showInfoBar("You have already reported this post", "info");
         return;
@@ -427,140 +563,159 @@ export default function FeedScreen() {
 
       setReportTargetId(postId);
       setReportTargetType("Post");
-
-      setTimeout(() => {
-        setReportModalVisible(true);
-      }, 300);
+      setTimeout(() => setReportModalVisible(true), 300);
     },
-    [token, visiblePosts],
+    [token, visiblePosts, showInfoBar],
   );
 
-  const handleOptionsModalClose = useCallback(() => {
-    setIsOptionsModalOpen(false);
-  }, []);
-
-  const handleOptionsModalOpen = useCallback(() => {
-    setIsOptionsModalOpen(true);
-  }, []);
-
-  const handleReportModalClose = useCallback(() => {
-    setReportModalVisible(false);
-  }, []);
-
+  /**
+   * Handles successful report submission
+   */
   const handleReportSuccess = useCallback(() => {
     if (reportTargetType === "Post" && reportTargetId) {
-      updatePost(reportTargetId, { isReported: true });
+      feed.updatePost(reportTargetId, { isReported: true });
     }
-  }, [reportTargetType, reportTargetId, updatePost]);
+  }, [reportTargetType, reportTargetId, feed]);
 
-  const handleReportShowInfoBar = useCallback(
-    (message: string, type: "success" | "error" | "info") => {
-      showInfoBar(message, type);
+  /**
+   * Handles copy link action
+   */
+  const handleCopyLink = useCallback(() => {
+    showInfoBar("Link copied to clipboard", "success");
+  }, [showInfoBar]);
+
+  /**
+   * Handles muting a user
+   */
+  const handleMuteUser = useCallback(
+    async (userId: string, userName?: string) => {
+      if (!token || !userId) return;
+
+      const postsToRemove = visiblePosts.filter((p) => p.user?._id === userId);
+      postsToRemove.forEach((post) => feed.removePost(post._id));
+      showInfoBar(
+        `User ${userName || "user"} muted`,
+        "info",
+        { type: "mute", userId, userName },
+        true,
+      );
+
+      try {
+        await toggleMuteUser(userId);
+        await feed.invalidateAllFeeds();
+      } catch (error: any) {
+        if (error.isBlocked) {
+          showInfoBar(
+            "Cannot mute this user due to block restrictions",
+            "info",
+          );
+          return;
+        }
+        await feed.invalidateAllFeeds();
+        showInfoBar(error.message || "Failed to mute user", "error");
+      }
     },
-    [],
+    [token, visiblePosts, feed, showInfoBar],
   );
 
-  // ===========================================================================
-  // Other Post Actions
-  // ===========================================================================
-  const handleHidePost = async (postId: string) => {
-    if (!token) {
-      showInfoBar("Please login to hide posts", "info");
-      return;
-    }
+  /**
+   * Handles blocking a user
+   */
+  const handleBlockUser = useCallback(
+    async (userId: string, userName?: string) => {
+      if (!token || !userId) return;
 
-    removePost(postId);
-    showInfoBar("Post hidden", "info", { type: "hide", postId }, true);
+      const postsToRemove = visiblePosts.filter((p) => p.user?._id === userId);
+      postsToRemove.forEach((post) => feed.removePost(post._id));
+      showInfoBar(
+        `User ${userName || "user"} blocked`,
+        "info",
+        { type: "block", userId, userName },
+        true,
+      );
 
-    try {
-      await hidePost(postId);
-      await invalidateAllFeeds();
-    } catch (error: any) {
-      if (error.isBlocked) {
-        showInfoBar("You cannot interact with this post", "info");
-        return;
+      try {
+        await toggleBlockUser(userId);
+        await feed.invalidateAllFeeds();
+      } catch (error: any) {
+        await feed.invalidateAllFeeds();
+        showInfoBar(error.message || "Failed to block user", "error");
       }
-      await invalidateAllFeeds();
-      showInfoBar(error.message || "Failed to hide post", "error");
-    }
-  };
+    },
+    [token, visiblePosts, feed, showInfoBar],
+  );
 
-  const handleCopyLink = () => {
-    showInfoBar("Link copied to clipboard", "success");
-  };
-
-  const handleMuteUser = async (userId: string, userName?: string) => {
-    if (!token || !userId) return;
-
-    const postsToRemove = visiblePosts.filter(
-      (p: Post) => p.user?._id === userId,
-    );
-    postsToRemove.forEach((post: Post) => removePost(post._id));
-    showInfoBar(
-      `User ${userName || "muted"} muted`,
-      "info",
-      { type: "mute", userId, userName },
-      true,
-    );
-
-    try {
-      await toggleMuteUser(userId);
-      await invalidateAllFeeds();
-    } catch (error: any) {
-      if (error.isBlocked) {
-        showInfoBar("Cannot mute this user due to block restrictions", "info");
-        return;
-      }
-      await invalidateAllFeeds();
-      showInfoBar(error.message || "Failed to mute user", "error");
-    }
-  };
-
-  const handleBlockUser = async (userId: string, userName?: string) => {
-    if (!token || !userId) return;
-
-    const postsToRemove = visiblePosts.filter(
-      (p: Post) => p.user?._id === userId,
-    );
-    postsToRemove.forEach((post: Post) => removePost(post._id));
-    showInfoBar(
-      `User ${userName || "blocked"} blocked`,
-      "info",
-      { type: "block", userId, userName },
-      true,
-    );
-
-    try {
-      await toggleBlockUser(userId);
-      await invalidateAllFeeds();
-    } catch (error: any) {
-      await invalidateAllFeeds();
-      showInfoBar(error.message || "Failed to block user", "error");
-    }
-  };
-
-  const handleCreatePost = () => {
+  /**
+   * Creates a new post
+   */
+  const handleCreatePost = useCallback(() => {
     if (!token) {
       showInfoBar("Please login to create posts", "info");
       return;
     }
-    markNeedsRefresh();
+    feed.markNeedsRefresh();
     router.push("/components/Feed/Post/create");
-  };
+  }, [token, feed, router, showInfoBar]);
 
-  // ===========================================================================
-  // Render Helpers
-  // ===========================================================================
-  const renderInfoBar = () => {
+  /**
+   * Closes options modal
+   */
+  const handleOptionsModalClose = useCallback(() => {
+    setIsOptionsModalOpen(false);
+  }, []);
+
+  /**
+   * Opens options modal
+   */
+  const handleOptionsModalOpen = useCallback(() => {
+    setIsOptionsModalOpen(true);
+  }, []);
+
+  /**
+   * Closes report modal
+   */
+  const handleReportModalClose = useCallback(() => {
+    setReportModalVisible(false);
+  }, []);
+
+  /**
+   * Wrapper for report modal info bar
+   */
+  const handleReportShowInfoBar = useCallback(
+    (message: string, type: "success" | "error" | "info") => {
+      showInfoBar(message, type);
+    },
+    [showInfoBar],
+  );
+
+  // ==========================================================================
+  // EFFECTS
+  // ==========================================================================
+
+  useFocusEffect(
+    useCallback(() => {
+      if (token) feed.refreshOnFocus();
+    }, [token, feed]),
+  );
+
+  // ==========================================================================
+  // RENDER HELPERS
+  // ==========================================================================
+
+  /**
+   * Renders the info bar with undo functionality
+   */
+  const renderInfoBar = useCallback(() => {
     if (!infoMessage) return null;
 
-    const bg =
+    const backgroundColor =
       infoType === "success"
         ? "#10b981"
         : infoType === "error"
           ? "#ef4444"
           : colors.primary;
-    const icon =
+
+    const iconName =
       infoType === "success"
         ? "checkmark-circle"
         : infoType === "error"
@@ -571,10 +726,13 @@ export default function FeedScreen() {
       <Animated.View
         style={[
           styles.infoBar,
-          { backgroundColor: bg, transform: [{ translateY: slideAnim }] },
+          {
+            backgroundColor,
+            transform: [{ translateY: slideAnim }],
+          },
         ]}
       >
-        <Ionicons name={icon} size={20} color="#fff" />
+        <Ionicons name={iconName} size={20} color="#fff" />
         <Text style={styles.infoBarText}>{infoMessage}</Text>
         {undoAction && (
           <TouchableOpacity onPress={handleUndo} style={styles.undoButton}>
@@ -583,33 +741,72 @@ export default function FeedScreen() {
         )}
       </Animated.View>
     );
-  };
+  }, [
+    infoMessage,
+    infoType,
+    colors.primary,
+    slideAnim,
+    undoAction,
+    handleUndo,
+  ]);
 
-  const sharePostData = sharePost
-    ? {
-        postId: sharePost._id,
-        postContent: sharePost.content || "",
-        postImage: sharePost.images?.[0]?.url
-          ? getFullImageUrl(sharePost.images[0].url)
-          : "",
-        postAuthorName: sharePost.isAnonymous
-          ? "Anonymous"
-          : sharePost.community?.name || sharePost.user?.name || "Unknown",
-        postAuthorAvatar: sharePost.community?.coverImage
-          ? getFullImageUrl(sharePost.community.coverImage)
-          : sharePost.user?.profilePicture || "",
-        isAnonymous: sharePost.isAnonymous || false,
-        postCommunityId: sharePost.community?._id || undefined,
-        postCommunityName: sharePost.community?.name || undefined,
-        postCommunityCoverImage: sharePost.community?.coverImage
-          ? getFullImageUrl(sharePost.community.coverImage)
-          : undefined,
-      }
-    : null;
+  /**
+   * Renders the empty state when no posts are available
+   */
+  const renderEmptyState = useCallback(
+    () => (
+      <View style={styles.emptyState}>
+        <Ionicons name="newspaper-outline" size={64} color={colors.textMuted} />
+        <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>
+          No posts yet
+        </Text>
+        <Text style={[styles.emptyStateSubtext, { color: colors.textMuted }]}>
+          {feed.activeFeed === "connections"
+            ? "Connect with more people to see their posts"
+            : "Be the first to share something on campus!"}
+        </Text>
+        <TouchableOpacity
+          style={[
+            styles.createFirstPostButton,
+            { backgroundColor: colors.primary },
+          ]}
+          onPress={handleCreatePost}
+        >
+          <Text style={styles.createFirstPostText}>Create First Post</Text>
+        </TouchableOpacity>
+      </View>
+    ),
+    [colors, feed.activeFeed, handleCreatePost],
+  );
 
-  // ===========================================================================
-  // Not Logged In State
-  // ===========================================================================
+  /**
+   * Renders the error state when feed fails to load
+   */
+  const renderErrorState = useCallback(
+    () => (
+      <View
+        style={[
+          styles.errorContainer,
+          { backgroundColor: isDark ? "#451a1a" : "#fee2e2" },
+        ]}
+      >
+        <Text style={styles.errorText}>{feed.currentFeed.error}</Text>
+        <TouchableOpacity
+          style={[styles.retryButton, { backgroundColor: colors.primary }]}
+          onPress={onRefresh}
+        >
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    ),
+    [isDark, colors.primary, feed.currentFeed.error, onRefresh],
+  );
+
+  // ==========================================================================
+  // CONDITIONAL RENDERING
+  // ==========================================================================
+
+  // Not logged in state
   if (!token) {
     return (
       <SafeAreaView
@@ -631,10 +828,8 @@ export default function FeedScreen() {
     );
   }
 
-  // ===========================================================================
-  // Loading State
-  // ===========================================================================
-  if (currentFeed.loading && visiblePosts.length === 0) {
+  // Loading state
+  if (feed.currentFeed.loading && visiblePosts.length === 0) {
     return (
       <SafeAreaView
         style={[styles.container, { backgroundColor: colors.background }]}
@@ -645,9 +840,9 @@ export default function FeedScreen() {
     );
   }
 
-  // ===========================================================================
-  // Main Render
-  // ===========================================================================
+  // ==========================================================================
+  // MAIN RENDER
+  // ==========================================================================
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: colors.background }]}
@@ -657,7 +852,7 @@ export default function FeedScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={currentFeed.refreshing}
+            refreshing={feed.currentFeed.refreshing}
             onRefresh={onRefresh}
             colors={[colors.primary]}
             tintColor={colors.primary}
@@ -668,92 +863,53 @@ export default function FeedScreen() {
         scrollEventThrottle={400}
         contentContainerStyle={styles.scrollContent}
       >
-        <FeedHeader onProfilePress={() => router.push("/(tabs)/profile")} />
-        <CreatePostButton onPress={handleCreatePost} />
-        <FilterTabs
+        <MemoizedFeedHeader
+          onProfilePress={() => router.push("/(tabs)/profile")}
+        />
+        <MemoizedCreatePostButton onPress={handleCreatePost} />
+        <MemoizedFilterTabs
           filters={filters}
-          activeFilter={activeFeed}
+          activeFilter={feed.activeFeed}
           onFilterChange={handleFilterChange}
         />
 
-        {currentFeed.error && visiblePosts.length === 0 && (
-          <View
-            style={[
-              styles.errorContainer,
-              { backgroundColor: isDark ? "#451a1a" : "#fee2e2" },
-            ]}
-          >
-            <Text style={styles.errorText}>{currentFeed.error}</Text>
-            <TouchableOpacity
-              style={[styles.retryButton, { backgroundColor: colors.primary }]}
-              onPress={onRefresh}
-            >
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+        {feed.currentFeed.error &&
+          visiblePosts.length === 0 &&
+          renderErrorState()}
 
         <View style={styles.postsContainer}>
-          {visiblePosts.length === 0 && !currentFeed.loading ? (
-            <View style={styles.emptyState}>
-              <Ionicons
-                name="newspaper-outline"
-                size={64}
-                color={colors.textMuted}
-              />
-              <Text
-                style={[styles.emptyStateText, { color: colors.textSecondary }]}
-              >
-                No posts yet
-              </Text>
-              <Text
-                style={[styles.emptyStateSubtext, { color: colors.textMuted }]}
-              >
-                {activeFeed === "connections"
-                  ? "Connect with more people to see their posts"
-                  : "Be the first to share something on campus!"}
-              </Text>
-              <TouchableOpacity
-                style={[
-                  styles.createFirstPostButton,
-                  { backgroundColor: colors.primary },
-                ]}
-                onPress={handleCreatePost}
-              >
-                <Text style={styles.createFirstPostText}>
-                  Create First Post
-                </Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            visiblePosts.map((post: Post) => (
-              <PostCard
-                key={post._id}
-                post={post}
-                onLikePress={handleLike}
-                onCommentPress={handleComment}
-                onSharePress={handleShare}
-                onEdit={handleEditPost}
-                onDelete={handleDeletePost}
-                onSave={handleSavePost}
-                onReport={handleReportPost}
-                onHide={handleHidePost}
-                onCopyLink={handleCopyLink}
-                onMuteUser={(userId: string) =>
-                  handleMuteUser(userId, post.user?.name || post.user?.username)
-                }
-                onBlockUser={(userId: string) =>
-                  handleBlockUser(
-                    userId,
-                    post.user?.name || post.user?.username,
-                  )
-                }
-                onProfilePress={handleProfilePress}
-                onOptionsOpen={handleOptionsModalOpen}
-                onOptionsClose={handleOptionsModalClose}
-              />
-            ))
-          )}
+          {visiblePosts.length === 0 && !feed.currentFeed.loading
+            ? renderEmptyState()
+            : visiblePosts.map((post) => (
+                <MemoizedPostCard
+                  key={post._id}
+                  post={post}
+                  onLikePress={handleLike}
+                  onCommentPress={handleComment}
+                  onSharePress={handleShare}
+                  onEdit={handleEditPost}
+                  onDelete={handleDeletePost}
+                  onSave={handleSavePost}
+                  onReport={handleReportPost}
+                  onHide={handleHidePost}
+                  onCopyLink={handleCopyLink}
+                  onMuteUser={(userId: string) =>
+                    handleMuteUser(
+                      userId,
+                      post.user?.name || post.user?.username,
+                    )
+                  }
+                  onBlockUser={(userId: string) =>
+                    handleBlockUser(
+                      userId,
+                      post.user?.name || post.user?.username,
+                    )
+                  }
+                  onProfilePress={handleProfilePress}
+                  onOptionsOpen={handleOptionsModalOpen}
+                  onOptionsClose={handleOptionsModalClose}
+                />
+              ))}
         </View>
 
         {loadingMorePosts && <LoadMorePostsSkeleton />}
@@ -763,7 +919,7 @@ export default function FeedScreen() {
 
       {/* Share Modal */}
       {sharePostData && (
-        <SharePostModal
+        <MemoizedSharePostModal
           visible={shareModalVisible}
           onClose={() => {
             setShareModalVisible(false);
@@ -775,7 +931,7 @@ export default function FeedScreen() {
       )}
 
       {/* Report Modal */}
-      <ReportModal
+      <MemoizedReportModal
         visible={reportModalVisible}
         onClose={handleReportModalClose}
         targetType={reportTargetType}
@@ -787,7 +943,7 @@ export default function FeedScreen() {
         }
       />
 
-      {/* Info Bar - Positioned at bottom */}
+      {/* Info Bar */}
       {renderInfoBar()}
     </SafeAreaView>
   );
