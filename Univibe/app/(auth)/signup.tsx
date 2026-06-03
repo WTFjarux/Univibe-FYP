@@ -456,29 +456,6 @@ export default function SignUpScreen() {
                 )}
               </TouchableOpacity>
 
-              <View style={styles.orContainer}>
-                <View style={styles.orLine} />
-                <Text style={styles.orText}>OR</Text>
-                <View style={styles.orLine} />
-              </View>
-
-              <Text style={styles.continueWith}>Continue with</Text>
-
-              <View style={styles.socialRow}>
-                <TouchableOpacity
-                  style={styles.socialButton}
-                  disabled={isLoading}
-                >
-                  <Ionicons name="logo-google" size={35} color="#4b5563" />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.socialButton}
-                  disabled={isLoading}
-                >
-                  <Ionicons name="logo-apple" size={35} color="#4b5563" />
-                </TouchableOpacity>
-              </View>
-
               <View style={styles.signInContainer}>
                 <Text style={styles.signInText}>Already have an account? </Text>
                 <Link href="/(auth)/login" asChild>
@@ -725,7 +702,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 30,
     backgroundColor: "#8b5cf6",
-    marginBottom: 30,
+    marginBottom: 20,
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#8b5cf6",
@@ -741,27 +718,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: "SofiaSans-SemiBold",
   },
-  orContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    width: "100%",
-    marginBottom: 15,
-  },
-  orLine: { flex: 1, height: 1, backgroundColor: "#d1d5db" },
-  orText: {
-    color: "#6b7280",
-    fontSize: 16,
-    marginHorizontal: 15,
-    fontFamily: "SofiaSans-Medium",
-  },
-  continueWith: {
-    color: "#6b7280",
-    fontSize: 15,
-    marginBottom: 20,
-    fontFamily: "SofiaSans-Regular",
-  },
-  socialRow: { flexDirection: "row", marginBottom: 30, gap: 25 },
-  socialButton: { padding: 10 },
   signInContainer: { flexDirection: "row", justifyContent: "center" },
   signInText: {
     color: "#6b7280",

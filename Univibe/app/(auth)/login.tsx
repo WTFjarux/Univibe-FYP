@@ -276,24 +276,6 @@ export default function LoginScreen() {
                 )}
               </TouchableOpacity>
 
-              {/* OR SECTION */}
-              <View style={styles.orContainer}>
-                <View style={styles.orLine} />
-                <Text style={styles.orText}>OR</Text>
-                <View style={styles.orLine} />
-              </View>
-
-              <Text style={styles.continueWith}>Continue with</Text>
-
-              {/* SOCIAL LOGINS */}
-              <View style={styles.socialRow}>
-                <TouchableOpacity style={styles.socialButton}>
-                  <Ionicons name="logo-google" size={35} color="#4b5563" />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.socialButton}>
-                  <Ionicons name="logo-apple" size={35} color="#4b5563" />
-                </TouchableOpacity>
-              </View>
 
               {/* SIGN UP LINK */}
               <View style={styles.signUpContainer}>

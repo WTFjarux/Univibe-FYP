@@ -60,25 +60,21 @@ export default function MyCommunities({ limit = 5 }: MyCommunitiesProps) {
 
     // Handle community joined event
     const handleCommunityJoined = (data: any) => {
-      console.log("Community joined event in MyCommunities:", data);
       fetchCommunities();
     };
 
     // Handle community left event
     const handleCommunityLeft = (data: any) => {
-      console.log("Community left event in MyCommunities:", data);
       fetchCommunities();
     };
 
     // Handle member added event (when added by someone else)
     const handleMemberAdded = (data: any) => {
-      console.log("Member added event in MyCommunities:", data);
       fetchCommunities();
     };
 
     // Handle member removed event
     const handleMemberRemoved = (data: any) => {
-      console.log("Member removed event in MyCommunities:", data);
       fetchCommunities();
     };
 

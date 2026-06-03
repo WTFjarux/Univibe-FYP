@@ -1,2 +1,2 @@
-export const API_BASE_URL: string = "http://192.168.1.4:5001";
-export const SOCKET_URL: string = "http://192.168.1.4:5001";
+export const API_BASE_URL: string = "http://172.20.10.2:5001";
+export const SOCKET_URL: string = "http://172.20.10.2:5001";

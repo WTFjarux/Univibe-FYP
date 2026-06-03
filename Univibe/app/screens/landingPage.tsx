@@ -35,24 +35,7 @@ export default function LandingScreen() {
               </TouchableOpacity>
             </Link>
 
-            {/* OR SECTION */}
-            <View style={styles.orContainer}>
-              <View style={styles.orLine} />
-              <Text style={styles.orText}>OR</Text>
-              <View style={styles.orLine} />
-            </View>
-
-            <Text style={styles.continueWith}>Continue with</Text>
-
-            {/* SOCIAL LOGINS */}
-            <View style={styles.socialRow}>
-              <TouchableOpacity style={styles.socialButton}>
-                <Ionicons name="logo-google" size={35} color="#4b5563" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.socialButton}>
-                <Ionicons name="logo-apple" size={35} color="#4b5563" />
-              </TouchableOpacity>
-            </View>
+            
           </View>
         </View>
       </SafeAreaView>
@@ -103,7 +86,7 @@ const styles = StyleSheet.create({
   buttonsContainer: {
     width: "100%",
     alignItems: "center",
-    marginBottom: 60,
+    marginBottom: 150,
   },
   loginButton: {
     width: "100%",
